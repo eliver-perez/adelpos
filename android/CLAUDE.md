@@ -4,8 +4,32 @@ Aplicación Android de meseros de AD-EL POS (etapa A1; la A2 agrega Para llevar,
 aviso de platillos listos). Es **un cliente más del servidor del restaurante** y usa la API v1 de la 9G
 ([docs/API_V1.md](../docs/API_V1.md), `backend/internal/apicontract/openapi.json`). Especificación de la etapa:
 [docs/etapas/ETAPA_A1_ANDROID.md](../docs/etapas/ETAPA_A1_ANDROID.md); decisiones y avance:
-[docs/ETAPA_A1_AVANCE.md](../docs/ETAPA_A1_AVANCE.md). Las reglas generales del repositorio siguen en
-[CLAUDE.md](../CLAUDE.md) y [AGENTS.md](../AGENTS.md).
+[docs/ETAPA_A1_AVANCE.md](../docs/ETAPA_A1_AVANCE.md). Los de la A2:
+[docs/etapas/ETAPA_A2_ANDROID.md](../docs/etapas/ETAPA_A2_ANDROID.md) y
+[docs/ETAPA_A2_AVANCE.md](../docs/ETAPA_A2_AVANCE.md) (decisiones A2-Dn). Las reglas generales del repositorio
+siguen en [CLAUDE.md](../CLAUDE.md) y [AGENTS.md](../AGENTS.md).
+
+## Identificador y nombres (A2-D5)
+
+Una sola convención, la misma para el identificador de la aplicación, los `namespace` de Gradle y los paquetes de
+Kotlin, desde la 0.2.0:
+
+| Pieza                                     | Nombre                                                                                                                                                                                       |
+| ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `applicationId` (definitivo, §0-B)        | `com.adelpos.meseros`                                                                                                                                                                        |
+| `namespace` de `app` (`R`, `BuildConfig`) | `com.adelpos.meseros`                                                                                                                                                                        |
+| `namespace` de cada biblioteca            | `com.adelpos.meseros.core.data`, `….core.ui`, `….feature.access`, `….feature.waiter` (los módulos nuevos de la A2: `….core.capture`, `….feature.takeaway`)                                   |
+| Paquetes de Kotlin                        | El `namespace` del módulo y sus subpaquetes; `core:domain` (JVM, sin `namespace`) usa `com.adelpos.meseros.core.domain…`                                                                     |
+| Carpetas                                  | `<módulo>/src/<main\|test\|androidTest>/kotlin/com/adelpos/meseros/…` (el paquete dice la carpeta)                                                                                           |
+| Pruebas instrumentadas                    | Paquete `com.adelpos.meseros.test` con el ejecutor `com.adelpos.meseros.AdelTestRunner`; las de las bibliotecas, `<namespace>.test` (`com.adelpos.meseros.core.data.test`, `….core.ui.test`) |
+| Esquemas de Room                          | `core/data/schemas/com.adelpos.meseros.core.data.db.AppDatabase/` y `….catalog.db.CatalogDatabase/` (el nombre completo de la clase, como lo busca `MigrationTestHelper`)                    |
+
+La 0.1.0 usaba el identificador provisional `local.adel.pos.android` (A1-D9). Para Android es **otra aplicación**: la
+0.2.0 no la actualiza, se instala aparte, empieza con su propia base, sus propias llaves del Keystore y se empareja de
+nuevo (la guía lo explica: [docs/ANDROID_INSTALAR.md](../docs/ANDROID_INSTALAR.md), «Pasar de la 0.1.0 a la 0.2.0»).
+El nombre viejo solo aparece donde se nombra a propósito para desinstalarlo (`scripts/android-e2e.sh` y la lista de
+paquetes que se desinstalan antes de las instrumentadas, en «Pruebas») y en esta explicación. El nombre visible
+(«AD-EL POS»), `X-Client-Kind` (`android`) y la forma de identificar el dispositivo en Go (`device_id`) no cambiaron.
 
 ## Reglas permanentes
 
@@ -85,7 +109,7 @@ aviso de platillos listos). Es **un cliente más del servidor del restaurante** 
 
 | Módulo           | Tipo                                     | Qué contiene                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | ---------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `app`            | aplicación (`local.adel.pos.android`)    | `AdelPosApplication` + `AppContainer` (con el bloqueo por inactividad del proceso y el registro de borrado), `MainActivity` (de borde a borde), `ShellViewModel` (indicador), navegación (`navigation/AdelPosApp.kt`, rutas con tipo), `CatalogRealtimeContainer` (catálogo, imágenes y el único canal de tiempo real) y `AppForeground` (primer plano del proceso), manifiesto, ícono, `src/debug` con `network_security_config`.                                                                                                                                                                                                                                                   |
+| `app`            | aplicación (`com.adelpos.meseros`)       | `AdelPosApplication` + `AppContainer` (con el bloqueo por inactividad del proceso y el registro de borrado), `MainActivity` (de borde a borde), `ShellViewModel` (indicador), navegación (`navigation/AdelPosApp.kt`, rutas con tipo), `CatalogRealtimeContainer` (catálogo, imágenes y el único canal de tiempo real) y `AppForeground` (primer plano del proceso), manifiesto, ícono, `src/debug` con `network_security_config`.                                                                                                                                                                                                                                                   |
 | `core:domain`    | Kotlin/JVM puro (sin Android)            | `Money` y `MoneyFormat`, `LinkState`/`ConnectionSummary` y `DefaultNetworkTracker`, `PendingOrdersSource`, `AppError`/`AppResult`, `SecretSealer`, `TableState`, `TablesView`; `server/` (dirección escrita, anuncio NSD, cambio de IP, versiones), `pairing/` (código de 6 dígitos, `PairingFlow`), `access/` (`DeviceAccess`, verificador del PIN, límite local, bloqueo por inactividad, `WaiterWork`), `catalog/` (modelos del catálogo, búsqueda sin acentos, `Customization`/`LineSelection`, reglas del personalizador y revisión de lo que declara el catálogo), `realtime/` (`RealtimeFeed`, señales, interrupciones de acceso, espera creciente). Pruebas JVM en segundos. |
 | `core:data`      | biblioteca Android                       | `api/` (OkHttp con huella fijada, cabeceras del cliente, JSON, `MoneySerializer`, errores de Go → `AppError`, `ServerApi` con `ApiOutcome`), `access/` (`AccessRepository`, `PairingRepository`, `PairedConnection`), `discovery/` (NSD, sonda HTTPS), `security/` (huella fijada, primer certificado del emparejamiento, Keystore), `db/` (Room, esquemas en `core/data/schemas/`), `network/`, `pending/`, `preferences/`; `catalog/` (`catalog.db`, descarga completa y por cambios, caché de imágenes, actualizaciones), `realtime/` (cliente SSE), `session/` (`ServerAccess`, `DeviceServerAccess`).                                                                           |
 | `core:ui`        | biblioteca Android (Compose, Material 3) | Tema claro/oscuro (`theme/`), íconos propios (`icons/AdelIcons.kt`, los trazos de `desktop/src/components/Icon.tsx`), botones, barra superior e indicador, estado de mesa, toques de los diálogos para el bloqueo por inactividad (`LocalUserActivity`), andamio de uno o dos paneles (`layout/`), `catalog/` (búsqueda, categorías, cuadrícula con «Agotado», imagen con marcador y el personalizador táctil). Compartido con la A2.                                                                                                                                                                                                                                                |
@@ -95,8 +119,9 @@ aviso de platillos listos). Es **un cliente más del servidor del restaurante** 
 Dependencias entre módulos: `app` → todos; `feature:*` → `core:ui` (→ `core:domain`); `core:data` → `core:domain`. Un
 módulo `feature` nunca depende de otro `feature`; la A2 agrega `feature:takeaway` sobre `core:*`.
 
-**Versión de la aplicación**: un solo lugar, `android/gradle.properties` (`adelpos.versionName`, `adelpos.versionCode`).
-La usan el APK y la cabecera `X-Client-Version` (`BuildConfig.VERSION_NAME` → `ClientIdentity`).
+**Versión de la aplicación**: un solo lugar, `android/gradle.properties` (`adelpos.versionName`, `adelpos.versionCode`;
+desde la A2, 0.2.0 y 2). La usan el APK y la cabecera `X-Client-Version` (`BuildConfig.VERSION_NAME` →
+`ClientIdentity`).
 
 ## Comandos
 
@@ -147,7 +172,10 @@ mismo entorno. Los comentarios de línea (`//`) se escriben de 100 columnas como
   `GET version` no dice `test_mode: true`. Pasos 1–5 y 7 con un servidor; el 6 necesita **otro** servidor temporal
   (otra identidad) en las mismas direcciones: `--steps "1 2 3 4 5"`, reemplazar el servidor y `--no-install --steps
 "6 7"`. En Android 8 a 10 el paso 3 corta la red desde la Mac con `adb root` (solo imágenes `google_apis`).
-  Resultados en `android/app/build/outputs/e2e/<serial>/`. **Nunca** contra el servicio real de la Mac.
+  Resultados en `android/app/build/outputs/e2e/<serial>/`. **Nunca** contra el servicio real de la Mac. El guion
+  nombra la aplicación con `APP_ID` (`com.adelpos.meseros`), `TEST_PACKAGE` y `TEST_RUNNER` (clase de prueba,
+  componente de `am instrument` y carpeta de capturas) y, antes de instalar, desinstala también la 0.1.0
+  (`LEGACY_APP_ID`, `local.adel.pos.android`, y su `.test`).
 - **`CatalogOnGoTest`** (`app`, contra el Go temporal; se omite sin argumentos) se corre con
   **`scripts/android-e2e.sh --suite catalog`** (etapas `a`, `b` y `c`, una instrumentación cada una con `-e stage`):
   `a` empareja y entra por la API, crea el catálogo (≈ 300 productos, con sus tiempos en el registro
@@ -168,10 +196,11 @@ mismo entorno. Los comentarios de línea (`//`) se escriben de 100 columnas como
   proceso) con la captura y el personalizador abiertos; Atrás en Mesas y el bloqueo por inactividad al volver; tema
   oscuro con capturas (`<salida>/screens`) y zonas táctiles de 48 dp. `-e tableOffset N` usa otras mesas de `f1` para
   repetir un paso en el mismo servidor.
-- **Ejecutor de pruebas de `app`**: `AdelTestRunner` (antes de crear el contenedor) busca por NSD el tipo
-  `_adelpostest._tcp` y toma `clientVersion` de los argumentos. Ayudantes: `TestDevice` (un servidor emparejado que no
-  responde y un mesero conocido para entrar sin conexión, con el Keystore real), `FakeAccess` (entrada falsa para las
-  pantallas con estados forzados) y `MainComputer`.
+- **Ejecutor de pruebas de `app`**: `com.adelpos.meseros.AdelTestRunner` (`testInstrumentationRunner` de
+  `app/build.gradle.kts`; paquete de pruebas `com.adelpos.meseros.test`). Antes de crear el contenedor, busca por NSD
+  el tipo `_adelpostest._tcp` y toma `clientVersion` de los argumentos. Ayudantes: `TestDevice` (un servidor
+  emparejado que no responde y un mesero conocido para entrar sin conexión, con el Keystore real), `FakeAccess`
+  (entrada falsa para las pantallas con estados forzados) y `MainComputer`.
 - **`testOptions.targetSdk = 36` en las bibliotecas que tocan la red** (`core:data`): el APK de pruebas de una
   biblioteca toma `compileSdk` (37) si no se indica, y en Android 17 un `targetSdk` 37 exige `ACCESS_LOCAL_NETWORK`
   (visto: `SecurityException: Missing local network permission` al anunciar por NSD). Se prueba con el nivel de la
@@ -191,8 +220,12 @@ ADELPOS_E2E_NEW_SERVER=<orden> scripts/android-e2e.sh --suite all`**, que levant
   `svc data disable` (imágenes `google_apis`; las de Play no permiten root).
 - **Ojo**: con AGP 9.5.1, si el APK no se puede instalar (por ejemplo, otra firma de la misma aplicación ya instalada),
   `connectedDebugAndroidTest` lo escribe en el registro pero **termina con BUILD SUCCESSFUL sin correr las pruebas** de
-  ese módulo. Comprobar siempre los resultados en `*/build/outputs/androidTest-results/connected/` y desinstalar antes
-  (`adb uninstall local.adel.pos.android`).
+  ese módulo. Comprobar siempre los resultados en `*/build/outputs/androidTest-results/connected/` (contar los XML
+  de cada módulo) y desinstalar antes, con `adb -s <serie> uninstall`, la aplicación y sus pruebas
+  (`com.adelpos.meseros`, `com.adelpos.meseros.test`, `com.adelpos.meseros.core.data.test`,
+  `com.adelpos.meseros.core.ui.test`) y las de la 0.1.0 (`local.adel.pos.android`, `local.adel.pos.android.test` y
+  sus bibliotecas `….core.data.test` y `….core.ui.test`): un APK de entrega firmado instalado a mano es «otra firma»
+  de la misma aplicación para el `debug`.
 - **Ojo (emulador cargado)**: con dos emuladores y Gradle a la vez, el lanzador del emulador puede mostrar «Pixel
   Launcher isn't responding»; ese diálogo se queda con el foco, la tecla Atrás que inyecta la instrumentación ya no
   llega a la aplicación y Espresso falla con «has-window-focus=false». Las pruebas de punta a punta lo cierran con
@@ -373,8 +406,13 @@ keyAlias=…
 keyPassword=…
 ```
 
-Sin ellas, `assembleRelease` produce `app-release-unsigned.apk`. La llave de desarrollo del APK de prueba la crea la
-Fase G (nunca una llave de publicación) y se guarda fuera del repositorio.
+Sin ellas, `assembleRelease` produce `app-release-unsigned.apk`. La llave de desarrollo del APK de prueba (nunca una
+llave de publicación) la creó la Fase G de la A1 y vive fuera del repositorio, en `~/.android/adel-pos-dev/`
+(`signing.properties` y su almacén). **Es la misma para la 0.1.0 y la 0.2.0**: el cambio de identificador (A2-D5) no
+pide otra llave, porque Android solo exige la misma firma para actualizar el mismo paquete. Huella SHA-256 del
+certificado (`apksigner verify --print-certs`, «CN=AD-EL POS desarrollo - APK de prueba, O=AD-EL POS»):
+`fb6a4bac93052ca9051342ea122ed90469340a3685de14243bdab288d71c7c86`; un APK de entrega con otra huella no es el de
+siempre.
 
 ## Diseño
 

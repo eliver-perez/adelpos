@@ -6,7 +6,7 @@ plugins {
 }
 
 android {
-    namespace = "local.adel.pos.android.feature.waiter"
+    namespace = "com.adelpos.meseros.feature.waiter"
     compileSdk { version = release(37) }
 
     defaultConfig { minSdk = 26 }

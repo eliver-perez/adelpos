@@ -43,11 +43,42 @@ Sirve cualquier teléfono o tableta con **Android 8.0 o posterior**.
 **Instalar una versión nueva.** Instálala **encima** de la que ya tienes, con los mismos pasos: se conservan el
 emparejamiento, los meseros y los pedidos sin enviar. Eso funciona si la versión nueva viene firmada con la misma llave;
 si Android dice que no puede instalarla porque choca con la que ya está, **no la desinstales** (sobre todo si hay
-pedidos sin enviar) y avisa a soporte.
+pedidos sin enviar) y avisa a soporte. **De la 0.1.0 a la 0.2.0 es distinto**: no se instala encima (ver «Pasar de la
+0.1.0 a la 0.2.0», al final de esta sección).
 
 **Si desinstalas la aplicación** (o borras sus datos en los Ajustes de Android), el dispositivo olvida el
 emparejamiento y se pierden los pedidos que no se hayan enviado. Al volver a instalarla hay que emparejarlo de nuevo
 (sección 3). En la computadora principal, revoca el registro anterior de ese dispositivo (sección 7).
+
+### Pasar de la 0.1.0 a la 0.2.0
+
+Desde la 0.2.0, la aplicación tiene su **nombre interno definitivo**. Por eso, para Android la 0.2.0 es **otra
+aplicación**: no reemplaza a la 0.1.0 (si la instalas sin quitar la anterior, quedan dos «AD-EL POS» en el
+dispositivo), no se queda con nada de lo que guardaba la 0.1.0 y hay que emparejarla de nuevo. Los meseros, sus PIN,
+las mesas, las cuentas y el catálogo no se pierden: están en la computadora principal y la 0.2.0 los vuelve a tomar
+de ahí.
+
+En cada teléfono o tableta que tenga la 0.1.0, en este orden:
+
+1. **Envía lo pendiente.** Abre la 0.1.0 con conexión y entra a **«Pedidos pendientes»**. Espera a que no quede
+   ningún pedido «Por enviar» ni «Enviando» (si uno tarda, toca **«Reintentar ya»**) y resuelve los que digan
+   «Requiere tu revisión» con **«Revisar»**. Arriba debe decir «En línea» y ningún pedido por enviar. Lo que no se
+   envíe **se pierde** al desinstalar. Si ya actualizaste la computadora principal, la 0.1.0 sigue funcionando con
+   ella para esto.
+2. **Desinstala la 0.1.0**: en los **Ajustes** del dispositivo, **Aplicaciones › AD-EL POS › Desinstalar** (o
+   mantén presionado su ícono y elige «Desinstalar»). Los nombres cambian un poco según la marca.
+3. **Retira el dispositivo en la computadora principal**: en **Administración › Sistema › Terminales**, busca ese
+   teléfono o esa tableta, toca **«Revocar»** y **«Confirmar revocación»** (sección 7). Así su autorización anterior
+   ya no sirve.
+4. **Instala la 0.2.0** con los pasos del principio de esta sección y **empareja** el dispositivo con su código
+   (sección 3). Puedes ponerle el mismo nombre de antes. Cada mesero entra con su PIN de siempre; la primera vez en
+   este dispositivo, con conexión (sin conexión solo entran los que ya entraron antes con conexión en él).
+5. La 0.2.0 puede pedir permisos nuevos de **notificaciones** y de **batería**, para el aviso de platillos listos; qué
+   hacer con ellos se explica en esta guía.
+
+Si en un dispositivo nunca se instaló la 0.1.0, no hace falta nada de esto: instala la 0.2.0 directamente. Si por
+error quedaron las dos, la 0.1.0 es la que ya estaba emparejada (en **Ajustes › Aplicaciones › AD-EL POS** se ve la
+versión de cada una): envía lo pendiente desde ella y sigue desde el paso 2.
 
 ## 2. Antes de emparejar
 
@@ -210,7 +241,8 @@ Otros avisos que puede mostrar el dispositivo:
   que pasan a su bitácora. Si nadie cambió la computadora principal, avisa a soporte antes: el dispositivo se niega a
   conectarse a una computadora que no puede comprobar, a propósito.
 - **«Actualiza esta aplicación»**: la computadora principal pide una versión más nueva de la aplicación. Instálala
-  encima de la actual (sección 1) y **no la desinstales**, porque se perderían los pedidos sin enviar.
+  encima de la actual (sección 1) y **no la desinstales**, porque se perderían los pedidos sin enviar. De la 0.1.0 a
+  la 0.2.0, en cambio, sigue «Pasar de la 0.1.0 a la 0.2.0» (sección 1).
 
 ## 7. Retirar un teléfono o una tableta
 
