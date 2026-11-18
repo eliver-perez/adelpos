@@ -2,7 +2,9 @@ package kitchen
 
 import (
 	"sort"
+	"time"
 
+	"local/ad-el-pos/server/internal/businessday"
 	"local/ad-el-pos/server/internal/events"
 )
 
@@ -122,6 +124,15 @@ func (handler *service) publishPreparation() error {
 	return nil
 }
 
+// ReadyAlertsRecentUse es cuánto cuenta, para los avisos de platillos listos, una sesión con PIN abierta antes del
+// inicio del día comercial en curso (decisión A2-D12 del coordinador): solo si sigue vigente y su last_seen_at es de
+// los últimos 30 minutos. Así se cubre al mesero que trabaja justo en el cambio de día (revisión R2) sin que la última
+// entrada de la noche (una sesión con PIN dura 12 h) mantenga activo toda la noche el servicio de avisos de las
+// tabletas (revisión RD2). Las sesiones creadas desde el inicio del día cuentan siempre durante ese día. La usan la
+// elección del dispositivo fijado (recordReadyNotices) y la lectura (administration/ready_alerts.go: active y «entró
+// en el dispositivo»), para que un aviso nunca se fije a un dispositivo que no lo entregaría.
+const ReadyAlertsRecentUse = 30 * time.Minute
+
 // recordReadyNotices registra cada unidad activa de las cuentas que quedó en «Listo» en esta transacción: todas sus
 // tareas vivas (no canceladas, de su versión vigente) están listas y, o bien la última se marcó ahora (ready_at es
 // now(), el instante de la transacción; states.go conserva el ready_at de una tarea que ya estaba lista), o bien ahora
@@ -139,12 +150,18 @@ func (handler *service) publishPreparation() error {
 //
 // El dispositivo destinatario (A2-D4) se fija aquí: entre los dispositivos android que pueden recibir el aviso (no
 // revocados, con «Avisar platillos listos» activado y con la aplicación 0.2.0 o posterior si Go conoce su versión, la
-// primera que lee avisos; revisión R7), el de la sesión con PIN vigente del responsable con last_seen_at más reciente;
-// si ninguno sirve, ninguno (entonces el aviso va a todos los dispositivos donde entró; lo decide la lectura,
+// primera que lee avisos; revisión R7), el de la sesión con PIN vigente del responsable con last_seen_at más reciente
+// entre las que cuentan (creadas desde el inicio del día comercial, o de antes pero usadas en los últimos 30 minutos;
+// A2-D12); si ninguno sirve, ninguno (entonces el aviso va a todos los dispositivos donde entró; lo decide la lectura,
 // administration/ready_alerts.go). Fijarlo al «Listo» y no al leer hace que cada dispositivo lo reciba o no sin
 // importar cuándo consulte: si el mesero cambia de dispositivo justo entonces o uno se reconecta tarde con su cursor,
 // el aviso no se pierde ni se duplica. Al registrar algo se podan los avisos de más de 2 días (dato derivado).
 func (handler *service) recordReadyNotices(accountIDs []string) error {
+	config, err := businessday.Load(handler.ctx, handler.tx)
+	if err != nil {
+		return err
+	}
+	dayStart := config.Start(config.DayOf(time.Now()).Date)
 	recorded, err := handler.tx.Exec(handler.ctx, `WITH ready AS (
             SELECT u.id AS unit_id,u.version_id,u.account_id,a.assigned_user_id,u.item_id,u.ordinal
             FROM app.restaurant_item_units u JOIN app.restaurant_accounts a ON a.id=u.account_id
@@ -163,6 +180,7 @@ func (handler *service) recordReadyNotices(accountIDs []string) error {
         SELECT r.unit_id,r.version_id,r.account_id,r.assigned_user_id,
             (SELECT s.device_id FROM app.sessions s JOIN app.devices d ON d.id=s.device_id
                 WHERE s.user_id=r.assigned_user_id AND s.opened_with_pin AND s.revoked_at IS NULL AND s.expires_at>now()
+                    AND (s.created_at>=$2 OR s.last_seen_at>=now()-make_interval(secs=>$3))
                     AND d.kind='android' AND d.revoked_at IS NULL AND d.ready_alerts_enabled
                     AND (coalesce(d.app_version,'') !~ '^\d{1,6}\.\d{1,6}\.\d{1,6}'
                         OR (regexp_match(d.app_version,'^(\d{1,6})\.(\d{1,6})\.(\d{1,6})'))::int[] >= ARRAY[0,2,0])
@@ -170,7 +188,7 @@ func (handler *service) recordReadyNotices(accountIDs []string) error {
             k.alert_key,now()
         FROM ready r JOIN keys k ON k.account_id=r.account_id
         ORDER BY r.account_id,r.item_id,r.ordinal,r.unit_id
-        ON CONFLICT (unit_id,version_id) DO NOTHING`, accountIDs)
+        ON CONFLICT (unit_id,version_id) DO NOTHING`, accountIDs, dayStart, ReadyAlertsRecentUse.Seconds())
 	if err != nil {
 		return err
 	}

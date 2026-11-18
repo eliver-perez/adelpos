@@ -725,13 +725,15 @@ sesión: llegan aunque esté en «¿Quién eres?» o con la aplicación cerrada,
 cocina no usa el KDS, no hay avisos.
 
 1. **A quién llega** (lo decide Go). El mesero M **está en** el dispositivo D si tiene en D una sesión con PIN
-   **vigente** o **creada desde el inicio del día comercial en curso** (la «Hora de inicio del día» de Administración);
+   **creada desde el inicio del día comercial en curso** (la «Hora de inicio del día» de Administración), o una de
+   antes que **sigue vigente y se usó (alguna petición con esa sesión) en los últimos 30 minutos** (decisión A2-D12: cubre al mesero que trabaja justo en
+   el cambio de día sin que la última entrada de la noche, que dura 12 h, mantenga el servicio activo hasta la mañana);
    es la misma regla que `active`. Un aviso de M llega a D si:
    - M está en D y el aviso es **posterior a la entrada de M en D** (su primera sesión con PIN en D que cuente): un
      dispositivo nuevo, o una lectura sin cursor, no recibe lo que se marcó «Listo» antes de que M entrara en él;
    - y el aviso quedó **para D o para todos**: al registrar el «Listo», Go lo fija al dispositivo de la sesión con PIN
-     vigente de actividad más reciente de M, pero solo entre dispositivos `android` no retirados, con «Avisar platillos
-     listos» activado y, si Go conoce su versión, 0.2.0 o posterior. Si ninguno sirve (por ejemplo, M cerró su sesión
+     vigente de actividad más reciente de M que cuente (con la misma regla), pero solo entre dispositivos `android` no
+     retirados, con «Avisar platillos listos» activado y, si Go conoce su versión, 0.2.0 o posterior. Si ninguno sirve (por ejemplo, M cerró su sesión
      con `logout` o su dispositivo tiene el aviso apagado), el aviso es para todos los dispositivos donde M está.
 
    Cerrar la sesión con `logout` hace que los «Listo» siguientes ya no se fijen a ese dispositivo; como M entró en él
@@ -780,12 +782,12 @@ cocina no usa el KDS, no hay avisos.
      manda (el cursor avanza igual). Al tocar un aviso de una cuenta que ya se cerró o se canceló, la aplicación muestra
      «Esta cuenta ya no está abierta».
    - **`active`**: `true` si «Avisar platillos listos» está activado y algún mesero está en el dispositivo (sesión con
-     PIN vigente o creada desde el inicio del día comercial); si no, `false`, sin avisos (no es un error) y el cursor
+     PIN creada desde el inicio del día comercial, o de antes pero vigente y usada en los últimos 30 minutos); si no, `false`, sin avisos (no es un error) y el cursor
      avanza (al volver a activarse no llegan avisos viejos). El servicio en primer plano se detiene con
      `active: false`.
    - **`day_ends_at`**: fin del día comercial en curso. Los avisos cuentan en el día comercial de su `ready_at`: al
      llegar la hora de inicio del día siguiente dejan de contar los meseros que entraron en el día anterior (salvo que
-     su sesión siga vigente) y **los avisos del día anterior que no se entregaron ya no llegan**. Un corte de red que
+     su sesión siga vigente y la usen en los últimos 30 minutos; después, `active` pasa a `false` sola) y **los avisos del día anterior que no se entregaron ya no llegan**. Un corte de red que
      cruza esa hora pierde lo que se marcó «Listo» en los últimos minutos del día anterior (con la hora de inicio de
      madrugada casi nunca pasa); es la regla del día comercial.
    - **`settings`**: «Avisar platillos listos», «Sonido» y «Vibración» de Terminales › Editar (también en

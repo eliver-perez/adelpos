@@ -4070,7 +4070,9 @@ Especificación: [docs/etapas/ETAPA_A2_ANDROID.md](docs/etapas/ETAPA_A2_ANDROID.
   completa; modificaciones y cancelaciones de `operations` con `kitchen.Integrate`; la liberación de
   `Worker.ReleaseDue`, que solo crea tareas pendientes) y nunca una unidad que ya
   estaba lista (una modificación económica no reinicia sus tareas; una de receta crea otra versión). Destinatario: el
-  responsable de la cuenta; dispositivo: el de su sesión con PIN vigente con `last_seen_at` más reciente, solo entre
+  responsable de la cuenta; dispositivo: el de su sesión con PIN vigente con `last_seen_at` más reciente que cuente
+  (creada desde el inicio del día comercial, o de antes y con `last_seen_at` de los últimos 30 minutos,
+  `kitchen.ReadyAlertsRecentUse`, A2-D12), solo entre
   `android` no revocados con `ready_alerts_enabled` y, si se conoce `app_version`, 0.2.0 o posterior (revisión R7), o
   ninguno. Las filas de una cuenta en la misma operación comparten un `alert_key` nuevo (`gen_random_uuid()`, R3). Al
   registrar algo, se poda lo de más de 2 días. Ningún lock nuevo: cocina escribe con 7820148305 exclusivo.
@@ -4080,8 +4082,9 @@ Especificación: [docs/etapas/ETAPA_A2_ANDROID.md](docs/etapas/ETAPA_A2_ANDROID.
   (`serveReadyAlerts`: revisa cada 750 ms y solo escribe con novedades, `: ping` cada 15 s, 5 minutos; `readyStreams`
   guarda el canal abierto de cada dispositivo y uno nuevo cierra el anterior, R12). `authenticateDevice` actualiza
   `devices.last_seen_at` de estas lecturas como mucho una vez por minuto. Presencia del mesero (`active` y los avisos):
-  sesión con PIN en el dispositivo vigente o creada desde el inicio del día comercial, y solo avisos desde su primera
-  sesión que cuente (R2, R11); la cuenta sigue `merged_into_id` y no se avisan unidades canceladas (R10). `active` y
+  sesión con PIN en el dispositivo creada desde el inicio del día comercial, o de antes pero vigente y usada en los
+  últimos 30 minutos (A2-D12, para que la última entrada de la noche no deje el servicio activo hasta la mañana), y
+  solo avisos desde su primera sesión que cuente (R2, R11); la cuenta sigue `merged_into_id` y no se avisan unidades canceladas (R10). `active` y
   `day_ends_at` con `businessday` (hora de inicio del día de inventario).
 - **`PATCH devices/{id}`** (`devices.manage`): campos opcionales `ready_alerts_enabled`, `ready_alerts_sound` y
   `ready_alerts_vibration` (sin ellos se conserva lo guardado); en una terminal que no es `android`, `400`. `GET
