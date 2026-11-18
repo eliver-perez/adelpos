@@ -96,12 +96,13 @@ var stage9HLegacyTables = []string{"legacy_import_batches", "legacy_id_map", "le
 // stage9HRowCounts cuenta las filas de todas las tablas del esquema app que existían en el esquema 23: la 0024 no debe
 // cambiar ninguna. La prueba migra hasta la última, así que excluye lo que agrega la 0025 (etapa A1: sus tablas
 // pin_attempts y offline_order_credentials, el permiso waiter_devices.use y sus concesiones), que se comprueba en
-// stagea1_upgrade_test.go.
+// stagea1_upgrade_test.go, y la tabla ready_notices de la 0026 (etapa A2, parte D), que se comprueba en
+// stagea2_upgrade_test.go.
 func stage9HRowCounts(ctx context.Context, t *testing.T, pool *pgxpool.Pool) string {
 	t.Helper()
 	rows, err := pool.Query(ctx, `SELECT table_name FROM information_schema.tables WHERE table_schema = 'app'
         AND table_type = 'BASE TABLE' AND table_name NOT LIKE 'legacy\_%'
-        AND table_name NOT IN ('pin_attempts', 'offline_order_credentials') ORDER BY table_name`)
+        AND table_name NOT IN ('pin_attempts', 'offline_order_credentials', 'ready_notices') ORDER BY table_name`)
 	if err != nil {
 		t.Fatal(err)
 	}
