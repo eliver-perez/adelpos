@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"local/ad-el-pos/server/internal/businessday"
 	"local/ad-el-pos/server/internal/httpapi"
+	"local/ad-el-pos/server/internal/kitchen"
 )
 
 // Avisos de platillos listos (etapa A2, parte D; §4 de la especificación, decisiones A2-D4 y A2-D9 y las correcciones de
@@ -24,8 +25,8 @@ import (
 //     nuevo del mismo dispositivo reemplaza al anterior (tras un cambio de red el viejo puede seguir medio abierto).
 //   - Solo dispositivos android no revocados (revocado: 401 DEVICE_REVOKED; de otro tipo, 403).
 //   - Go decide a quién llega: un aviso llega al dispositivo D si su destinatario M «está» en D (tiene en D una sesión
-//     con PIN vigente o creada desde el inicio del día comercial: la misma regla que active) y el aviso es posterior a
-//     la entrada de M en D, y además el aviso es para D (al «Listo», D era el dispositivo de la sesión con PIN vigente
+//     con PIN creada desde el inicio del día comercial, o una de antes que sigue vigente y se usó en los últimos 30
+//     minutos, A2-D12: la misma regla que active) y el aviso es posterior a la entrada de M en D, y además el aviso es para D (al «Listo», D era el dispositivo de la sesión con PIN vigente
 //     más reciente de M que podía recibirlo) o para todos (no había ninguno). Ver kitchen.recordReadyNotices.
 //   - Solo los datos del aviso: cuenta (la vigente, si se combinó), modalidad, mesa o folio y nombre del cliente,
 //     mesero, platillos y cantidades. Nunca precios ni importes; las unidades canceladas después no se avisan.
@@ -47,7 +48,8 @@ const (
 type ReadyAlertsBatch struct {
 	Cursor int64 `json:"cursor"`
 	// Active dice si el dispositivo debe mantener su servicio de avisos: el aviso está activado en Terminales y hay
-	// un mesero con sesión con PIN vigente en él o que entró en él con PIN durante el día comercial en curso.
+	// un mesero que entró en él con PIN durante el día comercial en curso, o con una sesión con PIN de antes que sigue
+	// vigente y se usó en los últimos 30 minutos (A2-D12).
 	Active bool `json:"active"`
 	// DayEndsAt es el fin del día comercial en curso (la hora de inicio del día siguiente).
 	DayEndsAt time.Time          `json:"day_ends_at"`
@@ -87,16 +89,19 @@ type ReadyItem struct {
 }
 
 // readyPresenceSQL son las sesiones con PIN del dispositivo $1 que hacen que su mesero «esté» en él: creadas desde el
-// inicio del día comercial $2 o vigentes. Dos consultas, cada una con su índice parcial (revisión R5).
+// inicio del día comercial $2, o vigentes y usadas en los últimos $3 segundos (kitchen.ReadyAlertsRecentUse, A2-D12;
+// una de las del día que también lo cumpla sale dos veces, sin efecto en el mínimo). Dos consultas, cada una con su
+// índice parcial (revisión R5).
 const readyPresenceSQL = `SELECT user_id,created_at FROM app.sessions WHERE device_id=$1 AND opened_with_pin AND created_at>=$2
         UNION ALL
         SELECT user_id,created_at FROM app.sessions WHERE device_id=$1 AND opened_with_pin AND revoked_at IS NULL
-            AND expires_at>now()`
+            AND expires_at>now() AND last_seen_at>=now()-make_interval(secs=>$3)`
 
-// readyAlertsQuery son los avisos del dispositivo $1 posteriores al cursor $3 y hasta $4 (lo último registrado al
-// leer), del día comercial que empezó en $2, agrupados por su clave (la operación de cocina en una cuenta), hasta $5
-// grupos. Cada fila es un grupo: su último número, si le queda alguna unidad activa y el aviso. La cuenta del aviso
-// sigue las combinaciones hasta la vigente (revisión R10).
+// readyAlertsQuery son los avisos del dispositivo $1 posteriores al cursor $4 y hasta $5 (lo último registrado al
+// leer), del día comercial que empezó en $2, agrupados por su clave (la operación de cocina en una cuenta), hasta $6
+// grupos ($3 es kitchen.ReadyAlertsRecentUse en segundos, para la presencia). Cada fila es un grupo: su último número,
+// si le queda alguna unidad activa y el aviso. La cuenta del aviso sigue las combinaciones hasta la vigente (revisión
+// R10).
 const readyAlertsQuery = `WITH RECURSIVE presence AS (
         SELECT user_id,min(created_at) AS since FROM (` + readyPresenceSQL + `) counted GROUP BY user_id
     ), notices AS (
@@ -107,12 +112,12 @@ const readyAlertsQuery = `WITH RECURSIVE presence AS (
         JOIN app.restaurant_item_units u ON u.id=n.unit_id
         JOIN app.restaurant_item_versions v ON v.id=n.version_id
         LEFT JOIN app.catalog_variants variant ON variant.id::text=v.quote_line->>'variant_id'
-        WHERE n.sequence>$3 AND n.sequence<=$4 AND n.ready_at>=$2
+        WHERE n.sequence>$4 AND n.sequence<=$5 AND n.ready_at>=$2
             AND (n.recipient_device_id IS NULL OR n.recipient_device_id=$1)
     ), grouped AS (
         SELECT alert_key,max(sequence) AS last,(array_agg(account_id))[1] AS account_id,
             (array_agg(recipient_user_id))[1] AS recipient_user_id,max(ready_at) AS ready_at
-        FROM notices GROUP BY alert_key ORDER BY max(sequence) LIMIT $5
+        FROM notices GROUP BY alert_key ORDER BY max(sequence) LIMIT $6
     ), chain AS (
         SELECT g.alert_key,a.id,a.merged_into_id,0 AS depth FROM grouped g JOIN app.restaurant_accounts a ON a.id=g.account_id
         UNION ALL
@@ -176,11 +181,15 @@ func readyAlerts(ctx context.Context, tx pgx.Tx, request Request) (any, error) {
 	if after > head {
 		after = 0
 	}
+	recent := kitchen.ReadyAlertsRecentUse.Seconds()
 	batch := &ReadyAlertsBatch{Cursor: head, DayEndsAt: day.Deadline, Settings: settings, Alerts: []ReadyAlert{}}
 	if settings.Enabled {
+		// La misma regla que readyPresenceSQL (A2-D12): una sesión de antes del inicio del día solo cuenta si sigue
+		// vigente y se usó hace poco; si no, la última entrada de la noche mantendría el servicio activo hasta la mañana.
 		err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT FROM app.sessions WHERE device_id=$1 AND opened_with_pin AND created_at>=$2)
-            OR EXISTS(SELECT FROM app.sessions WHERE device_id=$1 AND opened_with_pin AND revoked_at IS NULL AND expires_at>now())`,
-			request.DeviceID, dayStart).Scan(&batch.Active)
+            OR EXISTS(SELECT FROM app.sessions WHERE device_id=$1 AND opened_with_pin AND revoked_at IS NULL AND expires_at>now()
+                AND last_seen_at>=now()-make_interval(secs=>$3))`,
+			request.DeviceID, dayStart, recent).Scan(&batch.Active)
 		if err != nil {
 			return nil, err
 		}
@@ -190,7 +199,7 @@ func readyAlerts(ctx context.Context, tx pgx.Tx, request Request) (any, error) {
 	if !batch.Active {
 		return batch, nil
 	}
-	rows, err := tx.Query(ctx, readyAlertsQuery, request.DeviceID, dayStart, after, head, readyAlertsGroups)
+	rows, err := tx.Query(ctx, readyAlertsQuery, request.DeviceID, dayStart, recent, after, head, readyAlertsGroups)
 	if err != nil {
 		return nil, err
 	}

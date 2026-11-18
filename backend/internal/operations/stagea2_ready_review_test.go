@@ -22,8 +22,9 @@ import (
 // regresión (con el código anterior a las correcciones fallaba a propósito, con un mensaje que describe lo que pasaba).
 //
 //   - R1: modificar una unidad quitándole la única estación que faltaba la deja «Listo»: debe registrarse su aviso.
-//   - R2: un mesero con sesión con PIN vigente abierta antes de la «Hora de inicio del día»: el aviso fijado a su
-//     dispositivo debe llegarle (la regla de entrega es la misma de active).
+//   - R2: un mesero con sesión con PIN vigente abierta antes de la «Hora de inicio del día» y usada hace poco: el aviso
+//     fijado a su dispositivo debe llegarle (la regla de entrega es la misma de active). Con A2-D12 (revisión RD2), si
+//     la usó hace más de 30 minutos ya no cuenta: active false, el aviso no se fija a ese dispositivo y no le llega.
 //   - R3: base restaurada: un aviso nuevo puede repetir el número de otro ya avisado, pero no su clave (key), que es la
 //     que usa el dispositivo para descartar repetidos.
 //   - R4: el canal no manda nada sin novedades (solo «: ping» cada 15 s) e «interrupted» llega sin id y con su código.
@@ -159,15 +160,15 @@ func TestStageA2ReadyReview(t *testing.T) {
 		}
 	})
 
-	t.Run("R2 sesión vigente de antes del inicio del día: el aviso le llega", func(t *testing.T) {
+	t.Run("R2 sesión vigente de antes del inicio del día: usada hace poco, el aviso le llega; hace más de 30 min, no cuenta", func(t *testing.T) {
 		config, err := businessday.Load(fixture.ctx, fixture.pool)
 		if err != nil {
 			t.Fatal(err)
 		}
 		dayStart := config.Start(config.DayOf(time.Now()).Date)
-		// Beto entró en la tableta 2 una hora antes de la «Hora de inicio del día» y su sesión sigue vigente (12 h): por
-		// ejemplo entró a las 22:00 con la hora de inicio a las 00:00 (o a las 18:00 y sigue a las 05:15 con la de 05:00).
-		if _, err := fixture.pool.Exec(fixture.ctx, `UPDATE app.sessions SET created_at=$3,last_seen_at=now(),
+		// Beto entró en la tableta 2 una hora antes de la «Hora de inicio del día», su sesión sigue vigente (12 h) y la
+		// usó hace 10 minutos: por ejemplo entró a las 22:00 con la hora de inicio a las 00:00 y sigue trabajando.
+		if _, err := fixture.pool.Exec(fixture.ctx, `UPDATE app.sessions SET created_at=$3,last_seen_at=now()-interval '10 minutes',
             expires_at=now()+interval '6 hours' WHERE user_id=$1 AND device_id=$2 AND revoked_at IS NULL`,
 			fixture.beto, fixture.tabletTwo.deviceID, dayStart.Add(-time.Hour)); err != nil {
 			t.Fatal(err)
@@ -185,8 +186,29 @@ func TestStageA2ReadyReview(t *testing.T) {
 				"dispositivo aunque Beto tiene ahí su sesión abierta", pinned, two.Active, len(ofAccount(two, accountID)),
 				two.Cursor, fixture.head(t), len(ofAccount(one, accountID)))
 		}
-		// Beto vuelve a entrar para lo que sigue.
+		// A2-D12: la misma sesión, usada por última vez hace 31 minutos (la última entrada de la noche; la tableta quedó en
+		// «¿Quién eres?»), ya no cuenta: la tableta responde active false y el aviso siguiente no se fija a ella ni le
+		// llega.
+		if _, err := fixture.pool.Exec(fixture.ctx, `UPDATE app.sessions SET last_seen_at=now()-interval '31 minutes'
+            WHERE user_id=$1 AND device_id=$2 AND revoked_at IS NULL`, fixture.beto, fixture.tabletTwo.deviceID); err != nil {
+			t.Fatal(err)
+		}
+		before = fixture.head(t)
+		night := fixture.orderFor(t, fixture.beto, 4, draftLine(fixture.fries, 1))
+		fixture.ready(t, night, "")
+		unpinned := fixture.count(t, `SELECT count(*)::int FROM app.ready_notices WHERE account_id=$1 AND recipient_user_id=$2
+            AND recipient_device_id IS NULL`, night, fixture.beto)
+		idle := fixture.alerts(t, fixture.tabletTwo, before)
+		if unpinned != 1 || idle.Active || len(idle.Alerts) != 0 {
+			t.Errorf("sesión de antes del inicio del día usada hace 31 minutos: el aviso debía quedar para todos (%d filas "+
+				"sin dispositivo) y la tableta 2 responder active false sin avisos (active %v, %d avisos)", unpinned,
+				idle.Active, len(idle.Alerts))
+		}
+		// Beto vuelve a entrar para lo que sigue: su sesión nueva es de hoy y cuenta, pero solo para lo posterior.
 		fixture.betoTwo = fixture.enter(t, fixture.tabletTwo, fixture.beto, "6152")
+		if after := fixture.alerts(t, fixture.tabletTwo, before); !after.Active || len(ofAccount(after, night)) != 0 {
+			t.Errorf("tras volver a entrar: active %v y %d avisos de antes de su entrada", after.Active, len(ofAccount(after, night)))
+		}
 	})
 
 	t.Run("R3 base restaurada: el aviso nuevo no repite la clave de otro ya avisado", func(t *testing.T) {
