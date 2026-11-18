@@ -114,12 +114,13 @@ paquetes que se desinstalan antes de las instrumentadas, en «Pruebas») y en es
     mismo trabajador de la cola con la sesión del mesero que la hizo.
 22. **Un solo canal de eventos y un solo canal de avisos por proceso** (etapa A2, Fase D): el de eventos
     (`RealtimeClient`, solo en primer plano y con sesión, Go admite dos por dispositivo) y el de platillos listos
-    (`ReadyAlertsChannel`, con **solo la credencial del dispositivo**, Go admite uno). El servicio en primer plano del
-    aviso **no** abre el canal de eventos y **no envía pedidos**: al reconectar solo pide un envío de la cola
+    (`ReadyAlertsChannel`, con **solo la credencial del dispositivo**; Go mantiene uno por dispositivo: el nuevo
+    reemplaza al anterior). El servicio en primer plano del aviso **no** abre el canal de eventos y **no envía
+    pedidos**: al reconectar solo pide un envío de la cola
     (`retryNow`), como los demás disparadores. Un servicio en primer plano solo se arranca desde primer plano o con
     una exención (`BOOT_COMPLETED`, `MY_PACKAGE_REPLACED`, reinicio pegajoso); si Android lo rechaza
     (`ForegroundServiceStartNotAllowedException`), se espera al siguiente disparador. Un aviso nunca se muestra dos
-    veces (ids avisados en Room y en los extras de la notificación) y nunca se pierde (cursor en Room, guardado
+    veces (las `key` avisadas en Room y en los extras de la notificación) y nunca se pierde (cursor en Room, guardado
     **después** de mostrar).
 
 ## Estructura
