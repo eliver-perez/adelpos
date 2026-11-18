@@ -631,3 +631,351 @@ abrir la app.
 | 4    | **Revisión independiente** de §4                       | Servicio en primer plano, reconexión y entrega sin duplicados ni pérdidas (servidor y dispositivo). Sus correcciones vuelven a quien hizo la parte.                                                                                                                                                                                                         |
 | 5    | **Fase E**                                             | Pruebas de punta a punta en los cuatro emuladores (suites nuevas `takeaway`, `precheck` y `alerts` de `scripts/android-e2e.sh`), batería en una hora como referencia.                                                                                                                                                                                       |
 | 6    | **Fase F**                                             | Regresión completa (un agente), documentación, APK 0.2.0 con la llave de desarrollo, `.pkg` 0.13.0 (parada: lo instala el propietario), fusión en `main` y push.                                                                                                                                                                                            |
+
+## Fase A · Identificador definitivo
+
+Árbol `$SP/wt/a`, rama `etapa-a2-a` desde `etapa-a2-android` (`9c0f59c`). Solo se tocaron `android/`,
+`scripts/android-e2e.sh`, `android/CLAUDE.md` y `docs/ANDROID_INSTALAR.md` (nada de `backend/`, `desktop/`,
+`docs/API_V1.md`, `API_CONTRACTS.md`, `config/product.json` ni `CLAUDE.md` raíz). El servidor no cambió en esta fase.
+
+**Resultado.** La aplicación es `com.adelpos.meseros` 0.2.0 (`versionCode` 2) con la misma llave de desarrollo que la
+0.1.0. Instala, empareja, entra con PIN y envía pedidos (en línea y sin conexión) contra un Go temporal en Android 17
+y Android 8; las 256 pruebas de la JVM y las 94 instrumentadas por emulador pasan como al cerrar la A1.
+
+### Qué se hizo
+
+| Commit               | Contenido                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `4091429` (mecánico) | `applicationId` y `namespace` de `app` = `com.adelpos.meseros`; `namespace` de `core:data`, `core:ui`, `feature:access` y `feature:waiter` = `com.adelpos.meseros.<módulo>`; el prefijo `local.adel.pos.android` → `com.adelpos.meseros` en los 237 archivos `.kt` (fuentes, pruebas JVM, `androidTest`, también `core:domain`) y en los 5 `build.gradle.kts` (con `testInstrumentationRunner = "com.adelpos.meseros.AdelTestRunner"`). Los 14 árboles `src/<conjunto>/kotlin/local/adel/pos/android/` se movieron con `git mv` a `…/kotlin/com/adelpos/meseros/` y las dos carpetas de esquemas de Room a `core/data/schemas/com.adelpos.meseros.core.data.db.AppDatabase/` y `….catalog.db.CatalogDatabase/` (los 6 JSON sin cambios). `ktfmtFormat` solo reordenó los imports por el prefijo nuevo. **243 renombres** detectados por git (237 `.kt` + 6 JSON; similitud mínima 53 %, así que `git log --follow` conserva la historia) y 1 821 líneas cambiadas (las mismas que tenían el nombre viejo). |
+| `825d1f1`            | `android/gradle.properties`: `adelpos.versionName=0.2.0`, `adelpos.versionCode=2`. `app/build.gradle.kts`: el comentario del `applicationId` ya no dice «provisional A1-D9». `scripts/android-e2e.sh`: variables `APP_ID`, `TEST_PACKAGE`, `TEST_RUNNER` y `LEGACY_APP_ID` (`scripts/android-e2e.sh:149-155`); la clase de prueba (`-e class "$APP_ID.$TEST_CLASS#…"`), el componente de `am instrument` y la carpeta de capturas (`/sdcard/Android/data/$APP_ID/files/screens`) salen de ellas; `install_app` desinstala, antes de instalar, `com.adelpos.meseros`, su `.test`, `local.adel.pos.android` y su `.test` (`:279-285`). `ServerCompatibility` **no cambió** (A2-D6: cada fase agrega su capacidad).                                                                                                                                                                                                                                                                                           |
+| `387441c`            | `android/CLAUDE.md`: sección nueva «Identificador y nombres (A2-D5)» con la convención, fila de `app` en «Estructura», ejecutor y paquete de pruebas, `APP_ID` del guion, la lista de paquetes que se desinstalan antes de las instrumentadas, versión 0.2.0 y la llave de desarrollo con su huella. `docs/ANDROID_INSTALAR.md`: «Pasar de la 0.1.0 a la 0.2.0» al final de la sección 1 y dos avisos que llevan ahí («Instalar una versión nueva» y «Actualiza esta aplicación», que dicen «instálala encima»).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+
+`scripts/dev.sh` no nombra el paquete en ninguna orden `android-*`: no cambió.
+
+`AdelTestRunner` solo cambió de paquete (`android/app/src/androidTest/kotlin/com/adelpos/meseros/AdelTestRunner.kt`):
+sigue buscando `_adelpostest._tcp`.
+
+Lo que queda con el nombre viejo, a propósito: `scripts/android-e2e.sh:80,155` (para desinstalar la 0.1.0),
+`android/app/build.gradle.kts:59` (el comentario que dice que la 0.1.0 es otra aplicación) y `android/CLAUDE.md` (la
+explicación y la lista de paquetes a desinstalar). `grep -rn 'local\.adel\.pos\.android\|local/adel/pos/android'
+android/ scripts/ --exclude-dir=build` no encuentra nada más.
+
+### Convención (A2-D5, documentada en `android/CLAUDE.md`)
+
+Un solo prefijo, `com.adelpos.meseros`, para el `applicationId`, el `namespace` de cada módulo
+(`com.adelpos.meseros`, `….core.data`, `….core.ui`, `….feature.access`, `….feature.waiter`; los de la A2:
+`….core.capture`, `….feature.takeaway`) y los paquetes de Kotlin (`core:domain`, sin `namespace`, usa
+`com.adelpos.meseros.core.domain…`). Carpeta = paquete (`kotlin/com/adelpos/meseros/…`). Paquete de pruebas
+`com.adelpos.meseros.test` y de las bibliotecas `<namespace>.test`. Esquemas de Room con el nombre completo de la clase.
+
+### Llave de firma
+
+`assembleRelease` con `ADELPOS_SIGNING_PROPERTIES=~/.android/adel-pos-dev/signing.properties` (solo la variable; la
+llave y sus contraseñas no se leyeron, copiaron ni anotaron). `apksigner verify --print-certs -v` (build-tools 36.0.0):
+
+| APK                                                           | Paquete                            | Esquema         | Certificado                                          | SHA-256 del certificado                                            |
+| ------------------------------------------------------------- | ---------------------------------- | --------------- | ---------------------------------------------------- | ------------------------------------------------------------------ |
+| `app-release.apk` nuevo (2 417 755 bytes)                     | `com.adelpos.meseros` 0.2.0 (2)    | v2, un firmante | CN=AD-EL POS desarrollo - APK de prueba, O=AD-EL POS | `fb6a4bac93052ca9051342ea122ed90469340a3685de14243bdab288d71c7c86` |
+| `AD-EL-POS-Android-0.1.0.apk` (solo lectura, 2 417 755 bytes) | `local.adel.pos.android` 0.1.0 (1) | v2, un firmante | el mismo                                             | `fb6a4bac93052ca9051342ea122ed90469340a3685de14243bdab288d71c7c86` |
+
+**Mismo certificado.** (Que los dos APK midan lo mismo es coincidencia: el SHA-256 de los archivos es distinto,
+`0dac3394…` y `3071539e…`.) El APK firmado se borró del árbol después de comprobarlo: el de entrega lo compila la Fase F.
+
+### Pruebas
+
+Todo en el árbol `$SP/wt/a` con el arnés (`ISO_TAG=A`), JDK de Android Studio. Tiempos con la caché de Gradle del
+usuario caliente (la compilación de los 5 módulos y sus pruebas, después del cambio mecánico: 35 s).
+
+| Qué                                                                                                                                                                       | Dónde                                                       | Resultado                                                                                                                                                                                                                                                                                                                                                                                               |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ktfmtCheck`                                                                                                                                                              | Mac, después de cada commit de Kotlin                       | Aprobado (4 s)                                                                                                                                                                                                                                                                                                                                                                                          |
+| `:core:domain:test`                                                                                                                                                       | Mac                                                         | **103 pruebas, 0 fallas** (18 XML; 2 s)                                                                                                                                                                                                                                                                                                                                                                 |
+| `testDebugUnitTest` (JVM + Robolectric SDK 36)                                                                                                                            | Mac                                                         | **153 pruebas, 0 fallas**: `core:data` 133, `core:ui` 9, `feature:access` 7, `feature:waiter` 4 (`app` sin pruebas JVM); con el dominio, **256**, las mismas de la A1 (17 s)                                                                                                                                                                                                                            |
+| `lintDebug`                                                                                                                                                               | Mac                                                         | Sin errores ni avisos (3 sugerencias informativas de antes: `AutoboxingStateCreation` ×2 y el `lint.jar` de lifecycle; 33 s)                                                                                                                                                                                                                                                                            |
+| `assembleDebug`                                                                                                                                                           | Mac                                                         | `app-debug.apk` 15 162 806 bytes, `com.adelpos.meseros` 0.2.0 (2), `minSdk` 26, `targetSdk` 36 (`aapt2 dump badging`)                                                                                                                                                                                                                                                                                   |
+| `assembleRelease` sin firmar                                                                                                                                              | Mac                                                         | `app-release-unsigned.apk` 2 405 467 bytes (35 s)                                                                                                                                                                                                                                                                                                                                                       |
+| `assembleRelease` firmado (punto 4)                                                                                                                                       | Mac                                                         | `app-release.apk` 2 417 755 bytes, mismo certificado que la 0.1.0 (arriba; 23 s)                                                                                                                                                                                                                                                                                                                        |
+| Manifiestos                                                                                                                                                               | `aapt2 dump xmltree`                                        | Aplicación `com.adelpos.meseros.AdelPosApplication`, actividad `….MainActivity`, proveedor `com.adelpos.meseros.androidx-startup`; APK de pruebas `com.adelpos.meseros.test` con `instrumentation` `com.adelpos.meseros.AdelTestRunner` → `targetPackage` `com.adelpos.meseros`                                                                                                                         |
+| `connectedDebugAndroidTest` (antes: desinstalar los 8 paquetes nuevos y viejos, también los `.test` de las bibliotecas)                                                   | `Pixel_8` (`emulator-5580`, Android 17)                     | **94 pruebas, 0 fallas**, 44 omitidas a propósito (las de punta a punta sin argumentos): `app` 62 (42 omitidas), `core:data` 19 (2), `core:ui` 13 — 3 XML contados (217 s)                                                                                                                                                                                                                              |
+| Ídem                                                                                                                                                                      | `ADEL_A1_Tablet_API26` (`emulator-5582`, Android 8.0)       | **94 pruebas, 0 fallas**, 46 omitidas a propósito: `app` 62 (44), `core:data` 19 (2), `core:ui` 13 — 3 XML (142 s)                                                                                                                                                                                                                                                                                      |
+| `scripts/android-e2e.sh --suite access --steps "1 2 3 4 5"` contra un Go temporal (`server-up`, 8201/8461), con la **0.1.0 instalada antes** en el emulador (sin abrirla) | `Pixel_8`                                                   | **5 de 5 aprobados** (emparejar con el código, PIN incorrecto y bloqueo, entrada sin conexión, PIN cambiado, 426); clase `com.adelpos.meseros.AccessOnGoTest`. El guion desinstaló la 0.1.0: después, `pm list packages` muestra solo `com.adelpos.meseros` y `com.adelpos.meseros.test`; `dumpsys package` dice `versionName=0.2.0`, `versionCode=2`                                                   |
+| `scripts/android-e2e.sh --suite waiter` (w1–w13c) contra un Go temporal nuevo, con la 0.1.0 instalada antes                                                               | `ADEL_A1_Tablet_API26` (red cortada con `adb root` + `svc`) | **19 de 19 aprobados** (160 s) en la segunda corrida, con el emulador recién encendido y otro Go temporal. El guion desinstaló la 0.1.0 (después solo están `com.adelpos.meseros` 0.2.0 (2) y su `.test`). Primera corrida: `w1` aprobado y `w2` **colgado** más de 10 minutos antes de abrir la actividad (ver abajo); se detuvo; `w2` solo, en el mismo servidor y con `--no-install`, pasó en 11.8 s |
+| `iso.sh format` y `fmt-check` (Prettier, gofmt, datos del sistema anterior) y `ktfmtCheck`                                                                                | Mac, antes del commit de documentación                      | Aprobados; `md5` de `docs/etapas/*.md` igual antes y después                                                                                                                                                                                                                                                                                                                                            |
+
+Antes de las instrumentadas, ninguno de los dos emuladores tenía `local.adel.pos.android` ni `com.adelpos.meseros`
+(`pm list packages`); AGP los desinstaló al terminar. Para probar que el guion quita la app vieja, se instaló el APK
+0.1.0 (solo lectura, sin abrirlo: `stopped=true notLaunched=true`) antes de cada suite de punta a punta. Ninguna prueba
+usó la red real ni el servicio de la Mac; la lista de servidores nunca mostró uno real (el ejecutor busca
+`_adelpostest._tcp`).
+
+**El cuelgue de `w2` en la primera corrida.** La instrumentación arrancó (`INSTRUMENTATION_STATUS_CODE: 1`) y en 10
+minutos no se abrió ninguna actividad: ni una línea `START u0` en el registro, el lanzador con el foco, el hilo
+principal de la app esperando en `epoll` (sin trabajo) y el de la prueba (`.AdelTestRunner`) esperando en un
+`futex`. No se pudo sacar la pila de Java (`jdb` no se conectó y ART dejó «Timed out waiting for threads to
+suspend»; `/data/anr` pide root, y `adb root` habría cortado la instrumentación). Se detuvieron el guion y la app, se
+repitió `w2` solo (aprobado) y después la suite completa con el emulador recién encendido (19 de 19). Mientras tanto
+la Mac corría también las pruebas de Go del otro agente. No se repitió en ninguna otra corrida de esta fase y nada
+del cambio toca ese camino (la misma prueba pasó dos veces con el mismo APK), así que se anota como falla del
+entorno **sin causa confirmada**; si reaparece en la Fase E o F, sacar la pila antes de detenerlo (`adb root` y
+`kill -3`, perdiendo ese paso).
+
+### No verificado
+
+- Dispositivo físico (no hay).
+- Instalar la 0.2.0 encima de una 0.1.0 **emparejada** con datos reales: no hay dispositivos reales con la 0.1.0. En el
+  emulador la 0.1.0 estaba instalada sin abrir, así que no se vio en pantalla el caso de «dos AD-EL POS» que describe
+  la guía (es comportamiento estándar de Android: paquetes distintos).
+- Las suites `catalog` y `field`, `access` 6–7 y `Pixel_Tablet`/`ADEL_A1_Phone_API33`: la regresión completa es de la
+  Fase F.
+
+### Para la Fase F y las fases siguientes
+
+- `docs/ANDROID_INSTALAR.md` todavía dice «versión 0.1.0» en la introducción, `AD-EL-POS-Android-0.1.0.apk` en la
+  sección 1 y «0.12.0 o posterior» en las secciones 2 y 6: cambiarlos cuando la fase que agregue la primera capacidad
+  de la A2 a `ServerCompatibility.check` (B) suba la versión mínima del servidor, y el nombre del APK en la Fase F. El
+  paso 5 de «Pasar de la 0.1.0 a la 0.2.0» anuncia los permisos de notificaciones y batería que explicará la Fase D.
+- `android/CLAUDE.md` «Pruebas» y `scripts/android-e2e.sh`: las suites nuevas de la Fase E (`takeaway`, `precheck`,
+  `alerts`) usan `APP_ID`/`TEST_RUNNER` igual que las demás.
+
+### Para CLAUDE.md
+
+- §0/encabezado («Última revisión», línea 5): APK de prueba `AD-EL-POS-Android-0.1.0.apk` → el de la 0.2.0 al cerrar
+  la etapa; «Android 0.1.0» → 0.2.0 (`com.adelpos.meseros`, `versionCode` 2).
+- Árbol del repositorio (línea 202, `android/`): mencionar que el código vive en `kotlin/com/adelpos/meseros/…` con el
+  identificador `com.adelpos.meseros` (A2-D5) y el ejecutor `com.adelpos.meseros.AdelTestRunner`.
+- Regla «Nunca la red real» (línea 321): `scripts/android-e2e.sh` desinstala también la 0.1.0 (`local.adel.pos.android`)
+  antes de instalar.
+- Decisiones de la A1 (línea 684): «A1-D9 identificador provisional `local.adel.pos.android`» → agregar «reemplazado en
+  la A2 por `com.adelpos.meseros` (A2-D5; otra aplicación para Android: se desinstala la 0.1.0, se revoca en
+  Terminales y se empareja de nuevo)».
+- La llave de desarrollo es la misma (`~/.android/adel-pos-dev/`, certificado SHA-256 `fb6a4bac…1c7c86`).
+
+## Servidor · Parte B: Para llevar (servidor 0.13.0, sin migración)
+
+Rama `etapa-a2-srv` (desde `etapa-a2-android` en `9c0f59c`), árbol `$SP/wt/srv`, un agente, 18/11/2026, en paralelo
+con la Fase A en `android/` (que no se tocó). Pruebas en copias aisladas (`ISO_TAG=S`): clúster temporal 55499 con
+bases `adel_pos_test_s_*`; no se usó el Go temporal ni el escritorio, ni el servicio real de la Mac. Aplica §3 de la
+especificación con A2-D1, A2-D2 y A2-D6. Esquema **25** (la parte B no necesita migración; `0026` empieza en la C).
+
+Commits: `cb9b77f` (versión 0.13.0 con metadatos sincronizados) y `5f52e73` (Para llevar en el servidor, contrato,
+documentación y pruebas).
+
+### Qué cambió
+
+- **Permisos de mesero** (`backend/internal/administration/waiter_scope.go`): `WaiterPermissions` + `takeaway.read`,
+  `takeaway.manage` y `takeaway.deliver` (A2-D2), con su comentario. `waiter_scope_test.go` ahora admite esas tres (y
+  exige que estén) como únicas excepciones a los prefijos prohibidos; `pin_acceptance_test.go` (A1B_10) comprueba con
+  `payments/methods` lo que la sesión con PIN sigue sin poder (cobros) y que `restaurant/accounts?mode=takeaway` ya
+  responde 200.
+- **Pedido para llevar sin conexión** (`backend/internal/operations/offline_orders.go`): `OfflineDestination.Takeaway`
+  (`destination.takeaway: {customer_name?, phone?}`), exclusivo con `account_id` y `table_id`
+  (`validateOfflineInput`); `seen_account_ids` y `name` solo con `table_id` y `replaces_draft_items` solo con
+  `account_id` (como antes). `diagnoseOfflineTakeaway` exige `accounts.open` + `takeaway.manage` y responde
+  `items_in_account` si las partidas ya están en un pedido para llevar abierto; `tableAccountsWithItems` pasó a
+  `openAccountsWithItems(tableID *string, …)` (la misma consulta para la mesa y para llevar, sin duplicarla).
+  `offlineAccountInput` abre la cuenta `mode: takeaway` con `origin` «Para llevar», el cliente y el teléfono; el
+  responsable sigue siendo quien envía (`validateAccountInput`) y el resto de `acceptOffline` no cambia.
+- **Nombre y teléfono** (`backend/internal/operations/takeaway.go`, nuevo): `POST restaurant/accounts/{id}/customer`
+  (`updateTakeawayCustomer`), con `"customer": "takeaway.manage"` en `routePermission` (`handler.go`) y su caso en
+  `accounts` (`accounts_read.go`). `TakeawayOrigin`, `validCustomerFields` y los límites 100/40 viven ahí y los usa
+  también `validateAccountInput` (`accounts_write.go`), para que las tres entradas validen igual.
+- **«Entregado»** (`backend/internal/payments/delivery.go`): sin cambio de regla; la respuesta lleva `finance` solo con
+  `payments.read` (si no, `null`).
+- **Capacidad** `takeaway-v1` (`backend/internal/httpapi/router.go`, comprobada en `clientversion_test.go`).
+- **Versión 0.13.0** en `config/product.json` + `sync` (`metadata.json`, `desktop/src/generated/product.json`,
+  `tauri.conf.json`, `package.json`, `Cargo.toml`) y a mano `package-lock.json` y `Cargo.lock` (como la A1);
+  `schema_version` 25 y `min_client_versions` sin cambio (`desktop` 0.10.0, `android` 0.1.0; A2-D6).
+- **Contrato** (`backend/internal/apicontract/openapi.json`): `Account` con `customer_name`, `phone` y `origin`
+  (obligatorios: Go siempre los entrega) y los valores de `payment_state`/`delivery_state`; `listAccounts` y
+  `getRecoveryState`/`RecoveryState` con los pedidos para llevar; `destination.takeaway` en `OfflineOrderRequest` y la
+  descripción de `submitOfflineOrder`; operaciones nuevas `updateTakeawayCustomer` y `deliverTakeaway` (etiqueta
+  «Cobros», nueva); `pinLogin` con la lista de permisos nueva; los 409 de la entrega en la respuesta `Error`.
+  `TestContractV1` agrega `contractTakeaway` (34 operaciones, antes 32).
+- **Documentación**: `docs/API_V1.md` (sección nueva «Para llevar (etapa A2, parte B)», tabla de operaciones,
+  `takeaway-v1`, permisos de mesero, `destination` del pedido sin conexión, A1-D18 punto 4 y los dos códigos de error) y
+  `API_CONTRACTS.md` (sección «Etapa A2 · Para llevar en el servidor» y una nota en la de la A1).
+
+Sin locks consultivos nuevos: la ruta del cliente es una escritura de `restaurant/*` y toma 7820148305 exclusivo como
+todas (`operations.Handle`); el pedido sin conexión y la entrega, los de siempre.
+
+### Decisiones (con su porqué)
+
+Ninguna cambia una regla de negocio ni la especificación. Son detalles que A2-D1 y A2-D2 no fijaban:
+
+1. **Decisión propuesta · La ruta del cliente no pide ni sube la revisión.** A2-D1 dice «sin revisión». Si la subiera,
+   el siguiente `saveDraft` del mismo teléfono (o de la caja que tiene la cuenta abierta) con la revisión que tenía
+   chocaría (`ACCOUNT_CONFLICT`) cada vez que se escribe el nombre; y una edición hecha sin conexión llegaría «vieja».
+   Los dos datos no intervienen en nada de lo que la revisión protege (partidas, borrador, importes, mesa,
+   programación). Consecuencia aceptada: si alguien edita a la vez «Datos de la cuenta» en la caja (`PATCH` con su
+   revisión), gana la última escritura de esos dos campos, que es la regla de A2-D1. Se prueba que el borrador se sigue
+   guardando con la revisión anterior.
+2. **Decisión propuesta · `customer_name` y `phone` son obligatorios en la ruta** (vacío = quitar; sin uno, 400). Así
+   un cliente que solo manda uno no borra el otro sin querer. Un campo de más (`revision`) es 400, como en todas las
+   rutas de `restaurant/*` (`decode` con `DisallowUnknownFields`).
+3. **Decisión propuesta · Cuenta de salón en la ruta del cliente: 400 `OPERATION_VALIDATION`** (A2-D1 dejaba «409/400»;
+   es un dato inválido para esa cuenta, no un conflicto). Pedido que ya no está abierto: el 400 de `ensureOpen` con
+   `details.reason: account_not_open`, el mismo que la app ya maneja. Sin cambios reales, la ruta no escribe historia,
+   evento ni auditoría (sí guarda la clave, como toda escritura).
+4. **Decisión propuesta · `finance` de `deliverTakeaway` solo con `payments.read`.** Con `takeaway.deliver` en la lista
+   de mesero, la respuesta existente habría entregado al teléfono el estado financiero completo de la cuenta (pagos con
+   método, referencia, caja, turno y quién cobró), que la sesión con PIN no puede consultar (A1-D17: sin
+   `payments.read`). Ahora llega `null` a quien no tiene ese permiso; la caja sigue igual y el escritorio no usa ese
+   campo (`TakeawayDelivery.tsx` solo ejecuta la operación). Cambio compatible: la ruta no estaba en el contrato.
+5. **Decisión propuesta · `items_in_account` para llevar mira solo pedidos para llevar abiertos**, igual que la mesa
+   mira solo sus cuentas abiertas (A1-D18): es la red de seguridad para la apertura en línea sin respuesta; el
+   dispositivo resuelve antes (A1-D19, repite `openAccount` con su clave). La misma clave que un `confirmDraft` con
+   `destination.takeaway` sigue siendo `IDEMPOTENCY_CONFLICT`, como con una mesa: un `confirmDraft` exige que el
+   dispositivo ya conozca la cuenta, así que ese pedido de la cola debe ir con `account_id`.
+6. **Decisión propuesta · `Account.customer_name`, `phone` y `origin` quedan como obligatorios en el contrato**: Go los
+   entrega siempre (columnas `NOT NULL`, vacías en salón), y la app puede confiar en ellos.
+
+### Forma final para el agente de Android
+
+Todo con la credencial del dispositivo, `X-Client-Version` y `X-Client-Kind: android`; con la sesión con PIN salvo
+`submitOfflineOrder`, que también acepta la credencial de envío. Exigir **`takeaway-v1`** en `ServerCompatibility`
+(servidor 0.13.0). Mostrar Para llevar según `user.permissions` de `getRecoveryState`/`getIdentity` (`takeaway.read`
+para verlo; `takeaway.manage` para capturar y editar el cliente; `takeaway.deliver` para «Entregado»).
+
+**1. «Nuevo pedido» con conexión** (sin cambios en Go): `POST /api/v1/restaurant/accounts`
+
+```json
+{
+  "operation_id": "…",
+  "mode": "takeaway",
+  "origin": "Para llevar",
+  "customer_name": "",
+  "phone": "",
+  "items": [
+    {
+      "id": "…",
+      "product_id": "…",
+      "variant_id": null,
+      "quantity": 1,
+      "customization": {}
+    }
+  ]
+}
+```
+
+(los demás campos de `AccountInput` son opcionales; sin `table_id` ni `seen_account_ids`; un pedido para llevar con
+`table_id`: 400 «Los pedidos para llevar no utilizan mesas.») → 200 `Bill` (`account.mode: "takeaway"`, `folio`,
+`name: "Pedido para llevar"`). Sin `takeaway.manage`: 403 `PERMISSION_DENIED`. Después `saveDraft`, `previewDraft` y
+`confirmDraft` como en una mesa.
+
+**2. Sin conexión**: `POST /api/v1/restaurant/offline-orders` con `"destination": {"takeaway": {"customer_name":
+"Juan", "phone": "5551234567"}}` (los dos opcionales, se recortan; `{}` vale). Reglas:
+
+- 400 `OPERATION_VALIDATION` (sin `details`): dos destinos o ninguno («Indica el destino del pedido: una cuenta abierta,
+  una mesa o un pedido para llevar nuevo.»); `seen_account_ids` o `name` con `takeaway` («Las cuentas vistas y el nombre
+  solo aplican a una cuenta nueva en una mesa.»); `replaces_draft_items` con `takeaway`; cliente de más de 100 o
+  teléfono de más de 40 («Revisa el nombre del cliente (100) y el teléfono (40 caracteres).»); un campo desconocido.
+- 403 `PERMISSION_DENIED` («No tienes permiso para esta operación del restaurante.») sin `accounts.open` o sin
+  `takeaway.manage` (antes de revisar el pedido; con la credencial de envío, los permisos de mesero vigentes).
+- 200 `OfflineOrderResult`: `account_id` es el pedido nuevo; `bill.account` con `mode: "takeaway"`,
+  `table_id: null`, `origin: "Para llevar"`, `customer_name`, `phone`, `folio`, `assigned_user_id` = el mesero de la
+  sesión o de la credencial. Los cambios de precio y de catálogo, igual que en una mesa (`ORDER_REQUIRES_CONFIRMATION`
+  y reenvío con `confirmation` y **la misma `operation_id`**).
+- Misma clave y mismo contenido (con sesión o con credencial): la misma respuesta 200. Misma clave con otro contenido,
+  del mismo mesero y dispositivo: 409 `OFFLINE_ORDER_ALREADY_ACCEPTED` con `details.origin: "offline_order"` y
+  `details.result` (el pedido que entró; marcar «Recibido» con ese resultado). De otro mesero o dispositivo: 409
+  `IDEMPOTENCY_CONFLICT`.
+- **Apertura en línea sin respuesta**: 409 `ORDER_REQUIRES_CONFIRMATION`, `details.requires_changes: true`, un cambio
+  `{"kind": "items_in_account", "item_id": null, "product_id": null, "product_name": "", "before": null, "now": "folio
+12", "message": "Lo que capturaste ya está en el pedido para llevar de Juan (folio 12). Envía el pedido a esa cuenta.",
+"acceptable": false, "account_id": "<pedido>"}` (sin cliente: «…en el pedido para llevar (folio 12)…»). No se acepta
+  con `confirmation`: reenviar **con la misma `operation_id`** a `"destination": {"account_id": "<pedido>"}` (ahí
+  aplican `replaces_draft_items`, el último guardado propio y `draft_item_sent` de A1-D18).
+
+**3. Nombre y teléfono** (A2-D1): `POST /api/v1/restaurant/accounts/{id}/customer`
+
+```json
+{ "operation_id": "…", "customer_name": "Juan Pérez", "phone": "" }
+```
+
+→ 200 `Bill` con los datos nuevos y **la misma `revision`** (no la pide ni la sube). Los dos campos siempre (vacío
+quita). Errores: 400 `OPERATION_VALIDATION` sin uno de los dos («Indica el nombre del cliente y el teléfono (vacíos para
+quitarlos).»), con más de 100/40 («Revisa el nombre del cliente (100) y el teléfono (40 caracteres).»), con un campo de
+más, o en una cuenta de salón («El nombre del cliente y el teléfono se cambian aquí solo en los pedidos para llevar.»);
+400 `OPERATION_VALIDATION` con `details: {"reason": "account_not_open", "account_id", "account_state", "merged_into_id"}`
+si ya no está abierto; 403 `PERMISSION_DENIED` sin `takeaway.manage`; 409 `IDEMPOTENCY_CONFLICT` con la misma clave y
+otro contenido. Editado sin conexión: guardarlo y mandarlo al volver con su propia `operation_id` (la última edición
+gana). El evento es `restaurant.account.updated` en el ámbito `takeaway`.
+
+**4. Pendientes**: `GET /api/v1/restaurant/accounts?mode=takeaway&state=open` (`page_size` hasta 100; 403 sin
+`takeaway.read`) o `accounts` de `GET /api/v1/restaurant/state` (que solo incluye los para llevar con `takeaway.read`).
+Por cuenta: `folio`, `customer_name`, `phone`, `origin`, `elapsed_seconds`, `urgency`, `created_at`,
+`preparation_state` (pendiente = `pending_release`/`scheduled`/`released`; en preparación = `preparing`; listo =
+`ready`), `payment_state` (`not_recorded` sin pagar, `partial`, `paid` pagado) y `delivery_state` (`not_delivered`,
+`delivered`). Ordenados del más antiguo al más reciente. Tiempo real: `streamEvents` en el ámbito `takeaway` (lo da
+`takeaway.read`) con la cuenta como agregado (`restaurant.account.opened`, `restaurant.order.confirmed`,
+`restaurant.draft.saved`, `restaurant.account.updated`, `restaurant.account.preparation_changed`, `takeaway.delivered`,
+`restaurant.account.closed`…): volver a leer la cuenta. Un pedido pagado y entregado se cierra y deja de estar en la
+lista.
+
+**5. «Entregado»** (A2-D2): `POST /api/v1/payments/accounts/{id}/deliver` `{"operation_id": "…"}` (permisos
+`takeaway.deliver`, `accounts.read`, `takeaway.read`):
+
+- 200 `{"delivered": true, "closed": true, "finance": null}` (al mesero `finance` siempre es `null`). `closed` es
+  `true` cuando el pedido queda pagado, entregado y sin nada por enviar en su borrador (se cierra y sale de la lista);
+  con algo en el borrador es `false` y el pedido sigue abierto, ya entregado. El reintento con la misma clave devuelve
+  lo mismo.
+- 409 `BALANCE_PENDING` («El pedido tiene saldo pendiente. Cóbralo antes de marcarlo como entregado.») → mostrar
+  «Cobrar en caja antes de entregar»; 409 `ALREADY_DELIVERED` («El pedido ya fue entregado.») → volver a leer; 403
+  `PERMISSION_DENIED` sin `takeaway.deliver`; 400 en una cuenta de salón; 404 si no existe.
+- Ofrecer el botón solo con el permiso y `payment_state == "paid"`.
+
+### Para la guía (`docs/ANDROID_INSTALAR.md`, «Permisos del rol Mesero»)
+
+Filas nuevas para Para llevar (los nombres son los de **Administración › Personal › Roles › Editar permisos**):
+
+| Para que el mesero pueda…                                          | Marca                                                   |
+| ------------------------------------------------------------------ | ------------------------------------------------------- |
+| Ver los pedidos para llevar y sus estados (y la opción en el menú) | «Consultar tablero de pedidos para llevar y ventanilla» |
+| Tomar pedidos para llevar y anotar el nombre y el teléfono         | «Administrar datos de pedidos para llevar»              |
+| Marcar «Entregado» un pedido ya pagado (opcional)                  | «Registrar entrega de pedidos para llevar»              |
+
+Las dos primeras van juntas (sin la segunda solo ve la lista). Para capturar hacen falta además los de la A1 («Abrir
+cuentas», «Capturar y editar borradores de pedidos», «Confirmar pedidos», catálogo y precios). Sin la tercera, el
+mesero ve si el pedido está pagado y entregado, pero la entrega se marca en la caja. El mesero **nunca cobra** y no se
+entrega un pedido sin pagar: si no está pagado, el teléfono dice «Cobrar en caja antes de entregar». Se necesita la
+computadora principal en la versión **0.13.0** (el `.pkg` de esta etapa).
+
+### Pruebas ejecutadas
+
+| Qué                                                                                                                                            | Dónde                                                  | Resultado                                                |
+| ---------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ | -------------------------------------------------------- |
+| `TestStageA2Takeaway` (5 subpruebas, `-v`: pedido sin conexión, `items_in_account`, permisos y forma, nombre y teléfono, pendientes y entrega) | `./internal/operations`, base `_s_`                    | **PASS** las 5 (18 s); antes, una corrida sin `-v`: ok   |
+| `go-int ./internal/apicontract` (`TestContractV1` con `contractTakeaway`, más las pruebas del documento)                                       | base `_s_`                                             | **ok** (36 s); 34 operaciones comprobadas (antes 32)     |
+| `go-int ./internal/administration` completo (incluye `TestWaiterPermissionsAreClosedAndDocumented` y A1B_10)                                   | base `_s_`                                             | **ok** (215 s)                                           |
+| `go-int ./internal/operations` completo                                                                                                        | base `_s_`                                             | **ok** (381 s), con `TestStageA2Takeaway` y las de la A1 |
+| `go-unit` (vet normal e integración, `test -race`, `GOOS=windows` build y vet)                                                                 | `iso.sh go-unit`                                       | **aprobado** (35 paquetes ok)                            |
+| `format`, `fmt-check`, `sync-check`                                                                                                            | árbol `srv`                                            | Correctos                                                |
+| Pruebas del documento del contrato, `TestWaiter*` y `TestVersion*` después de los últimos retoques de redacción                                | `go test` (`apicontract`, `administration`, `httpapi`) | ok                                                       |
+| md5 de `docs/etapas/*.md` antes y después de formatear                                                                                         | árbol `srv`                                            | Idénticos                                                |
+
+### Para `CLAUDE.md` (no lo edité)
+
+- §3, «Composición del backend»: etapa A2 → `restaurant/accounts/{id}/customer` en `operations/takeaway.go`;
+  `destination.takeaway` en `operations/offline_orders.go`; `WaiterPermissions` con `takeaway.*`; `finance` de
+  `payments/.../deliver` solo con `payments.read`.
+- §6: prueba nueva `TestStageA2Takeaway` (`operations`) y `contractTakeaway` en `TestContractV1`.
+- §15: A2-D1 y A2-D2 implementadas (con las decisiones propuestas 1 a 6 de arriba, si se aceptan).
+
+### No verificado
+
+- La aplicación Android contra estas rutas (agente de Android, Fase B en el dispositivo y Fase E).
+- Vitest, `build`, `cargo` y Playwright: el escritorio no cambió (solo su número de versión, que `sync-check`
+  comprueba). La regresión completa es de la Fase F.
+- `go-int` de `payments` (sin pruebas de integración propias: la entrega se prueba en `operations`), `database`
+  (sin migración) y los demás paquetes no tocados.
+
+### Decisiones del coordinador sobre la parte B
+
+Se aceptan las seis decisiones propuestas de la parte. La 4 cambia la respuesta de una ruta que ya existía y se
+registra como **A2-D11**: `POST payments/accounts/{id}/deliver` devuelve `finance` solo a quien tiene `payments.read`
+(si no, `null`). Con `takeaway.deliver` en la lista de mesero, el teléfono habría recibido el estado financiero completo
+de la cuenta (pagos con método, referencia, caja, turno y quién cobró), que la sesión con PIN no puede consultar
+(A1-D17); la caja lo sigue recibiendo y el escritorio no usa ese campo. La parte B se verificó sobre una copia exacta
+de `5f52e73` (`git archive`): `fmt-check`, `sync-check`, `go-unit`, `go-int ./internal/apicontract`,
+`TestStageA2Takeaway` (`operations`) y `TestStageA1WaiterPIN` (`administration`), todo aprobado. Fusión: la parte B
+(`5f52e73`) y la Fase A (`387441c`) en `f90fd83`, sin archivos en común.
