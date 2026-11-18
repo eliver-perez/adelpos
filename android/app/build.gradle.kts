@@ -51,12 +51,12 @@ fun loadReleaseSigning(): Properties? {
 val releaseSigning: Properties? = loadReleaseSigning()
 
 android {
-    namespace = "local.adel.pos.android"
+    namespace = "com.adelpos.meseros"
     compileSdk { version = release(37) }
 
     defaultConfig {
         // Identificador provisional A1-D9; cambiarlo obliga a reinstalar y emparejar de nuevo.
-        applicationId = "local.adel.pos.android"
+        applicationId = "com.adelpos.meseros"
         // A1-D7: Android 8.0 como mínimo (tabletas económicas), el nivel que exige hoy Google Play
         // como destino.
         minSdk = 26
@@ -64,7 +64,7 @@ android {
         versionCode = appVersionCode
         versionName = appVersionName
         // Ejecutor propio: búsqueda NSD con un tipo de prueba y versión de cliente por argumento.
-        testInstrumentationRunner = "local.adel.pos.android.AdelTestRunner"
+        testInstrumentationRunner = "com.adelpos.meseros.AdelTestRunner"
     }
 
     signingConfigs {
