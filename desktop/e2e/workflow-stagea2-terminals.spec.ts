@@ -48,11 +48,12 @@ test('Terminales: impresora de precuentas y avisos de platillos listos de un tel
 }) => {
   // Hasta 11 minutos de espera por el límite de solicitudes, más la prueba.
   test.setTimeout(15 * 60_000);
+  // installDriver prepara la base (asistente inicial): sin eso Go no acepta emparejamientos (409 SETUP_REQUIRED).
+  const driver = await installDriver(page);
   // Un teléfono de meseros emparejado y la impresora de precuentas de aceptación. El código se pide antes de entrar,
   // porque puede haber que esperar al límite de solicitudes (y una solicitud vence a los 5 minutos).
   const pairing = await requestPairingCodeWhenAllowed('Tableta de precuentas A2');
 
-  const driver = await installDriver(page);
   await page.goto('/');
   await login(page);
   await expect(topBar(page)).toBeVisible();
