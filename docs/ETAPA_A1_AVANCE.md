@@ -3616,3 +3616,177 @@ queda con la hamburguesa y los tacos **una vez** y sin borrador.
   en cada `adb shell`, y todo pasó. Es una falla del entorno, no de la app.
 - `CLAUDE.md` §6 y `android/CLAUDE.md` («Pruebas» del modo Mesero) ahora nombran las pruebas de la JVM de A1-D19 y los
   pasos `w9`–`w13c`.
+
+---
+
+## Fase G · Regresión final, entregables y entrega
+
+17/11/2026. Un solo agente hizo la regresión completa, con la Mac sin otros agentes. El coordinador corrigió las dos
+fallas, que eran de las pruebas, y armó el APK y el `.pkg`. Evidencia completa en
+[VERIFICATION_STAGEA1.md](VERIFICATION_STAGEA1.md).
+
+### Regresión final
+
+La regresión corrió sobre una copia exacta (`git archive`) de `e2b8486`, que era el código final de ese momento. Hubo
+dos fallas, las dos de las pruebas:
+
+1. `desktop/e2e/workflow-stage9c-navigation.spec.ts` esperaba el menú del usuario sin «Mi PIN», la opción que agregó la
+   Fase B. El administrador tiene `waiter_devices.use` (A1-D2) y el servidor anuncia `waiter-pin-v1`, así que la
+   opción aparece, como pide la especificación. Las 25 especificaciones siguientes cayeron en cadena.
+2. En los dos teléfonos, el paso `f6` de `FieldOnGoTest` no alcanzaba «Enviar a cocina». La lista perezosa del pedido
+   ya había compuesto el botón fuera de la vista, y `performScrollTo` no desplaza una lista perezosa. Un mesero sí
+   llega desplazando la lista. En las tabletas el botón cabe en la pantalla.
+
+En `238c6f6`, el toque de las pruebas (`FieldOnGoTest` y `WaiterModeOnGoTest`) trae el nodo a la vista con
+`performScrollToNode` cuando no está a la vista. Solo cambiaron esos tres archivos de prueba, ningún archivo de la app,
+del servidor ni del escritorio. Lo que esos archivos afectan se repitió sobre una copia exacta de `238c6f6`: todo aprobó.
+En el teléfono de API 33, las capturas de `f6` muestran «Enviar a cocina» a la vista y habilitado.
+
+| Suite                                                            | Commit    | Resultado                                                                                                               |
+| ---------------------------------------------------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `fmt-check` (con la comprobación de datos reales) y `sync-check` | `e2b8486` | Correctos                                                                                                               |
+| `go-unit` (`-race`, vet normal e `integration`, `GOOS=windows`)  | `e2b8486` | 35 paquetes, 61 s                                                                                                       |
+| Integración (14 paquetes de la tupla y `./cmd/ad-el-pos-server`) | `e2b8486` | 14 de 14, 977 s (`TestOperationalReports` a las 14:44)                                                                  |
+| Lector con Docker real                                           | —         | **No corrido**: Docker Desktop estaba apagado                                                                           |
+| Vitest, `npm run build`, `cargo test`                            | `e2b8486` | 96 archivos y 916 pruebas; compilación correcta; 107 aprobadas y 3 ignoradas                                            |
+| Scripts del instalador                                           | `e2b8486` | 31 comprobaciones                                                                                                       |
+| Playwright Chromium completo                                     | `238c6f6` | 39 de 39; las 4 de instalación limpia, aparte con un segundo Go limpio: 4 de 4                                          |
+| Playwright WebKit completo                                       | `238c6f6` | 39 de 39 en la segunda corrida (la primera: intermitencia de `workflow-stage9g-two-terminals`, abajo); limpia: 4 de 4   |
+| `ktfmtCheck` y `android-test` (JVM, Robolectric y lint)          | ambos     | 256 pruebas, 0 fallas; lint sin errores ni avisos                                                                       |
+| Instrumentadas, en los cuatro emuladores (XML contados)          | `e2b8486` | 94 pruebas y 0 fallas en cada uno (46 omitidas a propósito en API 26 y 44 en los demás)                                 |
+| `android-e2e.sh --suite all` en las dos tabletas                 | `e2b8486` | 42 de 42 en `ADEL_A1_Tablet_API26` y en `Pixel_Tablet`                                                                  |
+| `--suite field` y `--suite waiter` en los dos teléfonos          | `238c6f6` | 13 de 13 y 19 de 19 en `ADEL_A1_Phone_API33` y en `Pixel_8`; `--suite field` 13 de 13 también en `ADEL_A1_Tablet_API26` |
+| APK `release` (llave desechable) con el guion de la Fase F       | `e2b8486` | Aprobado en API 26, API 33 y `Pixel_8` (emparejar por dirección escrita, PIN y un pedido sin conexión)                  |
+
+Lo repetido y por qué:
+
+- **`workflow-stage9g-two-terminals` (prueba de la 9G).** Falló una vez en Chromium, sobre `e2b8486`, y una vez en
+  WebKit, sobre `238c6f6`. La capa «Sin conexión» se cerró sola con su reintento automático antes de que la prueba
+  tocara «Reintentar». Aprobó al repetirla. Es una intermitencia de la prueba, no de la app.
+- **`Pixel_8`.** A media corrida de `--suite field`, Android se reinició dentro del emulador. La memoria de intercambio
+  de la Mac estaba casi llena (6.1 de 7 GiB) y el promedio de carga llegó a 113. Se apagó el emulador, se reinició `adb`
+  y se repitió la suite con un Go nuevo: 13 de 13. En `Pixel_8` la wifi del emulador se apagó antes de abrir la app,
+  para que no viera el anuncio del servicio real. Ninguna lista mostró un servidor y el servicio real no se tocó.
+
+### Entregables
+
+- **APK de prueba**: `android/app/build/outputs/apk/release/AD-EL-POS-Android-0.1.0.apk`. Es una carpeta ignorada por
+  git, y un `clean` de Gradle la borra.
+  - Mide 2 417 755 bytes (2.3 MiB). SHA-256: `3071539ed05853a1fdfd848053b1deb4a2c382e1b0c64f1c2ee8fbf91fb92af9`.
+  - Versión 0.1.0, `versionCode` 1, `minSdk` 26 y `targetSdk` 36, compilado desde una copia exacta de `238c6f6` (las
+    fuentes de `android/` no cambian después).
+  - R8 reduce el código sin ofuscarlo (A1-D8).
+  - Firma v2, verificada con `apksigner verify`, con la **llave de desarrollo** «CN=AD-EL POS desarrollo - APK de prueba,
+    O=AD-EL POS» (RSA 3072, válida hasta 2056). Huella SHA-256 del certificado:
+    `fb6a4bac93052ca9051342ea122ed90469340a3685de14243bdab288d71c7c86`.
+- **Llave de desarrollo**: fuera del repositorio, en `~/.android/adel-pos-dev/` (carpeta 0700). Ahí están el almacén
+  `adel-pos-desarrollo.p12` y `signing.properties`, con su contraseña, que se generó al azar y nunca se mostró, ambos 0600.
+  - Se compila firmado con `ADELPOS_SIGNING_PROPERTIES=~/.android/adel-pos-dev/signing.properties` y
+    `assembleRelease` (ver `android/CLAUDE.md`, «Firma»).
+  - **Hay que conservarla**: una versión nueva solo se instala encima de esta sin perder el emparejamiento si va
+    firmada con la misma llave. No es una llave de publicación.
+- **Tamaños de los APK** (regresión, `e2b8486`; el código de la app no cambió en `238c6f6`):
+  - `debug`: 15 162 806 bytes.
+  - `release` sin firmar: 2 405 467 bytes.
+- **Instalador `.pkg` 0.12.0**: `./scripts/dev.sh build-macos-pkg` sobre `3e8bbe4` (el código es el de `238c6f6`; solo cambió Markdown) produjo `desktop/src-tauri/target/release/bundle/macos-pkg/AD-EL POS_0.12.0.pkg` (23 064 907 bytes, SHA-256 `5ad0969cebeea8ec587bfadc0df5e6bbaa77f55156a1fff3cc6ff040f55def54`; aplicación y servidor 0.12.0, comprobados con `pkgutil --expand-full`, y firma ad hoc verificada con `codesign --verify --deep --strict`). No se instaló.
+- **Documentación**:
+  - `android/CLAUDE.md`: estructura, comandos, pruebas y reglas permanentes, entre ellas que la app nunca calcula
+    reglas de negocio.
+  - `docs/API_V1.md` y `openapi.json`: los cambios de las fases B y E.
+  - `docs/ANDROID_INSTALAR.md`: la guía del propietario.
+  - `docs/VERIFICATION_STAGEA1.md`, este avance, `CLAUDE.md` y `AGENTS.md`.
+
+### Entrega final (§10)
+
+**Cambios por fase** (el detalle está en cada sección de este avance):
+
+- **Fase 0.** Verificación del entorno, de la API v1, del tiempo real y de los permisos. El plan de la etapa y las
+  decisiones A1-D1 a A1-D11.
+- **Fase A.** El proyecto `android/`: módulos, tema, dependencias fijadas con verificación SHA-256, ktfmt y Lint
+  (A1-D12 a A1-D14).
+- **Fase B.** El PIN de los meseros en el servidor y el escritorio: asignar, «Mi PIN», bloqueos y desbloqueo, nombre
+  corto y color, y el bloqueo por inactividad por dispositivo.
+- **Fases C y B en el dispositivo.**
+  - Buscar el servidor (NSD o dirección escrita) y emparejar con el código de 6 dígitos y la huella fijada.
+  - Credencial cifrada con el Keystore.
+  - Lista de meseros, entrada con PIN con y sin conexión, cambio de mesero y bloqueo (A1-D15).
+- **Fase D.** El catálogo en el dispositivo (`catalog.db`), completo y por cambios con época, con imágenes con `ETag`,
+  búsqueda sin acentos y «Agotado».
+- **Fase E en el servidor.**
+  - El pedido sin conexión sustituye los renglones propios del borrador (A1-D6, sección E de la 0025).
+  - El evento de preparación (A1-D11), `account_not_open` y `event_cursor`.
+- **Fase E en el dispositivo.** El modo Mesero:
+  - Mesas en lista o mapa, y cuentas con creación diferida.
+  - Captura con la cuenta a la vista, «Enviar a cocina», modificar y cancelar lo enviado, y estados de preparación.
+  - La cola sin conexión en Room con WorkManager y la credencial de envío.
+  - Los cinco estados y «Requiere tu revisión».
+- **Revisiones independientes R3 (PIN y sesión) y R6 (cola sin conexión).** Sus correcciones, en el servidor y en el
+  dispositivo, con las decisiones A1-D16 a A1-D19. A1-D16 y A1-D17 son del propietario.
+- **Fase F.** Pruebas de extremo a extremo contra un Go temporal en los cuatro emuladores: rendimiento, Android 8, red
+  cortada y certificado cambiado.
+- **Fase G.**
+  - La guía del propietario y el aviso «Actualiza el servidor del restaurante» al emparejar con una principal anterior
+    a la 0.12.0.
+  - `CLAUDE.md` y `AGENTS.md` al día.
+  - La regresión, el APK, el `.pkg` y la fusión.
+
+**Cambios en el servidor** (0.12.0, esquema 25, migración `0025_android_waiters.sql` con las secciones B y E):
+
+- `auth/pin-users` y `auth/pin-login`.
+- La administración del PIN: `users/{id}/pin`, quitar, desbloquear, `auth/pin` y colores.
+- El bloqueo largo tras 3 bloqueos en 24 horas (A1-D16) y el semáforo de 4 verificaciones a la vez (`PIN_LOGIN_BUSY`).
+- La sesión con PIN y la credencial de envío, solo con los permisos de mesero (`WaiterPermissions`, A1-D17).
+- La credencial de envío, `X-Offline-Credential`, válida solo en `POST restaurant/offline-orders`.
+- El permiso `waiter_devices.use` para el administrador y el rol Mesero (A1-D2).
+- `idle_lock_seconds` por terminal.
+- La versión mínima por tipo de cliente (`min_client_versions`: escritorio 0.10.0 y Android 0.1.0), con
+  `CLIENT_KIND_MISMATCH`.
+- El evento `restaurant.account.preparation_changed`.
+- `account_not_open`, con `merged_into_id` cuando la cuenta se combinó.
+- En `submitOfflineOrder`, `replaces_draft_items` y las reglas de A1-D18.
+- `event_cursor` en `restaurant/state`.
+- Las capacidades `client-versions-by-kind`, `waiter-pin-v1` y `waiter-mode-v1`.
+- En el escritorio: «Mi PIN», el PIN en Personal › Usuarios y el bloqueo por inactividad en Terminales.
+- `min_client_version` y `min_server_version` siguen en 0.10.0: el escritorio 0.10.0 y 0.11.0 sigue funcionando.
+
+**Pruebas**: las de cada fase están en su sección. La regresión final está arriba y en
+[VERIFICATION_STAGEA1.md](VERIFICATION_STAGEA1.md).
+
+**Dispositivos probados**: solo emuladores arm64 sobre la Mac. **Ningún dispositivo físico.**
+
+- `Pixel_Tablet`: tableta, Android 17, API 37.
+- `Pixel_8`: teléfono, Android 17.
+- `ADEL_A1_Tablet_API26`: tableta de Android 8.0, 1280 × 800, 2 GiB. Es la referencia de las tabletas económicas.
+- `ADEL_A1_Phone_API33`: teléfono, Android 13.
+
+En la tableta de Android 8, el arranque en frío tardó unos 1.4 s y la app usó unos 87 MiB. Las demás cifras están en
+la tabla de rendimiento de la Fase F.
+
+**Tamaño del APK**: 2.3 MiB el de prueba, firmado; 14.5 MiB el `debug`.
+
+**Limitaciones de esta versión**:
+
+- El dispositivo no cobra.
+- Es un APK de prueba, sin tienda y firmado con una llave de desarrollo.
+- **No se probó en un dispositivo físico**:
+  - El descubrimiento NSD en una wifi real.
+  - Una wifi sin internet.
+  - Doze y el ahorro de batería de cada fabricante.
+  - Pantallas táctiles reales y equipos económicos lentos.
+- No se probó en Windows. La computadora principal con Windows sigue pendiente de la Fase W de la 9G.
+- La impresora de precuentas por dispositivo no existe: el modelo de la 9G solo la tiene por caja.
+- Lo demás no verificado está en [VERIFICATION_STAGEA1.md](VERIFICATION_STAGEA1.md), «No verificado».
+
+**Lo que queda para la A2**: Para llevar, imprimir la precuenta desde el dispositivo (con su impresora por
+dispositivo) y el aviso de platillos listos.
+
+### Lo que hace el propietario
+
+1. **Instalar el `.pkg` 0.12.0** con «Servidor del restaurante» marcada. Pide la contraseña de administrador, por eso
+   es una parada. Al arrancar, el `host` respalda la base (`…-antes-de-migrar.dump`) y aplica la 0025. El escritorio
+   0.11.0 sigue funcionando con el servidor 0.12.0.
+2. **Revisar Administración › Sistema › Terminales** en la computadora principal. Si queda una solicitud de
+   emparejamiento del incidente de la Fase F, recházala. Vence sola a los 5 minutos, y Go la rechazó con 426 antes de
+   registrarla, así que lo esperado es que no haya ninguna.
+3. Cuando haya un teléfono o una tableta: instalar el APK con [ANDROID_INSTALAR.md](ANDROID_INSTALAR.md) y probarlo en
+   el restaurante.
