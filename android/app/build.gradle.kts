@@ -55,7 +55,9 @@ android {
     compileSdk { version = release(37) }
 
     defaultConfig {
-        // Identificador provisional A1-D9; cambiarlo obliga a reinstalar y emparejar de nuevo.
+        // Identificador definitivo (A2-D5), el mismo prefijo que el namespace y los paquetes de
+        // Kotlin. Para Android es otra aplicación que la 0.1.0 (local.adel.pos.android): no la
+        // actualiza, se instala aparte y se empareja de nuevo (docs/ANDROID_INSTALAR.md).
         applicationId = "com.adelpos.meseros"
         // A1-D7: Android 8.0 como mínimo (tabletas económicas), el nivel que exige hoy Google Play
         // como destino.

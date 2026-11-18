@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Etapa A1 (fases C, B, D, E y F): pruebas de extremo a extremo de la aplicación Android contra un servidor Go
+# Etapas A1 (fases C, B, D, E y F) y A2: pruebas de extremo a extremo de la aplicación Android contra un servidor Go
 # TEMPORAL en modo de pruebas, nunca contra el servicio real de la Mac. Cada paso corre en su propia instrumentación
 # (`am instrument`), en orden y con la aplicación instalada una sola vez por suite: los datos pasan de un paso al
 # siguiente y el proceso se reinicia en cada uno.
@@ -75,6 +75,10 @@
 # o si `GET version` de alguna de las dos escuchas no responde `test_mode: true`; la base solo con las guardas de
 # arriba. Las pruebas usan el tipo NSD `_adelpostest._tcp` (AdelTestRunner): nunca buscan ni prueban el servidor real
 # del restaurante.
+#
+# Aplicación: `com.adelpos.meseros` (A2-D5) con su paquete de pruebas `com.adelpos.meseros.test`. Antes de instalar
+# se desinstalan también los de la 0.1.0 (`local.adel.pos.android` y su `.test`): para Android son otra aplicación y
+# no deben quedar en el emulador junto a la nueva.
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -141,6 +145,14 @@ if [ -z "${ANDROID_HOME:-}" ]; then
     export ANDROID_HOME="$HOME/Library/Android/sdk"
 fi
 ADB="$ANDROID_HOME/platform-tools/adb"
+
+# Identificador de la aplicación (A2-D5): el mismo prefijo que el namespace y los paquetes de Kotlin, así que las
+# clases de prueba (AccessOnGoTest…) y el ejecutor AdelTestRunner viven en el paquete APP_ID. La 0.1.0 usaba
+# LEGACY_APP_ID; se nombra solo para desinstalarla.
+APP_ID="com.adelpos.meseros"
+TEST_PACKAGE="$APP_ID.test"
+TEST_RUNNER="$TEST_PACKAGE/$APP_ID.AdelTestRunner"
+LEGACY_APP_ID="local.adel.pos.android"
 
 # Host y puerto de una URL «esquema://host:puerto»; solo la propia Mac y nunca los puertos del servicio real.
 check_url() {
@@ -265,8 +277,12 @@ test_sql() {
 # --- Dispositivo ---
 
 install_app() {
-    "$ADB" -s "$ANDROID_SERIAL" uninstall local.adel.pos.android >/dev/null 2>&1 || true
-    "$ADB" -s "$ANDROID_SERIAL" uninstall local.adel.pos.android.test >/dev/null 2>&1 || true
+    # Se desinstalan la aplicación y sus pruebas (una copia con otra firma haría fallar la instalación) y también
+    # las de la 0.1.0, que para Android son otra aplicación.
+    local package
+    for package in "$APP_ID" "$TEST_PACKAGE" "$LEGACY_APP_ID" "$LEGACY_APP_ID.test"; do
+        "$ADB" -s "$ANDROID_SERIAL" uninstall "$package" >/dev/null 2>&1 || true
+    done
     if [ ! -f "$PROJECT_ROOT/android/local.properties" ]; then
         echo "sdk.dir=$ANDROID_HOME" >"$PROJECT_ROOT/android/local.properties"
     fi
@@ -292,11 +308,11 @@ run_step() {
         server_id=(-e serverId "$ADELPOS_E2E_SERVER_ID")
     fi
     "$ADB" -s "$ANDROID_SERIAL" shell am instrument -w -r \
-        -e class "local.adel.pos.android.$TEST_CLASS#$method" \
+        -e class "$APP_ID.$TEST_CLASS#$method" \
         -e local "http://$DEVICE_HOST:$LOCAL_PORT" -e address "$DEVICE_HOST:$NETWORK_PORT" \
         -e net "https://$DEVICE_HOST:$NETWORK_PORT" -e pin "$PIN" \
         ${server_id[@]+"${server_id[@]}"} -e mainDevice "$MAIN_DEVICE" -e mainToken "$MAIN_TOKEN" "$@" \
-        local.adel.pos.android.test/local.adel.pos.android.AdelTestRunner >"$log" 2>&1 || true
+        "$TEST_RUNNER" >"$log" 2>&1 || true
     "$ADB" -s "$ANDROID_SERIAL" logcat -d -s AdelOnGo:V CatalogOnGoTest:V TestRunner:V AndroidRuntime:E \
         >"$SUITE_OUT/$method-logcat.txt" 2>/dev/null || true
     local codes verdict
@@ -456,7 +472,7 @@ field_step() {
         f10)
             run_step f10_temaOscuroYBotones
             mkdir -p "$SUITE_OUT/screens"
-            "$ADB" -s "$ANDROID_SERIAL" pull /sdcard/Android/data/local.adel.pos.android/files/screens/. \
+            "$ADB" -s "$ANDROID_SERIAL" pull "/sdcard/Android/data/$APP_ID/files/screens/." \
                 "$SUITE_OUT/screens" >/dev/null 2>&1 || echo "sin capturas que copiar" | tee -a "$SUMMARY"
             ;;
         *) fail "paso desconocido de la suite field: $1" ;;
