@@ -222,7 +222,7 @@ mismo entorno. Los comentarios de línea (`//`) se escriben de 100 columnas como
   fallas por tiempo: mejor no compilar mientras corren); `emu-down` al terminar.
   En cada uno: `connectedDebugAndroidTest` con `ANDROID_SERIAL` (contar los XML de cada módulo) y **`ANDROID_SERIAL=…
 ADELPOS_E2E_NEW_SERVER=<orden> scripts/android-e2e.sh --suite all`**, que levanta un servidor temporal nuevo para
-  cada parte (access 1–5; access 6–7 con otra identidad sin reinstalar; catalog; waiter; field; takeaway) con la orden
+  cada parte (access 1–5; access 6–7 con otra identidad sin reinstalar; catalog; waiter; field; takeaway; precheck) con la orden
   de `ADELPOS_E2E_NEW_SERVER` (detiene el anterior, levanta otro en las mismas direcciones e imprime líneas
   `ADELPOS_E2E_*=…`: provisioning y base temporal). Los agentes usan como orden `iso.sh - server-down` seguido de
   `iso.sh <árbol> server-up`. Resultados en `<salida>/<suite>/` y `<salida>/summary.txt`.
@@ -270,7 +270,8 @@ emparejado, el mesero activo y sus credenciales. Otro módulo (catálogo, modo M
   registra ahí** la cola de pedidos y sus borradores y cancela su trabajo (`WorkManager.cancelAllWork()`). Todo módulo
   nuevo que guarde datos del restaurante se registra ahí.
 - **Versiones** (`ServerCompatibility.check`: servidor 0.13.0 o posterior con `waiter-pin-v1` y, desde la A2,
-  `takeaway-v1` —A2-D6: cada fase agrega la capacidad que usa—, y la mínima de Android de `min_client_versions`): se
+  `takeaway-v1` y `device-precheck-printer-v1` —A2-D6: cada fase agrega la capacidad que usa—, y la mínima de Android
+  de `min_client_versions`): se
   comprueba con `GET version` **antes de pedir el código de emparejamiento** (también con la dirección escrita; `PairingRepository.request`) y en cada comprobación ya emparejado. Un servidor viejo da
   «Actualiza el servidor del restaurante» con «Volver a comprobar» (`PairingProblem.UpdateServer` al emparejar,
   `DeviceStatus.UpdateServer` después). Un 426 o un tipo de cliente desconocido durante el emparejamiento de un
@@ -416,6 +417,40 @@ captura y la misma cola de la A1, con la modalidad en la captura, el pedido y el
 takeaway`** (pasos `t1`–`t8`; el guion corta la red en `t4`; la prueba hace de cocina y de caja por la escucha
   local).
 
+## Precuenta desde el dispositivo (etapa A2, Fase C, para los demás módulos)
+
+«Imprimir precuenta» en la cuenta de una mesa y en un pedido para llevar, la misma pieza de `core:capture`
+(`PrecheckPrintBar`, al final de `OrderPanel`), solo con la cuenta ya en Go y `payments.tickets.print` en los permisos
+de Go del mesero (`WaiterAction.PRINT_PRECHECK`, con `grants`: con permisos desconocidos no aparece). Go decide todo
+(impresora, contenido con «Atendió: <mesero>», permiso y estado); el dispositivo pide, sigue y lo dice.
+
+- **Nunca entra en la cola sin conexión** ni usa la credencial de envío: `PrecheckRepository` (`core:data/waiter`)
+  pide con la **sesión** del mesero; sin sesión, sin red (`connected`, el mismo monitor del indicador) o sin respuesta
+  responde `PrintAnswer.NoConnection` y el botón dice «Para imprimir necesitas conexión con la computadora principal».
+  Una petición sin respuesta se repite una vez con la **misma** `operation_id` (Go no imprime dos).
+- **Nombre visible e impresora** (`PrecheckSetup`): `establishment.precheck_name` y `terminal.precheck_printer` de
+  `getIdentity`, leídos al entrar un mesero con conexión, al abrir una cuenta y después de imprimir; guardados en
+  `restaurant_snapshot` con el tipo `precheck` (sin cambiar el esquema de Room; los borra `WaiterDao.eraseAll`, ya en
+  `deviceDataWipe`) para verse sin conexión. El botón dice «Imprimir precuenta», «Imprimir ticket de venta» o
+  «Imprimir cuenta» (`PrecheckName`); sin impresora asignada se avisa antes de tocar, pero la respuesta de Go manda.
+- **Seguimiento** (`PrecheckPrinting`, `core:domain`, en el `viewModelScope` de la captura): `getDocumentStatus` cada
+  2,5 s durante 15 s como máximo, sin bloquear la captura, y termina al salir de la cuenta o al cambiar de cuenta.
+  `PrecheckFeedback` traduce las claves de Go (`kitchen/print_problems.go`) a `PrintMessage`: «Enviada a Caja 1»,
+  «La Caja 2 está desconectada» (`agent_offline`), «La impresora no responde» (`unreachable`), «La impresora necesita
+  revisión», revisar el papel (`uncertain`), «Este dispositivo no tiene impresora asignada» (409
+  `PRINTER_NOT_CONFIGURED` con `scope: device`, A2-D3), `PRINTER_UNAVAILABLE` con el mensaje de Go, sin permiso.
+- **Reintentar** (`retryDocument`, sin motivo) solo si el trabajo **nunca salió en papel** (`error`, `intervention`;
+  regla de la 9F), nunca con `uncertain` ni con la terminal desconectada; `PRINT_NOT_FAILED`, `PRINT_UNCERTAIN` y
+  `PRINT_JOB_SUPERSEDED` vuelven a leer el estado. Volver a imprimir algo que ya salió es tocar el botón otra vez:
+  otra precuenta con otra clave, como en la caja (no hay copia con motivo en el dispositivo).
+- Pruebas: `PrecheckRulesTest` (dominio: cada clave y código → su aviso, «Reintentar», nombre visible, el
+  seguimiento con tiempo virtual), `PrecheckRepositoryTest` (Robolectric + MockWebServer con los JSON del contrato),
+  `WaiterViewModelsTest.capturaImprimeLaPrecuentaYSigueElTrabajo`; instrumentada `PrecheckScreensTest` (cada aviso
+  con su texto en ambos temas); contra el Go temporal, `PrecheckOnGoTest` con **`scripts/android-e2e.sh --suite
+precheck`** (pasos `p1`–`p7`; la prueba hace de principal y del agente de impresión de una terminal de prueba «Caja 2»
+  y revisa los bytes ESC/POS; el guion corta la red en `p6`; la impresora de red que «no responde» usa el puerto 9106
+  de la Mac).
+
 ## Dependencias
 
 - Versiones en `gradle/libs.versions.toml` (las de la Fase 0, avance §1.2; fuentes y para qué en
@@ -505,7 +540,8 @@ misma versión antes de la entrega): `captures` admite capturas sin mesa (`table
 columna a opcional, así que la migración 5 → 6 copia la tabla) con `mode`, `customer_name` y `customer_phone`, y la
 tabla nueva `takeaway_customer_edits` (ediciones del cliente por enviar); `WAITER_CHANGES_V6`. El destino guardado de
 un pedido (`pending_orders.destination`, JSON) lleva la modalidad y el cliente con valores por omisión para lo guardado
-antes. Todo registrado en `deviceDataWipe` (`WaiterDao.eraseAll`) y en la bitácora (`unsentOrders`).
+antes. Todo registrado en `deviceDataWipe` (`WaiterDao.eraseAll`) y en la bitácora (`unsentOrders`). La Fase C no
+cambia el esquema: el nombre visible y la impresora de precuentas van en `restaurant_snapshot` (tipo `precheck`).
 
 Cada cambio de esquema: subir `version`, agregar la `Migration` a `AppDatabase.MIGRATIONS`, versionar el nuevo
 `core/data/schemas/…/<versión>.json` y un caso en `AppDatabaseMigrationTest`. **Nunca**

@@ -25,6 +25,9 @@ import com.adelpos.meseros.core.domain.waiter.DraftLine
 import com.adelpos.meseros.core.domain.waiter.DraftOperation
 import com.adelpos.meseros.core.domain.waiter.DraftOperations
 import com.adelpos.meseros.core.domain.waiter.DraftQuote
+import com.adelpos.meseros.core.domain.waiter.PrecheckPrintState
+import com.adelpos.meseros.core.domain.waiter.PrecheckPrinting
+import com.adelpos.meseros.core.domain.waiter.PrecheckSetup
 import com.adelpos.meseros.core.domain.waiter.SendRequest
 import com.adelpos.meseros.core.domain.waiter.SentChangeResult
 import com.adelpos.meseros.core.domain.waiter.SentLine
@@ -203,12 +206,45 @@ class CaptureViewModel(
     val online: Boolean
         get() = dependencies.activeWaiter.value?.hasServerSession == true
 
+    // --- La precuenta (etapa A2, Fase C) ---
+
+    private val printing = PrecheckPrinting(dependencies.precheck, viewModelScope, newId = ::newId)
+
+    /** Nombre visible e impresora del dispositivo (lo último que se leyó, también sin conexión). */
+    val precheckSetup: StateFlow<PrecheckSetup> = dependencies.precheck.setup
+
+    /** Cómo va la impresión de la precuenta de esta cuenta (se sigue unos 15 s, sin bloquear). */
+    val precheckState: StateFlow<PrecheckPrintState> = printing.state
+
+    /**
+     * Se puede imprimir ahora: el mesero tiene sesión de Go y el dispositivo tiene red. Imprimir
+     * nunca entra en la cola sin conexión.
+     */
+    val canPrintNow: StateFlow<Boolean> =
+        combine(dependencies.activeWaiter, dependencies.precheck.connected) { waiter, connected ->
+                waiter?.hasServerSession == true && !waiter.mustReenterPin && connected
+            }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
     init {
         viewModelScope.launch {
             capture
                 .map { it?.accountId }
                 .distinctUntilChanged()
-                .collect { accountId -> if (accountId != null) loadBill(accountId) }
+                .collect { accountId ->
+                    // Otra cuenta (se abrió otra o se siguió la combinada): la impresión de la
+                    // anterior ya no se dice aquí.
+                    printing.reset()
+                    if (accountId != null) loadBill(accountId)
+                }
+        }
+        viewModelScope.launch {
+            // El nombre visible o la impresora pudieron cambiar en la principal desde la última
+            // lectura (Administración › Documentos, Terminales): se vuelven a leer al abrir la
+            // cuenta.
+            if (userId != null && online) {
+                dependencies.precheck.refreshSetup(userId)
+            }
         }
         viewModelScope.launch {
             // Cambios de otras terminales y de cocina, al momento (canal de tiempo real).
@@ -368,6 +404,20 @@ class CaptureViewModel(
                     DiscardResult.PENDING -> CaptureNotice.DiscardPending
                 }
         }
+    }
+
+    /** «Imprimir precuenta» (o el nombre visible): una precuenta nueva de esta cuenta en Go. */
+    fun onPrintPrecheck() {
+        val accountId = capture.value?.accountId ?: return
+        val waiter = userId ?: return
+        printing.print(waiter, accountId)
+    }
+
+    /** «Reintentar» la precuenta que nunca salió en papel, sin motivo (regla de la 9F). */
+    fun onRetryPrecheck() {
+        val accountId = capture.value?.accountId ?: return
+        val waiter = userId ?: return
+        printing.retry(waiter, accountId)
     }
 
     fun onNoticeShown() {

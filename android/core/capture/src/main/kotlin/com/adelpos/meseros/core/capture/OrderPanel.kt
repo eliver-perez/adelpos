@@ -67,7 +67,9 @@ class OrderPanelActions(
  * la vista en la tableta y a un toque en el teléfono (§6.3): lo enviado a cocina con su preparación
  * (del mismo modelo del escritorio y de cocina) y lo por enviar (el borrador, «Borrador» de §7) con
  * −/+, «Cambiar» y «Quitar»; el estado del guardado y, al final, «Enviar a cocina». Los importes
- * son los de Go; sin su cotización, los precios del catálogo son solo de referencia.
+ * son los de Go; sin su cotización, los precios del catálogo son solo de referencia. Con la cuenta
+ * ya en Go y el permiso de imprimir, al final «Imprimir precuenta» con el nombre visible
+ * ([precheck], etapa A2).
  */
 @Composable
 internal fun OrderPanel(
@@ -81,6 +83,7 @@ internal fun OrderPanel(
     message: String?,
     actions: OrderPanelActions,
     customer: CustomerView = CustomerView.NONE,
+    precheck: PrecheckSection? = null,
 ) {
     val visible = capture.visible
     val plan = OfflineOrderPlan.of(capture)
@@ -228,6 +231,9 @@ internal fun OrderPanel(
                     }
                 }
             }
+        }
+        if (precheck != null) {
+            item { PrecheckPrintBar(precheck) }
         }
         item { Column(Modifier.heightIn(min = AdelDimens.ScreenPadding)) {} }
     }

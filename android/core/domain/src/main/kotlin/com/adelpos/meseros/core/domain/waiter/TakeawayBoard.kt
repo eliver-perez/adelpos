@@ -99,11 +99,18 @@ object TakeawayBoard {
                     ),
                 )
             }
+            // La captura y su pedido de la cola tienen el mismo identificador (A1-D19) y «Enviar a
+            // cocina» (o «Corregir en la captura») pasa de uno al otro en una transacción, pero las
+            // dos lecturas de Room llegan por separado: por un momento se ven las dos. Manda el
+            // pedido de la cola; dos renglones con la misma clave tumbarían la lista (visto en
+            // Android 8 en la Fase C).
+            val orderIds = orders.map(PendingOrder::operationId).toSet()
             val drafts = captures.filter { capture ->
                 capture.takeaway &&
                     capture.accountId == null &&
                     capture.inProgress &&
-                    capture.sync != DraftSync.DISCARDING
+                    capture.sync != DraftSync.DISCARDING &&
+                    capture.id !in orderIds
             }
             for (capture in drafts.sortedBy(Capture::createdAtMillis)) {
                 val edit = editFor(edits, key = capture.id, accountId = null)
