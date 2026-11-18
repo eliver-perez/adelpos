@@ -1366,7 +1366,7 @@ nueva de su conteo, como ya excluía las de la 0025), `c988d16` (servidor, contr
   - `GET ready-alerts?after=` en `dispatch` después de `authenticateDevice` y `matchClientKind`, antes de la sesión
     (solo la credencial del dispositivo); solo `android` (si no, 403 `READY_ALERTS_DEVICE_NOT_ALLOWED`).
   - `GET ready-alerts/stream` (`serveReadyAlerts`): el patrón de `serveEvents` (750 ms, 30 s, `Last-Event-ID`,
-    `interrupted`), con su contador `readyStreams`, **uno por dispositivo** (429 `READY_ALERTS_CONNECTION_LIMIT`; **reemplazado** en las correcciones de la revisión, R12: un canal nuevo cierra el anterior y ya no hay 429).
+    `interrupted`), con su contador `readyStreams`, **uno por dispositivo** (429 `READY_ALERTS_CONNECTION_LIMIT`).
   - Lock 7820148305 **compartido** al leer (cocina escribe con él en exclusiva): ningún aviso queda detrás del cursor.
   - Filtro (A2-D4, A2-D9): para el dispositivo D, avisos cuyo mesero entró con PIN en D desde el inicio del día
     comercial (`businessday`, «Hora de inicio del día») y con `recipient_device_id` = D o vacío; agrupados por la
@@ -1479,9 +1479,12 @@ Exigir **`ready-alerts-v1`** (servidor 0.13.0). Todas las peticiones con `X-Devi
   «Esta cuenta ya no está abierta».
 - **`active: false`**: no hay avisos (no es un error). Detener el servicio en primer plano; volver a preguntar al
   entrar un mesero con PIN con conexión o al abrir la app (A2-D8). Pasa con el aviso apagado en Terminales o si ningún
-  mesero tiene en el dispositivo una sesión con PIN vigente o creada hoy.
+  mesero tiene en el dispositivo una sesión con PIN creada hoy (desde el inicio del día comercial) o una de antes,
+  vigente y usada en los últimos 30 minutos (A2-D12). **Puede pasar a `false` sola durante la noche**, sin que nadie
+  haga nada, cuando la última sesión de antes del inicio del día cumple 30 minutos sin usarse: el canal lo manda en
+  cuanto cambia.
 - **`day_ends_at`**: programar ahí una nueva lectura (no detener a ciegas): si sigue `active` (un mesero con sesión
-  vigente), continuar; si no, detener. Al cambiar de día, borrar las `key` avisadas del día anterior (Go ya no
+  vigente que se sigue usando), continuar; si no, detener. Al cambiar de día, borrar las `key` avisadas del día anterior (Go ya no
   entrega avisos de ese día; lo que no llegó antes de esa hora se pierde, regla del día comercial). Conservar el
   cursor.
 - **`settings`**: `sound`/`vibration` eligen el canal «Platillos listos» (A2-D7); `enabled: false` llega con
@@ -1500,8 +1503,9 @@ Exigir **`ready-alerts-v1`** (servidor 0.13.0). Todas las peticiones con `X-Devi
     al volver (y `key` evita repetirlo).
   - Ya no hay 429 en este canal.
 - **A quién llega** (lo decide Go; para entender lo que ve el mesero): el mesero «está» en el dispositivo si tiene en
-  él una sesión con PIN vigente o creada desde el inicio del día comercial. Al «Listo», el aviso se fija al dispositivo
-  de su sesión vigente más reciente **que pueda recibirlo** (android, «Avisar platillos listos» activado y, si Go
+  él una sesión con PIN creada desde el inicio del día comercial, o una de antes que sigue vigente y se usó (alguna
+  petición con esa sesión) en los últimos 30 minutos (A2-D12). Al «Listo», el aviso se fija al dispositivo de su
+  sesión vigente más reciente que cuente **y pueda recibirlo** (android, «Avisar platillos listos» activado y, si Go
   conoce la versión, app 0.2.0 o posterior); si ninguno sirve, va a todos los dispositivos donde está.
 - **Cerrar sesión**: llamar `POST /api/v1/auth/logout` con la sesión del mesero al cerrar su sesión en la app (A2-D4):
   así los «Listo» siguientes ya no se fijan a ese dispositivo; van a su otra sesión vigente o, si no tiene ninguna, a
@@ -1523,7 +1527,8 @@ Exigir **`ready-alerts-v1`** (servidor 0.13.0). Todas las peticiones con `X-Devi
   que aún no estaban listos.
 - **Entrar sin conexión** no cuenta: el mesero recibe avisos en ese dispositivo desde su primera entrada con conexión.
 - **Al terminar el día comercial** (la hora de inicio del día siguiente) dejan de contar los meseros que entraron ese
-  día; el aviso se detiene si nadie tiene la sesión abierta. Lo que cocina terminó antes de esa hora y no llegó (por
+  día; el que sigue trabajando con su sesión abierta sigue recibiendo avisos, y el aviso se detiene a los 30 minutos
+  de que nadie use el dispositivo. Lo que cocina terminó antes de esa hora y no llegó (por
   ejemplo, por un corte de red que cruza esa hora) ya no se avisa.
 - No hace falta ningún permiso nuevo para el rol Mesero.
 - Requiere la computadora principal en la versión **0.13.0**.
@@ -1563,7 +1568,7 @@ entregado); no hay migración nueva. El escritorio no cambió.
 | #   | Qué cambió                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | R1  | `recordReadyNotices` registra también la unidad que queda con todas sus tareas vivas listas porque **en esta transacción se canceló la que faltaba** (una tarea cancelada ahora sin haber estado lista: `state='cancelled'`, `ready_at IS NULL`, `updated_at=now()`). Revisé los tres caminos que escriben tareas: `states.go` (KDS), `changes.go` (modificaciones, cancelaciones y sus reintentos) y `releases.go` (solo crea pendientes); todos pasan por `publishPreparation`. Quitar una parte que ya estaba lista no vuelve a avisar (la cancelación conserva su `ready_at`). |
-| R2  | «Entró en el dispositivo» = la regla de `active`: sesión con PIN en D **vigente o creada desde el inicio del día comercial**. Un mesero que entró antes de la hora de inicio y sigue con la sesión vigente recibe sus avisos.                                                                                                                                                                                                                                                                                                                                                      |
+| R2  | «Entró en el dispositivo» = la regla de `active`: sesión con PIN en D **vigente o creada desde el inicio del día comercial** (con A2-D12, la vigente de antes del inicio del día solo si se usó en los últimos 30 minutos; ver abajo). Un mesero que entró antes de la hora de inicio y sigue trabajando con la sesión vigente recibe sus avisos.                                                                                                                                                                                                                                  |
 | R3  | Columna `ready_notices.alert_key uuid NOT NULL` (`gen_random_uuid()` por cuenta y operación, compartida por las filas del grupo) y campo **`key`** en cada aviso: el dispositivo descarta repetidos por `key`; `id` es solo el cursor. Se conserva la decisión 6.                                                                                                                                                                                                                                                                                                                  |
 | R4  | El canal revisa cada 750 ms pero **solo escribe** al abrir y con avisos nuevos o un cambio de `active`/`settings`/`day_ends_at`; en silencio `: ping` cada 15 s; dura 5 minutos. `authenticateDevice` actualiza `last_seen_at` de `GET ready-alerts` como mucho una vez por minuto (Terminales considera en línea lo de los últimos 2).                                                                                                                                                                                                                                            |
 | R5  | Índices parciales en la `0026`: `sessions_pin_device_created_idx (device_id, created_at) WHERE opened_with_pin` y `sessions_pin_device_open_idx (device_id) WHERE opened_with_pin AND revoked_at IS NULL`; `active` son dos `EXISTS` y la presencia un `UNION ALL` de dos consultas, cada una con su índice. Medición abajo.                                                                                                                                                                                                                                                       |
@@ -1604,6 +1609,43 @@ detenido y base borrada con `server-down`; scripts `$SP/srv-tools/r5-seed.sql` y
 consumo real de batería y datos del canal con `: ping` (R4 midió el tráfico de antes; con el canal nuevo, en silencio
 son 2 líneas cada 15 s y una reconexión cada 5 minutos); la restauración real de un respaldo (R3 se reproduce
 simulándola en `ready_notices`, como la revisión).
+
+#### A2-D12 · Sesiones de antes del inicio del día (revisión, parte 2: RD2)
+
+Con la regla de R2 («vigente o creada en el día»), la última entrada de la noche (una sesión con PIN dura 12 h y la app
+no la cierra al cambiar de mesero ni al bloquearse) mantenía `active: true` hasta la mañana y el servicio de las
+tabletas no se detenía nunca. Decisión del coordinador **A2-D12**: una sesión con PIN creada **antes** del inicio del
+día comercial en curso solo cuenta si sigue vigente **y** su `last_seen_at` es de los últimos **30 minutos**; las
+creadas desde el inicio del día cuentan como antes. Commit `b91ae66` (encima de `e3a3a88`; la `0026` solo cambió en un comentario).
+
+- **Constante** `kitchen.ReadyAlertsRecentUse = 30 * time.Minute` (`kitchen/preparation.go`, comentada), la misma para
+  las tres reglas: `active` y la presencia («entró en el dispositivo», `readyPresenceSQL`) en
+  `administration/ready_alerts.go`, y la elección del dispositivo fijado en `recordReadyNotices`, que ahora lee el día
+  comercial (`businessday`) para no fijar un aviso a un dispositivo que no lo entregaría. Se pasa a SQL en segundos
+  (`make_interval(secs => …)`); los índices parciales de R5 siguen sirviendo (el filtro nuevo va sobre las pocas
+  sesiones abiertas del dispositivo).
+- `last_seen_at` de la sesión lo actualiza cada petición con esa sesión (`authenticateSession`); con la tableta en
+  «¿Quién eres?» deja de moverse y a los 30 minutos `active` pasa a `false` sola (el canal lo manda en cuanto cambia).
+  **Depende de que la app no use la sesión del mesero mientras nadie trabaja**: cada lectura de `GET events` (cada
+  750 ms) también mueve `last_seen_at`. Según su comentario, `RealtimeClient` solo lo abre en primer plano y con
+  sesión; si en «¿Quién eres?» con la pantalla encendida sigue usando la sesión del último mesero, el servicio no se
+  detendría. Lo debe confirmar el agente de Android (no lo revisé más allá de ese comentario).
+- Un aviso fijado a un dispositivo cuya sesión de antes del inicio del día deja de contar antes de que lo lea (el
+  dispositivo pasó más de 30 minutos sin red y el mesero no volvió a usar la sesión) ya no llega: es el mismo caso que
+  un mesero que dejó de trabajar.
+- **Pruebas**: `TestStageA2ReadyReview` R2 (sesión de antes del inicio usada hace 10 minutos → fijado a la tableta y
+  llega; usada hace 31 minutos → `active: false`, el aviso queda para todos y no llega; al volver a entrar, `active`
+  vuelve y lo de antes de su entrada no llega) y `TestStageA2ReadyAlerts` «día comercial, sesiones de antes del inicio
+  del día (A2-D12), poda y dispositivo revocado» (31 minutos → `active: false`; 5 minutos → `true`). Documentación:
+  `docs/API_V1.md` (a quién llega, `active`, `day_ends_at`), `openapi.json` (`getReadyAlerts` y
+  `ReadyAlertsBatch.active`), `API_CONTRACTS.md` y la «Forma final» de arriba.
+
+| Qué                                                                                         | Dónde                               | Resultado                            |
+| ------------------------------------------------------------------------------------------- | ----------------------------------- | ------------------------------------ |
+| `TestStageA2ReadyReview` y `TestStageA2ReadyAlerts` (`-v`)                                  | `./internal/operations`, base `_s_` | **PASS** 4/4 (27,3 s) y 9/9 (26,5 s) |
+| `go-unit` (vet normal e integración, `test -race`, `GOOS=windows` build y vet)              | `iso.sh go-unit`                    | **aprobado**                         |
+| `go-int` completos: `administration`, `apicontract`, `kitchen`; `TestStageA2Upgrade` (`-v`) | `iso.sh go-int`                     | **ok** (215 s, 40 s, 5 s); **PASS**  |
+| `format`, `fmt-check`, `sync-check`; md5 de `docs/etapas/*.md`                              | árbol `srv`                         | Correctos; idénticos                 |
 
 ### Decisiones del coordinador sobre la parte D
 
@@ -2134,3 +2176,307 @@ Sobre una copia exacta de `e3a3a88` (`git archive`): `fmt-check`, `sync-check`, 
 `database` y `kitchen` completos, `TestStageA2Ready*` de `operations` (`TestStageA2ReadyAlerts` y
 `TestStageA2ReadyReview`, las reproducciones del revisor, que ahora pasan y se quedan como pruebas de regresión) y
 `TestStageTwoAcceptance` y `TestStageA1WaiterPIN` de `administration`, todo aprobado. Fusión en `2bf8183`.
+
+# Revisión independiente · Aviso de platillos listos (§4)
+
+Revisor independiente que pide §0 de la especificación («servicio en primer plano, reconexión y entrega sin duplicados
+ni pérdidas»). La revisión va en dos partes: la **Parte 1 (servidor)** sobre `etapa-a2-rev` desde `394cab6` (cabeza de
+`etapa-a2-android` con la parte D del servidor fusionada) y la **Parte 2 (dispositivo)** cuando la Fase D esté
+fusionada. Árbol `$SP/wt/rev`, `ISO_TAG=R` (clúster temporal 55499, bases `adel_pos_test_r_*`, Go temporal 8251/8511 ya
+detenido). No se tocó el código del producto ni la instalación real; las reproducciones son una prueba nueva en un
+commit de la rama de revisión. Leí el código, la migración, el contrato y las pruebas antes de leer «Servidor · Parte
+D» del avance; al final contrasto con ese apartado.
+
+## Parte 1 · Servidor
+
+### Resumen
+
+El diseño es sólido en lo central: el registro `app.ready_notices` se escribe en la misma transacción que el «Listo»,
+todos los escritores toman 7820148305 en exclusiva **antes** de insertar (`kitchen/handler.go:72`, `kitchen/worker.go:70`,
+`operations/handler.go:54`; `kitchen.Integrate` solo se llama desde `operations`), así que las secuencias se asignan y se
+confirman en el mismo orden y ninguna lectura puede ver un hueco detrás del cursor; `UNIQUE (unit_id, version_id)`, el
+grupo por operación de cocina y el cursor por grupos completos no repiten nada; la respuesta nunca lleva importes y la
+credencial del dispositivo solo abre `GET ready-alerts` y su canal.
+
+Encontré **tres caminos en los que un aviso se pierde en silencio** (los tres confirmados con reproducción), un
+problema de **consumo del canal** con la pantalla apagada (confirmado: medición del tráfico) y varios puntos bajos. Ninguno
+es crítico ni obliga a cambiar una decisión del propietario; R1–R3 contradicen «ningún aviso se pierde» (§4.1) y R2
+además §0-B («en el dispositivo donde tenga sesión abierta»).
+
+Reproducciones: `backend/internal/operations/stagea2_ready_review_test.go`, `TestStageA2ReadyReview`, commit `712e869`
+de `etapa-a2-rev`. **Falla a propósito con el código actual** (cada subprueba comprueba lo que pide la especificación y
+su mensaje dice lo que pasó): no debe fusionarse en la etapa tal cual; sirve para verificar las correcciones (y quedarse
+como prueba de regresión) o se descarta.
+
+### Hallazgos
+
+| #   | Severidad | Estado                                                      | Dónde                                                                                                                       | Escenario de falla                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Corrección sugerida                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| --- | --------- | ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R1  | Medio     | Confirmado (R1 de la prueba)                                | `kitchen/preparation.go:153-154`; `kitchen/changes.go:165-167` y `184-192`                                                  | Una unidad con tareas en dos estaciones (combo: la parrilla lista, la freidora pendiente). El mesero quita las papas: la tarea de la freidora se **cancela** y la de la parrilla, sin cambio de receta, **sigue lista con su `ready_at` viejo**. La unidad queda «Listo» (`preparation_state: ready`) pero `recordReadyNotices` exige `max(ready_at)=now()`: **0 filas en `ready_notices`, 0 avisos**. El autor de la parte D revisó este camino y concluyó que «las modificaciones no marcan Listo»; esta sí lo hace, por cancelación.                                                                                                                                                                                                                                      | En `recordReadyNotices`, contar también como «pasó a Listo en esta transacción» la unidad activa con todas sus tareas vivas listas y alguna tarea **cancelada en esta transacción que no estaba lista** (`state='cancelled' AND updated_at=now() AND ready_at IS NULL`; la cancelación no borra `ready_at`, así que una tarea que ya estaba lista no vuelve a avisar). Agregar el caso a `TestStageA2ReadyAlerts`.                                                                                |
+| R2  | Medio     | Confirmado (R2)                                             | `administration/ready_alerts.go:82-83` frente a `157-158`; `kitchen/preparation.go:143-146`                                 | Beto entró en la tableta 2 antes de la «Hora de inicio del día» y su sesión con PIN sigue vigente (12 h: entró a las 22:00 con la hora de inicio a las 00:00, o a las 18:00 y son las 05:15 con la de 05:00). Al «Listo», el aviso **se fija a la tableta 2** (su sesión vigente más reciente). La tableta 2 responde `active: true` (cuenta la sesión vigente) pero `entered` solo admite sesiones **creadas** desde el inicio del día: no le entrega el aviso y su cursor lo deja atrás; la tableta 1 tampoco (no es para ella). **No llega a nadie**, hasta que Beto vuelva a entrar con PIN (y lo de mientras se pierde si la tableta siguió leyendo, que es lo que pide la «Forma final» para `day_ends_at`, `docs/ETAPA_A2_AVANCE.md:1469`).                           | Que `entered` sea la misma regla que `active`: un mesero cuenta en D si entró con PIN hoy **o** tiene en D una sesión con PIN vigente (`created_at>=$2 OR (revoked_at IS NULL AND expires_at>now())`). Es lo que dice §0-B («en el dispositivo donde tenga sesión abierta») y lo que ya promete `active`. Ajustar la regla 1 de `docs/API_V1.md` («Avisos de platillos listos») y el contrato.                                                                                                    |
+| R3  | Medio     | Confirmado (R3, restauración simulada)                      | `migrations/0026_android_a2.sql:57`; `administration/ready_alerts.go:59-60`, `150-154`                                      | Se restaura un respaldo anterior (pg_dump guarda el `setval` de la identidad). El dispositivo vuelve con un cursor mayor que la cabeza: Go relee el día (decisión 6 de la parte D) y el dispositivo descarta los `id` que ya avisó. Pero los avisos **nuevos** reciben otra vez los números que el dispositivo ya vio ese día para **otras cuentas** (en la prueba: la cuenta B llega con `id` 2, el mismo de la cuenta A). Con A2-D9 («descartar los `id` repetidos del día») el dispositivo los descarta: se pierden todos hasta que la secuencia pase el cursor viejo (con un respaldo de la noche anterior, el resto del día).                                                                                                                                           | Dar a cada aviso una clave que no se reutilice tras una restauración y que el dispositivo use para descartar repetidos: por ejemplo `notice_key uuid NOT NULL DEFAULT gen_random_uuid() UNIQUE` en `ready_notices` (la 0026 aún no se entrega) y en `ReadyAlert` la del último aviso del grupo; el número sigue siendo solo el cursor. Alternativa mínima: con `after > head`, responder `reset: true` para que el dispositivo vacíe sus `id` del día (a costa de repetir lo del día restaurado). |
+| R4  | Medio     | Confirmado (R4: tráfico medido); consumo real no verificado | `administration/ready_alerts.go:263-285`                                                                                    | El canal manda un mensaje `alerts` completo **cada 750 ms aunque no haya nada** y se cierra a los 30 s. Medido sin ningún «Listo»: **8 mensajes y 1288 bytes en 6 s** → unas 4800 respuestas y ~750 KB por hora y dispositivo, más 120 peticiones nuevas por hora (cada una con su lectura en la base). Para el canal de eventos de la A1 era aceptable (solo en primer plano); aquí corre todo el turno con la pantalla apagada y no deja dormir la wifi. La prueba de humo de la Fase 0 midió la batería con un evento cada 20 s (29 paquetes en 2 min), no con este ritmo. En Go, cada lectura es además una transacción con escritura (`UPDATE devices SET last_seen_at`, `administration/service.go:395`): unas 1,3 confirmaciones con fsync por segundo y dispositivo. | Seguir leyendo cada 750 ms en Go, pero **mandar solo cuando haya avisos o cambien `cursor`, `active`, `settings` o `day_ends_at`**, con un comentario de mantenimiento (`: ping`) cada 15–20 s para que el dispositivo detecte la conexión muerta, y una vida más larga para este canal (unos 5 min). Coordinarlo con el tiempo de «lectura sin datos» del dispositivo (Parte 2). Medir la batería en la Fase E con el ritmo real.                                                                |
+| R5  | Bajo      | Confirmado (medición sobre datos sintéticos)                | `administration/ready_alerts.go:82-83` y `157-158`                                                                          | `sessions` nunca se poda y cada entrada con PIN crea una fila (con el bloqueo por inactividad de 2 min, decenas o cientos al día por dispositivo). Las dos lecturas de sesiones del dispositivo se hacen en cada lectura (cada 750 ms) y solo tienen el índice por `device_id`: con 58 000 sesiones por dispositivo (un año a ~160 entradas diarias) y 10 dispositivos, **9,5 ms + 5,9 ms por lectura** (`EXPLAIN ANALYZE`, 58 000 filas descartadas cada vez), con el lock 7820148305 compartido y la fila del dispositivo bloqueada mientras tanto; crece con los años. Con un índice parcial, 0,05 ms y 0,03 ms.                                                                                                                                                          | Índices en la 0026: `sessions (device_id, created_at) WHERE opened_with_pin` y `sessions (device_id) WHERE opened_with_pin AND revoked_at IS NULL`, y `active` como dos `EXISTS` separados (así se midió con los índices; no medí el `OR` dentro de un solo `EXISTS`).                                                                                                                                                                                                                            |
+| R6  | Bajo      | Confirmado `id: 0` (R4); el 503 por lectura de código       | `administration/ready_alerts.go:279`; `administration/http.go:141-158`                                                      | «interrupted» lleva `id: 0`: en un cliente SSE estándar el último id pasa a 0 y una reconexión con `Last-Event-ID` relee todo el día. Además no solo llega al revocar: cualquier error transitorio de la lectura (la espera del lock pasa de los 3 s detrás de una escritura larga, la base no responde) llega como `interrupted` con `SERVICE_UNAVAILABLE`/503, y la «Forma final» lo describe como «el dispositivo dejó de valer». Un dispositivo que lo trate como retiro detendría los avisos por un tropiezo de la base.                                                                                                                                                                                                                                                | Mandar «interrupted» sin línea `id:` (o con el cursor vigente) y, en un 5xx, cerrar el canal sin «interrupted» (el dispositivo reconecta como tras un corte). Precisar en `docs/API_V1.md` y en la «Forma final» que solo 401 es definitivo. Verificar en la Parte 2 qué hace la app.                                                                                                                                                                                                             |
+| R7  | Bajo      | Plausible (lectura de código)                               | `kitchen/preparation.go:143-146`                                                                                            | El dispositivo se fija al «Listo» sin mirar si puede recibirlo: si la sesión vigente más reciente del mesero está en un dispositivo con «Avisar platillos listos» apagado, en uno que se retira antes de leer o en uno que todavía tiene la 0.1.0 (`local.adel.pos.android`, que no lee avisos), el aviso no llega a ninguno de sus otros dispositivos.                                                                                                                                                                                                                                                                                                                                                                                                                      | Elegir el dispositivo entre los `android` no revocados con `ready_alerts_enabled` (y, si se quiere, con `app_version` ≥ 0.2.0); documentar en la guía que la 0.1.0 debe revocarse antes (ya lo pide §2).                                                                                                                                                                                                                                                                                          |
+| R8  | Bajo      | Plausible (lectura de código)                               | `administration/service.go:395`; `administration/ready_alerts.go:137`; `kitchen/stations.go:235`; `maintenance/apply.go:57` | La lectura bloquea la fila del dispositivo (`last_seen_at`) y después pide 7820148305 compartido; quien tiene 7820148305 en exclusiva y luego bloquea la fila de ese android (guardar sus estaciones de cocina con `FOR UPDATE`, o «Quitar datos de prueba» con una impresora de prueba como su impresora de precuentas) forma un interbloqueo. PostgreSQL lo corta en 1 s: falla la lectura (canal interrumpido, R6) o la operación del administrador. No se pierde nada. El mismo patrón ya existe en `restaurant/state`.                                                                                                                                                                                                                                                  | Tomar el lock compartido antes de `authenticateDevice` en esta ruta, o rechazar la configuración de estaciones de cocina en un `android`. Prioridad baja.                                                                                                                                                                                                                                                                                                                                         |
+| R9  | Bajo      | Plausible (diseño; la prueba existente lo fija)             | `administration/ready_alerts.go:90`                                                                                         | Un corte de red que cruza la «Hora de inicio del día» pierde los avisos del día anterior que no llegaron (`ready_at>=$2`). Con 05:00 casi nunca pasa; con 00:00 y un servicio hasta la 01:00, un corte de 23:58 a 00:03 pierde lo de 23:58–00:00.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | Aceptable como regla del día comercial; si se quiere cerrar, admitir los avisos de las últimas horas del día anterior cuando el cursor del dispositivo es anterior a `dayStart`. Decirlo en la guía.                                                                                                                                                                                                                                                                                              |
+| R10 | Bajo      | Plausible (lectura de código)                               | `administration/ready_alerts.go:84-108`                                                                                     | El aviso se entrega tal como se registró aunque, mientras el dispositivo estuvo sin red, la unidad o la cuenta se cancelaran o la cuenta se combinara en otra: «Mesa 4: 1 filete listo» de algo que ya no existe; al tocarlo se abre una cuenta cancelada o combinada.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | Filtrar al leer `u.state='active'` y la cuenta abierta (o mandar `account_state`/`merged_into_id` para que la app abra la cuenta destino). Bajo.                                                                                                                                                                                                                                                                                                                                                  |
+| R11 | Bajo      | Plausible (depende del dispositivo)                         | `administration/ready_alerts.go:117-123` (`after` vacío = 0)                                                                | La primera lectura sin cursor (instalación nueva, datos borrados) recibe **todo el día** que le corresponde al dispositivo (avisos a «todos» de horas antes): una ráfaga de notificaciones viejas si la app no la descarta.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | Que la app tome el cursor de la primera respuesta sin notificar lo anterior (o use `ready_at`). Revisarlo en la Parte 2.                                                                                                                                                                                                                                                                                                                                                                          |
+| R12 | Bajo      | Plausible (diseño documentado)                              | `administration/ready_alerts.go:231-237`                                                                                    | Tras un cambio de red, el canal viejo queda medio abierto en Go (escribe en el búfer del socket sin error) hasta su vida de 30 s: la reconexión recibe 429 `READY_ALERTS_CONNECTION_LIMIT` hasta entonces. Sin pérdida (el cursor), pero el aviso puede tardar ~30 s más (más la espera creciente de la app).                                                                                                                                                                                                                                                                                                                                                                                                                                                                | Aceptable; con la vida más larga de R4, cerrar el canal anterior del mismo dispositivo cuando llega uno nuevo (en lugar de 429) evita esperar.                                                                                                                                                                                                                                                                                                                                                    |
+
+### Detalle de las reproducciones (`TestStageA2ReadyReview`)
+
+Una base desde cero (como `TestStageA2ReadyAlerts`), dos estaciones KDS: la categoría va a «Parrilla revisión» y el
+producto «Papas producto» a «Freidora revisión» (la ruta por producto gana), Ana en la tableta 1 y Beto en la tableta 2.
+Corrida con `ISO_TAG=R ISO_RUN=TestStageA2ReadyReview iso.sh … go-int ./internal/operations` (28 s): **falla en las 4
+subpruebas**, con estos mensajes:
+
+- **R1**: «la unidad quedó «Listo» (preparation_state "ready"; parrilla ready, freidora cancelled) al quitarle la
+  estación pendiente y no se registró su aviso: 0 filas en ready_notices, 0 avisos en la tableta de Ana». Es la edición
+  normal (`edit-preview` + `edit`) del combo con 1 → 0 papas, después de marcar «Listo» solo la parrilla.
+- **R2**: «el aviso de Beto quedó fijado a la tableta 2 (1 fila), que responde active true, pero no lo entrega (0
+  avisos; cursor 1, cabeza 1: ya lo dejó atrás) y la tableta 1 tampoco (0)». La sesión de Beto se movió a una hora
+  antes del inicio del día con `expires_at` en 6 h (lo que deja la entrada de la noche anterior).
+- **R3**: «tras restaurar, el aviso nuevo de la cuenta … llega con id 2, el mismo que el dispositivo ya avisó hoy para
+  la cuenta …». La restauración se simula en `ready_notices` (`DELETE` desde ese aviso y
+  `ALTER … RESTART WITH`, lo que deja un `pg_restore` de un respaldo de justo antes).
+- **R4**: «sin novedades el canal mandó 8 mensajes (1288 bytes) en 6.0 s…» y ««interrupted» llega con id: 0…» (al
+  retirar el dispositivo con el canal abierto).
+
+R5 se midió aparte, en la base del Go temporal (`iso.sh server-up` con 8251/8511, asistente por HTTP, 580 000 sesiones
+sintéticas en 10 dispositivos android con `psql`; `EXPLAIN (ANALYZE, BUFFERS)` de las dos consultas de sesiones antes y
+después de crear los dos índices sugeridos; servidor detenido y base borrada con `server-down`). Script:
+`$SP/rev-work/psql-r.sh`.
+
+### Revisado sin encontrar defectos
+
+- **Orden del cursor y locks**: todos los caminos que insertan en `ready_notices` pasan por `publishPreparation` dentro
+  de `kitchen.Handle` (POST), `Worker.ReleaseDue` o `kitchen.Integrate` (solo desde `operations`), y los tres tienen
+  7820148305 en exclusiva desde antes de la primera escritura hasta el commit. La identidad se asigna con el lock, así
+  que los números se confirman en orden y cualquier foto de la base ve un prefijo; la lectura toma el lock compartido
+  antes de leer la cabeza y los avisos (y la transacción es `READ COMMITTED`). Las secuencias de un mismo grupo son
+  contiguas (un solo `INSERT … ORDER BY account_id`), así que el corte de 50 grupos nunca parte un grupo.
+- **Caminos de «Listo»**: el único `UPDATE … state=$1` con `ready` es `saveStates` (tareas, pedido de una estación y
+  cuenta completa); conserva el `ready_at` de una tarea que ya estaba lista, así que repetir «Listo» o un segundo KDS no
+  vuelve a avisar. Una modificación con cambio de receta reinicia las tareas y la versión nueva se avisa una vez; sin
+  cambio de receta, una unidad que ya estaba lista no se vuelve a avisar (salvo R1, al revés). Reintentar un cambio
+  pendiente usa el mismo código. La liberación automática no marca «Listo».
+- **Sin repetición**: `UNIQUE (unit_id, version_id)` con `ON CONFLICT DO NOTHING`, la reproducción idempotente de una
+  operación de cocina devuelve la respuesta guardada sin escribir, el `id` del grupo es estable entre lecturas y `after`
+  y `Last-Event-ID` dan los mismos `id` (salvo R3).
+- **Destinatario**: el responsable al «Listo» (`assigned_user_id`), también en para llevar; transferir cambia lo que no
+  estaba listo; dividir/transferir unidades y combinar usan la cuenta actual de la unidad (`notePreparationUnits`).
+  Solo sesiones con PIN de `android` no revocados, la de `last_seen_at` más reciente; el canal de avisos no toca
+  `sessions.last_seen_at`, así que el servicio en segundo plano no convierte su tableta en «la más reciente».
+  `auth/logout` deja de contar. Sin sesión vigente, todos los dispositivos donde entró hoy.
+- **Datos y credencial**: el aviso lleva mesa o folio, nombre del cliente, mesero, nombre del producto con su
+  presentación y cantidad; ningún importe (la prueba existente busca `price`, `total`, `amount`, `subtotal`,
+  `balance`). `ready-alerts` se atiende después de `authenticateDevice` y `matchClientKind` y antes de la sesión, solo
+  `GET` y solo la ruta exacta; la credencial de envío se rechaza antes; un no `android` recibe 403; un revocado, 401
+  (al abrir) o «interrupted» (en el canal). Un parámetro de más o un cursor inválido, 400.
+- **Día comercial y reloj**: `businessday` con la zona del establecimiento y la «Hora de inicio del día»; Go y
+  PostgreSQL usan el mismo reloj (misma computadora). `day_ends_at` es el inicio del día siguiente.
+- **Poda**: solo lo de más de 2 días y solo al registrar un aviso, así que la cabeza nunca baja por la poda (un cursor
+  mayor que la cabeza solo aparece con una base restaurada).
+- **Migración 0026 (D)**: tabla nueva vacía, tres columnas con valor por omisión, ninguna fila cambia; las claves
+  foráneas apuntan a tablas que Go nunca borra («Quitar datos de prueba» y la importación no tocan cuentas, unidades,
+  versiones, usuarios ni dispositivos con avisos).
+- **Canal**: un canal por dispositivo (429), revalidación en cada lectura, cierre al apagar el servidor, plazo de
+  escritura de 10 s.
+- **Prueba existente**: `TestStageA2ReadyAlerts` pasa en este árbol (27 s).
+
+### No revisado o no verificado
+
+- El consumo real de batería con el ritmo de R4 (solo medí el tráfico del lado de Go) y el canal con muchos
+  dispositivos a la vez bajo carga real.
+- R7, R8, R10, R11 y R12 no tienen reproducción (lectura de código; R8 depende de que la interfaz deje configurar
+  estaciones de cocina de un android, que no comprobé).
+- Una restauración real con `pg_dump`/`pg_restore` (R3 se simuló en la tabla; el efecto sobre el dispositivo depende de
+  la Fase D).
+- Escritorio (Terminales › Editar) y la regresión completa del servidor: fuera de esta parte.
+
+### Pruebas ejecutadas
+
+| Qué                                                                                | Dónde                                                   | Resultado                                                                 |
+| ---------------------------------------------------------------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `go vet -tags=integration ./internal/operations/` con la prueba nueva              | `$SP/wt/rev/backend`                                    | Sin avisos                                                                |
+| `TestStageA2ReadyReview` (R1–R4)                                                   | `iso.sh go-int ./internal/operations`, `ISO_TAG=R`      | **Falla en las 4** (las reproducciones; mensajes arriba)                  |
+| `TestStageA2ReadyAlerts` (la de la parte D)                                        | idem                                                    | **ok** (27 s)                                                             |
+| R5: `EXPLAIN (ANALYZE, BUFFERS)` de las consultas de sesiones con 580 000 sesiones | Go temporal (`server-up` 8251/8511) y `psql` en su base | 9,5 ms y 5,9 ms por lectura; con los índices sugeridos, 0,05 ms y 0,03 ms |
+| `format`, `fmt-check`; md5 de `docs/etapas/*.md` antes y después                   | `$SP/wt/rev`                                            | Correctos; idénticos                                                      |
+
+Commit: `712e869` («etapa A2 revisión §4 (servidor): reproducciones de los hallazgos en TestStageA2ReadyReview…»), solo
+`backend/internal/operations/stagea2_ready_review_test.go`. El Go temporal está detenido y su base borrada.
+
+### Contraste con «Servidor · Parte D» del avance (leído después)
+
+- La parte D dice haber revisado los caminos y que «las modificaciones no marcan “Listo”»: R1 es justo una
+  modificación que deja la unidad «Listo» sin pasar por `saveStates`.
+- La decisión 6 (cursor mayor que la cabeza → releer el día y descartar `id` ya avisados) resuelve la relectura de lo
+  restaurado, pero no la reutilización de los números por los avisos nuevos (R3).
+- La decisión 4 (`active` con sesión vigente o entrada de hoy) y la «Forma final» para `day_ends_at` («si sigue
+  `active`, continuar») hacen que el dispositivo siga leyendo justo en el caso en que `entered` ya no admite al mesero
+  (R2): la regla de entrega y la de `active` deben ser la misma.
+- «No verificado: el canal con muchos dispositivos… no se midió con carga»: R4 y R5 lo cuantifican en parte.
+- La «Forma final» describe «interrupted» como «el dispositivo dejó de valer»; también llega con 503 (R6).
+
+### Para la Parte 2 (dispositivo), lo que conviene contrastar con lo anterior
+
+- Cómo descarta repetidos (¿por `id` numérico? → R3) y cuándo borra los `id` del día; si guarda el cursor después de
+  notificar (pérdida si el proceso muere entre notificar y guardar es preferible a repetir, o al revés).
+- Qué hace con `interrupted` (¿lo trata como retiro? → R6) y si alguna vez usa el `id: 0` como cursor.
+- Qué hace al pasar `day_ends_at` con `active: true` por una sesión vigente (R2) y si hay idas y vueltas del servicio.
+- Su tiempo de «lectura sin datos» frente al ritmo del canal (si se aplica R4, debe ser mayor que el `ping`).
+- Primera lectura sin cursor (R11), manejo del 429 (R12) y de una cuenta cancelada o combinada al tocar el aviso (R10).
+
+## Parte 2 · Dispositivo
+
+Árbol `$SP/wt/rev` con `etapa-a2-android` fusionada (`afd754e`: fases C y D; fusión `5a0205a`, conserva `712e869`).
+Revisé `core:domain/ready` (`ReadyAlerts.kt`, `ReadyAlertsLifecycle.kt`, `ReadyNotice.kt`), `core:data/ready`
+(cliente, canal, registro en Room y sus entidades de la v6), `app/ready` (servicio, controlador, notificaciones,
+receptor de arranque e interfaz), el manifiesto, `AppContainer.kt`, `MainActivity.kt`, `AdelPosApp.kt`, el arranque de
+`AccessRepository` y las pruebas (`ReadyAlertsRulesTest`, `ReadyAlertsChannelTest`, `RoomReadyAlertsLedgerTest`,
+`AlertsOnGoTest`). El cliente ya usa el protocolo acordado (`c4de974`); el servidor corregido todavía no existe, así que
+todo lo que depende de él se revisó contra el protocolo escrito, no contra Go. Leí el apartado «Fase D» del avance
+después de formarme la opinión. Sin emulador: los hallazgos se reproducen en la JVM o se ven en el código, y lo que
+solo se ve en un dispositivo físico queda como no verificado.
+
+### Resumen
+
+El ciclo de vida está bien resuelto en lo esencial:
+
+- `startForeground` es lo primero de `onStartCommand`, también tras un reinicio pegajoso.
+- Las dos `ForegroundServiceStartNotAllowedException` están atrapadas.
+- `specialUse` está declarado con su permiso y su subtipo.
+- El canal es uno por proceso.
+- El cursor se guarda después de mostrar, y los repetidos se descartan por `key` en Room y en los extras de la
+  notificación.
+- Solo `DEVICE_REVOKED` detiene; los demás `interrupted` se reintentan y el `id` del canal nunca se usa como cursor.
+- La huella fijada vale también en este canal, y el borrado del dispositivo está registrado.
+
+No encontré un camino de pérdida ni de repetición dentro del día.
+
+Lo importante es **cuándo se detiene**. Respondiendo a la pregunta del coordinador:
+
+- **RD1**: una tableta que no alcanza la computadora principal pasado el fin del día sigue reintentando para siempre
+  con la notificación permanente.
+- **RD2**: aun con la computadora principal encendida, `active` sigue en `true` toda la noche (las sesiones con PIN
+  duran 12 h y la app nunca las cierra), así que el servicio no se detiene al cerrar el día en ningún dispositivo.
+
+Las dos contradicen §4.3 («se detiene al cerrar el día comercial… o si nadie ha entrado en él en el día»). Las demás
+son bajas.
+
+Reproducción: `android/core/data/src/test/kotlin/com/adelpos/meseros/core/data/ready/ReadyAlertsReviewTest.kt`
+(commit `ed34942` de `etapa-a2-rev`). **Falla a propósito** con el código actual (como `TestStageA2ReadyReview`): no
+debe fusionarse tal cual en la etapa.
+
+### Hallazgos
+
+| #   | Severidad | Estado                                                                                                                                                                                                                    | Dónde (rutas desde `android/`)                                                                                                                                        | Escenario de falla                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | Corrección sugerida                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| --- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| RD1 | Medio     | Confirmado (`ReadyAlertsReviewTest`)                                                                                                                                                                                      | `core/data/…/ready/ReadyAlertsChannel.kt:103-126`, `:207-217`, `:232-241`; `app/…/ready/ReadyAlertsController.kt:302-313`                                             | Lo último que dijo Go fue `active: true`. Pasa `day_ends_at` + 30 s con la Mac apagada (cierre del restaurante), la wifi caída o un teléfono que el mesero se llevó a casa. El `GET` del cambio de día falla (`RETRY`, `null`), el canal sigue con espera creciente y no hay ninguna condición de salida: **21 intentos y una búsqueda de otra dirección en 3 s, sin detenerse**. En la aplicación son un intento cada 30 s y una búsqueda NSD por minuto, toda la noche, con «AD-EL POS conectado · Sin conexión… Reintentando…». El reinicio pegajoso (`onServiceStarted`) vuelve a correr el canal sin mirar si el día terminó. En cambio, tras reiniciar el equipo no arranca (`decide(BOOT)` exige el día en curso): dos respuestas distintas para la misma situación. Es la consecuencia que el agente de la Fase D anotó en su decisión 6. | Pasado `day_ends_at` (y un margen corto, p. ej. 10 min), sin respuesta de Go **y** sin ningún mesero usando el dispositivo (ver RD2), detener el servicio sin mover el cursor. Lo vuelven a arrancar la próxima entrada con PIN con conexión o abrir la aplicación (`ASK_FIRST`), y lo de mientras llega desde el cursor. Aplicar la misma regla al reinicio pegajoso.                                                                                                                                                                                                            |
+| RD2 | Medio     | Confirmado por partes (servidor `R2`: «responde active true» con una sesión de antes del inicio del día; `ReadyAlertsChannelTest.pasadoElFinDelDiaVuelveAPreguntarYSigueMientrasGoDigaActivo`); no corrido en un emulador | Servidor `administration/ready_alerts.go:157-158` (y la regla 4 del protocolo acordado); `core/data/…/ReadyAlertsChannel.kt:120-126`; regla 15 de `android/CLAUDE.md` | La app no cierra la sesión de Go («Cambiar de mesero» y el bloqueo por inactividad no lo hacen; A2-D4 quedó sin efecto) y cada sesión con PIN dura 12 h desde la última entrada. Si la última entrada fue a las 22:55, `active` vale `true` hasta las 10:55 del día siguiente. Al pasar `day_ends_at` el dispositivo pregunta, Go dice `active` y el servicio sigue. En un restaurante que abre todos los días **el servicio no se detiene nunca**: todas las tabletas pasan la noche con la notificación permanente y el canal abierto (con el protocolo nuevo, un `: ping` cada 15 s), y los teléfonos que salen del restaurante caen en RD1. La regla 4 acordada («entró» = sesión vigente o creada en el día) lo mantiene.                                                                                                                    | **Decisión del coordinador** (precisa §4.3 «un mesero con sesión en el dispositivo»), dos opciones compatibles entre sí. (a) Servidor: después del inicio del día, una sesión de antes cuenta para `active` y para la entrega solo si se usó hace poco (`last_seen_at` de los últimos 15–30 min: el canal de eventos de la A1 la refresca cada 750 ms mientras un mesero usa la app). (b) Dispositivo: pasado `day_ends_at`, seguir solo si un mesero entró o usó el modo Mesero en este dispositivo después de esa hora; si no, detenerse como en RD1. (b) también resuelve RD1. |
+| RD3 | Bajo      | Plausible (lectura de código; `BOOT_COMPLETED` no se probó en la fase)                                                                                                                                                    | `app/…/ready/ReadyAlertsBootReceiver.kt:31-33, 41`; `ReadyAlertsController.kt:244-246`; `core/data/…/access/AccessRepository.kt:103-112, 314-363`                     | Tras reiniciar el equipo, `requestNow(BOOT)` tiene 8 s, pero antes de decidir llama a `prepare()` → `AccessRepository.start()` → `checkLocked()`, que con la wifi conectada **pregunta a Go**. Con la Mac apagada son hasta 5 s de conexión, la búsqueda NSD de otra dirección (unos 4 s) y otro intento: pasa de 8 s, se cancela y el servicio no arranca hasta que alguien abra la app. El comentario dice que «solo lee Room y lo guardado del emparejamiento».                                                                                                                                                                                                                                                                                                                                                                                | En `BOOT`, decidir con lo guardado (Room y el emparejamiento, `loadLocked`, sin `checkLocked`) y arrancar; la comprobación con Go la hace el canal ya en primer plano.                                                                                                                                                                                                                                                                                                                                                                                                            |
+| RD4 | Bajo      | Plausible (lectura de código)                                                                                                                                                                                             | `app/…/ready/ReadyAlertsController.kt:104`, `:308-312`                                                                                                                | El canal corre en `CoroutineScope(SupervisorJob() + Dispatchers.Default)` sin `CoroutineExceptionHandler` ni `try`. Una excepción inesperada (Room lleno, `SQLiteFullException`; un `RuntimeException` de `NotificationManager`) **tumba todo el proceso**, también la captura del mesero en primer plano. El reinicio pegajoso vuelve al mismo lote y puede quedar en bucle.                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | Atrapar en `onServiceStarted` todo lo que no sea `CancellationException`, registrarlo y tratarlo como `RETRY` (o detener el servicio), sin tumbar la app.                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| RD5 | Bajo      | Confirmado (lectura de código)                                                                                                                                                                                            | `app/…/ready/ReadyAlertsService.kt:50`; `ReadyAlertsChannel.kt:100`, `:151`                                                                                           | Sin red, cada intento pasa por `Connecting`, que la notificación permanente cuenta como conectado. Mientras dura cada intento (hasta 5 s) dice «Recibiendo avisos de platillos listos» y vuelve a «Sin conexión…» al fallar: cambia cada ≤30 s y se vuelve a publicar con `startForeground` cada vez.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | Contar como conectado solo `Connected` (o `Connecting` solo en el primer intento después de estar conectado).                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| RD6 | Bajo      | Confirmado (lectura de código)                                                                                                                                                                                            | `app/…/ready/ReadyAlertsUi.kt:175-182`, `:199-205`                                                                                                                    | «Ahora no» en la explicación de un permiso lo marca como pedido para siempre: nunca se vuelve a explicar. En Android 13+ sin el permiso de notificaciones, el servicio corre y los avisos no se ven. Solo lo dice la ayuda, y el mesero no tiene por qué abrirla.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | Con «Ahora no», volver a explicarlo en el siguiente arranque (o tras un tiempo). Con las notificaciones sin permiso, un aviso visible en el modo Mesero («Los avisos de platillos listos no se ven: activa las notificaciones»).                                                                                                                                                                                                                                                                                                                                                  |
+| RD7 | Bajo      | Plausible (lectura de código)                                                                                                                                                                                             | `core/data/…/ready/ReadyAlertsClient.kt:215`, `:239-246`                                                                                                              | Un mensaje `alerts` que no se puede leer (un campo obligatorio que falta, `day_ends_at` con otro formato) se **salta en silencio**. Con el protocolo nuevo Go ya avanzó su `after` y el siguiente mensaje solo trae lo nuevo, así que sus avisos se pierden.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | Tratarlo como falla de la conexión (cerrar y reabrir desde el último cursor guardado), no saltarlo.                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| RD8 | Bajo      | No verificado (solo se ve en un dispositivo físico)                                                                                                                                                                       | `core/data/…/ready/ReadyAlertsClient.kt:342`; `ReadyAlertsChannel.kt:152`                                                                                             | La detección de la conexión muerta (45 s sin un byte) y la espera creciente son temporizadores sin _wake lock_ ni alarma. En un teléfono real con la pantalla apagada la CPU se suspende: un socket muerto o una espera pueden durar hasta que algo despierte el equipo. Mientras llegan `: ping` el equipo despierta solo; tras un corte no. El emulador no suspende la CPU, así que no se ve en las pruebas.                                                                                                                                                                                                                                                                                                                                                                                                                                    | Medirlo en la Fase E o en un equipo físico (corte de wifi con la pantalla apagada y cuánto tarda en volver). Si hace falta, una alarma `setAndAllowWhileIdle` para la reconexión o _keepalive_ TCP.                                                                                                                                                                                                                                                                                                                                                                               |
+| RD9 | Bajo      | Plausible (diseño aceptado)                                                                                                                                                                                               | `core/domain/…/ready/ReadyAlerts.kt:160-173`; `app/…/ready/ReadyAlertNotifications.kt:130-153`                                                                        | Mostrar y después guardar es lo correcto (decisión 1 de la fase). El reconocimiento tras morir el proceso usa la notificación a la vista: si el mesero la descartó, o el aviso fue dentro de la aplicación, y el proceso muere antes de guardar, el aviso se repite una vez.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | Aceptable; documentarlo junto a la decisión 1.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+
+### Revisado sin encontrar defectos
+
+- **Arranque y exenciones (API 26 a 37)**:
+  - `startForegroundService` desde primer plano (entrada con conexión, aplicación abierta) o con exención
+    (`BOOT_COMPLETED`, `MY_PACKAGE_REPLACED`), con `IllegalStateException`/`SecurityException` atrapadas.
+  - `startForeground` primero, con el tipo `SPECIAL_USE` desde la API 34 y 0 antes.
+  - `START_STICKY` con `intent == null`; `onTaskRemoved` no detiene nada.
+  - `onDestroy` quita la notificación (`STOP_FOREGROUND_REMOVE`) y cancela el canal.
+  - No vi un camino que deje la notificación sin servicio: `refreshOngoing` exige el canal vivo y corre en el hilo
+    principal, como `onDestroy`.
+- **Parada**:
+  - con `active: false`, con el retiro (`DEVICE_REVOKED` → `report` → `retireLocked` → `deviceDataWipe` →
+    `eraseDeviceData`), con «Emparejar de nuevo» o al actualizar (estado no `Ready` → `stopService`);
+  - un pedido de arranque mientras se detiene se recuerda y no se pierde.
+- **Reconexión**:
+  - espera de 2 a 30 s, acortada al volver la red o al entrar un mesero;
+  - `after` y `Last-Event-ID` desde el cursor del último lote procesado;
+  - 45 s sin un byte frente a `: ping` cada 15 s;
+  - el cierre normal a los 5 min se reabre enseguida y uno inmediato cuenta como falla;
+  - 429 lee con `GET` mientras tanto;
+  - tres fallas piden `recheck` (otra dirección; `DEVICE_REQUIRED` termina en «Emparejar de nuevo» por la lista de
+    meseros);
+  - 426 y otra huella informan a la entrada y se detienen;
+  - huella fijada (`PinnedHttpClient` del emparejamiento).
+- **Sin duplicados ni pérdidas dentro del día**:
+  - `distinctBy(key)` en el lote, `unseen` por `key` en Room y un `commit` transaccional de las `key`, el cursor y el
+    estado;
+  - mostrar antes de guardar, con los extras de la notificación para el proceso que muere a la mitad;
+  - un solo proceso y un solo canal (`loop?.isActive`);
+  - la consulta previa nunca mueve el cursor si está activo;
+  - `seenKeys` con `IN` de como mucho 50 grupos (lejos del límite de 999 variables de SQLite en Android 8);
+  - los avisados de días anteriores se borran al cambiar `day_ends_at`.
+- **Convivencia con la A1**:
+  - regla 22: el canal de eventos no cambia y el servicio no lo abre;
+  - la cola solo recibe `retryNow` al reconectar (mismo `REPLACE` de la A1; la clave de operación impide duplicados);
+  - reglas 15–19 sin cambios; la regla 17 se cumple en los diálogos nuevos (`reportsUserActivity`);
+  - sin secretos nuevos (la credencial sale de `AccessRepository`, sellada con el Keystore); Room v6 con sus tablas al
+    final de 5 → 6 y su caso de migración.
+- **Canales, texto y toque**:
+  - A2-D7 con un solo canal visible y el anterior borrado;
+  - A2-D10 con singular y plural;
+  - una notificación por cuenta con el acumulado y un resumen silencioso;
+  - pantalla de bloqueo pública sin precios;
+  - el toque abre la cuenta, deja elegido a su mesero en «¿Quién eres?», sigue una cuenta combinada y dice «Esta
+    cuenta ya no está abierta»;
+  - aviso dentro de la aplicación con la cuenta a la vista.
+- **Contraste con la Parte 1**:
+  - R3: repetidos por `key`, no por `id`;
+  - R6: solo `DEVICE_REVOKED` detiene y el `id: 0` nunca es cursor;
+  - R4: 45 s frente a `: ping`;
+  - R12: el 429 se lee con `GET`;
+  - R10: el toque sigue la combinación;
+  - R2 y R11 dependen del servidor corregido.
+
+### No revisado o no verificado
+
+- Contra el **servidor corregido**: no existe todavía; falta la suite `alerts` (y la nueva medición de batería) cuando
+  se fusione.
+- `BOOT_COMPLETED` real con esta aplicación (RD3), Android 8 y `Pixel_8` en esta fase (la matriz es de la Fase E).
+- Doze real, suspensión de la CPU y gestores de batería de cada marca (RD8).
+- No abrí ningún emulador: lo que encontré se reproduce en la JVM o se lee en el código.
+
+### Pruebas ejecutadas
+
+| Qué                                                                               | Dónde                                  | Resultado                                                                                                                                                                                            |
+| --------------------------------------------------------------------------------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `:core:data:testDebugUnitTest --tests 'com.adelpos.meseros.core.data.ready.*'`    | `$SP/wt/rev`, `ISO_TAG=R`, `--offline` | `ReadyAlertsChannelTest` 13/13, `RoomReadyAlertsLedgerTest` 4/4; **`ReadyAlertsReviewTest` falla** (RD1: «seguía reintentando a los 3 s: 21 intentos, 1 búsquedas de otra dirección, sin detenerse») |
+| `:core:domain:test --tests 'com.adelpos.meseros.core.domain.ready.*'`             | ídem                                   | `ReadyAlertsRulesTest` 18/18                                                                                                                                                                         |
+| `ktfmtFormat` (`core:data`), `ktfmtCheck`, `fmt-check`; md5 de `docs/etapas/*.md` | ídem                                   | Correctos; idénticos                                                                                                                                                                                 |
+
+Commit: `ed34942` («etapa A2 revisión §4 (dispositivo): reproducción RD1 en ReadyAlertsReviewTest…»), solo el archivo de
+prueba. Sin emuladores ni Go temporal en esta parte; árbol limpio.
+
+### Decisiones del coordinador sobre la revisión independiente
+
+- **Parte 1 (servidor)**: R1 a R12 se corrigieron con el protocolo acordado (`$SP/briefs/correcciones-R-servidor.md`):
+  clave `key` por aviso para descartar repetidos (el `id` queda solo como cursor), canal que solo envía con novedades,
+  `: ping` cada 15 s y cierre a los 5 minutos, un canal nuevo que reemplaza al anterior (sin 429), `interrupted` con
+  código, presencia del mesero y avisos solo posteriores a su entrada en el dispositivo, destinatario fijado solo entre
+  dispositivos que pueden recibirlo, índices parciales de `sessions` y la unidad que queda lista porque se canceló la
+  parte pendiente. R9 (un corte que cruza la hora de inicio del día) queda como regla del día comercial. Las
+  reproducciones del revisor (`TestStageA2ReadyReview`) pasan y se quedan como pruebas de regresión.
+- **A2-D12 (RD1 y RD2, precisa §4.3)**: una sesión con PIN creada **antes** del inicio del día comercial en curso solo
+  cuenta (para `active`, para «entró en el dispositivo» y para fijar el dispositivo) si sigue vigente y se usó en los
+  últimos **30 minutos**; las creadas desde el inicio del día cuentan como siempre. Así se cubre al mesero que trabaja
+  justo en el cambio de día sin que las sesiones de 12 h mantengan el servicio vivo toda la noche. En el dispositivo,
+  pasado `day_ends_at` + 10 minutos, si no alcanza a Go y ningún mesero lo está usando, el servicio **se detiene sin
+  mover el cursor**; lo reabren la siguiente entrada con PIN con conexión o abrir la app, y lo de mientras llega desde
+  el cursor. Así se cumple «se detiene al cerrar el día comercial» sin perder avisos.
+- **Parte 2 (dispositivo)**: RD1 y RD3 a RD7 se corrigen en la Fase D (sección siguiente); RD8 (temporizadores sin
+  _wake lock_ en un equipo real) queda como no verificado sin dispositivo físico y RD9 (una repetición única si el
+  proceso muere entre mostrar y guardar un aviso ya descartado) como diseño aceptado.
+- Verificación del coordinador de A2-D12 sobre una copia exacta de `b91ae66`: `fmt-check`, `sync-check`, `go-unit`,
+  `go-int` de `apicontract`, `database` y `kitchen` completos, `TestStageA2Ready*` (`operations`) y
+  `TestStageTwoAcceptance` y `TestStageA1WaiterPIN` (`administration`), todo aprobado.
