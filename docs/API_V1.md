@@ -715,20 +715,30 @@ sin conexión.
 
 ## Avisos de platillos listos (etapa A2, parte D)
 
-Capacidad **`ready-alerts-v1`** (servidor 0.13.0, esquema 26; decisiones A2-D4 y A2-D9). Cuando cocina marca «Listo»
-en el KDS (una unidad, el pedido de una estación o la cuenta completa), Go registra cada unidad que pasó a «Listo» en
-la misma transacción que el evento `restaurant.account.preparation_changed` (tabla `app.ready_notices`, una vez por
-unidad y versión) con el **responsable de la cuenta en ese momento**. El dispositivo los lee con **solo su credencial**
-(`X-Device-ID` y `X-Device-Token`, sin sesión: llegan aunque esté en «¿Quién eres?» o con la aplicación cerrada, desde
-su servicio en primer plano). Si la cocina no usa el KDS, no hay avisos.
+Capacidad **`ready-alerts-v1`** (servidor 0.13.0, esquema 26; decisiones A2-D4 y A2-D9, con las correcciones de la
+revisión independiente). Cuando cocina marca «Listo» en el KDS (una unidad, el pedido de una estación o la cuenta
+completa), o cuando una unidad queda con todas sus partes listas porque en esa misma operación se canceló la que
+faltaba, Go registra cada unidad que pasó a «Listo» en la misma transacción que el evento
+`restaurant.account.preparation_changed` (tabla `app.ready_notices`, una vez por unidad y versión) con el **responsable
+de la cuenta en ese momento**. El dispositivo los lee con **solo su credencial** (`X-Device-ID` y `X-Device-Token`, sin
+sesión: llegan aunque esté en «¿Quién eres?» o con la aplicación cerrada, desde su servicio en primer plano). Si la
+cocina no usa el KDS, no hay avisos.
 
-1. **A quién llega** (lo decide Go): un aviso es para el dispositivo D si su mesero M **entró con PIN en D durante el
-   día comercial en curso** (desde la «Hora de inicio del día» de Administración) y además, **en el momento del
-   «Listo»**, M tenía en D su sesión con PIN vigente de actividad más reciente entre sus dispositivos android, **o** no
-   tenía ninguna vigente (entonces llega a todos los dispositivos donde M entró hoy). Cerrar la sesión con `logout`
-   deja de contar desde ese momento. Una entrada con PIN **sin conexión** no le dice nada a Go: ese mesero no recibe
-   avisos en ese dispositivo hasta su primera entrada con conexión. Transferir la cuenta cambia el destinatario de lo
-   que todavía no estaba listo.
+1. **A quién llega** (lo decide Go). El mesero M **está en** el dispositivo D si tiene en D una sesión con PIN
+   **vigente** o **creada desde el inicio del día comercial en curso** (la «Hora de inicio del día» de Administración);
+   es la misma regla que `active`. Un aviso de M llega a D si:
+   - M está en D y el aviso es **posterior a la entrada de M en D** (su primera sesión con PIN en D que cuente): un
+     dispositivo nuevo, o una lectura sin cursor, no recibe lo que se marcó «Listo» antes de que M entrara en él;
+   - y el aviso quedó **para D o para todos**: al registrar el «Listo», Go lo fija al dispositivo de la sesión con PIN
+     vigente de actividad más reciente de M, pero solo entre dispositivos `android` no retirados, con «Avisar platillos
+     listos» activado y, si Go conoce su versión, 0.2.0 o posterior. Si ninguno sirve (por ejemplo, M cerró su sesión
+     con `logout` o su dispositivo tiene el aviso apagado), el aviso es para todos los dispositivos donde M está.
+
+   Cerrar la sesión con `logout` hace que los «Listo» siguientes ya no se fijen a ese dispositivo; como M entró en él
+   hoy, sigue recibiendo los que quedan para todos hasta el fin del día comercial. Una entrada con PIN **sin conexión**
+   no le dice nada a Go: ese mesero no recibe avisos en ese dispositivo hasta su primera entrada con conexión.
+   Transferir la cuenta cambia el destinatario de lo que todavía no estaba listo.
+
 2. **`getReadyAlerts`** (`GET /ready-alerts?after=<cursor>`) → **`ReadyAlertsBatch`**:
 
    ```json
@@ -740,6 +750,7 @@ su servicio en primer plano). Si la cocina no usa el KDS, no hay avisos.
      "alerts": [
        {
          "id": 812,
+         "key": "5f0c2d6e-3b1a-4c8e-9f27-6d4b1a0e7c35",
          "account_id": "…",
          "mode": "dine_in",
          "table_name": "Mesa 4",
@@ -757,29 +768,42 @@ su servicio en primer plano). Si la cocina no usa el KDS, no hay avisos.
    - Un aviso es lo que cocina marcó «Listo» en una cuenta **en una misma operación**, agrupado por platillo
      (`product_name` es el nombre visible del producto con su presentación, `quantity` las unidades). En un pedido para
      llevar `table_name` es `null` y `customer_name` el nombre capturado. **Nunca trae precios ni importes.**
-   - **`cursor`** es el último aviso que Go revisó para el dispositivo, le corresponda o no: el dispositivo lo guarda y
-     vuelve con `after=<cursor>`; lo que se registró mientras no estuvo llega entonces, **una sola vez**. Hasta 50
-     avisos por respuesta (con más, `cursor` es el del último entregado y el resto llega en la siguiente).
-   - **`id`** crece con el cursor. Releer desde un cursor anterior devuelve los mismos `id`: el dispositivo descarta los
-     que ya avisó (guarda los del día).
-   - **`active`**: `true` si «Avisar platillos listos» está activado y hay un mesero con sesión con PIN vigente en el
-     dispositivo o que entró en él con PIN durante el día comercial en curso; si no, `false`, sin avisos (no es un
-     error) y el cursor avanza (al volver a activarse no llegan avisos viejos). El servicio en primer plano se detiene
-     con `active: false`.
-   - **`day_ends_at`**: fin del día comercial en curso; ahí dejan de contar los meseros que entraron hoy y los avisos
-     de ese día.
+   - **`key`** es la clave del aviso: única y **nunca se reutiliza**, ni siquiera tras restaurar un respaldo. El
+     dispositivo descarta por `key` los que ya avisó (guarda las del día).
+   - **`id`** es solo el cursor (crece con él; tras restaurar un respaldo un número puede repetirse con otro aviso).
+     **`cursor`** es el último aviso que Go revisó para el dispositivo, le corresponda o no: el dispositivo lo guarda y
+     vuelve con `after=<cursor>`; lo que se registró mientras no estuvo llega entonces. Hasta 50 avisos por respuesta
+     (con más, `cursor` es el del último entregado y el resto llega en la siguiente). Un cursor mayor que el último
+     aviso registrado (la base volvió atrás) se lee desde el inicio del día comercial; `key` evita los repetidos.
+   - **`account_id`** es la cuenta vigente: si la cuenta se combinó en otra, la de destino. Las unidades que se
+     cancelaron después del «Listo» ya no aparecen en `items`, y un aviso cuyas unidades se cancelaron todas no se
+     manda (el cursor avanza igual). Al tocar un aviso de una cuenta que ya se cerró o se canceló, la aplicación muestra
+     «Esta cuenta ya no está abierta».
+   - **`active`**: `true` si «Avisar platillos listos» está activado y algún mesero está en el dispositivo (sesión con
+     PIN vigente o creada desde el inicio del día comercial); si no, `false`, sin avisos (no es un error) y el cursor
+     avanza (al volver a activarse no llegan avisos viejos). El servicio en primer plano se detiene con
+     `active: false`.
+   - **`day_ends_at`**: fin del día comercial en curso. Los avisos cuentan en el día comercial de su `ready_at`: al
+     llegar la hora de inicio del día siguiente dejan de contar los meseros que entraron en el día anterior (salvo que
+     su sesión siga vigente) y **los avisos del día anterior que no se entregaron ya no llegan**. Un corte de red que
+     cruza esa hora pierde lo que se marcó «Listo» en los últimos minutos del día anterior (con la hora de inicio de
+     madrugada casi nunca pasa); es la regla del día comercial.
    - **`settings`**: «Avisar platillos listos», «Sonido» y «Vibración» de Terminales › Editar (también en
      `terminal.ready_alerts_*` de `getIdentity` y `getRecoveryState`).
    - Errores: **401 `DEVICE_REVOKED`** (retirado; dejar de escuchar), 401 `DEVICE_REQUIRED`, **403
      `READY_ALERTS_DEVICE_NOT_ALLOWED`** (no es un teléfono o tableta de meseros), 400 con un cursor inválido o un
      parámetro desconocido, 401 `OFFLINE_CREDENTIAL_NOT_ALLOWED` con la credencial de envío.
 
-3. **`streamReadyAlerts`** (`GET /ready-alerts/stream?after=<cursor>` o con `Last-Event-ID`): como `streamEvents`,
-   mensajes `event: alerts` con `id: <cursor>` y `data: <ReadyAlertsBatch>` cada 750 ms; dura 30 s y el dispositivo se
-   vuelve a conectar desde el último `id`. **Un solo canal por dispositivo** (aparte de los dos de eventos): otro
-   mientras sigue abierto responde **429 `READY_ALERTS_CONNECTION_LIMIT`** (esperar unos segundos y reconectar; el
-   anterior se cierra solo). Cada lectura revalida el dispositivo: si ya no vale, `event: interrupted` con `id: 0` y
-   `{"error", "status"}`, y termina.
+3. **`streamReadyAlerts`** (`GET /ready-alerts/stream?after=<cursor>` o con `Last-Event-ID`): SSE con la misma lectura.
+   Go revisa la base cada 750 ms, pero **solo manda** `event: alerts` (con `id: <cursor>` y `data: <ReadyAlertsBatch>`)
+   al abrir y cuando hay avisos nuevos o cambian `active`, `settings` o `day_ends_at`; en silencio manda el comentario
+   SSE `: ping` cada **15 s** (para saber que la conexión sigue viva). El canal dura **5 minutos** y el dispositivo lo
+   vuelve a abrir de inmediato con `Last-Event-ID`. **Un canal nuevo del mismo dispositivo reemplaza al anterior** (el
+   viejo se cierra): tras un cambio de red no hay que esperar. Cada lectura revalida el dispositivo: si falla, manda
+   `event: interrupted` **sin `id`** (el cursor no cambia) con `data: {"code": "…"}` y termina. Solo
+   **`DEVICE_REVOKED`** (o un 401 `DEVICE_REVOKED` al abrir) significa que el dispositivo se retiró; con cualquier otro
+   código (`TEMPORARY` si la base no respondió a tiempo, o el código del rechazo) se reconecta con espera creciente.
+   Al abrir, los errores son los de `getReadyAlerts`.
 
 ## Códigos de error más frecuentes
 
@@ -803,7 +827,6 @@ su servicio en primer plano). Si la cocina no usa el KDS, no hay avisos.
 | `OFFLINE_ORDER_ALREADY_ACCEPTED`                         | 409    | El pedido sin conexión (o su «Enviar a cocina», `details.origin`) ya entró: usar `details.result`, no capturarlo otra vez. |
 | `PRINTER_NOT_CONFIGURED`, `PRINTER_UNAVAILABLE`          | 409    | Sin impresora válida para la precuenta; con `details.scope: "device"`, la del dispositivo (se elige en Terminales).        |
 | `READY_ALERTS_DEVICE_NOT_ALLOWED`                        | 403    | Los avisos de platillos listos solo llegan a teléfonos y tabletas de meseros.                                              |
-| `READY_ALERTS_CONNECTION_LIMIT`                          | 429    | El dispositivo ya tiene abierto su canal de avisos: reconectar en unos segundos.                                           |
 | `PRINT_NOT_FAILED`                                       | 409    | La precuenta no tiene una impresión fallida que reintentar.                                                                |
 | `BALANCE_PENDING`                                        | 409    | El pedido para llevar tiene saldo: cobrarlo en la caja antes de marcarlo como entregado.                                   |
 | `ALREADY_DELIVERED`                                      | 409    | El pedido para llevar ya estaba entregado: volver a leerlo.                                                                |
