@@ -42,6 +42,8 @@ import com.adelpos.meseros.core.ui.catalog.productTag
 import com.adelpos.meseros.core.ui.components.TAG_PIN_KEY_PREFIX
 import com.adelpos.meseros.core.ui.components.TAG_PIN_PAD
 import com.adelpos.meseros.core.ui.components.TAG_PIN_SUBMIT
+import com.adelpos.meseros.core.ui.components.TAG_WAITER_MENU
+import com.adelpos.meseros.core.ui.components.TAG_WAITER_SWITCH
 import com.adelpos.meseros.core.ui.layout.TAG_PANE_BACK
 import com.adelpos.meseros.core.ui.layout.TAG_PANE_OPEN_SECONDARY
 import com.adelpos.meseros.feature.access.findserver.TAG_ADDRESS
@@ -57,6 +59,7 @@ import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_SEARCH
 import com.adelpos.meseros.feature.waiter.tables.TAG_TABLE_PREFIX
 import com.adelpos.meseros.ready.ReadyAlertNotifications
 import com.adelpos.meseros.ready.ReadyAlertsService
+import com.adelpos.meseros.ready.TAG_ALERTS_OFF
 import com.adelpos.meseros.ready.TAG_IN_APP
 import com.adelpos.meseros.ready.TAG_PERMISSION
 import com.adelpos.meseros.ready.TAG_PERMISSION_LATER
@@ -111,6 +114,9 @@ import org.junit.runner.RunWith
  * - `r8` deja el servicio corriendo con una cuenta enviada a cocina: **el guion** abre la
  *   aplicación, mata el proceso, espera el reinicio pegajoso, marca «Listo» desde la Mac y busca el
  *   aviso con `dumpsys notification --noredact`.
+ * - `r10` (antes de `r9`) en «¿Quién eres?», sin mesero activo, con la pantalla encendida (más que
+ *   el periodo de 5 minutos del catálogo) y apagada, la aplicación **no** usa la sesión del último
+ *   mesero: Go no renueva su `last_seen_at` (A2-D12: así, de noche, Go responde `active: false`).
  * - `r9` al retirar el dispositivo el servicio se detiene y se borran sus datos.
  *
  * Argumentos: `local`, `address`, `net`, `pin`, `mainDevice` y `mainToken` (los arma el guion). Sin
@@ -187,6 +193,19 @@ class AlertsOnGoTest {
                 Thread.sleep(SETTLE_MILLIS)
             }
             assertFalse("no se vuelve a preguntar", present(TAG_PERMISSION))
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                // RD6: sin notificaciones, un aviso discreto arriba de Mesas; en la siguiente
+                // entrada con conexión se vuelve a ofrecer el permiso (solo ese, una vez).
+                waitFor(TAG_ALERTS_OFF)
+                compose.onNodeWithTag(TAG_WAITER_MENU).performClick()
+                compose.onNodeWithTag(TAG_WAITER_SWITCH).performClick()
+                enter(ids.getValue("ana"), ANA_PIN)
+                waitFor(TAG_PERMISSION, timeout = 30_000)
+                compose.onNodeWithTag(TAG_PERMISSION_LATER).performClick()
+                compose.waitForIdle()
+                Thread.sleep(SETTLE_MILLIS)
+                assertFalse("una sola vez por entrada", present(TAG_PERMISSION))
+            }
         }
         // El permiso se concede aquí (no con el diálogo de Android): como lo haría la respuesta
         // del diálogo, se vuelve a publicar la notificación permanente.
@@ -442,6 +461,59 @@ class AlertsOnGoTest {
         }
         // El guion toma esta cuenta para marcarla «Listo» después del reinicio pegajoso.
         log("r8 cuenta=$accountId")
+    }
+
+    @Test
+    fun r10_enQuienEresNoSeUsaLaSesionDelUltimoMesero() {
+        val ids = loadIds()
+        grantNotifications()
+        launch()
+        enter(ids.getValue("ana"), ANA_PIN)
+        waitForService()
+        // Con Ana en Mesas, la aplicación usa su sesión (canal de eventos, mesas, catálogo).
+        Thread.sleep(QUIET_MILLIS)
+        tap(TAG_WAITER_MENU)
+        tap(TAG_WAITER_SWITCH)
+        waitFor("$TAG_WAITER_PREFIX${ids.getValue("ana")}")
+        assertNull(container.deviceAccess.activeWaiter.value)
+        // Lo que iba en camino termina; desde aquí no debe haber ninguna petición con su sesión.
+        Thread.sleep(QUIET_MILLIS)
+        val deviceId = container.deviceAccess.deviceCredentials()!!.deviceId
+        val before = lastSeen(deviceId)
+        log("r10: última actividad de la sesión de Ana al pasar a «¿Quién eres?»: $before")
+        Thread.sleep(WHO_SCREEN_ON_MILLIS)
+        val screenOn = lastSeen(deviceId)
+        shell("input keyevent ${KeyEvent.KEYCODE_SLEEP}")
+        try {
+            Thread.sleep(WHO_SCREEN_OFF_MILLIS)
+        } finally {
+            shell("input keyevent ${KeyEvent.KEYCODE_WAKEUP}")
+            shell("wm dismiss-keyguard")
+        }
+        val screenOff = lastSeen(deviceId)
+        assertEquals("con la pantalla encendida no se usó la sesión de Ana", before, screenOn)
+        assertEquals("con la pantalla apagada no se usó la sesión de Ana", before, screenOff)
+        // El aviso sigue con la credencial del dispositivo (no es una sesión de mesero).
+        assertTrue(serviceRunning())
+        log(
+            "r10: sin uso de la sesión de Ana en ${WHO_SCREEN_ON_MILLIS + WHO_SCREEN_OFF_MILLIS} ms",
+        )
+    }
+
+    /** `last_seen_at` de la sesión vigente más reciente de Ana en este dispositivo (Go). */
+    private fun lastSeen(deviceId: String): String {
+        val session =
+            ok("GET", "sessions")
+                .body
+                .jsonArray
+                .map { it.jsonObject }
+                .filter {
+                    it.text("username") == ANA_USER &&
+                        it.text("device_id") == deviceId &&
+                        it["revoked_at"] is JsonNull
+                }
+                .maxBy { it.text("created_at") }
+        return session.text("last_seen_at")
     }
 
     @Test
@@ -963,6 +1035,10 @@ class AlertsOnGoTest {
         const val SETTLE_MILLIS = 1_500L
         const val REVEAL_EVERY_MILLIS = 1_000L
         const val QUIET_MILLIS = 5_000L
+
+        /** `r10`: más que el periodo del catálogo (5 minutos) con la pantalla encendida. */
+        const val WHO_SCREEN_ON_MILLIS = 330_000L
+        const val WHO_SCREEN_OFF_MILLIS = 120_000L
 
         /** Lo crea el guion (como shell) cuando ya marcó «Listo» y devolvió la red en `r4`. */
         const val CUT_DONE_FILE = "/data/local/tmp/adelpos-r4-listo"

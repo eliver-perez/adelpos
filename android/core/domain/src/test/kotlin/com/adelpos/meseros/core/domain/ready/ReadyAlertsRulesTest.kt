@@ -311,14 +311,33 @@ class ReadyAlertsRulesTest {
     }
 
     @Test
+    fun pasadoElFinDelDiaSinGoYSinNadieUsandoloSeDetiene() {
+        val margin = ReadyAlertsLifecycle.DAY_END_STOP_MILLIS
+        fun over(lastReached: Long?, now: Long, inUse: Boolean = false) =
+            ReadyAlertsLifecycle.dayOverWithoutGo(DAY_ENDS, lastReached, now, inUse)
+        // A2-D12: diez minutos después del fin del día, sin haber alcanzado a Go desde entonces.
+        assertTrue(over(lastReached = null, now = DAY_ENDS + margin))
+        assertTrue(over(lastReached = DAY_ENDS - 1, now = DAY_ENDS + margin + 60_000))
+        // Antes del margen, sigue reintentando.
+        assertFalse(over(lastReached = null, now = DAY_ENDS + margin - 1))
+        // Go respondió después del fin del día: él decide (active).
+        assertFalse(over(lastReached = DAY_ENDS + 1, now = DAY_ENDS + margin + 60_000))
+        // Un mesero lo está usando: no se detiene aunque Go no responda.
+        assertFalse(over(lastReached = null, now = DAY_ENDS + 3_600_000, inUse = true))
+        // Sin fin de día conocido, no hay de dónde contar.
+        assertFalse(ReadyAlertsLifecycle.dayOverWithoutGo(null, null, DAY_ENDS + margin, false))
+    }
+
+    @Test
     fun queHacerAnteCadaError() {
         assertEquals(
             ErrorAction.STOP_AND_REPORT,
             ReadyAlertsLifecycle.onError(AppError.DeviceRevoked(null, null)),
         )
-        // Solo DEVICE_REVOKED es «retirado»; cualquier otro rechazo de la credencial es temporal.
+        // Al abrir o leer, un 401 DEVICE_REQUIRED es como en las demás rutas (se avisa a la
+        // entrada).
         assertEquals(
-            ErrorAction.RETRY,
+            ErrorAction.STOP_AND_REPORT,
             ReadyAlertsLifecycle.onError(
                 AppError.DeviceNotRecognized("DEVICE_REQUIRED", null, null),
             ),

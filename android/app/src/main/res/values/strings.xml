@@ -11,6 +11,7 @@
     <string name="ready_channel_ready_name">Platillos listos</string>
     <string name="ready_channel_ready_description">Avisa cuando la cocina marca «Listo» los platillos de tus cuentas.</string>
     <string name="ready_ongoing_title">AD-EL POS conectado</string>
+    <string name="ready_ongoing_connecting">Conectando con la computadora principal…</string>
     <string name="ready_ongoing_connected">Recibiendo avisos de platillos listos</string>
     <string name="ready_ongoing_waiting">Sin conexión con la computadora principal. Reintentando…</string>
     <string name="ready_alert_dish_one">platillo listo</string>
@@ -31,6 +32,8 @@
     <string name="ready_permission_battery_text">Para que los avisos lleguen con la pantalla apagada, permite que AD-EL POS funcione sin la optimización de batería. Gasta muy poca: solo mantiene la conexión con la computadora principal del restaurante. En el siguiente mensaje elige «Permitir».</string>
     <string name="ready_permission_continue">Continuar</string>
     <string name="ready_permission_later">Ahora no</string>
+    <string name="ready_alerts_off_notice">Las notificaciones de AD-EL POS están desactivadas: los avisos de platillos listos no se verán.</string>
+    <string name="ready_alerts_off_help">Cómo activarlas</string>
 
     <!-- Se tocó el aviso de una cuenta que ya no está abierta. -->
     <string name="ready_open_closed_title">Esta cuenta ya no está abierta</string>
