@@ -6,6 +6,7 @@ import com.adelpos.meseros.core.data.waiter.CustomerEditSender
 import com.adelpos.meseros.core.data.waiter.OrderQueueRepository
 import com.adelpos.meseros.core.data.waiter.OrderSender
 import com.adelpos.meseros.core.data.waiter.OrdersInFlight
+import com.adelpos.meseros.core.data.waiter.PrecheckRepository
 import com.adelpos.meseros.core.data.waiter.RestaurantRepository
 import com.adelpos.meseros.core.data.waiter.SentLineRepository
 import com.adelpos.meseros.core.data.waiter.ServerClock
@@ -22,19 +23,22 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 /**
  * El modo Mesero (Fase E), una instancia por proceso: mesas y cuentas ([restaurant]), capturas
  * ([captures]), la cola ([queue], creada antes en `AppContainer` porque la entrada al dispositivo
  * la necesita), modificar o cancelar lo enviado ([sentLines]) y, desde la A2, Para llevar
- * ([takeaway] y el envío de las ediciones del cliente, [customerEdits]). Todo habla con Go con las
- * cabeceras del mesero dueño de cada operación ([server]).
+ * ([takeaway] y el envío de las ediciones del cliente, [customerEdits]) y la precuenta desde el
+ * dispositivo ([precheck]). Todo habla con Go con las cabeceras del mesero dueño de cada operación
+ * ([server]).
  *
  * [start] (desde `AdelPosApplication`) recupera la cola después de un reinicio y pide envíos al
  * volver la red, al volver a primer plano y cuando un mesero vuelve a entrar con conexión.
@@ -108,6 +112,19 @@ class WaiterModeContainer(
     /** Envía las ediciones del cliente de Para llevar (lo usa el trabajador de la cola). */
     val customerEdits: CustomerEditSender = CustomerEditSender(dao, server, api)
 
+    /** Imprimir la precuenta desde el dispositivo (etapa A2, Fase C): nunca entra en la cola. */
+    val precheck: PrecheckRepository =
+        PrecheckRepository(
+            dao = dao,
+            server = server,
+            api = api,
+            connected =
+                linkState
+                    .map { it == LinkState.ONLINE }
+                    .stateIn(scope, SharingStarted.Eagerly, true),
+            scope = scope,
+        )
+
     fun start() {
         if (started) {
             return
@@ -115,6 +132,7 @@ class WaiterModeContainer(
         started = true
         captures.start()
         restaurant.start()
+        precheck.start()
         scope.launch {
             // Lo que quedó «Enviando» al cerrarse el proceso vuelve a la cola con su clave.
             queue.recoverAfterRestart()

@@ -131,4 +131,33 @@
     <string name="customer_save">Guardar</string>
     <string name="customer_none">Sin nombre ni teléfono</string>
     <string name="customer_pending">Se guardará en la computadora principal en cuanto haya conexión.</string>
+
+    <!-- Imprimir la precuenta desde la cuenta (etapa A2, Fase C): el nombre visible y lo que dice Go. -->
+    <string name="precheck_print_precheck">Imprimir precuenta</string>
+    <string name="precheck_print_sales_ticket">Imprimir ticket de venta</string>
+    <string name="precheck_print_bill">Imprimir cuenta</string>
+    <string name="precheck_sending">Enviando…</string>
+    <string name="precheck_destination">Se imprime en %1$s.</string>
+    <string name="precheck_no_printer_known">Este dispositivo todavía no tiene impresora asignada.</string>
+    <string name="precheck_sent">Enviada a %1$s</string>
+    <string name="precheck_sent_masculine">Enviado a %1$s</string>
+    <string name="precheck_sent_any">Enviada a la impresora</string>
+    <string name="precheck_sent_masculine_any">Enviado a la impresora</string>
+    <string name="precheck_terminal_offline">La %1$s está desconectada.</string>
+    <string name="precheck_terminal_offline_named">La terminal %1$s está desconectada.</string>
+    <string name="precheck_terminal_offline_unknown">La terminal de la impresora está desconectada.</string>
+    <string name="precheck_terminal_offline_hint">Se imprimirá en cuanto esa terminal esté encendida y con AD-EL POS abierto; no hace falta reintentar.</string>
+    <string name="precheck_not_responding">La impresora no responde.</string>
+    <string name="precheck_not_responding_hint">Revisa que esté encendida, con papel y conectada, y toca «Reintentar».</string>
+    <string name="precheck_needs_review">La impresora necesita revisión: avisa al administrador.</string>
+    <string name="precheck_check_paper">No se sabe si salió en papel. Revisa la impresora antes de imprimir otra vez.</string>
+    <string name="precheck_cancelled">Se canceló la impresión en la computadora principal.</string>
+    <string name="precheck_no_printer">Este dispositivo no tiene impresora asignada.</string>
+    <string name="precheck_no_printer_hint">Pídele al administrador que la elija en Administración › Sistema › Terminales.</string>
+    <string name="precheck_printer_unavailable">La impresora de este dispositivo no puede imprimir ahora.</string>
+    <string name="precheck_ask_admin_hint">Pídele al administrador que la revise en Administración › Sistema › Terminales.</string>
+    <string name="precheck_no_connection">Para imprimir necesitas conexión con la computadora principal.</string>
+    <string name="precheck_no_permission">No tienes permiso para imprimir.</string>
+    <string name="precheck_failed">No se pudo imprimir. Intenta de nuevo.</string>
+    <string name="precheck_retry">Reintentar</string>
 </resources>

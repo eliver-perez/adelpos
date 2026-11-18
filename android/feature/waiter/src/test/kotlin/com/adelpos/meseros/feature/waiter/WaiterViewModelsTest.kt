@@ -20,6 +20,10 @@ import com.adelpos.meseros.core.domain.waiter.DiningTable
 import com.adelpos.meseros.core.domain.waiter.DraftLine
 import com.adelpos.meseros.core.domain.waiter.DraftOperation
 import com.adelpos.meseros.core.domain.waiter.OrderMode
+import com.adelpos.meseros.core.domain.waiter.PrecheckPrintState
+import com.adelpos.meseros.core.domain.waiter.PrecheckPrinting
+import com.adelpos.meseros.core.domain.waiter.PrintAnswer
+import com.adelpos.meseros.core.domain.waiter.PrintMessage
 import com.adelpos.meseros.core.domain.waiter.TableShape
 import com.adelpos.meseros.core.domain.waiter.TakeawayCustomer
 import com.adelpos.meseros.core.domain.waiter.Totals
@@ -28,12 +32,14 @@ import com.adelpos.meseros.feature.waiter.tables.TablesViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -263,5 +269,73 @@ class WaiterViewModelsTest {
                 CustomerView(TakeawayCustomer("Juan Pérez", "555"), pending = true),
                 model.customer.value,
             )
+        }
+
+    /**
+     * La precuenta desde la cuenta (etapa A2, Fase C): al abrir la cuenta se vuelven a leer el
+     * nombre visible y la impresora; sin red o sin sesión no se puede imprimir; «Enviada a…» se
+     * sigue unos segundos sin bloquear la captura; «Reintentar» solo si nunca salió en papel; y
+     * otra cuenta olvida lo de la anterior.
+     */
+    @Test
+    fun capturaImprimeLaPrecuentaYSigueElTrabajo() =
+        runTest(dispatcher) {
+            val fake = FakeWaiter(Catalog.EMPTY)
+            fake.captureFlow.value =
+                FakeWaiter.emptyCapture("captura-1", "t1").copy(accountId = "c1")
+            val saved = SavedStateHandle(mapOf(CaptureViewModel.KEY_CAPTURE_ID to "captura-1"))
+            val model = CaptureViewModel(fake.captureDependencies(), saved)
+            advanceUntilIdle()
+            assertEquals(listOf("ana"), fake.setupReads)
+            assertTrue(model.canPrintNow.value)
+
+            // Sin red, o sin sesión de Go (entró sin conexión), no se puede imprimir.
+            fake.connected.value = false
+            advanceUntilIdle()
+            assertFalse(model.canPrintNow.value)
+            fake.connected.value = true
+            fake.active.value = fake.active.value!!.copy(hasServerSession = false)
+            advanceUntilIdle()
+            assertFalse(model.canPrintNow.value)
+            fake.active.value = fake.active.value!!.copy(hasServerSession = true)
+            advanceUntilIdle()
+            assertTrue(model.canPrintNow.value)
+
+            // La impresora de red no responde: «Reintentar» sin motivo la misma precuenta.
+            fake.printAnswers.add(PrintAnswer.Queued("t1", "j1", "pending", null, "Red", null))
+            fake.statusAnswers.add(PrintAnswer.Status("error", "unreachable", "Red", null))
+            fake.retryAnswers.add(PrintAnswer.Queued("t1", "j1", "pending", null, "Red", null))
+            fake.statusAnswers.add(PrintAnswer.Status("submitted", null, "Red", null))
+            model.onPrintPrecheck()
+            advanceTimeBy(1)
+            assertEquals(PrintMessage.SentTo("Red"), model.precheckState.value.message)
+            assertTrue(model.precheckState.value.following)
+            // Mientras se sigue, la captura sigue igual (nada espera a la impresora).
+            model.onSearchTextChange("taco")
+            assertEquals("taco", model.searchText)
+            advanceTimeBy(PrecheckPrinting.POLL_MILLIS + 1)
+            assertEquals(PrintMessage.NotResponding("Red"), model.precheckState.value.message)
+            assertTrue(model.precheckState.value.canRetry)
+            model.onRetryPrecheck()
+            advanceTimeBy(PrecheckPrinting.POLL_MILLIS + 2)
+            assertEquals(listOf("t1"), fake.retried)
+            assertEquals(PrintMessage.SentTo("Red"), model.precheckState.value.message)
+            assertFalse(model.precheckState.value.canRetry)
+            assertEquals("c1", fake.printed.single().first)
+
+            // Otra vez «Imprimir»: otra precuenta con otra clave (como en la caja).
+            fake.printAnswers.add(
+                PrintAnswer.Rejected(409, "PRINTER_NOT_CONFIGURED", "Este dispositivo…"),
+            )
+            model.onPrintPrecheck()
+            advanceUntilIdle()
+            assertEquals(PrintMessage.NoPrinter, model.precheckState.value.message)
+            assertEquals(2, fake.printed.map { it.second }.toSet().size)
+
+            // La captura pasó a otra cuenta: se olvida lo de la anterior.
+            fake.captureFlow.value =
+                FakeWaiter.emptyCapture("captura-1", "t1").copy(accountId = "c2")
+            advanceUntilIdle()
+            assertEquals(PrecheckPrintState.IDLE, model.precheckState.value)
         }
 }
