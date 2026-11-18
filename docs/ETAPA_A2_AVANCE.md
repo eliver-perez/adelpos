@@ -2575,3 +2575,341 @@ prueba. Sin emuladores ni Go temporal en esta parte; árbol limpio.
 `ReadyAlertsReviewTest` que ahora pasa, y la fusión de `61b8ba1` con A2-D12) en la etapa, sin cambios fuera de
 `android/`, `scripts/android-e2e.sh`, `docs/ANDROID_INSTALAR.md` y el avance. Con esto, el código de Android de la
 etapa queda completo para la Fase E.
+
+## Fase E · Pruebas de punta a punta en los cuatro emuladores
+
+Árbol `$SP/wt/e`, rama `etapa-a2-e` desde `etapa-a2-android`, 18 de noviembre de 2026. Es la **parte de Android de la
+regresión completa de la etapa**: todo se corrió sobre **un solo commit, `03a90e6`** («etapa A2: avance de la Fase D al
+día…», la cabeza de `etapa-a2-android` con las fases A–D y las correcciones de la revisión fusionadas). No se cambió
+nada del repositorio (árbol limpio al terminar, sin commits de esta fase); `md5` de `docs/etapas/*.md` igual antes y
+después. Mientras tanto otro agente corría la regresión del servidor y el escritorio en la misma Mac (Go con `-race`,
+integración, Vitest, Playwright): la Mac estuvo cargada todo el tiempo. Como mucho dos emuladores encendidos a la vez.
+
+**Resultado.** En la Mac, 344 pruebas de la JVM, lint y los tres APK sin fallas. En **los cuatro emuladores**, 134
+instrumentadas sin fallas y **`--suite all` 68 de 68** en `Pixel_8`, `Pixel_Tablet` y `ADEL_A1_Phone_API33`; en
+`ADEL_A1_Tablet_API26` (Android 8.0) **67 de 68**: `alerts r4` falló una vez porque el corte del guion es más corto
+que la detección de conexión muerta cuando `svc` no aborta el socket, y **pasó al repetirlo** y con un corte de 64 s
+(el aviso llegó una sola vez): es de la prueba, no del producto. Lo que las suites no cubrían también pasó: paso de la
+0.1.0 a la 0.2.0 siguiendo la guía (la guía dice lo que pasa), `BOOT_COMPLETED` con un reinicio real en Android 17 y
+8.0 (el servicio vuelve solo y el aviso llega), el servicio y el aviso en Android 8 con el corte por root, y el diálogo
+real del permiso de notificaciones en Android 13 (negar y después permitir). Batería: una hora en Android 17 con seis
+«Listo», ≈ 182 KB de red, 183 despertares del radio, 2,9 s de CPU, sin alarmas y solo los _wake locks_ del sistema
+al publicar notificaciones (2,2 s) (referencia, **no es medición real**). **Hallazgo para decidir** (no se cambió): en el teléfono en horizontal, la barra inferior «Mesas |
+Para llevar» deja la captura sin espacio para los productos (§3.5). Ningún defecto obligó a detener la fase.
+
+**Aislamiento.** Todo contra Go temporales del arnés construidos desde este mismo árbol (servidor 0.13.0, esquema 26,
+`test_mode: true`, escucha de red en loopback): `ISO_TAG=E` (8261/8521) y, para correr dos emuladores a la vez sin que
+el `ADELPOS_E2E_NEW_SERVER` de uno apague el servidor del otro, un segundo `ISO_TAG=EB` (8262/8522; base
+`adel_pos_test_eb_*`), **decisión propia de esta fase**. Ninguna prueba usó la red real ni la instalación de la Mac
+(8181, 8443, 55432, su carpeta, `.local`, Keychain): las instrumentadas buscan `_adelpostest._tcp`; cada vez que se
+abrió la aplicación **normal** (BOOT, batería, horizontal, identificador y permisos) la wifi del emulador estaba
+apagada (el emulador llega a 10.0.2.2 por la red móvil simulada) y la aplicación ya estaba emparejada por dirección o
+se emparejó escribiendo la dirección del Go temporal; ninguna lista mostró un servidor real. Al terminar cada corrida:
+`force-idle` quitado, `battery reset`, pantalla encendida, wifi encendida, modo avión apagado y rotación como estaba
+(comprobado con `settings`/`dumpsys`), aplicaciones desinstaladas, Go temporal detenido con su base borrada.
+
+Ayudantes (fuera del repositorio, en `$SP/e-work/`): `gradle-timed.sh`, `connected.sh` (desinstala los 8 paquetes
+nuevos y viejos, corre `connectedDebugAndroidTest` con `ANDROID_SERIAL`, copia y cuenta los XML por módulo),
+`new-server.sh` (la orden de `ADELPOS_E2E_NEW_SERVER`: `server-down` + `server-up` del `ISO_TAG` e imprime las
+`ADELPOS_E2E_*`, también `ADELPOS_E2E_DATABASE_URL` de la base temporal para `catalog c` y `field f7`),
+`suite-all.sh`, `boot-test.sh`, `r4-api26.sh`, `battery-hour.sh`, `main_api.py` (la «principal» por la escucha local
+del Go temporal, como `MainComputer.kt`) y `ui.py` (uiautomator con tiempo límite).
+
+### 1. En la Mac (una vez, sobre `03a90e6`)
+
+JDK de Android Studio con el arnés (`iso.sh <árbol> gradle`). Las tareas de prueba y lint se corrieron con
+`--no-build-cache` (la caché de Gradle del usuario tenía los resultados de los árboles de las fases con las mismas
+entradas: sin eso habrían salido «FROM-CACHE» sin correr).
+
+| Qué                                                                         | Resultado                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | Tiempo |
+| --------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| `ktfmtCheck` (`--no-build-cache --rerun-tasks`, 26 tareas ejecutadas)       | Aprobado                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | 8 s    |
+| `:core:domain:test`                                                         | **148 pruebas, 0 fallas** (21 XML)                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | 4 s    |
+| `testDebugUnitTest` (JVM + Robolectric SDK 36)                              | **196 pruebas, 0 fallas**: `core:data` 169, `core:ui` 9, `feature:access` 7, `feature:takeaway` 5, `feature:waiter` 6 (`app` y `core:capture` sin pruebas JVM). Con el dominio, **344** (50 XML), las mismas de la Fase D                                                                                                                                                                                                                                                                                   | 30 s   |
+| `lintDebug`                                                                 | 0 errores, 0 avisos; 3 sugerencias de antes (`ObsoleteLintCustomCheck` en `core:ui`, `AutoboxingStateCreation` ×2 en `feature:access`)                                                                                                                                                                                                                                                                                                                                                                      | 35 s   |
+| `assembleDebug`, `assembleRelease` (sin firmar), `assembleDebugAndroidTest` | `app-debug.apk` **15 580 729 bytes** (SHA-256 `aa7efb7c…72567c2`), `app-release-unsigned.apk` **2 561 215 bytes** (`bffdbef4…a4664277`), `app-debug-androidTest.apk` 1 329 848 bytes; APK de pruebas de las bibliotecas: `core:data` 5 675 910, `core:ui` 13 091 245, `core:capture` 12 470 394, `feature:access` 12 467 246, `feature:takeaway` 12 528 822, `feature:waiter` 12 585 382. `aapt2 dump badging`: `com.adelpos.meseros` 0.2.0 (`versionCode` 2), `minSdk` 26, `targetSdk` 36, `compileSdk` 37 | 50 s   |
+
+Permisos del APK (`aapt2`): `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_SPECIAL_USE`, `POST_NOTIFICATIONS`,
+`RECEIVE_BOOT_COMPLETED`, `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`, `INTERNET`, `ACCESS_NETWORK_STATE`, `WAKE_LOCK` y el
+de receptores no exportados.
+
+### 2. Por emulador
+
+En cada uno, antes de cada corrida, se desinstalaron `com.adelpos.meseros`, `com.adelpos.meseros.test`,
+`….core.data.test`, `….core.ui.test` y los cuatro de la 0.1.0 (`local.adel.pos.android…`); `pm list packages` sin
+apps de AD-EL POS antes y después. `connectedDebugAndroidTest` con `ANDROID_SERIAL`; los XML se contaron por módulo
+(los «omitidos» son las pruebas contra el Go temporal, que sin argumentos se omiten a propósito; `core:capture` y
+`feature:*` no tienen instrumentadas propias). La suite de punta a punta es **`scripts/android-e2e.sh --suite all`**
+con `ADELPOS_E2E_NEW_SERVER` (un Go temporal nuevo para cada parte: access 1–5, access 6–7 con otra identidad sin
+reinstalar, catalog, waiter, field, takeaway, precheck y alerts) y `ADELPOS_E2E_DATABASE_URL` de cada base temporal
+(así corren `catalog c` y `field f7`). Resultados en `$SP/e-work/e2e/<emulador>-all/summary.txt`. La duración de cada
+parte sale de las horas de sus archivos (aproximada).
+
+#### `Pixel_8` (`emulator-5580`, Android 17, API 37, imagen `user`, 1080×2400)
+
+| Qué                         | Resultado                                                                                                                               | Tiempo |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| `connectedDebugAndroidTest` | **134 pruebas, 0 fallas** (69 omitidas a propósito): `app` 101 (67), `core:data` 20 (2), `core:ui` 13 — 3 XML                           | 258 s  |
+| `--suite all`               | **68 de 68 aprobados**                                                                                                                  | 1360 s |
+| · access 1–5 y 6–7          | 7/7                                                                                                                                     | 64 s   |
+| · catalog a, b, c           | 3/3 (`c` con la época cambiada en la base temporal)                                                                                     | 18 s   |
+| · waiter w1–w13c            | 19/19                                                                                                                                   | 204 s  |
+| · field f1–f10              | 13/13 (f7a, f7b y f7c con la serie de bloqueos en la base temporal)                                                                     | 267 s  |
+| · takeaway t1–t8            | 8/8                                                                                                                                     | 88 s   |
+| · precheck p1–p7            | 7/7                                                                                                                                     | 91 s   |
+| · alerts r1–r8b, r10, r9    | 11/11 (`r2` con `IDLE` y la pantalla apagada; `r8b` reinicio pegajoso con `run-as kill -9`; `r10` sin uso de la sesión de Ana en 450 s) | 588 s  |
+
+`f2` (rendimiento, con la Mac cargada): arranque en frío 2413 ms hasta la lista de meseros, PIN → Mesas 1006 ms, PIN →
+mesa 40 a la vista 1791 ms, «Nueva cuenta» → catálogo 314 ms, «Enviar a cocina» → «Recibido por el restaurante»
+325 ms, memoria total 147 993 KB.
+
+#### `ADEL_A1_Tablet_API26` (`emulator-5582`, Android 8.0, API 26, `google_apis` `userdebug`, 1280×800)
+
+| Qué                                                             | Resultado                                                                                                     | Tiempo |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ------ |
+| `connectedDebugAndroidTest`                                     | **134 pruebas, 0 fallas** (71 omitidas a propósito): `app` 101 (69), `core:data` 20 (2), `core:ui` 13 — 3 XML | 736 s  |
+| `--suite all`, intento 1                                        | **Cortado por el guion** tras `waiter w2` (12 de 12 aprobados hasta ahí): ver «Repeticiones»                  | 131 s  |
+| `--suite all`, intento 2                                        | **67 de 68 aprobados**; `alerts r4` FALLA («No llegó: el canal nota el corte»): ver §3 y «Repeticiones»       | 1268 s |
+| · access, catalog                                               | 7/7 y 3/3 (el paso 3 de access corta la red con `adb root` + `svc`)                                           | 66 s   |
+| · waiter                                                        | 19/19 (w3, w7b, w12b y w13b con la red cortada por root)                                                      | 162 s  |
+| · field                                                         | 13/13                                                                                                         | 238 s  |
+| · takeaway, precheck                                            | 8/8 y 7/7                                                                                                     | 146 s  |
+| · alerts                                                        | 10/11 (`r4` falla; `r8b` con `run-as kill -9`)                                                                | 616 s  |
+| `r4` repetido (corte del guion, ≈ 12 s), Go nuevo               | **Aprobado**; el aviso de «Mesa R8» apareció una sola vez                                                     | —      |
+| `r4` con un corte de 64 s (la misma prueba, corte hecho a mano) | **Aprobado**: el canal vio el corte a los ≈ 47 s; el aviso llegó una vez, ≈ 1 s después de volver la red      | —      |
+
+`f2`: arranque en frío 1348 ms, PIN → Mesas 771 ms, PIN → mesa 40 1297 ms, «Nueva cuenta» → catálogo 249 ms, «Enviar a
+cocina» 324 ms, memoria total 85 341 KB.
+
+#### `ADEL_A1_Phone_API33` (`emulator-5586`, Android 13, API 33, `google_apis` `userdebug`, 1080×2400)
+
+| Qué                         | Resultado                                                                                                     | Tiempo |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------- | ------ |
+| `connectedDebugAndroidTest` | **134 pruebas, 0 fallas** (69 omitidas a propósito): `app` 101 (67), `core:data` 20 (2), `core:ui` 13 — 3 XML | 239 s  |
+| `--suite all`               | **68 de 68 aprobados**                                                                                        | 1275 s |
+| · access / catalog / waiter | 7/7, 3/3, 19/19                                                                                               | 246 s  |
+| · field                     | 13/13                                                                                                         | 245 s  |
+| · takeaway / precheck       | 8/8, 7/7                                                                                                      | 165 s  |
+| · alerts                    | 11/11 (`r8b`: `run-as` no pudo matar el proceso y el guion usó root, como en la Fase D)                       | 580 s  |
+
+`f2`: arranque en frío 1823 ms, PIN → Mesas 840 ms, PIN → mesa 40 1484 ms, «Nueva cuenta» → catálogo 283 ms, «Enviar a
+cocina» 325 ms, memoria total 154 268 KB.
+
+#### `Pixel_Tablet` (`emulator-5584`, Android 17, API 37, imagen `user`, 2560×1600)
+
+| Qué                         | Resultado                                                                                                     | Tiempo |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------- | ------ |
+| `connectedDebugAndroidTest` | **134 pruebas, 0 fallas** (69 omitidas a propósito): `app` 101 (67), `core:data` 20 (2), `core:ui` 13 — 3 XML | 279 s  |
+| `--suite all`               | **68 de 68 aprobados**                                                                                        | 1344 s |
+| · access / catalog / waiter | 7/7, 3/3, 19/19                                                                                               | 281 s  |
+| · field                     | 13/13                                                                                                         | 258 s  |
+| · takeaway / precheck       | 8/8, 7/7                                                                                                      | 176 s  |
+| · alerts                    | 11/11 (`r8b` con `run-as kill -9`)                                                                            | 590 s  |
+
+`f2`: arranque en frío 2489 ms, PIN → Mesas 1000 ms, PIN → mesa 40 1808 ms, «Nueva cuenta» → catálogo 383 ms, «Enviar a
+cocina» 323 ms, memoria total 150 169 KB. (Corrió mientras el `Pixel_8` hacía la hora de batería.)
+
+#### Resumen de la matriz
+
+| Emulador                         | Instrumentadas         | `--suite all`                                                                                  |
+| -------------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------- |
+| `Pixel_8` (Android 17, teléfono) | 134, 0 fallas (69 om.) | 68/68                                                                                          |
+| `Pixel_Tablet` (Android 17)      | 134, 0 fallas (69 om.) | 68/68                                                                                          |
+| `ADEL_A1_Phone_API33` (13)       | 134, 0 fallas (69 om.) | 68/68                                                                                          |
+| `ADEL_A1_Tablet_API26` (8.0)     | 134, 0 fallas (71 om.) | 67/68 (`r4` falla; aprobado al repetirlo y con un corte largo; intento 1 cortado por el guion) |
+
+Las 134 instrumentadas son 40 más que en la Fase A (94: `app` 62 → 101, `core:data` 19 → 20, `core:ui` 13);
+los 68 pasos de `--suite all`: access 7, catalog 3, waiter 19, field 13, takeaway 8, precheck 7 y alerts 11.
+
+### 3. Lo de §6 que las suites no cubren o quedó «No verificado»
+
+Las suites cubren, en los cuatro emuladores, todo lo de §6 «Para llevar» (t1–t8), «Precuenta» (p1–p7, con los bytes
+ESC/POS) y «Aviso» (r1–r10). Lo que no cubren o quedó «No verificado» en las fases:
+
+#### 3.1 Identificador: de la 0.1.0 a la 0.2.0 siguiendo la guía (`ADEL_A1_Phone_API33`, Android 13)
+
+Go temporal nuevo (`ISO_TAG=EB`), restaurante preparado por la API de la principal (`main_api.py prepare`: rol
+«Meseros A1», Ana y Beto con PIN, «Salón E» con 6 mesas, «Filete E» con cocina en pantalla). Wifi del emulador
+**apagada** todo el tiempo (la app normal busca `_adelpos._tcp`; con la wifi apagada no puede ver el anuncio real).
+APK de la 0.1.0 instalado desde la ruta de solo lectura (`AD-EL-POS-Android-0.1.0.apk`, SHA-256 `3071539e…`); la 0.2.0
+es el `app-debug.apk` de este commit. Capturas en `$SP/e-work/id-api33/`.
+
+| Paso (guía, sección 1, «Pasar de la 0.1.0 a la 0.2.0») | Lo que pasó de verdad                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| (antes) La 0.1.0 instalada y emparejada                | «Buscar el servidor»: la lista decía «No se encontró ninguna computadora principal en la red» (ningún servidor real). Dirección escrita `10.0.2.2:8522` → código «233 107» → aprobado por la API de la principal → «¿Quién eres?» → Ana con su PIN → Mesas con las 6 mesas. La 0.1.0 **funciona con el servidor 0.13.0**: Mesa E1, «Filete E», «Enviar a cocina» → «Recibido por el restaurante»                                                                |
+| 1. Envía lo pendiente                                  | «Pedidos pendientes» de la 0.1.0 mostró el pedido «Recibido por el restaurante» (nada «Por enviar» ni «Enviando»), arriba «En línea». Coincide con la guía                                                                                                                                                                                                                                                                                                      |
+| Instalar la 0.2.0 sin quitar la 0.1.0                  | Se instala como **otra aplicación**: `pm list packages` muestra `local.adel.pos.android` (0.1.0) y `com.adelpos.meseros` (0.2.0); **Ajustes › Apps muestra dos «AD-EL POS»** y la ficha de cada una dice «version 0.1.0» / «version 0.2.0» (capturas `06-…` y `07-…`). Coincide con la guía («quedan dos AD-EL POS»; «en Ajustes › Aplicaciones › AD-EL POS se ve la versión de cada una»)                                                                      |
+| 2. Desinstala la 0.1.0                                 | `adb uninstall local.adel.pos.android` (equivale a Ajustes › Desinstalar); queda solo `com.adelpos.meseros`                                                                                                                                                                                                                                                                                                                                                     |
+| 3. Revoca el dispositivo en Terminales                 | Por la API de la principal (`POST devices/{id}/revoke`, la misma que usa «Confirmar revocación»): «Teléfono 1» (android, `app_version` 0.1.0) pasó a revocada                                                                                                                                                                                                                                                                                                   |
+| 4. Instala la 0.2.0 y empareja                         | La 0.2.0 abrió **sin nada de la 0.1.0** («Este teléfono todavía no está conectado…», «Buscar el servidor», lista vacía): hay que emparejar de nuevo, como dice la guía. Dirección → código «734 874» → aprobado → «¿Quién eres?» con Ana y Beto (los meseros y sus PIN siguen en la principal). Terminales: la nueva «Teléfono 1» activa y la anterior revocada (mismo nombre, como permite la guía)                                                            |
+| 5. Permisos del aviso                                  | Al entrar Ana con su PIN de siempre (con conexión): la explicación de notificaciones → «Continuar» → **diálogo real de Android 13** «Allow AD-EL POS to send you notifications?»; después la explicación de batería → «Continuar» → diálogo real «Let app always run in background?» (detalle en 3.3). Coincide con la guía                                                                                                                                     |
+| La 0.2.0 funciona                                      | Mesas muestra la Mesa E1 «Ocupada» con la cuenta que abrió la 0.1.0 (las cuentas siguen en la principal). Con la app en segundo plano, la principal abrió una cuenta de Ana en Mesa E2 y la marcó «Listo»: llegó «Mesa E2 · 1 platillo listo / 1 × Filete E»; y el «Listo» de la cuenta que había abierto la **0.1.0** (Mesa E1) llegó también a la 0.2.0, «Mesa E1 · 1 platillo listo». «AD-EL POS conectado · Recibiendo avisos de platillos listos» presente |
+
+**La guía dice lo que pasa de verdad**, con una precisión menor: en el paso 5 dice que la 0.2.0 pide los permisos «la
+primera vez que un mesero entra con conexión»; en realidad la explicación de notificaciones **vuelve a salir en cada
+entrada con conexión mientras falte el permiso** (RD6, ya lo dice la sección 8). No es un error de la guía, solo no lo
+repite ahí. No se probó instalar la 0.2.0 **firmada** con la llave de desarrollo (este commit no la firma; la Fase F
+compila el APK de entrega): para Android son paquetes distintos, así que la firma no cambia lo anterior.
+
+#### 3.2 Aviso: `BOOT_COMPLETED` con un reinicio real (`Pixel_8` y `ADEL_A1_Tablet_API26`)
+
+`$SP/e-work/boot-test.sh`: Go temporal nuevo; `alerts r1` (empareja por dirección y entra Ana); se abre la aplicación
+normal con la wifi apagada, el servicio queda en primer plano; la principal abre una cuenta de Ana en cocina; **`adb
+reboot`** sin volver a abrir la aplicación; después, «Listo» desde la Mac.
+
+| Emulador       | Reinicio                                                                                             | Sin abrir la aplicación                                                                                                                                                                                                                                                                                                                                  | Aviso después del reinicio                                            |
+| -------------- | ---------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `Pixel_8` (17) | `boot_id` distinto, uptime 10 s; la app sigue instalada (capa temporal del emulador de solo lectura) | `ReadyAlertsBootReceiver` arrancó el proceso (`Start proc … for broadcast …ReadyAlertsBootReceiver`), `Background started FGS: Allowed … code:BOOT_COMPLETED`, «servicio de avisos pedido (BOOT)»; servicio `isForeground=true`, `types=0x40000000` (`specialUse`); «AD-EL POS conectado · Recibiendo avisos de platillos listos»; el lanzador al frente | «Mesa R1 · 1 platillo listo / 1 × Filete R» ≈ 2 s después del «Listo» |
+| Android 8.0    | `boot_id` distinto                                                                                   | Igual: el receptor arrancó el servicio («(BOOT)»), `isForeground=true`, «AD-EL POS conectado». Android 8.0 agrega además su propia notificación del sistema «AD-EL POS is running in the background» (ver «Para el coordinador»)                                                                                                                         | «Mesa R1 · 1 platillo listo» ≈ 2 s después                            |
+
+#### 3.3 Permiso de notificaciones con el diálogo real (Android 13)
+
+En el flujo de 3.1, con la aplicación normal (no la instrumentación, que concede el permiso ella misma):
+
+1. Primera entrada de Ana: explicación «Avisos de platillos listos… En el siguiente mensaje elige «Permitir»» →
+   «Continuar» → diálogo del sistema (`com.google.android.permissioncontroller`) → **«Don’t allow»**:
+   `POST_NOTIFICATIONS: granted=false, flags=[USER_SET…]`. Siguió la explicación de batería → «Continuar» → diálogo del
+   sistema (`com.android.settings`) → «Allow»: `dumpsys deviceidle whitelist` → `user,com.adelpos.meseros`. Mesas mostró
+   «Las notificaciones de AD-EL POS están desactivadas: los avisos de platillos listos no se verán.» con «Cómo
+   activarlas»; el servicio en primer plano sí corría (Android 13 lo permite sin el permiso; su notificación no se ve).
+2. «Cambiar de mesero» → Ana otra vez con conexión: **otra vez** la explicación (solo la de notificaciones; la de
+   batería no, porque ya estaba concedida) → «Continuar» → el diálogo del sistema apareció de nuevo (Android 13 lo deja
+   pedir una segunda vez) → **«Allow»**: `granted=true`; el aviso discreto de Mesas desapareció y apareció «AD-EL POS
+   conectado».
+
+También se vio en `Pixel_8` (Android 17) con «Ahora no» en las dos explicaciones: la de notificaciones vuelve en cada
+entrada con conexión y Mesas muestra el aviso discreto (RD6).
+
+#### 3.4 El servicio y el aviso en Android 8 con el corte de red por `adb root` + `svc`
+
+La suite `alerts` completa corrió en `ADEL_A1_Tablet_API26` (por primera vez en la etapa): r1–r3 y r5–r10 aprobados,
+con la pantalla apagada y Doze forzado (`r2`), la aplicación cerrada, otro dispositivo, transferencia, agrupado,
+«¿Quién eres?» con PIN, sonido y vibración apagados, reinicio pegajoso y retiro. **`r4` (corte durante el «Listo»)
+falló una vez y pasó al repetirlo**; con un corte más largo también pasó. Detalle:
+
+- La prueba espera, después de pedir el corte, a que el canal **note** el corte (`ReadyChannelState.Waiting`) en 60 s.
+  El guion corta la red con `svc wifi/data disable`, marca «Listo» a los 6 s y la devuelve a los ≈ 12 s.
+- Lo que se vio es compatible con esto: en Android 8, `svc … disable` **no siempre aborta** la conexión TCP abierta
+  (a diferencia del modo avión de Android 11+), y si no la aborta el canal solo la da por muerta tras **45 s sin un
+  byte** (`ReadyAlertsClient`, el diseño aprobado). Con un corte de 12 s la red vuelve antes, la misma conexión sigue
+  y el aviso llega por ella, pero el canal nunca pasa por «Waiting» y la prueba se vence. (No se capturó el estado
+  del socket: el registro completo se perdió con el `logcat -c` del guion.)
+- Repetido con un Go nuevo (`r4-api26.sh … corto`: el guion tal cual): **aprobado**, el aviso «Mesa R8» apareció una
+  sola vez. Con la misma prueba y un corte de **64 s** hecho a mano (`… largo 60`): el canal vio el corte a los ≈ 47 s
+  (`Waiting(failures=1, delayMillis=2000)`), la red volvió, el aviso llegó **una sola vez** ≈ 1 s después
+  (`assertEquals(1, …)` y una sola clave mostrada): **aprobado**.
+- Conclusión: el producto cumple §4.1 («llega una sola vez») en Android 8; lo frágil es la prueba (el corte del guion
+  es más corto que la detección de conexión muerta cuando `svc` no aborta el socket). No se cambió nada.
+
+#### 3.5 Para llevar: la barra inferior en el teléfono horizontal (`Pixel_8`)
+
+`takeaway t1–t3` (Ana con `takeaway.*`) y después la aplicación normal (wifi apagada), rotación fija con
+`settings put system user_rotation 1`. Capturas en `$SP/e-work/landscape-pixel8/`.
+
+- **Sí estorba.** En horizontal (2400×1080) la barra «Mesas | Para llevar» ocupa de y = 807 a 1080 (273 px ≈ 104 dp
+  con el margen de gestos). En la **captura** (de Para llevar y de una mesa) solo caben la búsqueda, las categorías y
+  «Ver la cuenta (0)»: **la cuadrícula de productos queda sin altura y no se ve ningún producto** (en la jerarquía no
+  hay ningún nodo de producto; nada se desplaza), capturas `04-captura-para-llevar-horizontal.png` y
+  `07-captura-mesa-horizontal.png`. En vertical, la misma pantalla muestra «Hamburguesa T» y «Tacos T» (`05-…`).
+- Comparación sin la barra (el mismo rol sin `takeaway.*`, Ana entra de nuevo): en horizontal se ven las tarjetas de
+  los productos, aunque cortadas (≈ 134 px de alto, sin el nombre a la vista), `09-captura-mesa-horizontal-sin-barra.png`.
+  O sea, la captura del teléfono en horizontal ya era estrecha en la A1, y con la barra de la A2 deja de servir: el
+  mesero con Para llevar tiene que girar el teléfono a vertical para capturar.
+- La lista de Para llevar en horizontal también pierde espacio (solo se ve el encabezado del primer pedido sin
+  desplazar, `03-…`). No se cambió nada (lo pide el encargo); queda para que decida el coordinador.
+- De paso: en horizontal la pantalla del PIN muestra solo las teclas 1–6 (`08-pin-horizontal.png`); no comprobé si se
+  desplaza (es de la A1 y no lo pide el encargo).
+
+### 4. Batería (referencia, **no es una medición real**)
+
+**Advertencia: el perfil de energía del emulador es ficticio** (en `batterystats`: «Capacity: 3000, Computed drain:
+0, actual drain: 0», todas las frecuencias de la CPU con 0 mA). Los mAh no valen como consumo real; lo útil son el
+tráfico, la CPU, los _wake locks_ y los despertares, y sirven para comparar.
+
+Método de §0.5.6 (`$SP/e-work/battery-hour.sh`) en **`Pixel_8` (Android 17)**, contra un Go temporal nuevo: `alerts
+r1` (empareja por dirección y entra Ana), aplicación normal abierta con la wifi apagada (red móvil simulada), servicio en
+primer plano (`isForeground=true`, `types=0x40000000`), Inicio; `dumpsys batterystats --reset`, `dumpsys battery
+unplug`, `KEYCODE_SLEEP`, `dumpsys deviceidle force-idle` (`IDLE`, `mWakefulness=Asleep`); **3610 s** (16:09:56 a
+17:10:06). A los 5, 15, 25, 35, 45 y 55 minutos la principal abrió una cuenta de Ana con «Filete R» (Mesa R1…R6) y la
+marcó «Listo» a los 20 s (siempre con el dispositivo en `IDLE`).
+
+| Medida (`dumpsys batterystats com.adelpos.meseros`, uid `u0a254`) | Una hora                                                                                                                           |
+| ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Tiempo                                                            | 1 h 0 min 11 s con batería y pantalla apagada; Doze profundo («Idle mode full time») 1 h 0 min 0 s (99,7 %)                        |
+| Servicio en primer plano                                          | 1 h 0 min 11 s (todo el tiempo); al final seguía `isForeground=true`                                                               |
+| Red (móvil simulada)                                              | **118,20 KB recibidos y 64,09 KB enviados** (530/533 paquetes)                                                                     |
+| Despertares                                                       | «Mobile radio AP wakeups» **183**; ninguna alarma ni trabajo de la aplicación                                                      |
+| _Wake locks_                                                      | Solo `NotificationManagerService:post:com.adelpos.meseros`: 2,166 s en 10 veces (publicar los avisos y la notificación permanente) |
+| CPU                                                               | u = 2,372 s, s = 0,516 s                                                                                                           |
+| Estimado (perfil ficticio)                                        | 0,0232 mAh (CPU 0,00768 + _wake lock_ 0,0155)                                                                                      |
+| Avisos                                                            | **Los 6 llegaron** con la pantalla apagada y en Doze: «Mesa R1 · 1 platillo listo» … «Mesa R6 · 1 platillo listo»                  |
+
+Comparación con la Fase D (10 minutos sin avisos, `Pixel_Tablet`, protocolo ajustado): 19,56 / 11,33 KB, 29
+despertares y CPU 400/50 ms; por hora serían ≈ 117 / 68 KB, ≈ 174 despertares y ≈ 2,4/0,3 s. La hora completa con
+seis «Listo» da lo mismo: el tráfico lo marcan el `: ping` cada 15 s y la reapertura cada 5 minutos (TLS), no los
+avisos. **≈ 182 KB por hora y dispositivo.** Al terminar: `deviceidle unforce`, `battery reset` (`AC powered: true`),
+pantalla encendida, wifi encendida, modo avión apagado (comprobado), aplicación desinstalada y Go detenido.
+
+### 5. Repeticiones y su causa
+
+| Qué                                   | Qué pasó                                                                                                                                                                                                                                                                                                                                                                                                          | Causa                                                                                                                                  | Repetición                                                                                                                                                            |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--suite all` en Android 8, intento 1 | El guion terminó con estado 1 **sin ningún mensaje** justo después de `waiter w2` (12 de 12 aprobados hasta ahí, 131 s). El emulador quedó con `adbd` como root y la wifi encendida: el corte se cayó dentro de `host_network disable` (paso `w3`), en `adb root` (su salida va a `/dev/null`) o en el primer `svc` justo después de que `adbd` se reinició; con `set -euo pipefail` el guion sale sin decir nada | Entorno (reinicio de `adbd` con la Mac cargada) + el guion no tolera ese código de salida                                              | `adb unroot`; 4 ciclos `root`/`svc`/`unroot` a mano sin error; la suite completa otra vez: pasó todos los cortes por root (w3, w7b, w12b, w13b, f5a, f7b, t4, p6, r4) |
+| `alerts r4` en Android 8              | FALLA «No llegó: el canal nota el corte» (60 s)                                                                                                                                                                                                                                                                                                                                                                   | La prueba: el corte del guion (≈ 12 s) es más corto que la detección de conexión muerta (45 s) cuando `svc` no aborta el socket (§3.4) | Con Go nuevo, el guion tal cual: aprobado. Con un corte de 64 s: aprobado (el aviso, una sola vez)                                                                    |
+
+Nada más se repitió. Ninguna instrumentación se colgó (no hizo falta sacar pilas), no apareció «Pixel Launcher isn't
+responding» y ningún paso falló por tiempo, aunque la Mac corrió a la vez la regresión del servidor y el escritorio.
+
+### 6. Para el coordinador
+
+Nada obligó a cambiar una regla de negocio ni el servidor, y no se encontró ningún defecto que rompa una función
+(nada perdido ni repetido, ningún cierre de la aplicación). Puntos para decidir, **sin cambiar nada** en esta fase:
+
+1. **La barra inferior en el teléfono horizontal sí estorba** (§3.5): con `takeaway.read`, en la captura (mesa o Para
+   llevar) del teléfono en horizontal no se ve ningún producto; hay que girarlo a vertical. Es un defecto de uso del
+   diseño de la Fase B (no de datos). Opciones para quien decida: ocultar la barra en la captura cuando la altura es
+   compacta, o una barra lateral (`NavigationRail`) en horizontal. En las tabletas no se vio el problema (la `Pixel_Tablet`
+   y la de Android 8, en horizontal, pasaron `takeaway` y `field`, que tocan productos en la captura).
+2. **`r4` en Android 8–10 es frágil** (§3.4): el producto cumple, la prueba no siempre. Arreglo posible en la prueba o
+   el guion (no en el producto): en `alerts_cut_during_ready`, con `SDK < 30`, mantener el corte hasta que la prueba
+   anote «r4 corte visto por el canal» (o al menos 50 s), o que la prueba acepte que la conexión sobreviva al corte y
+   compruebe solo «una sola vez».
+3. **`host_network` del guion con `set -e`**: un código distinto de cero de `adb root` (que se manda a `/dev/null`)
+   corta toda la suite sin mensaje (intento 1 en Android 8). Bastaría `|| true` en `adb root` y reintentar `svc`.
+4. **Android 8.0** muestra, junto a «AD-EL POS conectado», su propia notificación del sistema «AD-EL POS is running
+   in the background · Tap for details on battery and data usage» (vista después del reinicio, §3.2). Es de Android,
+   no de la aplicación; si se quiere, la guía (sección 8) podría mencionarla para los equipos con Android 8.
+5. Textos de la A1 que dicen «tableta» también en un teléfono: `tables_empty` («Todavía no hay mesas guardadas en esta
+   tableta…», visto en `Pixel_8`), `sync_pending` y `pending_others_title` (`feature/waiter`, `core/capture`). Menor.
+6. **Segundo `ISO_TAG` (`EB`, 8262/8522)**: decisión de esta fase para correr dos emuladores a la vez (ver arriba).
+
+Para la Fase F: el código de Android probado es el de **`03a90e6`**. Al terminar, `etapa-a2-android` está en
+`40ca93d`; entre los dos, en `android/`, `scripts/android-e2e.sh` y la guía solo cambiaron `android/CLAUDE.md` y
+`docs/ANDROID_INSTALAR.md` (texto; `git diff --stat 03a90e6 40ca93d -- android scripts/android-e2e.sh
+docs/ANDROID_INSTALAR.md`), ningún archivo de código, de prueba ni de Gradle. La Fase F solo tiene que comprobar que
+eso sigue así al fusionar.
+
+### 7. No verificado
+
+- **Dispositivo físico** (no hay): Doze real, suspensión de la CPU y despertar por paquete de wifi (RD8: los
+  temporizadores del canal sin _wake lock_), gestores de batería de cada marca, la wifi real del restaurante, el
+  sonido y la vibración reales del canal y el consumo real de batería.
+- El APK **firmado** con la llave de desarrollo: este commit se compiló sin firmar (`assembleRelease`); el de entrega
+  lo compila la Fase F. La 0.2.0 del paso de identificador fue el `app-debug.apk`.
+- «Forzar detención»/«Detener» del Administrador de tareas (`REASON_USER_REQUESTED`) y la pantalla de Ajustes de
+  batería (solo se vio su diálogo «Let app always run in background?»).
+- La negación del diálogo de batería («Deny»): se probó solo «Allow».
+- El diálogo de notificaciones de Android 17 (en `Pixel_8` solo se tocó «Ahora no» en la explicación).
+- El reinicio real en `Pixel_Tablet` y `ADEL_A1_Phone_API33` (se hizo en `Pixel_8` y en Android 8).
+- La barra inferior en horizontal en `ADEL_A1_Phone_API33` (se vio en `Pixel_8`, el otro teléfono).
+- El aviso dentro de la aplicación con dos `MainActivity` a la vez (multiventana).
+- Si la pantalla del PIN se desplaza en el teléfono horizontal (§3.5, de la A1).
+
+### Decisiones del coordinador sobre la Fase E
+
+- **Barra «Mesas | Para llevar» en el teléfono horizontal** (hallazgo de la fase): es un defecto de la Fase B y se
+  corrige: con poca altura la navegación pasa a un riel lateral, que sigue «siempre visible» como pide §3.1; vuelve al
+  agente de la Fase B junto con los arreglos del guion (`r4` en Android 8–10 y un `adb root` que falla sin aviso) y los
+  textos «en esta tableta» que también salen en un teléfono. Las pruebas que ese arreglo toca se repiten después; lo
+  demás de esta fase vale para el código final de Android, que fuera de ese arreglo no cambia.
+- La notificación propia de Android 8.0 («… is running in the background») es del sistema y se documenta en la guía.
