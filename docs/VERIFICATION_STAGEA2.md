@@ -175,7 +175,7 @@ impresión de una terminal «Caja 2» por la escucha local del Go temporal.
 | Aviso: el servicio se detiene al retirar el dispositivo                                      | `r9`                                                                                                                                                                                                                                                                                                                              |
 | Aviso: «¿Quién eres?» no mantiene viva la sesión (A2-D12)                                    | `r10` (`last_seen_at` sin cambio en 450 s con la pantalla encendida y apagada)                                                                                                                                                                                                                                                    |
 | Batería: una hora en el emulador (referencia)                                                | Fase D: 5 y 10 minutos (abajo); la hora completa, **pendiente de la Fase E**                                                                                                                                                                                                                                                      |
-| Identificador: la aplicación nueva instala, empareja y funciona; paso de la 0.1.0 a la 0.2.0 | Fase A (`access` y `waiter` con la 0.1.0 instalada antes, que el guion desinstala); con la 0.1.0 emparejada siguiendo la guía, **pendiente de la Fase E**                                                                                                                                                                         |
+| Identificador: la aplicación nueva instala, empareja y funciona; paso de la 0.1.0 a la 0.2.0 | Fase A (`access` y `waiter` con la 0.1.0 instalada antes, que el guion desinstala); Fase E: con la 0.1.0 emparejada, siguiendo la guía paso a paso (`ADEL_A1_Phone_API33`, «Regresión final»)                                                                                                                                     |
 | Regresión completa (servidor, escritorio y Android)                                          | «Regresión final»                                                                                                                                                                                                                                                                                                                 |
 
 ## Batería (referencia, no es una medición real)
@@ -215,9 +215,12 @@ No se afirma ninguna de estas:
   compartido); R5 solo midió las consultas de sesiones con datos sintéticos.
 - **Una restauración real** de un respaldo con avisos (R3 se reprodujo simulándola en `ready_notices`).
 - **El aviso dentro de la aplicación con dos `MainActivity`** (multiventana): la última que cambia de pantalla manda.
-- **Android en la regresión final**: `BOOT_COMPLETED` con un reinicio real del emulador, el servicio y el aviso en
-  **Android 8**, el diálogo real del permiso de notificaciones en Android 13 y la barra inferior de Para llevar en el
-  teléfono horizontal: **pendiente de la Fase E** (`MY_PACKAGE_REPLACED` sí se probó en Android 13 en la Fase D).
+- **Lo que la Fase E dejó sin verificar**: el reinicio real en `Pixel_Tablet` y `ADEL_A1_Phone_API33` (se hizo en
+  `Pixel_8` y en Android 8), la negación del diálogo de batería («Deny»; solo «Allow»), el diálogo de notificaciones de
+  Android 17 (en `Pixel_8` solo «Ahora no» en la explicación), la pantalla de Ajustes de batería, la barra inferior en
+  horizontal en `ADEL_A1_Phone_API33` (se vio en `Pixel_8`), si la pantalla del PIN se desplaza en el teléfono
+  horizontal (solo se ven las teclas 1–6; es de la A1) y el APK firmado en el paso de la 0.1.0 a la 0.2.0 (se usó el
+  `app-debug.apk`). `Pixel_Tablet` y la batería de una hora: pendiente de la Fase E.
 - **Instalar la 0.2.0 junto a una 0.1.0 emparejada con datos reales**: no hay dispositivos reales con la 0.1.0.
 - **El lector con Docker real** (`TestLegacyPrepareWithDocker`): Docker Desktop apagado; el código del lector no cambió
   en la etapa.
@@ -297,18 +300,75 @@ dos emuladores a la vez, `ISO_TAG=EB` (8262/8522). Detalle en el avance, «Fase 
 | `lintDebug`                                                                 | 0 errores, 0 avisos (3 sugerencias de antes)                                                                                                                                                                                                                                                      |
 | `assembleDebug`, `assembleRelease` (sin firmar), `assembleDebugAndroidTest` | `app-debug.apk` 15 580 729 bytes; `app-release-unsigned.apk` 2 561 215 bytes; `app-debug-androidTest.apk` 1 329 848 bytes; `com.adelpos.meseros` 0.2.0 (`versionCode` 2), `minSdk` 26, `targetSdk` 36, `compileSdk` 37; permisos del servicio en primer plano, notificaciones, arranque y batería |
 
-Por emulador (`connectedDebugAndroidTest` con los XML contados por módulo y `scripts/android-e2e.sh --suite all`:
-access 1–5, access 6–7 con otra identidad, catalog, waiter, field, takeaway, precheck y alerts): **pendiente de la Fase
-E**.
+Por emulador, con las aplicaciones nuevas y las de la 0.1.0 (y sus `.test`) desinstaladas antes y después:
+`connectedDebugAndroidTest` con `ANDROID_SERIAL` y los XML contados por módulo (las omitidas son las pruebas contra el
+Go temporal, que sin argumentos se omiten a propósito) y `scripts/android-e2e.sh --suite all` (un Go temporal nuevo
+para cada parte: access 1–5, access 6–7 con otra identidad sin reinstalar, catalog, waiter, field, takeaway, precheck
+y alerts; `catalog c` y `field f7` con la base temporal). Pasos aprobados / pasos, del resumen del guion.
 
-| Prueba                | `ADEL_A1_Tablet_API26` (Android 8) | `ADEL_A1_Phone_API33` (Android 13) | `Pixel_Tablet` (Android 17) | `Pixel_8` (Android 17) |
-| --------------------- | ---------------------------------- | ---------------------------------- | --------------------------- | ---------------------- |
-| Instrumentadas (XML)  | pendiente de la Fase E             | pendiente de la Fase E             | pendiente de la Fase E      | pendiente de la Fase E |
-| `--suite all` (total) | pendiente de la Fase E             | pendiente de la Fase E             | pendiente de la Fase E      | pendiente de la Fase E |
+| Prueba                                                | `ADEL_A1_Tablet_API26` (Android 8)                                                          | `ADEL_A1_Phone_API33` (Android 13)                    | `Pixel_Tablet` (Android 17) | `Pixel_8` (Android 17)                                |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------- | ----------------------------------------------------- | --------------------------- | ----------------------------------------------------- |
+| Instrumentadas (XML): `app` / `core:data` / `core:ui` | **134, 0 fallas**: 101 / 20 / 13; 71 omitidas (736 s)                                       | **134, 0 fallas**: 101 / 20 / 13; 69 omitidas (239 s) | pendiente de la Fase E      | **134, 0 fallas**: 101 / 20 / 13; 69 omitidas (258 s) |
+| access (1–5 y 6–7) / catalog / waiter / field         | 7/7, 3/3, 19/19, 13/13 (los cortes con `adb root` + `svc`)                                  | 7/7, 3/3, 19/19, 13/13                                | pendiente de la Fase E      | 7/7, 3/3, 19/19, 13/13                                |
+| takeaway / precheck                                   | 8/8, 7/7                                                                                    | 8/8, 7/7                                              | pendiente de la Fase E      | 8/8, 7/7                                              |
+| alerts (r1–r8b, r10, r9)                              | 10/11: `r4` falló (abajo); repetido, aprobado                                               | 11/11 (`r8b` con el respaldo de root)                 | pendiente de la Fase E      | 11/11                                                 |
+| `--suite all` (total)                                 | 1.º intento cortado por el guion tras `w2` (abajo); 2.º **67/68**, y `r4` repetido aprobado | **68/68** (1 275 s)                                   | pendiente de la Fase E      | **68/68** (1 360 s)                                   |
 
-Lo de §6 que las suites no cubren (`BOOT_COMPLETED` con un reinicio real, el aviso en Android 8, el diálogo real del
-permiso de notificaciones, el paso de la 0.1.0 a la 0.2.0 con la 0.1.0 emparejada y la barra inferior en el teléfono
-horizontal) y la batería de una hora: **pendiente de la Fase E**.
+**Las dos repeticiones, en Android 8 y de las pruebas o del entorno, no del producto.** (1) El primer `--suite all`
+terminó sin mensaje justo después de `waiter w2` (12 de 12 aprobados hasta ahí): el corte de red por root se cayó en
+`adb root` o en el primer `svc` tras reiniciar `adbd` con la Mac cargada, y el guion (`set -euo pipefail`, con la
+salida de `adb root` a `/dev/null`) salió sin decir nada; tras `adb unroot` y cuatro ciclos a mano sin error, la suite
+completa pasó todos los cortes por root. (2) `alerts r4` («No llegó: el canal nota el corte», 60 s): en Android 8,
+`svc wifi/data disable` no siempre aborta la conexión TCP abierta, así que el canal solo la da por muerta a los 45 s
+sin un byte (el diseño aprobado) y el corte del guion dura unos 12 s: la red vuelve antes, el aviso llega por la misma
+conexión y el canal nunca pasa por «Waiting», que es lo que espera la prueba. Repetido con un Go nuevo y el guion tal
+cual: aprobado (el aviso, una sola vez); con un corte de 64 s: el canal vio el corte a los ≈ 47 s y el aviso llegó una
+sola vez ≈ 1 s después de volver la red. **El producto cumple «llega una sola vez» en Android 8.** Ninguna
+instrumentación se colgó y ningún paso falló por tiempo.
+
+**Rendimiento** (`field f2`, registro `AdelOnGo`, con la Mac cargada):
+
+| Medida                                                 | `ADEL_A1_Tablet_API26` | `ADEL_A1_Phone_API33` | `Pixel_Tablet`         | `Pixel_8` |
+| ------------------------------------------------------ | ---------------------- | --------------------- | ---------------------- | --------- |
+| Arranque en frío (proceso → lista de meseros)          | 1 348 ms               | 1 823 ms              | pendiente de la Fase E | 2 413 ms  |
+| PIN (con conexión) → Mesas con la primera mesa         | 771 ms                 | 840 ms                | pendiente de la Fase E | 1 006 ms  |
+| PIN → la mesa 40 a la vista                            | 1 297 ms               | 1 484 ms              | pendiente de la Fase E | 1 791 ms  |
+| «Nueva cuenta» → catálogo de ~300 productos a la vista | 249 ms                 | 283 ms                | pendiente de la Fase E | 314 ms    |
+| «Enviar a cocina» → «Recibido por el restaurante»      | 324 ms                 | 325 ms                | pendiente de la Fase E | 325 ms    |
+| Memoria (total de `dumpsys meminfo`)                   | ≈ 83 MiB               | ≈ 151 MiB             | pendiente de la Fase E | ≈ 145 MiB |
+
+**Lo de §6 que las suites no cubren** (Fase E, con la aplicación normal fuera de la instrumentación, la wifi del
+emulador apagada y el dispositivo emparejado por la dirección del Go temporal; ninguna lista mostró un servidor real):
+
+- **Paso de la 0.1.0 a la 0.2.0 siguiendo la guía** (`ADEL_A1_Phone_API33`): la 0.1.0 (el APK de la A1, SHA-256
+  `3071539e…`) emparejada con el Go temporal 0.13.0 **sigue funcionando** («Enviar a cocina» → «Recibido por el
+  restaurante»); con la 0.2.0 instalada sin quitarla, Ajustes › Apps muestra **dos «AD-EL POS»** con su versión; tras
+  desinstalar la 0.1.0 y revocarla (la misma ruta que «Confirmar revocación»), la 0.2.0 abre sin nada de la 0.1.0 y se
+  empareja de nuevo; los meseros entran con su PIN de siempre, se ven las cuentas que abrió la 0.1.0 y llegan los
+  avisos (también el de la cuenta que abrió la 0.1.0). **La guía dice lo que pasa de verdad**; la única precisión: la
+  explicación del permiso de notificaciones vuelve en cada entrada con conexión mientras falte (ya en la sección 8;
+  desde esta fase también en el paso 5). La 0.2.0 de esta prueba es el `app-debug.apk` (sin firmar con la llave de
+  desarrollo: para Android son paquetes distintos, así que la firma no cambia lo anterior).
+- **`BOOT_COMPLETED` con un reinicio real** (`adb reboot`, `boot_id` distinto, sin volver a abrir la aplicación), en
+  `Pixel_8` y `ADEL_A1_Tablet_API26`: `ReadyAlertsBootReceiver` arrancó el proceso y el servicio en primer plano
+  (`Background started FGS: Allowed … BOOT_COMPLETED` en Android 17, `specialUse`), «AD-EL POS conectado · Recibiendo
+  avisos de platillos listos», y el «Listo» de después llegó en ≈ 2 s. En Android 8.0, Android agrega su propia
+  notificación «AD-EL POS is running in the background» (es del sistema).
+- **El diálogo real del permiso de notificaciones** (Android 13): «Don’t allow» → `POST_NOTIFICATIONS` negado, Mesas
+  muestra «Las notificaciones de AD-EL POS están desactivadas…» con «Cómo activarlas» y el servicio corre sin
+  notificación visible; en la siguiente entrada con conexión la explicación y el diálogo otra vez → «Allow» → el aviso
+  de Mesas desaparece y aparece «AD-EL POS conectado». El de batería, «Allow» (`deviceidle whitelist` con la
+  aplicación). En `Pixel_8`, «Ahora no» en las dos explicaciones: la de notificaciones vuelve en cada entrada (RD6).
+- **El servicio y el aviso en Android 8** (`ADEL_A1_Tablet_API26`, por primera vez en la etapa): la suite `alerts`
+  completa (arriba), con la pantalla apagada y Doze forzado, la aplicación cerrada, otro dispositivo, transferencia,
+  agrupado, PIN en «¿Quién eres?», sonido y vibración, reinicio pegajoso y retiro.
+- **Hallazgo · la barra inferior en el teléfono horizontal** (`Pixel_8`, 2400 × 1080): con `takeaway.read`, la barra
+  «Mesas | Para llevar» ocupa unos 104 dp y **en la captura (de una mesa o de Para llevar) no se ve ningún producto**
+  (solo la búsqueda, las categorías y «Ver la cuenta»); en vertical sí; sin la barra (mismo rol sin `takeaway.*`) se
+  ven las tarjetas, cortadas. La lista de Para llevar en horizontal también pierde espacio. Las tabletas no se ven
+  afectadas. No se cambió nada: **PENDIENTE-COORDINADOR · decisión** (ocultar la barra en la captura con altura
+  compacta, una barra lateral en horizontal, o dejarlo y decir en la guía que en el teléfono se captura en vertical).
+- **Batería, una hora** (`Pixel_Tablet`, con un mesero y un «Listo» cada 10 minutos): pendiente de la Fase E.
 
 ## Entregables
 
