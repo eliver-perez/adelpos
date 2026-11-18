@@ -15,15 +15,18 @@ import (
 // (fase B), el bloqueo por inactividad (lo usan los teléfonos y tabletas de meseros); desde la etapa A2 (parte C), la
 // impresora de precuentas de un dispositivo android con su nombre y el de su terminal si es la USB de una terminal.
 const devicesQuery = `SELECT d.id,d.name,d.register_id,r.name AS register_name,d.keyboard_mode,d.home_screen,d.created_at,d.last_seen_at,d.revoked_at,
-    d.kind,d.os,d.app_version,d.paired_at,d.idle_lock_seconds,` + precheckPrinterColumns + `
-    FROM app.devices d LEFT JOIN app.registers r ON r.id=d.register_id` + precheckPrinterJoins
+    d.kind,d.os,d.app_version,d.paired_at,d.idle_lock_seconds,` + waiterDeviceColumns + `
+    FROM app.devices d LEFT JOIN app.registers r ON r.id=d.register_id` + waiterDeviceJoins
 
-// precheckPrinterColumns y precheckPrinterJoins son la impresora de precuentas de la terminal d (etapa A2, parte C):
-// su identificador, su nombre y el de la terminal que la tiene conectada (solo si es una impresora USB de una terminal).
-const precheckPrinterColumns = `d.precheck_printer_id,precheck_printer.name AS precheck_printer_name,
-    CASE WHEN precheck_printer.transport='agent' THEN precheck_printer_terminal.name END AS precheck_printer_terminal_name`
+// waiterDeviceColumns y waiterDeviceJoins son lo que se configura de un teléfono o tableta de meseros en la terminal d
+// (etapa A2): su impresora de precuentas (parte C) con su identificador, su nombre y el de la terminal que la tiene
+// conectada (solo si es una impresora USB de una terminal), y sus avisos de platillos listos (parte D): «Avisar
+// platillos listos», «Sonido» y «Vibración».
+const waiterDeviceColumns = `d.precheck_printer_id,precheck_printer.name AS precheck_printer_name,
+    CASE WHEN precheck_printer.transport='agent' THEN precheck_printer_terminal.name END AS precheck_printer_terminal_name,
+    d.ready_alerts_enabled,d.ready_alerts_sound,d.ready_alerts_vibration`
 
-const precheckPrinterJoins = `
+const waiterDeviceJoins = `
     LEFT JOIN app.kitchen_printers precheck_printer ON precheck_printer.id=d.precheck_printer_id
     LEFT JOIN app.devices precheck_printer_terminal ON precheck_printer_terminal.id=precheck_printer.agent_device_id`
 
@@ -35,20 +38,22 @@ const onlineWindow = "2 minutes"
 // usuario que tiene la sesión activa en ella (nunca la identidad reservada de soporte). Es por terminal:
 // desde la etapa 9H el mismo usuario puede ser el usuario actual de varias terminales a la vez.
 const deviceListQuery = `SELECT d.id,d.name,d.register_id,r.name AS register_name,d.keyboard_mode,d.home_screen,d.created_at,d.last_seen_at,d.revoked_at,
-    d.kind,d.os,d.app_version,d.paired_at,d.idle_lock_seconds,` + precheckPrinterColumns + `,
+    d.kind,d.os,d.app_version,d.paired_at,d.idle_lock_seconds,` + waiterDeviceColumns + `,
     (d.revoked_at IS NULL AND d.last_seen_at > now() - interval '` + onlineWindow + `') AS online,
     (SELECT u.display_name FROM app.sessions s JOIN app.users u ON u.id=s.user_id
         WHERE s.device_id=d.id AND s.revoked_at IS NULL AND s.expires_at > now() AND NOT u.support
         ORDER BY s.last_seen_at DESC LIMIT 1) AS "current_user"
-    FROM app.devices d LEFT JOIN app.registers r ON r.id=d.register_id` + precheckPrinterJoins
+    FROM app.devices d LEFT JOIN app.registers r ON r.id=d.register_id` + waiterDeviceJoins
 
 // terminalIdentityQuery es la terminal de quien pide, tal como la informan auth/me y restaurant/state: pantalla de
 // inicio (etapa 9C), bloqueo por inactividad (etapa A1) y, desde la etapa A2 (parte C), la impresora de precuentas de
-// un dispositivo android (null si no tiene), para que el dispositivo diga a dónde se envió la precuenta.
+// un dispositivo android (null si no tiene), para que el dispositivo diga a dónde se envió la precuenta; desde la parte
+// D, sus avisos de platillos listos (activados, sonido y vibración).
 const terminalIdentityQuery = `SELECT d.id,d.name,d.register_id,d.keyboard_mode,d.home_screen,d.idle_lock_seconds,d.precheck_printer_id,
+    d.ready_alerts_enabled,d.ready_alerts_sound,d.ready_alerts_vibration,
     CASE WHEN precheck_printer.id IS NOT NULL THEN jsonb_build_object('id',precheck_printer.id,'name',precheck_printer.name,
         'terminal_name',CASE WHEN precheck_printer.transport='agent' THEN precheck_printer_terminal.name END) END AS precheck_printer
-    FROM app.devices d` + precheckPrinterJoins + ` WHERE d.id=$1`
+    FROM app.devices d` + waiterDeviceJoins + ` WHERE d.id=$1`
 
 // Límites del bloqueo por inactividad de un dispositivo (etapa A1, fase B): los mismos del CHECK
 // devices_idle_lock_seconds_check de la migración 0025.
@@ -136,6 +141,11 @@ func devices(ctx context.Context, tx pgx.Tx, request Request, principal Principa
 		// Impresora de precuentas de un teléfono o tableta de meseros (etapa A2, parte C, A2-D3). Opcional por la
 		// misma razón; a diferencia de los anteriores, null la quita (sin impresora el dispositivo no imprime).
 		PrecheckPrinterID optionalID `json:"precheck_printer_id"`
+		// Avisos de platillos listos de un teléfono o tableta (etapa A2, parte D): «Avisar platillos listos», «Sonido»
+		// y «Vibración». Opcionales: sin ellos se conserva lo guardado.
+		ReadyAlertsEnabled   *bool `json:"ready_alerts_enabled"`
+		ReadyAlertsSound     *bool `json:"ready_alerts_sound"`
+		ReadyAlertsVibration *bool `json:"ready_alerts_vibration"`
 	}
 	if err := decode(request.Body, &input); err != nil {
 		return nil, err
@@ -152,6 +162,12 @@ func devices(ctx context.Context, tx pgx.Tx, request Request, principal Principa
 	}
 	if err := validatePrecheckPrinter(ctx, tx, deviceID, input.PrecheckPrinterID); err != nil {
 		return nil, err
+	}
+	if input.ReadyAlertsEnabled != nil || input.ReadyAlertsSound != nil || input.ReadyAlertsVibration != nil {
+		if err := requireAndroidDevice(ctx, tx, deviceID,
+			"Los avisos de platillos listos solo se configuran en teléfonos y tabletas de meseros."); err != nil {
+			return nil, err
+		}
 	}
 	if input.RegisterID != nil {
 		if !identifierPattern.MatchString(*input.RegisterID) {
@@ -181,9 +197,12 @@ func devices(ctx context.Context, tx pgx.Tx, request Request, principal Principa
 	// impresora de precuentas se conserva si no se envió y cambia (o se quita, con null) si se envió.
 	if _, err := tx.Exec(ctx, `UPDATE app.devices SET name=$1,register_id=$2,keyboard_mode=$3,home_screen=coalesce($4,home_screen),
         idle_lock_seconds=coalesce($5,idle_lock_seconds),
-        precheck_printer_id=CASE WHEN $7 THEN $8::uuid ELSE precheck_printer_id END WHERE id=$6`,
+        precheck_printer_id=CASE WHEN $7 THEN $8::uuid ELSE precheck_printer_id END,
+        ready_alerts_enabled=coalesce($9,ready_alerts_enabled),ready_alerts_sound=coalesce($10,ready_alerts_sound),
+        ready_alerts_vibration=coalesce($11,ready_alerts_vibration) WHERE id=$6`,
 		input.Name, input.RegisterID, input.KeyboardMode, input.HomeScreen, input.IdleLockSeconds, deviceID,
-		input.PrecheckPrinterID.Set, input.PrecheckPrinterID.Value); err != nil {
+		input.PrecheckPrinterID.Set, input.PrecheckPrinterID.Value,
+		input.ReadyAlertsEnabled, input.ReadyAlertsSound, input.ReadyAlertsVibration); err != nil {
 		return nil, err
 	}
 	next, err := object(ctx, tx, devicesQuery+" WHERE d.id=$1", deviceID)

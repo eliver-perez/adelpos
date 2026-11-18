@@ -219,7 +219,7 @@ func TestClientMinimumVersionByKind(t *testing.T) {
 	if !found["waiter-pin-v1"] || !found["client-versions-by-kind"] || !found["waiter-mode-v1"] {
 		t.Fatalf("capacidades de la etapa A1: %v", capabilities)
 	}
-	if !found["takeaway-v1"] || !found["device-precheck-printer-v1"] {
+	if !found["takeaway-v1"] || !found["device-precheck-printer-v1"] || !found["ready-alerts-v1"] {
 		t.Fatalf("capacidades de la etapa A2: %v", capabilities)
 	}
 }

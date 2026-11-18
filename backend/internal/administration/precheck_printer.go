@@ -45,12 +45,8 @@ func validatePrecheckPrinter(ctx context.Context, tx pgx.Tx, deviceID string, fi
 	if !identifierPattern.MatchString(*field.Value) {
 		return invalid("Identificador de impresora inválido.")
 	}
-	var kind string
-	if err := tx.QueryRow(ctx, "SELECT kind FROM app.devices WHERE id=$1", deviceID).Scan(&kind); err != nil {
+	if err := requireAndroidDevice(ctx, tx, deviceID, "La impresora de precuentas solo se asigna a teléfonos y tabletas de meseros."); err != nil {
 		return err
-	}
-	if kind != "android" {
-		return invalid("La impresora de precuentas solo se asigna a teléfonos y tabletas de meseros.")
 	}
 	choice, err := kitchen.DocumentPrinterChoice(ctx, tx, *field.Value)
 	if err != nil {
@@ -62,6 +58,18 @@ func validatePrecheckPrinter(ctx context.Context, tx pgx.Tx, deviceID string, fi
 	if choice.Problem != "" {
 		return invalid(kitchen.UnavailablePrinterMessage(choice.Problem, choice.Name) +
 			" Elige una impresora que pueda imprimir precuentas.")
+	}
+	return nil
+}
+
+// requireAndroidDevice rechaza con el mensaje dado lo que solo se configura en un teléfono o tableta de meseros.
+func requireAndroidDevice(ctx context.Context, tx pgx.Tx, deviceID, message string) error {
+	var kind string
+	if err := tx.QueryRow(ctx, "SELECT kind FROM app.devices WHERE id=$1", deviceID).Scan(&kind); err != nil {
+		return err
+	}
+	if kind != "android" {
+		return invalid(message)
 	}
 	return nil
 }

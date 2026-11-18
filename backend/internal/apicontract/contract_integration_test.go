@@ -405,6 +405,8 @@ func contractScenario(t *testing.T, client *contractClient) {
 	contractTakeaway(t, client, phone, waiterData)
 	// Etapa A2 (parte C): la precuenta desde el teléfono, en su impresora.
 	contractPrecheck(t, client, phone, waiterData)
+	// Etapa A2 (parte D): los avisos de platillos listos del teléfono, con su lectura y su canal.
+	contractReadyAlerts(t, client, phone, waiterData)
 	client.call("POST", "/auth/logout", nil, nil, 200)
 }
 
@@ -790,5 +792,90 @@ func contractPrecheck(t *testing.T, client *contractClient, phone *contractClien
 	retried := decodeContract[map[string]any](t, waiterPhone.call("POST", route+"retry", retry, nil, 200).Body.Bytes())
 	if retried["ticket_id"] != ticketID || retried["printer_name"] != "Precuentas contrato" {
 		t.Fatalf("reintento: %v", retried)
+	}
+}
+
+// contractReadyAlerts son los avisos de platillos listos (etapa A2, parte D): un mesero entra con PIN en el teléfono;
+// la computadora principal le abre una cuenta y cocina (KDS) la marca «Listo» (preparación, fuera del contrato); el
+// teléfono, solo con su credencial, recibe el aviso con getReadyAlerts y abre su canal streamReadyAlerts, cuyo primer
+// mensaje cumple ReadyAlertsBatch.
+func contractReadyAlerts(t *testing.T, client *contractClient, phone *contractClient, data contractWaiterData) {
+	role := decodeContract[map[string]any](t, client.setup("POST", "/roles", map[string]any{"name": "Meseros con avisos contrato",
+		"permissions": []string{"waiter_devices.use", "accounts.read", "accounts.open", "orders.capture", "orders.confirm"}}, 200))
+	waiter := decodeContract[map[string]any](t, client.setup("POST", "/users", map[string]any{"username": "eva.contrato",
+		"display_name": "Eva del contrato", "role_id": role["id"], "active": true, "password": "clave-del-contrato-5"}, 200))
+	waiterID := fmt.Sprint(waiter["id"])
+	client.setup("PUT", "/users/"+waiterID+"/pin", map[string]any{"pin": "5274", "short_name": "Eva", "badge_color": ""}, 200)
+	phone.call("POST", "/auth/pin-login", map[string]string{"user_id": waiterID, "pin": "5274"}, nil, 200)
+	// Cocina en pantalla para la categoría de las papas y una cuenta de Eva enviada a cocina (preparación).
+	categoryID := ""
+	if err := client.pool.QueryRow(context.Background(), "SELECT category_id::text FROM app.catalog_products WHERE id=$1",
+		data.fries).Scan(&categoryID); err != nil {
+		t.Fatal(err)
+	}
+	station := decodeContract[map[string]any](t, client.setup("POST", "/kitchen/stations", map[string]any{"operation_id": contractID(),
+		"name": "Cocina contrato", "active": true, "reception": "kds", "target_minutes": 12, "warning_minutes": 15,
+		"overdue_minutes": 25, "grouping": "inherit", "tracking": "inherit"}, 200))
+	client.setup("POST", "/kitchen/routes", map[string]any{"operation_id": contractID(), "category_id": categoryID,
+		"mode": "prepare", "station_ids": []any{station["id"]}}, 200)
+	opened := decodeContract[map[string]any](t, client.setup("POST", "/restaurant/accounts", map[string]any{
+		"operation_id": contractID(), "mode": "dine_in", "assigned_user_id": waiterID,
+		"items": []map[string]any{{"id": contractID(), "product_id": data.fries, "variant_id": nil, "quantity": 2,
+			"customization": data.customization}},
+	}, 200))["account"].(map[string]any)
+	accountID := fmt.Sprint(opened["id"])
+	preview := decodeContract[map[string]any](t, client.setup("GET", "/restaurant/accounts/"+accountID+"/preview", nil, 200))
+	client.setup("POST", "/restaurant/accounts/"+accountID+"/confirm", map[string]any{"operation_id": contractID(),
+		"revision": opened["revision"], "expected_fingerprint": preview["fingerprint"]}, 200)
+	rows, err := client.pool.Query(context.Background(), `SELECT t.id::text,t.revision FROM app.kitchen_tasks t
+        JOIN app.restaurant_item_units u ON u.id=t.unit_id WHERE u.account_id=$1`, accountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tasks := []map[string]any{}
+	for rows.Next() {
+		var id string
+		var revision int
+		if err := rows.Scan(&id, &revision); err != nil {
+			t.Fatal(err)
+		}
+		tasks = append(tasks, map[string]any{"id": id, "revision": revision})
+	}
+	rows.Close()
+	if len(tasks) != 2 {
+		t.Fatalf("tareas de cocina: %v", tasks)
+	}
+	client.setup("POST", "/kitchen/states", map[string]any{"operation_id": contractID(), "state": "ready", "tasks": tasks}, 200)
+	// El teléfono, solo con su credencial (phone no tiene sesión), recibe el aviso.
+	batch := decodeContract[map[string]any](t, phone.call("GET", "/ready-alerts?after=0", nil, nil, 200).Body.Bytes())
+	alerts, _ := batch["alerts"].([]any)
+	if batch["active"] != true || len(alerts) != 1 {
+		t.Fatalf("avisos del teléfono: %v", batch)
+	}
+	alert := alerts[0].(map[string]any)
+	items, _ := alert["items"].([]any)
+	if alert["account_id"] != accountID || alert["waiter_short_name"] != "Eva" || len(items) != 1 ||
+		items[0].(map[string]any)["quantity"] != float64(2) || items[0].(map[string]any)["product_name"] != "Papas contrato" {
+		t.Fatalf("aviso: %v", alert)
+	}
+	// El canal: el primer mensaje cumple el contrato.
+	streamContext, stop := context.WithTimeout(context.Background(), 400*time.Millisecond)
+	defer stop()
+	stream := httptest.NewRecorder()
+	phone.handler.ServeHTTP(stream, phone.request(streamContext, "GET", "/ready-alerts/stream?after=0", nil, nil))
+	operation, _ := client.contract.Match("GET", "/ready-alerts/stream")
+	client.check(operation, stream.Code, stream.Header().Get("Content-Type"), nil)
+	scanner := bufio.NewScanner(bytes.NewReader(stream.Body.Bytes()))
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	message := ""
+	for scanner.Scan() {
+		if data, found := strings.CutPrefix(scanner.Text(), "data: "); found {
+			message = data
+			break
+		}
+	}
+	if err := client.contract.ValidateJSON(map[string]any{"$ref": "#/components/schemas/ReadyAlertsBatch"}, []byte(message)); err != nil ||
+		!strings.Contains(message, accountID) {
+		t.Fatalf("el mensaje del canal de avisos no cumple el contrato: %v (%q)", err, message)
 	}
 }
