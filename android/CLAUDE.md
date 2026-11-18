@@ -112,19 +112,28 @@ paquetes que se desinstalan antes de las instrumentadas, en «Pruebas») y en es
     un pedido para llevar se guardan en la captura solo mientras nada ha salido (`Capture.customerEditable`); después,
     como una edición aparte (`takeaway_customer_edits`, con su propia `operation_id`, la última gana) que envía el
     mismo trabajador de la cola con la sesión del mesero que la hizo.
+22. **Un solo canal de eventos y un solo canal de avisos por proceso** (etapa A2, Fase D): el de eventos
+    (`RealtimeClient`, solo en primer plano y con sesión, Go admite dos por dispositivo) y el de platillos listos
+    (`ReadyAlertsChannel`, con **solo la credencial del dispositivo**, Go admite uno). El servicio en primer plano del
+    aviso **no** abre el canal de eventos y **no envía pedidos**: al reconectar solo pide un envío de la cola
+    (`retryNow`), como los demás disparadores. Un servicio en primer plano solo se arranca desde primer plano o con
+    una exención (`BOOT_COMPLETED`, `MY_PACKAGE_REPLACED`, reinicio pegajoso); si Android lo rechaza
+    (`ForegroundServiceStartNotAllowedException`), se espera al siguiente disparador. Un aviso nunca se muestra dos
+    veces (ids avisados en Room y en los extras de la notificación) y nunca se pierde (cursor en Room, guardado
+    **después** de mostrar).
 
 ## Estructura
 
-| Módulo             | Tipo                                     | Qué contiene                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| ------------------ | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `app`              | aplicación (`com.adelpos.meseros`)       | `AdelPosApplication` + `AppContainer` (con el bloqueo por inactividad del proceso y el registro de borrado), `MainActivity` (de borde a borde), `ShellViewModel` (indicador), navegación (`navigation/AdelPosApp.kt`, rutas con tipo), `CatalogRealtimeContainer` (catálogo, imágenes y el único canal de tiempo real) y `AppForeground` (primer plano del proceso), manifiesto, ícono, `src/debug` con `network_security_config`.                                                                                                                                                                                                                                                    |
-| `core:domain`      | Kotlin/JVM puro (sin Android)            | `Money` y `MoneyFormat`, `LinkState`/`ConnectionSummary` y `DefaultNetworkTracker`, `PendingOrdersSource`, `AppError`/`AppResult`, `SecretSealer`, `TableState`, `TablesView`; `server/` (dirección escrita, anuncio NSD, cambio de IP, versiones), `pairing/` (código de 6 dígitos, `PairingFlow`), `access/` (`DeviceAccess`, verificador del PIN, límite local, bloqueo por inactividad, `WaiterWork`), `catalog/` (modelos del catálogo, búsqueda sin acentos, `Customization`/`LineSelection`, reglas del personalizador y revisión de lo que declara el catálogo), `realtime/` (`RealtimeFeed`, señales, interrupciones de acceso, espera creciente). Pruebas JVM en segundos.  |
-| `core:data`        | biblioteca Android                       | `api/` (OkHttp con huella fijada, cabeceras del cliente, JSON, `MoneySerializer`, errores de Go → `AppError`, `ServerApi` con `ApiOutcome`), `access/` (`AccessRepository`, `PairingRepository`, `PairedConnection`), `discovery/` (NSD, sonda HTTPS), `security/` (huella fijada, primer certificado del emparejamiento, Keystore), `db/` (Room, esquemas en `core/data/schemas/`), `network/`, `pending/`, `preferences/`; `catalog/` (`catalog.db`, descarga completa y por cambios, caché de imágenes, actualizaciones), `realtime/` (cliente SSE), `session/` (`ServerAccess`, `DeviceServerAccess`).                                                                            |
-| `core:ui`          | biblioteca Android (Compose, Material 3) | Tema claro/oscuro (`theme/`), íconos propios (`icons/AdelIcons.kt`, los trazos de `desktop/src/components/Icon.tsx`), botones, barra superior e indicador, estado de mesa, toques de los diálogos para el bloqueo por inactividad (`LocalUserActivity`), andamio de uno o dos paneles (`layout/`), `catalog/` (búsqueda, categorías, cuadrícula con «Agotado», imagen con marcador y el personalizador táctil). Compartido con la A2.                                                                                                                                                                                                                                                 |
-| `feature:access`   | biblioteca Android                       | Entrada al dispositivo (fases B y C): «Buscar el servidor» y código de emparejamiento, entrada con PIN, «Vuelve a escribir tu PIN», cambio de mesero (`AccessViewModel`), emparejar de nuevo, actualizar la aplicación o el servidor, dispositivo retirado y su bitácora, permiso de red local. Solo usa interfaces de `core:domain`.                                                                                                                                                                                                                                                                                                                                                 |
-| `core:capture`     | biblioteca Android (A2)                  | La captura compartida de Mesas y Para llevar (`com.adelpos.meseros.core.capture`, movida con `git mv` de `feature:waiter` en la Fase B de la A2): `CaptureScreen`/`CaptureViewModel` (catálogo y personalizador de `core:ui` con la cuenta al lado o a un toque: lo enviado con su preparación, modificar o cancelar unidades, lo por enviar y «Enviar a cocina»; en un pedido para llevar, su cliente y «Nombre y teléfono»), `OrderPanel`, `SentLineDialogs`, `Takeaway.kt` (`CustomerDialog` y cómo se nombra un pedido para llevar) y `pending/` («Pedidos pendientes» con los cinco estados y «Requiere tu revisión»); `CaptureDependencies` (solo interfaces de `core:domain`). |
-| `feature:waiter`   | biblioteca Android                       | Modo Mesero (Fase E): `tables/` (Mesas en lista o mapa con su tiempo, búsqueda y el panel de la mesa con sus cuentas y «Nueva cuenta»); `WaiterDependencies` (la `CaptureDependencies` de `core:capture` más la vista de Mesas y el reloj). Queda la pantalla de muestra «Catálogo» de la Fase D (sin ruta en la navegación).                                                                                                                                                                                                                                                                                                                                                         |
-| `feature:takeaway` | biblioteca Android (A2)                  | Para llevar (Fase B de la A2): `TakeawayScreen`/`TakeawayViewModel` (la lista de `TakeawayBoard` con folio, nombre, tiempo, preparación y pago de Go, lo que falta enviar y, sin conexión, lo último con su hora; «Nuevo pedido», «Nombre y teléfono» y «Entregado» o «Cobrar en caja antes de entregar»); `TakeawayDependencies`. La captura es la de `core:capture`.                                                                                                                                                                                                                                                                                                                |
+| Módulo             | Tipo                                     | Qué contiene                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ------------------ | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `app`              | aplicación (`com.adelpos.meseros`)       | `AdelPosApplication` + `AppContainer` (con el bloqueo por inactividad del proceso y el registro de borrado), `MainActivity` (de borde a borde), `ShellViewModel` (indicador), navegación (`navigation/AdelPosApp.kt`, rutas con tipo), `CatalogRealtimeContainer` (catálogo, imágenes y el único canal de tiempo real) y `AppForeground` (primer plano del proceso), `ready/` (aviso de platillos listos, A2: `ReadyAlertsController`, `ReadyAlertsService`, `ReadyAlertsBootReceiver`, notificaciones, permisos y ayuda), manifiesto, ícono, `src/debug` con `network_security_config`.                                                                                                                                                                                   |
+| `core:domain`      | Kotlin/JVM puro (sin Android)            | `Money` y `MoneyFormat`, `LinkState`/`ConnectionSummary` y `DefaultNetworkTracker`, `PendingOrdersSource`, `AppError`/`AppResult`, `SecretSealer`, `TableState`, `TablesView`; `server/` (dirección escrita, anuncio NSD, cambio de IP, versiones), `pairing/` (código de 6 dígitos, `PairingFlow`), `access/` (`DeviceAccess`, verificador del PIN, límite local, bloqueo por inactividad, `WaiterWork`), `catalog/` (modelos del catálogo, búsqueda sin acentos, `Customization`/`LineSelection`, reglas del personalizador y revisión de lo que declara el catálogo), `realtime/` (`RealtimeFeed`, señales, interrupciones de acceso, espera creciente), `ready/` (A2: avisos, texto, agrupación, sin duplicados, arranque y parada, canales). Pruebas JVM en segundos. |
+| `core:data`        | biblioteca Android                       | `api/` (OkHttp con huella fijada, cabeceras del cliente, JSON, `MoneySerializer`, errores de Go → `AppError`, `ServerApi` con `ApiOutcome`), `access/` (`AccessRepository`, `PairingRepository`, `PairedConnection`), `discovery/` (NSD, sonda HTTPS), `security/` (huella fijada, primer certificado del emparejamiento, Keystore), `db/` (Room, esquemas en `core/data/schemas/`), `network/`, `pending/`, `preferences/`; `catalog/` (`catalog.db`, descarga completa y por cambios, caché de imágenes, actualizaciones), `realtime/` (cliente SSE), `session/` (`ServerAccess`, `DeviceServerAccess`), `ready/` (A2: cliente y canal de `ready-alerts` con la credencial del dispositivo y su registro en Room).                                                       |
+| `core:ui`          | biblioteca Android (Compose, Material 3) | Tema claro/oscuro (`theme/`), íconos propios (`icons/AdelIcons.kt`, los trazos de `desktop/src/components/Icon.tsx`), botones, barra superior e indicador, estado de mesa, toques de los diálogos para el bloqueo por inactividad (`LocalUserActivity`), andamio de uno o dos paneles (`layout/`), `catalog/` (búsqueda, categorías, cuadrícula con «Agotado», imagen con marcador y el personalizador táctil). Compartido con la A2.                                                                                                                                                                                                                                                                                                                                      |
+| `feature:access`   | biblioteca Android                       | Entrada al dispositivo (fases B y C): «Buscar el servidor» y código de emparejamiento, entrada con PIN, «Vuelve a escribir tu PIN», cambio de mesero (`AccessViewModel`), emparejar de nuevo, actualizar la aplicación o el servidor, dispositivo retirado y su bitácora, permiso de red local. Solo usa interfaces de `core:domain`.                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `core:capture`     | biblioteca Android (A2)                  | La captura compartida de Mesas y Para llevar (`com.adelpos.meseros.core.capture`, movida con `git mv` de `feature:waiter` en la Fase B de la A2): `CaptureScreen`/`CaptureViewModel` (catálogo y personalizador de `core:ui` con la cuenta al lado o a un toque: lo enviado con su preparación, modificar o cancelar unidades, lo por enviar y «Enviar a cocina»; en un pedido para llevar, su cliente y «Nombre y teléfono»), `OrderPanel`, `SentLineDialogs`, `Takeaway.kt` (`CustomerDialog` y cómo se nombra un pedido para llevar) y `pending/` («Pedidos pendientes» con los cinco estados y «Requiere tu revisión»); `CaptureDependencies` (solo interfaces de `core:domain`).                                                                                      |
+| `feature:waiter`   | biblioteca Android                       | Modo Mesero (Fase E): `tables/` (Mesas en lista o mapa con su tiempo, búsqueda y el panel de la mesa con sus cuentas y «Nueva cuenta»); `WaiterDependencies` (la `CaptureDependencies` de `core:capture` más la vista de Mesas y el reloj). Queda la pantalla de muestra «Catálogo» de la Fase D (sin ruta en la navegación).                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `feature:takeaway` | biblioteca Android (A2)                  | Para llevar (Fase B de la A2): `TakeawayScreen`/`TakeawayViewModel` (la lista de `TakeawayBoard` con folio, nombre, tiempo, preparación y pago de Go, lo que falta enviar y, sin conexión, lo último con su hora; «Nuevo pedido», «Nombre y teléfono» y «Entregado» o «Cobrar en caja antes de entregar»); `TakeawayDependencies`. La captura es la de `core:capture`.                                                                                                                                                                                                                                                                                                                                                                                                     |
 
 Dependencias entre módulos: `app` → todos; `feature:*` → `core:ui` (→ `core:domain`) y, `feature:waiter` y
 `feature:takeaway`, `core:capture` (→ `core:ui`); `core:data` → `core:domain`. Un módulo `feature` nunca depende de otro
@@ -222,7 +231,7 @@ mismo entorno. Los comentarios de línea (`//`) se escriben de 100 columnas como
   fallas por tiempo: mejor no compilar mientras corren); `emu-down` al terminar.
   En cada uno: `connectedDebugAndroidTest` con `ANDROID_SERIAL` (contar los XML de cada módulo) y **`ANDROID_SERIAL=…
 ADELPOS_E2E_NEW_SERVER=<orden> scripts/android-e2e.sh --suite all`**, que levanta un servidor temporal nuevo para
-  cada parte (access 1–5; access 6–7 con otra identidad sin reinstalar; catalog; waiter; field; takeaway) con la orden
+  cada parte (access 1–5; access 6–7 con otra identidad sin reinstalar; catalog; waiter; field; takeaway; alerts) con la orden
   de `ADELPOS_E2E_NEW_SERVER` (detiene el anterior, levanta otro en las mismas direcciones e imprime líneas
   `ADELPOS_E2E_*=…`: provisioning y base temporal). Los agentes usan como orden `iso.sh - server-down` seguido de
   `iso.sh <árbol> server-up`. Resultados en `<salida>/<suite>/` y `<salida>/summary.txt`.
@@ -270,7 +279,8 @@ emparejado, el mesero activo y sus credenciales. Otro módulo (catálogo, modo M
   registra ahí** la cola de pedidos y sus borradores y cancela su trabajo (`WorkManager.cancelAllWork()`). Todo módulo
   nuevo que guarde datos del restaurante se registra ahí.
 - **Versiones** (`ServerCompatibility.check`: servidor 0.13.0 o posterior con `waiter-pin-v1` y, desde la A2,
-  `takeaway-v1` —A2-D6: cada fase agrega la capacidad que usa—, y la mínima de Android de `min_client_versions`): se
+  `takeaway-v1` y `ready-alerts-v1` —A2-D6: cada fase agrega la capacidad que usa—, y la mínima de Android de
+  `min_client_versions`): se
   comprueba con `GET version` **antes de pedir el código de emparejamiento** (también con la dirección escrita; `PairingRepository.request`) y en cada comprobación ya emparejado. Un servidor viejo da
   «Actualiza el servidor del restaurante» con «Volver a comprobar» (`PairingProblem.UpdateServer` al emparejar,
   `DeviceStatus.UpdateServer` después). Un 426 o un tipo de cliente desconocido durante el emparejamiento de un
@@ -332,8 +342,9 @@ listo y un mesero **con sesión de Go**; la dirección se pide en cada uso por e
   y `Customization.toDto()` (`core:data`) dan el JSON exacto que esperan `openAccount`, `saveDraft`,
   `previewDraft` y `submitOfflineOrder` (con `CustomizationJson`); `CustomizationDto.toDomain()` lee un borrador de Go.
   `CustomizationCheck` revisa solo lo que declara el catálogo; `LineDescription` describe la partida.
-- **Tiempo real** (`catalogRealtime.realtime`, `RealtimeFeed`): **un solo canal SSE por proceso**, abierto solo en primer
-  plano y con sesión; nunca abrir otro (Go admite dos por dispositivo). La Fase E se suscribe con
+- **Tiempo real** (`catalogRealtime.realtime`, `RealtimeFeed`): **un solo canal de eventos por proceso**, abierto solo en
+  primer plano y con sesión; nunca abrir otro (Go admite dos por dispositivo). El canal de avisos de platillos listos
+  es otro, aparte (regla 22). La Fase E se suscribe con
   `realtime.events(RealtimeScopes.RESTAURANT)` (o `TAKEAWAY`, con tipos como
   `RealtimeKinds.ACCOUNT_PREPARATION_CHANGED`) y `realtime.rebuilds()` (reset del servidor o canal abierto de nuevo:
   volver a leer `restaurant/state`). El cursor sale del `id` de los mensajes `changes`; se abre desde el
@@ -415,6 +426,62 @@ captura y la misma cola de la A1, con la modalidad en la captura, el pedido y el
   `AppDatabaseMigrationTest`; contra el Go temporal, `TakeawayOnGoTest` con **`scripts/android-e2e.sh --suite
 takeaway`** (pasos `t1`–`t8`; el guion corta la red en `t4`; la prueba hace de cocina y de caja por la escucha
   local).
+
+## Aviso de platillos listos (etapa A2, Fase D, para los demás módulos)
+
+Cuando cocina marca «Listo» en el KDS, Go registra el aviso (`app.ready_notices`) y decide a quién llega (A2-D4,
+A2-D9); el dispositivo lo recibe con **solo su credencial** (`GET ready-alerts?after=` y `ready-alerts/stream`, SSE con
+`Last-Event-ID`), aunque esté en «¿Quién eres?», con la pantalla apagada o la aplicación cerrada. El texto lo arma la
+aplicación (A2-D10) con las plantillas de `app/src/main/res/values/strings.xml`: «Mesa 4 · 2 platillos listos» /
+«2 × Filete de res».
+
+- **Dónde vive**: la lógica pura en `core:domain/ready` (`ReadyAlertsProcessor`: quitar lo ya avisado, mostrar,
+  guardar; `ReadyNotice`: una notificación por cuenta con el acumulado; `ReadyAlertWords`: el texto con singular y
+  plural; `ReadyAlertsLifecycle`: cuándo arrancar, el fin del día, qué hacer con cada error y la espera creciente de 2
+  a 30 s; `ReadyChannels`, A2-D7). La red y Room en `core:data/ready` (`ReadyAlertsClient`, `ReadyAlertsChannel` —el
+  único canal de avisos del proceso—, `RoomReadyAlertsLedger`, `DeviceReadyAlertsServer`). El servicio, las
+  notificaciones, los permisos y la ayuda en `app/ready` (`AppContainer.readyAlerts`, `ReadyAlertsController`).
+- **Servicio en primer plano** (`ReadyAlertsService`, A2-D8): tipo `specialUse` (con su subtipo en el manifiesto) y
+  la notificación permanente «AD-EL POS conectado» (canal `conectado`, baja importancia; al tocarla, la ayuda). Solo
+  sostiene el proceso: el canal y las decisiones son de `ReadyAlertsController`. `startForeground` es lo primero de
+  `onStartCommand` (también con `intent == null`, el reinicio pegajoso); el tipo se pasa desde la API 34 (en 29–33,
+  ninguno; antes no existe). `START_STICKY`. Quitar la aplicación de recientes no lo detiene.
+- **Arranca** (`ReadyAlertsController.request`, decidido por `ReadyAlertsLifecycle.decide` con lo guardado): al entrar
+  un mesero con conexión, al abrir la aplicación con el dispositivo listo (si lo último de Go fue `active: true` y no
+  terminó el día; si no, pregunta antes con `GET ready-alerts` sin mover el cursor) y desde `BOOT_COMPLETED` /
+  `MY_PACKAGE_REPLACED` (`ReadyAlertsBootReceiver`, solo con esa condición guardada). Sin destinatarios en el día no
+  arranca: no hay notificación permanente.
+- **Se detiene** cuando el canal termina: `active: false` (nadie entró hoy o «Avisar platillos listos» apagado), el
+  día comercial terminó sin poder volver a preguntar (10 min de margen), la credencial dejó de valer (401
+  `DEVICE_*`, otra huella, 426: se avisa a `deviceAccess.report`) o un rechazo permanente (403/400); también cuando el
+  dispositivo deja de estar listo y con «borrar los datos de este dispositivo» (registrado en `deviceDataWipe` como
+  «avisos de platillos listos»: detiene canal y servicio, borra Room y quita los avisos a la vista).
+- **Sin duplicados ni pérdidas** (§4.1): Room guarda el cursor y lo último de Go (`ready_alerts_state`) y los avisos ya
+  mostrados del día por número y hora (`ready_alerts_seen`; al cambiar de día se borran los anteriores). Cada lote:
+  quitar lo ya mostrado → mostrar → guardar ids y cursor en una transacción. Si el proceso muere entre mostrar y
+  guardar, el aviso vuelve a llegar y la notificación de su cuenta lo reconoce en sus extras (no vuelve a sonar). Sin
+  cambios no escribe en Room (Go manda un mensaje cada 750 ms).
+- **Reconexión**: Go cierra cada flujo a los 30 s y se reconecta enseguida desde el último cursor; sin red, 5xx o
+  conexión muerta (10 s sin un byte), espera creciente; 429 (el canal anterior todavía abierto) lee con `GET` mientras
+  espera; tras tres fallas pide buscar el servidor en otra dirección (`deviceAccess.recheck`, cambio de IP); al volver
+  la red, reconecta enseguida.
+- **Notificaciones**: un solo canal visible «Platillos listos» cuyo id depende del sonido y la vibración de Terminales
+  (A2-D7); una notificación por cuenta (etiqueta = la cuenta) con el acumulado, y el resumen del grupo con dos o más.
+  Al tocarla, `MainActivity` recibe la cuenta (`ReadyAlertsController.pendingOpen`): en «¿Quién eres?» la entrada con
+  PIN deja elegido a su mesero y, al entrar (él u otro que pueda ver la cuenta), se abre su captura
+  (`ReadyAlertsNavigationEffects`). Con esa cuenta a la vista, el aviso va dentro de la aplicación (`inAppNotices`).
+- **Permisos** (`ReadyAlertsOverlay`): la primera vez que el servicio corre, una explicación antes del diálogo de
+  Android, una sola vez cada uno: notificaciones (API 33+) y la exclusión de la optimización de batería
+  (`tools:ignore="BatteryLife"`, con su porqué en el manifiesto). Si se niegan, la ayuda «Avisos de platillos listos»
+  (menú del mesero o la notificación permanente) dice qué falta, con los botones a Ajustes, y si la salida anterior
+  fue «Forzar detención» o «Detener» (`ApplicationExitInfo.REASON_USER_REQUESTED`, API 30+).
+- **Pruebas**: `ReadyAlertsRulesTest` (dominio), `ReadyAlertsChannelTest` (MockWebServer como Go),
+  `RoomReadyAlertsLedgerTest` (Robolectric); instrumentadas `ReadyAlertsOnDeviceTest` (servicio, canales,
+  notificaciones, ayuda) y el caso 5 → 6 de `AppDatabaseMigrationTest`; contra el Go temporal, `AlertsOnGoTest` con
+  **`scripts/android-e2e.sh --suite alerts`** (`r1`–`r9`; el guion corta la red en `r4`, mata el proceso en `r8b` y
+  marca «Listo» desde la Mac). En las pruebas instrumentadas el aviso va **apagado** salvo con `readyAlerts=on`
+  (`AdelTestRunner`): su servicio y sus notificaciones no deben cambiar las pruebas de la A1; sus permisos se piden
+  solo con `alertPermissions=ask`.
 
 ## Dependencias
 
@@ -505,7 +572,10 @@ misma versión antes de la entrega): `captures` admite capturas sin mesa (`table
 columna a opcional, así que la migración 5 → 6 copia la tabla) con `mode`, `customer_name` y `customer_phone`, y la
 tabla nueva `takeaway_customer_edits` (ediciones del cliente por enviar); `WAITER_CHANGES_V6`. El destino guardado de
 un pedido (`pending_orders.destination`, JSON) lleva la modalidad y el cliente con valores por omisión para lo guardado
-antes. Todo registrado en `deviceDataWipe` (`WaiterDao.eraseAll`) y en la bitácora (`unsentOrders`).
+antes. Todo registrado en `deviceDataWipe` (`WaiterDao.eraseAll`) y en la bitácora (`unsentOrders`). Fase D: el
+aviso de platillos listos agrega a la misma v6 `ready_alerts_state` (una fila: cursor, si está activo, fin del día y
+configuración de Terminales) y `ready_alerts_seen` (avisos ya mostrados con su hora y su día), vacías al migrar;
+`READY_ALERTS_TABLES_V6` al final de la migración 5 → 6 y `ReadyAlertsDao.eraseAll` en `deviceDataWipe`.
 
 Cada cambio de esquema: subir `version`, agregar la `Migration` a `AppDatabase.MIGRATIONS`, versionar el nuevo
 `core/data/schemas/…/<versión>.json` y un caso en `AppDatabaseMigrationTest`. **Nunca**

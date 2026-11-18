@@ -6,6 +6,8 @@ A2). Con ella cada mesero:
 - Entra con **su nombre y su PIN** en un teléfono o una tableta que comparten varios meseros.
 - Ve las mesas y sus cuentas, captura los pedidos y los manda a cocina con **«Enviar a cocina»**.
 - Toma pedidos **Para llevar** con el mismo catálogo y ve si ya están listos y pagados (sección 6).
+- Recibe un **aviso cuando la cocina termina sus platillos**, aunque la pantalla esté apagada o la aplicación cerrada
+  (sección 7).
 - Sigue capturando **sin conexión**: los pedidos se mandan solos cuando vuelve la red.
 
 La **computadora principal** sigue mandando en todo: precios, impuestos, permisos y estados los decide ella al recibir
@@ -49,7 +51,7 @@ pedidos sin enviar) y avisa a soporte. **De la 0.1.0 a la 0.2.0 es distinto**: n
 
 **Si desinstalas la aplicación** (o borras sus datos en los Ajustes de Android), el dispositivo olvida el
 emparejamiento y se pierden los pedidos que no se hayan enviado. Al volver a instalarla hay que emparejarlo de nuevo
-(sección 3). En la computadora principal, revoca el registro anterior de ese dispositivo (sección 8).
+(sección 3). En la computadora principal, revoca el registro anterior de ese dispositivo (sección 9).
 
 ### Pasar de la 0.1.0 a la 0.2.0
 
@@ -69,13 +71,16 @@ En cada teléfono o tableta que tenga la 0.1.0, en este orden:
 2. **Desinstala la 0.1.0**: en los **Ajustes** del dispositivo, **Aplicaciones › AD-EL POS › Desinstalar** (o
    mantén presionado su ícono y elige «Desinstalar»). Los nombres cambian un poco según la marca.
 3. **Retira el dispositivo en la computadora principal**: en **Administración › Sistema › Terminales**, busca ese
-   teléfono o esa tableta, toca **«Revocar»** y **«Confirmar revocación»** (sección 8). Así su autorización anterior
+   teléfono o esa tableta, toca **«Revocar»** y **«Confirmar revocación»** (sección 9). Así su autorización anterior
    ya no sirve.
 4. **Instala la 0.2.0** con los pasos del principio de esta sección y **empareja** el dispositivo con su código
    (sección 3). Puedes ponerle el mismo nombre de antes. Cada mesero entra con su PIN de siempre; la primera vez en
    este dispositivo, con conexión (sin conexión solo entran los que ya entraron antes con conexión en él).
-5. La 0.2.0 puede pedir permisos nuevos de **notificaciones** y de **batería**, para el aviso de platillos listos; qué
-   hacer con ellos se explica en esta guía.
+5. **Acepta los permisos del aviso de platillos listos.** La primera vez que un mesero entra con conexión, la 0.2.0
+   explica y pide dos permisos nuevos: **mostrar notificaciones** (Android 13 o posterior; toca **«Continuar»** y
+   después **«Permitir»**) y **quitar la optimización de batería** (toca **«Continuar»** y después **«Permitir»**).
+   Sin ellos la aplicación sigue funcionando, pero los avisos no se ven o pueden llegar tarde con la pantalla apagada
+   (sección 7, «Si los avisos no llegan»). La 0.1.0 no tenía avisos: no hay nada que pasar de una a otra.
 
 Si en un dispositivo nunca se instaló la 0.1.0, no hace falta nada de esto: instala la 0.2.0 directamente. Si por
 error quedaron las dos, la 0.1.0 es la que ya estaba emparejada (en **Ajustes › Aplicaciones › AD-EL POS** se ve la
@@ -267,7 +272,62 @@ solo cambia si la cocina marca los platillos en la pantalla de cocina.
   siempre, y después se entrega.
 - Sin el permiso de registrar entregas, el mesero ve si está pagado y entregado, y la entrega se marca en la caja.
 
-## 7. Si no encuentra la computadora principal
+## 7. Avisos de platillos listos
+
+Cuando la cocina marca **«Listo»** un platillo en la **pantalla de cocina** (KDS), el mesero responsable de esa cuenta
+recibe un aviso en su teléfono o su tableta, **aunque la pantalla esté apagada o la aplicación cerrada**: «Mesa 4 · 2
+platillos listos» con «2 × Filete de res» debajo, o «Para llevar #12 (Juan) · 1 platillo listo». Nunca muestra
+precios. Los avisos de una misma mesa o pedido se juntan en uno solo que va sumando, y con varias cuentas aparece un
+resumen. Se ve también en «¿Quién eres?» y en la pantalla de bloqueo.
+
+- **Al tocarlo**, la aplicación abre esa cuenta o ese pedido. Si el dispositivo está en «¿Quién eres?», primero pide
+  el PIN del mesero del aviso (ya elegido) y después abre la cuenta. Si entra otro mesero, solo se abre si él puede
+  ver esa cuenta.
+- **Si el mesero ya está viendo esa cuenta** en la aplicación, el aviso aparece arriba de la pantalla unos segundos,
+  en lugar de la notificación.
+- **Solo funciona si la cocina marca «Listo» en la pantalla de cocina.** Si la cocina solo imprime comandas, no hay
+  avisos; la función queda lista para cuando se use.
+- **A quién le llega**: al mesero responsable de la cuenta (quien la abrió o a quien se le transfirió), en el
+  dispositivo donde usó su sesión más recientemente; si no tiene ninguna abierta, en todos los dispositivos donde entró
+  con su PIN durante el día. **Transferir la cuenta** cambia a quién llegan los platillos que todavía no estaban
+  listos. A los demás meseros y a los demás dispositivos no les llega.
+- **No se repiten ni se pierden**: si se corta la wifi justo cuando la cocina marca «Listo», el aviso llega una sola
+  vez en cuanto vuelve la conexión.
+- No hace falta ningún permiso nuevo para el rol Mesero. Requiere la computadora principal en la versión **0.13.0**.
+
+**«AD-EL POS conectado».** Para que los avisos lleguen con la pantalla apagada, Android exige que la aplicación muestre
+una **notificación permanente** mientras mantiene la conexión con la computadora principal: «AD-EL POS conectado»
+(«Sin conexión con la computadora principal. Reintentando…» si se cortó la red). Aparece cuando un mesero entra con su
+PIN **con conexión** y se queda mientras haya meseros que entraron ese día en el dispositivo; desaparece sola al
+terminar el día comercial (a la «Hora de inicio del día» de la computadora principal), si se apaga «Avisar platillos
+listos», al retirar el dispositivo o al emparejarlo de nuevo. Se ve discreta, sin sonido. Al tocarla se abre la ayuda
+«Avisos de platillos listos». Después de reiniciar el teléfono vuelve sola (desde el primer desbloqueo) si el día
+comercial no ha terminado.
+
+**Sonido y vibración.** Se eligen por dispositivo en la computadora principal: **Administración › Sistema ›
+Terminales**, **«Editar»** en el teléfono o la tableta, **«Avisos de platillos listos»**: **«Avisar platillos listos»**
+(activado al principio), **«Sonido»** y **«Vibración»**, y **«Guardar cambios»**; **«Ver configuración»** los muestra.
+El cambio llega al dispositivo en unos segundos. Android también deja ajustarlos en sus Ajustes, en **Aplicaciones ›
+AD-EL POS › Notificaciones › «Platillos listos»** (siempre hay un solo canal con ese nombre).
+
+**Si los avisos no llegan.** En el teléfono o la tableta, toca el nombre del mesero arriba a la derecha y elige
+**«Avisos de platillos listos»** (o toca la notificación «AD-EL POS conectado»): la ayuda dice qué falta y lleva a los
+Ajustes de Android.
+
+- **Notificaciones desactivadas**: toca **«Abrir ajustes de notificaciones»** y actívalas (y el canal «Platillos
+  listos»). Sin ellas los avisos no se ven.
+- **Optimización de batería**: toca **«Quitar la restricción de batería»** y **«Permitir»**. Sin esto, algunos
+  teléfonos retrasan o cortan los avisos con la pantalla apagada. La aplicación gasta muy poca batería: solo mantiene
+  la conexión.
+- **«Forzar detención»** (en Ajustes › Aplicaciones) o **«Detener»** en el Administrador de tareas de Android paran
+  los avisos **hasta que se vuelve a abrir AD-EL POS**. No los uses para «cerrar» la aplicación: quitarla de recientes
+  no detiene los avisos.
+- Un mesero que entró **sin conexión** no recibe avisos en ese dispositivo hasta su primera entrada con conexión (la
+  computadora principal no sabe que entró).
+- Algunas marcas de teléfonos cierran las aplicaciones en segundo plano por su cuenta; si pasa, busca en los Ajustes
+  de esa marca la opción para dejar que AD-EL POS siga activa.
+
+## 8. Si no encuentra la computadora principal
 
 Revisa en este orden:
 
@@ -299,12 +359,13 @@ Otros avisos que puede mostrar el dispositivo:
   encima de la actual (sección 1) y **no la desinstales**, porque se perderían los pedidos sin enviar. De la 0.1.0 a
   la 0.2.0, en cambio, sigue «Pasar de la 0.1.0 a la 0.2.0» (sección 1).
 
-## 8. Retirar un teléfono o una tableta
+## 9. Retirar un teléfono o una tableta
 
 1. En **Administración › Sistema › Terminales**, busca el dispositivo, toca **«Revocar»** y **«Confirmar
    revocación»**. Desde ese momento ya no puede hacer nada en el restaurante, y queda en el Registro de movimientos.
 2. En cuanto el dispositivo se conecta con la computadora principal, muestra **«Este dispositivo fue retirado del
-   restaurante»** y borra lo que guardaba: su autorización, los meseros y sus PIN, y el catálogo.
+   restaurante»** y borra lo que guardaba: su autorización, los meseros y sus PIN, y el catálogo. Los avisos de
+   platillos listos y «AD-EL POS conectado» se detienen.
 3. Si tenía pedidos sin enviar, los muestra antes: «Este dispositivo fue retirado del restaurante; estos pedidos no se
    enviaron». **Nunca llegaron a cocina**: si todavía hacen falta, captúralos en otra terminal. Se quedan en la
    bitácora del dispositivo hasta que toques **«Borrar la bitácora»**.
@@ -312,10 +373,11 @@ Otros avisos que puede mostrar el dispositivo:
    el restaurante. Por precaución, cambia el PIN de los meseros que lo usaban.
 5. Para volver a usarlo, toca **«Emparejar de nuevo»** en el dispositivo y apruébalo otra vez con su código (sección 3).
 
-## 9. Lo que todavía no hace esta versión de prueba
+## 10. Lo que todavía no hace esta versión de prueba
 
-- **Imprimir la precuenta** desde el dispositivo y el **aviso de platillos listos**: llegan más adelante en esta misma
-  etapa (A2).
+- **Imprimir la precuenta** desde el dispositivo: llega más adelante en esta misma etapa (A2).
+- El aviso de platillos listos **no se ha probado con la pantalla apagada en un dispositivo real** (Doze y gestores de
+  batería de cada marca), solo en emuladores.
 - **No cobra**, ni mesas ni Para llevar: se cobra en la caja.
 - No marca productos como agotados (se hace en la caja).
 - **No se ha probado en un teléfono ni en una tableta reales**, solo en emuladores.
