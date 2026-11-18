@@ -82,7 +82,8 @@ En cada teléfono o tableta que tenga la 0.1.0, en este orden:
    explica y pide dos permisos nuevos: **mostrar notificaciones** (Android 13 o posterior; toca **«Continuar»** y
    después **«Permitir»**) y **quitar la optimización de batería** (toca **«Continuar»** y después **«Permitir»**).
    Sin ellos la aplicación sigue funcionando, pero los avisos no se ven o pueden llegar tarde con la pantalla apagada
-   (sección 8, «Si los avisos no llegan»). La 0.1.0 no tenía avisos: no hay nada que pasar de una a otra.
+   (sección 8, «Si los avisos no llegan»). Si no das el de notificaciones, la explicación vuelve a salir cada vez que un
+   mesero entra con conexión, hasta que lo des. La 0.1.0 no tenía avisos: no hay nada que pasar de una a otra.
 
 Si en un dispositivo nunca se instaló la 0.1.0, no hace falta nada de esto: instala la 0.2.0 directamente. Si por
 error quedaron las dos, la 0.1.0 es la que ya estaba emparejada (en **Ajustes › Aplicaciones › AD-EL POS** se ve la
@@ -364,7 +365,8 @@ dispositivo o al emparejarlo de nuevo. Si al terminar el día comercial la compu
 desaparece unos 10 minutos después (salvo que un mesero esté usando la aplicación); vuelve cuando un mesero entra con
 su PIN con conexión. Mientras se conecta dice «Conectando con la computadora principal…». Se ve discreta, sin sonido. Al tocarla se abre la ayuda
 «Avisos de platillos listos». Después de reiniciar el teléfono vuelve sola (desde el primer desbloqueo) si el día
-comercial no ha terminado.
+comercial no ha terminado. En los equipos con **Android 8.0**, Android agrega junto a ella su propia notificación,
+que dice que AD-EL POS se está ejecutando en segundo plano: es del sistema, no es un error y se puede dejar así.
 
 **Sonido y vibración.** Se eligen por dispositivo en la computadora principal: **Administración › Sistema ›
 Terminales**, **«Editar»** en el teléfono o la tableta, **«Avisos de platillos listos»**: **«Avisar platillos listos»**
