@@ -63,16 +63,27 @@ object OrderTransitions {
 }
 
 /**
- * A dónde va el pedido: una cuenta abierta o una mesa en la que se abre una cuenta nueva (con las
- * cuentas que el mesero veía abiertas en ella; Go avisa `table_has_account` si había otra).
+ * A dónde va el pedido: una cuenta abierta, una mesa en la que se abre una cuenta nueva (con las
+ * cuentas que el mesero veía abiertas en ella; Go avisa `table_has_account` si había otra) o, en un
+ * pedido para llevar sin cuenta todavía, un pedido para llevar nuevo (`destination.takeaway`, con
+ * [customer]; etapa A2).
+ *
+ * @param tableId null en un pedido para llevar.
+ * @param customer el nombre y el teléfono **con que salió** el pedido (no cambian: el reintento con
+ *   la misma clave lleva el mismo contenido; una edición posterior es una [CustomerEdit]).
  */
 data class OrderDestination(
-    val tableId: String,
+    val tableId: String?,
     val tableName: String,
     val accountId: String?,
     val accountName: String?,
     val seenAccountIds: List<String>,
-)
+    val mode: OrderMode = OrderMode.DINE_IN,
+    val customer: TakeawayCustomer = TakeawayCustomer.NONE,
+) {
+    val takeaway: Boolean
+        get() = mode == OrderMode.TAKEAWAY
+}
 
 /**
  * Partida de un pedido de la cola: el renglón (con su identificador), el nombre que se mostró y el
@@ -212,15 +223,18 @@ data class OrderReview(
  * cuenta, mandar el pedido a esa cuenta. Sin sesión, Go reconoce los renglones por su identificador
  * (A1-D18).
  *
- * @param accountId null: era la apertura de la cuenta en [tableId] (`openAccount`).
+ * @param accountId null: era la apertura de la cuenta en [tableId] (`openAccount`) o, en un pedido
+ *   para llevar ([mode]), la de un pedido para llevar nuevo con [customer].
  */
 data class UnresolvedSave(
     val operationId: String,
     val accountId: String?,
-    val tableId: String,
+    val tableId: String?,
     val seenAccountIds: List<String>,
     val revision: Int,
     val items: List<DraftLine>,
+    val mode: OrderMode = OrderMode.DINE_IN,
+    val customer: TakeawayCustomer = TakeawayCustomer.NONE,
 )
 
 /**

@@ -127,7 +127,8 @@ object WaiterTestSupport {
 
 /** El acceso al servidor simulado, con las credenciales de cada mesero. */
 class FakeWaiterServer(private val mock: MockWebServer) : WaiterServer {
-    private val active = MutableStateFlow<ActiveWaiter?>(null)
+    /** El mesero que usa el dispositivo (las pruebas de las lecturas lo cambian). */
+    val active = MutableStateFlow<ActiveWaiter?>(null)
     val sessions = mutableMapOf<String, String>()
     val credentials = mutableMapOf<String, String>()
     val reports = mutableListOf<Pair<AppError, String>>()

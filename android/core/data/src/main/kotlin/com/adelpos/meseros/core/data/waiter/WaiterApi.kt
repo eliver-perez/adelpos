@@ -169,6 +169,43 @@ class WaiterApi(
             deserializer = BillDto.serializer(),
         )
 
+    /**
+     * «Nombre y teléfono» de un pedido para llevar (`updateTakeawayCustomer`, A2-D1), con la sesión
+     * del mesero que hizo la edición.
+     */
+    suspend fun updateTakeawayCustomer(
+        server: ServerTransport,
+        headers: Headers,
+        accountId: String,
+        body: TakeawayCustomerBody,
+    ) =
+        send(
+            server = server,
+            headers = headers,
+            method = "POST",
+            path = "restaurant/accounts/$accountId/customer",
+            body = body,
+            serializer = TakeawayCustomerBody.serializer(),
+            deserializer = BillDto.serializer(),
+        )
+
+    /** «Entregado» de un pedido para llevar pagado (`deliverTakeaway`, A2-D2). */
+    suspend fun deliverTakeaway(
+        server: ServerTransport,
+        headers: Headers,
+        accountId: String,
+        body: DeliverBody,
+    ) =
+        send(
+            server = server,
+            headers = headers,
+            method = "POST",
+            path = "payments/accounts/$accountId/deliver",
+            body = body,
+            serializer = DeliverBody.serializer(),
+            deserializer = DeliveryResultDto.serializer(),
+        )
+
     /** `submitOfflineOrder`, con la sesión o con la credencial de envío del mesero. */
     suspend fun submitOfflineOrder(
         server: ServerTransport,

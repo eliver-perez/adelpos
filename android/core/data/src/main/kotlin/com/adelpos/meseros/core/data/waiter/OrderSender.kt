@@ -59,6 +59,10 @@ class OrdersInFlight {
  * respuesta se pierde, el reintento devuelve lo mismo y Go nunca lo duplica
  * (`OFFLINE_ORDER_ALREADY_ACCEPTED`, también si la confirmación en línea ya había entrado).
  *
+ * Un pedido para llevar nuevo sale con `destination.takeaway` (etapa A2) y las mismas reglas de
+ * clave; si Go dice que sus partidas ya están en un pedido para llevar abierto
+ * (`items_in_account`), se manda a ese pedido con la misma clave, como en una mesa.
+ *
  * Antes de cada pedido (revisión R6): recupera los que quedaron «Enviando» sin petición en curso
  * (B2), repite con su clave el guardado del borrador que quedó sin respuesta si el mesero tiene
  * sesión (C1) y, si Go dice que las partidas ya están en una cuenta de la mesa
@@ -237,12 +241,13 @@ class OrderSender(
                 api.openAccount(
                     transport,
                     headers,
-                    OpenAccountBody(
+                    WaiterMapper.openBody(
                         operationId = save.operationId,
-                        mode = DINE_IN,
+                        mode = save.mode,
                         tableId = save.tableId,
                         seenAccountIds = save.seenAccountIds,
-                        items = items,
+                        customer = save.customer,
+                        items = save.items,
                     ),
                 )
             } else {
@@ -302,7 +307,16 @@ class OrderSender(
 
     private suspend fun finish(sending: PendingOrder, outcome: SendOutcome): PendingOrder? {
         val next = OrderSendRules.after(sending, outcome, clock())
-        return if (write(next, OrderState.SENDING)) next else null
+        if (!write(next, OrderState.SENDING)) {
+            return null
+        }
+        val accountId = next.receivedAccountId
+        if (next.state == OrderState.RECEIVED && next.destination.takeaway && accountId != null) {
+            // El pedido para llevar ya está en Go: la edición del cliente que se hizo mientras
+            // esperaba en la cola ya sabe a qué cuenta va (A2-D1; la envía la misma vuelta).
+            dao.bindCustomerEdit(next.operationId, accountId)
+        }
+        return next
     }
 
     /** Escribe [order] solo si en Room sigue en [expected] (nunca revive un pedido borrado). */
@@ -421,7 +435,6 @@ class OrderSender(
         private const val CLOCK_SKEW_MILLIS = 10L * 60 * 1000
 
         private const val BAD_REQUEST = 400
-        private const val DINE_IN = "dine_in"
         private const val NO_ANSWER = "Sin respuesta de la computadora principal."
         private const val MALFORMED = "La respuesta de la computadora principal no se entendió."
         private const val GENERIC_REJECTION = "La computadora principal no aceptó el pedido."
@@ -441,13 +454,23 @@ class OrderSender(
                         Instant.ofEpochMilli(order.capturedAtMillis + clockOffsetMillis),
                     ),
                 destination =
-                    if (accountId != null) {
-                        OfflineDestinationDto(accountId = accountId)
-                    } else {
-                        OfflineDestinationDto(
-                            tableId = destination.tableId,
-                            seenAccountIds = destination.seenAccountIds,
-                        )
+                    when {
+                        accountId != null -> OfflineDestinationDto(accountId = accountId)
+                        // Un pedido para llevar nuevo (etapa A2): nace en Go al recibirse, con el
+                        // nombre y el teléfono con que salió.
+                        destination.takeaway ->
+                            OfflineDestinationDto(
+                                takeaway =
+                                    OfflineTakeawayDto(
+                                        customerName = destination.customer.name,
+                                        phone = destination.customer.phone,
+                                    ),
+                            )
+                        else ->
+                            OfflineDestinationDto(
+                                tableId = destination.tableId,
+                                seenAccountIds = destination.seenAccountIds,
+                            )
                     },
                 items =
                     order.lines.map { line ->

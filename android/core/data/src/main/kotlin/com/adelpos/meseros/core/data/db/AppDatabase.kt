@@ -7,8 +7,10 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.adelpos.meseros.core.data.waiter.db.CaptureEntity
+import com.adelpos.meseros.core.data.waiter.db.CustomerEditEntity
 import com.adelpos.meseros.core.data.waiter.db.PendingOrderEntity
 import com.adelpos.meseros.core.data.waiter.db.RestaurantSnapshotEntity
+import com.adelpos.meseros.core.data.waiter.db.WAITER_CHANGES_V6
 import com.adelpos.meseros.core.data.waiter.db.WAITER_COLUMNS_V5
 import com.adelpos.meseros.core.data.waiter.db.WAITER_TABLES_V4
 import com.adelpos.meseros.core.data.waiter.db.WaiterDao
@@ -25,6 +27,11 @@ import com.adelpos.meseros.core.data.waiter.db.WaiterPermissionsEntity
  * - Versión 4 (Fase E): modo Mesero: capturas en curso por mesero (`captures`), la cola de pedidos
  *   (`pending_orders`), lo último leído de Go para trabajar sin conexión (`restaurant_snapshot`) y
  *   los permisos de cada mesero (`waiter_permissions`).
+ * - Versión 5 (revisión R6): columnas de la cola y las capturas.
+ * - Versión 6 (etapa A2, **una sola versión para toda la etapa**): Para llevar (Fase B): capturas
+ *   sin mesa con su modalidad y los datos del cliente, y las ediciones del cliente por enviar
+ *   (`takeaway_customer_edits`). Las fases C y D agregan sus tablas a esta misma versión antes de
+ *   la entrega.
  *
  * Reglas para las fases siguientes: cada cambio sube [version][Database.version] en uno, agrega su
  * `Migration` a [MIGRATIONS] y una prueba con `MigrationTestHelper` (`AppDatabaseMigrationTest`).
@@ -42,8 +49,9 @@ import com.adelpos.meseros.core.data.waiter.db.WaiterPermissionsEntity
             PendingOrderEntity::class,
             RestaurantSnapshotEntity::class,
             WaiterPermissionsEntity::class,
+            CustomerEditEntity::class,
         ],
-    version = 5,
+    version = 6,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -166,9 +174,24 @@ abstract class AppDatabase : RoomDatabase() {
                 }
             }
 
+        /**
+         * 5 → 6 (etapa A2, Para llevar): `captures` admite capturas sin mesa (la tabla se copia:
+         * Android 8 no cambia una columna a opcional) con su modalidad y los datos del cliente, y
+         * la tabla nueva de ediciones del cliente por enviar; las capturas que había quedan como de
+         * salón, sin cambios. El SQL es el de `schemas/…/6.json`.
+         */
+        val MIGRATION_5_6: Migration =
+            object : Migration(5, 6) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    for (statement in WAITER_CHANGES_V6) {
+                        db.execSQL(statement)
+                    }
+                }
+            }
+
         /** Migraciones de todas las versiones, en orden. */
         val MIGRATIONS: Array<Migration> =
-            arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+            arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
 
         fun open(context: Context): AppDatabase =
             Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, FILE_NAME)

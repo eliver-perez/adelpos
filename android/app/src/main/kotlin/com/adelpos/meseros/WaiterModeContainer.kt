@@ -2,12 +2,14 @@ package com.adelpos.meseros
 
 import android.os.SystemClock
 import com.adelpos.meseros.core.data.waiter.CaptureRepository
+import com.adelpos.meseros.core.data.waiter.CustomerEditSender
 import com.adelpos.meseros.core.data.waiter.OrderQueueRepository
 import com.adelpos.meseros.core.data.waiter.OrderSender
 import com.adelpos.meseros.core.data.waiter.OrdersInFlight
 import com.adelpos.meseros.core.data.waiter.RestaurantRepository
 import com.adelpos.meseros.core.data.waiter.SentLineRepository
 import com.adelpos.meseros.core.data.waiter.ServerClock
+import com.adelpos.meseros.core.data.waiter.TakeawayRepository
 import com.adelpos.meseros.core.data.waiter.WaiterApi
 import com.adelpos.meseros.core.data.waiter.WaiterServer
 import com.adelpos.meseros.core.data.waiter.db.WaiterDao
@@ -30,8 +32,9 @@ import kotlinx.coroutines.launch
 /**
  * El modo Mesero (Fase E), una instancia por proceso: mesas y cuentas ([restaurant]), capturas
  * ([captures]), la cola ([queue], creada antes en `AppContainer` porque la entrada al dispositivo
- * la necesita) y modificar o cancelar lo enviado ([sentLines]). Todo habla con Go con las cabeceras
- * del mesero dueño de cada operación ([server]).
+ * la necesita), modificar o cancelar lo enviado ([sentLines]) y, desde la A2, Para llevar
+ * ([takeaway] y el envío de las ediciones del cliente, [customerEdits]). Todo habla con Go con las
+ * cabeceras del mesero dueño de cada operación ([server]).
  *
  * [start] (desde `AdelPosApplication`) recupera la cola después de un reinicio y pide envíos al
  * volver la red, al volver a primer plano y cuando un mesero vuelve a entrar con conexión.
@@ -91,6 +94,19 @@ class WaiterModeContainer(
         )
 
     val sentLines: SentLineRepository = SentLineRepository(server, api)
+
+    /** Para llevar (etapa A2): la lista, el nombre y el teléfono, y «Entregado». */
+    val takeaway: TakeawayRepository =
+        TakeawayRepository(
+            dao = dao,
+            server = server,
+            api = api,
+            restaurant = restaurant,
+            scheduler = queue::retryNow,
+        )
+
+    /** Envía las ediciones del cliente de Para llevar (lo usa el trabajador de la cola). */
+    val customerEdits: CustomerEditSender = CustomerEditSender(dao, server, api)
 
     fun start() {
         if (started) {

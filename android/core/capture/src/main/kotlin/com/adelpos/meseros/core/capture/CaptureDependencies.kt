@@ -7,6 +7,7 @@ import com.adelpos.meseros.core.domain.waiter.CaptureService
 import com.adelpos.meseros.core.domain.waiter.OrderQueueService
 import com.adelpos.meseros.core.domain.waiter.RestaurantSource
 import com.adelpos.meseros.core.domain.waiter.SentLineService
+import com.adelpos.meseros.core.domain.waiter.TakeawayService
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -22,4 +23,6 @@ class CaptureDependencies(
     val catalog: CatalogSource,
     val images: CatalogImages?,
     val activeWaiter: StateFlow<ActiveWaiter?>,
+    /** Para llevar (etapa A2): el nombre y el teléfono por enviar y la lista. */
+    val takeaway: TakeawayService,
 )

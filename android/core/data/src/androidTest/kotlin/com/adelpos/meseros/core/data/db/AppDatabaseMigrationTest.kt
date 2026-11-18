@@ -179,6 +179,94 @@ class AppDatabaseMigrationTest {
         }
     }
 
+    /**
+     * 5 → 6 (etapa A2, Para llevar): `captures` se copia a la tabla nueva (con `table_id` opcional)
+     * sin perder nada; las capturas que había quedan como de salón y sin cliente, la cola no cambia
+     * y aparece la tabla de ediciones del cliente, vacía. Después se puede guardar una captura para
+     * llevar (sin mesa).
+     */
+    @Test
+    fun de5a6ConservaLasCapturasYLaColaYAdmitePedidosParaLlevar() {
+        helper.createDatabase(testDatabase, 5).use { database ->
+            database.execSQL(
+                "INSERT INTO pending_orders (operation_id, waiter_user_id, waiter_name, state, " +
+                    "destination, lines, replaces, catalog_version, catalog_epoch, captured_at, " +
+                    "confirmation, review, attempts, last_error, credential_rejected, " +
+                    "online_confirm, received_account_id, received_at, updated_at, " +
+                    "unresolved_save, clock_corrected) VALUES " +
+                    "('op-1', 'ana', 'Ana', 'queued', '{\"table_id\":\"mesa\"}', '[]', '[]', " +
+                    "41, NULL, 1, NULL, NULL, 0, NULL, 0, NULL, NULL, NULL, 1, NULL, 1)",
+            )
+            database.execSQL(
+                "INSERT INTO captures (id, waiter_user_id, table_id, table_name, account_id, " +
+                    "account_name, seen_account_ids, base, base_revision, operations, " +
+                    "own_item_ids, seen_prices, sync, sync_message, table_accounts, " +
+                    "pending_operation_id, in_flight_count, created_at, updated_at, " +
+                    "created_account) VALUES " +
+                    "('c-1', 'ana', 'mesa', 'Mesa 4', 'cuenta', 'Mesa 4', '[\"vista\"]', " +
+                    "'[]', 3, '[{\"kind\":\"remove\",\"id\":\"r1\"}]', '[\"r1\"]', " +
+                    "'{}', 'PENDING', 'mensaje', '[]', 'op-guardado', 1, 7, 8, 1)",
+            )
+        }
+        helper.runMigrationsAndValidate(testDatabase, 6, true, AppDatabase.MIGRATION_5_6).use {
+            database ->
+            database
+                .query(
+                    "SELECT table_id, table_name, account_id, seen_account_ids, base_revision, " +
+                        "operations, own_item_ids, sync, sync_message, pending_operation_id, " +
+                        "in_flight_count, created_at, updated_at, created_account, mode, " +
+                        "customer_name, customer_phone FROM captures WHERE id = 'c-1'",
+                )
+                .use { cursor ->
+                    assertTrue(cursor.moveToFirst())
+                    assertEquals("mesa", cursor.getString(0))
+                    assertEquals("Mesa 4", cursor.getString(1))
+                    assertEquals("cuenta", cursor.getString(2))
+                    assertEquals("[\"vista\"]", cursor.getString(3))
+                    assertEquals(3, cursor.getInt(4))
+                    assertEquals("[{\"kind\":\"remove\",\"id\":\"r1\"}]", cursor.getString(5))
+                    assertEquals("[\"r1\"]", cursor.getString(6))
+                    assertEquals("PENDING", cursor.getString(7))
+                    assertEquals("mensaje", cursor.getString(8))
+                    assertEquals("op-guardado", cursor.getString(9))
+                    assertEquals(1, cursor.getInt(10))
+                    assertEquals(7L, cursor.getLong(11))
+                    assertEquals(8L, cursor.getLong(12))
+                    assertEquals(1, cursor.getInt(13))
+                    assertEquals("dine_in", cursor.getString(14))
+                    assertEquals("", cursor.getString(15))
+                    assertEquals("", cursor.getString(16))
+                }
+            database
+                .query(
+                    "SELECT state, clock_corrected FROM pending_orders WHERE operation_id = 'op-1'",
+                )
+                .use { cursor ->
+                    cursor.moveToFirst()
+                    assertEquals("queued", cursor.getString(0))
+                    assertEquals(1, cursor.getInt(1))
+                }
+            database.query("SELECT count(*) FROM takeaway_customer_edits").use { cursor ->
+                cursor.moveToFirst()
+                assertEquals(0, cursor.getInt(0))
+            }
+            // Una captura para llevar, sin mesa, ya se puede guardar.
+            database.execSQL(
+                "INSERT INTO captures (id, waiter_user_id, table_id, table_name, account_id, " +
+                    "account_name, seen_account_ids, base, base_revision, operations, " +
+                    "own_item_ids, seen_prices, sync, sync_message, table_accounts, " +
+                    "pending_operation_id, in_flight_count, created_at, updated_at, mode, " +
+                    "customer_name, customer_phone) VALUES " +
+                    "('c-2', 'ana', NULL, '', NULL, NULL, '[]', '[]', 0, '[]', '[]', '{}', " +
+                    "'SAVED', NULL, '[]', NULL, 0, 9, 9, 'takeaway', 'Juan', '555')",
+            )
+            database.query("SELECT count(*) FROM captures WHERE table_id IS NULL").use { cursor ->
+                cursor.moveToFirst()
+                assertEquals(1, cursor.getInt(0))
+            }
+        }
+    }
+
     @Test
     fun todasLasMigracionesLlevanALaVersionActual() = runBlocking {
         helper.createDatabase(testDatabase, 1).close()
@@ -206,7 +294,7 @@ class AppDatabaseMigrationTest {
                 ),
             )
             assertArrayEquals(byteArrayOf(1, 2, 3), access.pairedServer()?.sealedDeviceToken)
-            assertEquals(5, database.openHelper.readableDatabase.version)
+            assertEquals(6, database.openHelper.readableDatabase.version)
         } finally {
             database.close()
         }

@@ -28,23 +28,27 @@ import java.util.concurrent.atomic.AtomicInteger
  *
  * Sin respuesta del servidor devuelve `retry()` y WorkManager lo repite con **espera creciente**
  * (exponencial desde 10 s). Cada pedido sale con su misma clave de operación: Go nunca lo duplica.
+ *
+ * Después de los pedidos, la misma vuelta envía las ediciones del nombre y el teléfono de Para
+ * llevar ([customers], etapa A2, A2-D1): nunca bloquean ni retrasan un pedido.
  */
 class OrderSendWorker(
     context: Context,
     parameters: WorkerParameters,
     private val sender: () -> OrderSender,
     private val signals: OrderSendSignals,
+    private val customers: () -> CustomerEditSender? = { null },
 ) : CoroutineWorker(context, parameters) {
     override suspend fun doWork(): Result {
         signals.running.incrementAndGet()
         try {
-            var run = sender().sendPending()
+            var retryLater = sendRound()
             // Llegó otro pedido (o «Reintentar ya») mientras se enviaba: otra vuelta enseguida en
             // lugar de cancelar la que estaba en curso.
-            while (!run.retryLater && signals.again.getAndSet(false)) {
-                run = sender().sendPending()
+            while (!retryLater && signals.again.getAndSet(false)) {
+                retryLater = sendRound()
             }
-            return if (run.retryLater) {
+            return if (retryLater) {
                 Result.retry()
             } else {
                 Result.success()
@@ -52,6 +56,13 @@ class OrderSendWorker(
         } finally {
             signals.running.decrementAndGet()
         }
+    }
+
+    /** Una vuelta: primero la cola y después las ediciones del cliente. */
+    private suspend fun sendRound(): Boolean {
+        val run = sender().sendPending()
+        val customersLater = customers()?.sendPending() ?: false
+        return run.retryLater || customersLater
     }
 }
 
@@ -68,6 +79,7 @@ class OrderSendSignals {
 class OrderWorkerFactory(
     private val sender: () -> OrderSender,
     private val signals: OrderSendSignals,
+    private val customers: () -> CustomerEditSender? = { null },
 ) : WorkerFactory() {
     override fun createWorker(
         appContext: Context,
@@ -75,7 +87,7 @@ class OrderWorkerFactory(
         workerParameters: WorkerParameters,
     ): ListenableWorker? =
         if (workerClassName == OrderSendWorker::class.java.name) {
-            OrderSendWorker(appContext, workerParameters, sender, signals)
+            OrderSendWorker(appContext, workerParameters, sender, signals, customers)
         } else {
             null
         }

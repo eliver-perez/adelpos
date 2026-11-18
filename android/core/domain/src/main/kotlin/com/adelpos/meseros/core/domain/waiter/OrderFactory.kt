@@ -73,6 +73,8 @@ object OrderFactory {
                     accountId = capture.accountId,
                     accountName = capture.accountName,
                     seenAccountIds = capture.seenAccountIds,
+                    mode = capture.mode,
+                    customer = capture.customer.trimmed(),
                 ),
             lines = lines,
             replaces = plan.replaces,

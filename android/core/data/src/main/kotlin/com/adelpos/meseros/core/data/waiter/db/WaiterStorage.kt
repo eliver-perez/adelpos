@@ -6,6 +6,7 @@ import com.adelpos.meseros.core.data.waiter.OfflineChangeDto
 import com.adelpos.meseros.core.data.waiter.WaiterMapper
 import com.adelpos.meseros.core.domain.money.Money
 import com.adelpos.meseros.core.domain.waiter.Capture
+import com.adelpos.meseros.core.domain.waiter.CustomerEdit
 import com.adelpos.meseros.core.domain.waiter.DraftLine
 import com.adelpos.meseros.core.domain.waiter.DraftOperation
 import com.adelpos.meseros.core.domain.waiter.DraftSync
@@ -13,11 +14,13 @@ import com.adelpos.meseros.core.domain.waiter.OnlineConfirm
 import com.adelpos.meseros.core.domain.waiter.OrderConfirmation
 import com.adelpos.meseros.core.domain.waiter.OrderDestination
 import com.adelpos.meseros.core.domain.waiter.OrderLine
+import com.adelpos.meseros.core.domain.waiter.OrderMode
 import com.adelpos.meseros.core.domain.waiter.OrderReview
 import com.adelpos.meseros.core.domain.waiter.OrderState
 import com.adelpos.meseros.core.domain.waiter.PendingOrder
 import com.adelpos.meseros.core.domain.waiter.ReviewReason
 import com.adelpos.meseros.core.domain.waiter.TableAccountRef
+import com.adelpos.meseros.core.domain.waiter.TakeawayCustomer
 import com.adelpos.meseros.core.domain.waiter.UnresolvedSave
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -26,9 +29,9 @@ import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
 
 /*
- * Documentos JSON de las tablas del modo Mesero (`AppDatabase` v5). Los renglones van con la forma `DraftItem` del contrato (la misma
- * que se envía a Go), así que lo guardado es exactamente lo que se mandará; los importes, como
- * cadenas decimales.
+ * Documentos JSON de las tablas del modo Mesero y Para llevar (`AppDatabase` v6). Los renglones van
+ * con la forma `DraftItem` del contrato (la misma que se envía a Go), así que lo guardado es
+ * exactamente lo que se mandará; los importes, como cadenas decimales.
  */
 
 @Serializable
@@ -43,13 +46,20 @@ private data class StoredOperation(
 @Serializable
 private data class StoredTableAccount(val id: String, val folio: Int, val name: String)
 
+/**
+ * Destino guardado de un pedido. Desde la v6 (etapa A2) también la modalidad y el cliente con que
+ * sale un pedido para llevar; los pedidos guardados antes no los tienen y son de salón.
+ */
 @Serializable
 private data class StoredDestination(
-    @SerialName("table_id") val tableId: String,
+    @SerialName("table_id") val tableId: String?,
     @SerialName("table_name") val tableName: String,
     @SerialName("account_id") val accountId: String?,
     @SerialName("account_name") val accountName: String?,
     @SerialName("seen_account_ids") val seenAccountIds: List<String>,
+    val mode: String = DINE_IN,
+    @SerialName("customer_name") val customerName: String = "",
+    val phone: String = "",
 )
 
 @Serializable
@@ -86,11 +96,17 @@ private data class StoredOnlineConfirm(
 private data class StoredUnresolvedSave(
     @SerialName("operation_id") val operationId: String,
     @SerialName("account_id") val accountId: String?,
-    @SerialName("table_id") val tableId: String,
+    @SerialName("table_id") val tableId: String?,
     @SerialName("seen_account_ids") val seenAccountIds: List<String>,
     val revision: Int,
     val items: List<DraftItemDto>,
+    val mode: String = DINE_IN,
+    @SerialName("customer_name") val customerName: String = "",
+    val phone: String = "",
 )
+
+/** Modalidad de lo guardado antes de la v6 (todo era de salón). */
+private const val DINE_IN = "dine_in"
 
 /** Conversión entre el dominio y las filas de las tablas del modo Mesero. */
 object WaiterStorage {
@@ -129,6 +145,9 @@ object WaiterStorage {
             createdAt = capture.createdAtMillis,
             updatedAt = nowMillis,
             createdAccount = capture.createdAccount,
+            mode = capture.mode.wireName,
+            customerName = capture.customer.name,
+            customerPhone = capture.customer.phone,
         )
 
     fun toCapture(entity: CaptureEntity): Capture =
@@ -156,6 +175,8 @@ object WaiterStorage {
             inFlightCount = entity.inFlightCount,
             createdAtMillis = entity.createdAt,
             createdAccount = entity.createdAccount,
+            mode = OrderMode.fromWireName(entity.mode),
+            customer = TakeawayCustomer(entity.customerName, entity.customerPhone),
         )
 
     fun toEntity(order: PendingOrder): PendingOrderEntity =
@@ -173,6 +194,9 @@ object WaiterStorage {
                         accountId = order.destination.accountId,
                         accountName = order.destination.accountName,
                         seenAccountIds = order.destination.seenAccountIds,
+                        mode = order.destination.mode.wireName,
+                        customerName = order.destination.customer.name,
+                        phone = order.destination.customer.phone,
                     ),
                 ),
             lines =
@@ -242,6 +266,9 @@ object WaiterStorage {
                             seenAccountIds = save.seenAccountIds,
                             revision = save.revision,
                             items = save.items.map(WaiterMapper::draftItem),
+                            mode = save.mode.wireName,
+                            customerName = save.customer.name,
+                            phone = save.customer.phone,
                         ),
                     )
                 },
@@ -262,6 +289,8 @@ object WaiterStorage {
                     accountId = destination.accountId,
                     accountName = destination.accountName,
                     seenAccountIds = destination.seenAccountIds,
+                    mode = OrderMode.fromWireName(destination.mode),
+                    customer = TakeawayCustomer(destination.customerName, destination.phone),
                 ),
             lines =
                 json.decodeFromString(orderLines, entity.lines).map { stored ->
@@ -320,11 +349,34 @@ object WaiterStorage {
                         seenAccountIds = stored.seenAccountIds,
                         revision = stored.revision,
                         items = stored.items.map(WaiterMapper::draftLine),
+                        mode = OrderMode.fromWireName(stored.mode),
+                        customer = TakeawayCustomer(stored.customerName, stored.phone),
                     )
                 },
             clockCorrected = entity.clockCorrected,
         )
     }
+
+    fun toEdit(entity: CustomerEditEntity): CustomerEdit =
+        CustomerEdit(
+            key = entity.key,
+            accountId = entity.accountId,
+            waiterUserId = entity.waiterUserId,
+            customer = TakeawayCustomer(entity.customerName, entity.phone),
+            operationId = entity.operationId,
+            updatedAtMillis = entity.updatedAt,
+        )
+
+    fun toEntity(edit: CustomerEdit): CustomerEditEntity =
+        CustomerEditEntity(
+            key = edit.key,
+            accountId = edit.accountId,
+            waiterUserId = edit.waiterUserId,
+            customerName = edit.customer.name,
+            phone = edit.customer.phone,
+            operationId = edit.operationId,
+            updatedAt = edit.updatedAtMillis,
+        )
 
     fun encodeStrings(values: List<String>): String = json.encodeToString(strings, values)
 

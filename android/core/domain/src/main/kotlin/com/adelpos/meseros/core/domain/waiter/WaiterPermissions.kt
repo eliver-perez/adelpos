@@ -22,6 +22,21 @@ enum class WaiterAction(val requiredPermissions: Set<String>) {
 
     /** Cancelar unidades ya enviadas (`cancelUnits`), con motivo. */
     CANCEL_SENT(setOf("orders.cancel", "accounts.read")),
+
+    /** Ver «Para llevar» y la lista de pedidos para llevar con sus estados (A2, §3.1). */
+    VIEW_TAKEAWAY(setOf("takeaway.read")),
+
+    /**
+     * Capturar en un pedido para llevar y cambiar el nombre y el teléfono (`takeaway.manage`; sin
+     * él, solo la lista).
+     */
+    MANAGE_TAKEAWAY(setOf("takeaway.manage")),
+
+    /** «Nuevo pedido» para llevar: nace con el primer producto (creación diferida). */
+    OPEN_TAKEAWAY(setOf("takeaway.manage", "accounts.open", "orders.capture")),
+
+    /** Marcar «Entregado» un pedido para llevar ya pagado (A2-D2). */
+    DELIVER_TAKEAWAY(setOf("takeaway.deliver")),
 }
 
 /**
@@ -41,6 +56,14 @@ data class WaiterPermissions(val keys: Set<String>?) {
         val granted = keys ?: return true
         return granted.containsAll(action.requiredPermissions)
     }
+
+    /**
+     * Go **dio** el permiso (los permisos se conocen y lo incluyen). Para lo que solo debe aparecer
+     * con el permiso de Go, como «Para llevar» en la navegación (§3.1) o «Entregado»: con permisos
+     * desconocidos no se muestra.
+     */
+    fun grants(action: WaiterAction): Boolean =
+        keys?.containsAll(action.requiredPermissions) == true
 
     /** Reducir la cantidad de lo enviado exige modificar y cancelar (Go responde 403 si no). */
     val canReduceSent: Boolean

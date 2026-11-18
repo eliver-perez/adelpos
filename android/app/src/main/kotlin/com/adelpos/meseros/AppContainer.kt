@@ -150,7 +150,9 @@ class AppContainer(context: Context, private val settings: Settings = Settings()
         DeviceDataWipe().apply {
             register("catálogo e imágenes") { catalogRealtime.eraseDeviceData() }
             // Fase E: la cola, las capturas y lo guardado de Go (UnsentOrdersSource ya entregó lo
-            // no enviado a la bitácora). Revisión R6, M1 y B5: primero se cancela el envío y se
+            // no enviado a la bitácora); desde la A2, también las ediciones del cliente de Para
+            // llevar por enviar (WaiterDao.eraseAll). Revisión R6, M1 y B5: primero se cancela el
+            // envío y se
             // espera a que termine la vuelta en curso (nada vuelve a escribir un pedido borrado) y,
             // al final, se vuelve a programar el envío periódico.
             register("cola de pedidos y capturas") {
@@ -281,7 +283,11 @@ class AppContainer(context: Context, private val settings: Settings = Settings()
 
     /** Fábrica del trabajador de la cola para la configuración de WorkManager. */
     val orderWorkerFactory: OrderWorkerFactory by lazy {
-        OrderWorkerFactory(sender = { waiterMode.sender }, signals = orderSendSignals)
+        OrderWorkerFactory(
+            sender = { waiterMode.sender },
+            signals = orderSendSignals,
+            customers = { waiterMode.customerEdits },
+        )
     }
 
     /**
@@ -297,6 +303,7 @@ class AppContainer(context: Context, private val settings: Settings = Settings()
             catalog = catalogRealtime.catalog,
             images = catalogRealtime.images,
             activeWaiter = deviceAccess.activeWaiter,
+            takeaway = waiterMode.takeaway,
         )
     }
 

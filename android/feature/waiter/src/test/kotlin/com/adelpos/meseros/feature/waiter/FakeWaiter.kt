@@ -17,6 +17,9 @@ import com.adelpos.meseros.core.domain.waiter.AccountBill
 import com.adelpos.meseros.core.domain.waiter.AccountSummary
 import com.adelpos.meseros.core.domain.waiter.Capture
 import com.adelpos.meseros.core.domain.waiter.CaptureService
+import com.adelpos.meseros.core.domain.waiter.CustomerEdit
+import com.adelpos.meseros.core.domain.waiter.CustomerTarget
+import com.adelpos.meseros.core.domain.waiter.DeliveryResult
 import com.adelpos.meseros.core.domain.waiter.DiscardResult
 import com.adelpos.meseros.core.domain.waiter.DraftOperation
 import com.adelpos.meseros.core.domain.waiter.DraftQuote
@@ -32,6 +35,9 @@ import com.adelpos.meseros.core.domain.waiter.SendRequest
 import com.adelpos.meseros.core.domain.waiter.SentChangeResult
 import com.adelpos.meseros.core.domain.waiter.SentLineService
 import com.adelpos.meseros.core.domain.waiter.TableAccountRef
+import com.adelpos.meseros.core.domain.waiter.TakeawayCustomer
+import com.adelpos.meseros.core.domain.waiter.TakeawayRead
+import com.adelpos.meseros.core.domain.waiter.TakeawayService
 import com.adelpos.meseros.core.domain.waiter.WaiterPermissions
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -87,6 +93,11 @@ class FakeWaiter(catalog: Catalog = Catalog.EMPTY) {
                 captureFlow.value = capture
                 return capture
             }
+
+            override suspend fun openTakeaway(userId: String, account: AccountSummary?): Capture =
+                error("El modo Mesero no abre pedidos para llevar")
+
+            override suspend fun setCustomer(captureId: String, customer: TakeawayCustomer) = Unit
 
             override suspend fun stage(
                 captureId: String,
@@ -176,6 +187,25 @@ class FakeWaiter(catalog: Catalog = Catalog.EMPTY) {
             ): SentChangeResult = SentChangeResult.Failed(AppError.Unreachable)
         }
 
+    val takeaway =
+        object : TakeawayService {
+            override val accounts: StateFlow<List<AccountSummary>> = this@FakeWaiter.accounts
+            override val readAt: StateFlow<TakeawayRead?> = MutableStateFlow(null)
+
+            override fun refresh() = Unit
+
+            override fun customerEdits(): Flow<List<CustomerEdit>> = flowOf(emptyList())
+
+            override suspend fun editCustomer(
+                userId: String,
+                target: CustomerTarget,
+                customer: TakeawayCustomer,
+            ) = Unit
+
+            override suspend fun deliver(userId: String, accountId: String): DeliveryResult =
+                DeliveryResult.NoConnection
+        }
+
     val catalogSource =
         object : CatalogSource {
             override val catalog: StateFlow<Catalog> = MutableStateFlow(catalog)
@@ -213,6 +243,7 @@ class FakeWaiter(catalog: Catalog = Catalog.EMPTY) {
             catalog = catalogSource,
             images = null,
             activeWaiter = active,
+            takeaway = takeaway,
         )
 
     fun dependencies(): WaiterDependencies =

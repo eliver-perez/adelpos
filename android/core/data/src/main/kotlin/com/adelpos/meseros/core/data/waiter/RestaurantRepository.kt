@@ -17,6 +17,7 @@ import com.adelpos.meseros.core.domain.waiter.AccountSummary
 import com.adelpos.meseros.core.domain.waiter.RestaurantSource
 import com.adelpos.meseros.core.domain.waiter.RestaurantStatus
 import com.adelpos.meseros.core.domain.waiter.RestaurantView
+import com.adelpos.meseros.core.domain.waiter.TakeawayRead
 import com.adelpos.meseros.core.domain.waiter.WaiterPermissions
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -37,9 +38,12 @@ import kotlinx.serialization.builtins.ListSerializer
 /**
  * Mesas, cuentas abiertas y permisos del mesero activo (§6.1 y §6.2), con la sesión de **ese**
  * mesero. Lo leído de Go se guarda en Room para mostrarlo sin conexión (también después de
- * reiniciar), y el canal de tiempo real lo mantiene al momento: cada evento del ámbito `restaurant`
- * con una cuenta como agregado avisa que esa cuenta cambió ([accountChanges]) y vuelve a leer las
- * mesas (con una espera corta, para juntar varios eventos); «reconstruir» vuelve a leer todo.
+ * reiniciar), y el canal de tiempo real lo mantiene al momento: cada evento de los ámbitos
+ * `restaurant` y `takeaway` (etapa A2) con una cuenta como agregado avisa que esa cuenta cambió
+ * ([accountChanges]) y vuelve a leer las mesas y las cuentas (con una espera corta, para juntar
+ * varios eventos); «reconstruir» vuelve a leer todo. Los pedidos para llevar abiertos salen de la
+ * misma lectura de `restaurant/state` ([allOpenAccounts], con la hora de la lectura en
+ * [accountsReadAt]: sin conexión se ve lo último, con su hora).
  *
  * @param elapsedClock reloj monótono (el tiempo de las mesas se cuenta desde la lectura).
  * @param wallClock hora del dispositivo, solo para traducir el momento de una lectura guardada.
@@ -57,6 +61,8 @@ class RestaurantRepository(
     private val mutablePermissions = MutableStateFlow(WaiterPermissions.UNKNOWN)
     private val mutableStatus = MutableStateFlow(RestaurantStatus(false, false, null))
     private val mutableAccounts = MutableStateFlow<List<AccountSummary>>(emptyList())
+    private val mutableAllAccounts = MutableStateFlow<List<AccountSummary>>(emptyList())
+    private val mutableReadAt = MutableStateFlow<TakeawayRead?>(null)
     private val changes = MutableSharedFlow<String>(extraBufferCapacity = CHANGES_BUFFER)
     private val refreshing = Mutex()
     private var pendingRefresh: Job? = null
@@ -67,6 +73,15 @@ class RestaurantRepository(
     override val status: StateFlow<RestaurantStatus> = mutableStatus.asStateFlow()
     override val openAccounts: StateFlow<List<AccountSummary>> = mutableAccounts.asStateFlow()
     override val accountChanges: Flow<String> = changes.asSharedFlow()
+
+    /**
+     * Todas las cuentas abiertas de la última lectura, de salón y para llevar (las para llevar solo
+     * vienen con `takeaway.read`).
+     */
+    val allOpenAccounts: StateFlow<List<AccountSummary>> = mutableAllAccounts.asStateFlow()
+
+    /** Cuándo se leyeron esas cuentas (null si nunca). */
+    val accountsReadAt: StateFlow<TakeawayRead?> = mutableReadAt.asStateFlow()
 
     /** Lee lo guardado y empieza a seguir al mesero activo y el canal de tiempo real. */
     fun start() {
@@ -89,6 +104,13 @@ class RestaurantRepository(
         val feed = realtime ?: return
         scope.launch {
             feed.events(RealtimeScopes.RESTAURANT).collect { event ->
+                event.aggregateId?.let { changes.tryEmit(it) }
+                refreshSoon()
+            }
+        }
+        // Para llevar (etapa A2): los pedidos para llevar avisan en su propio ámbito.
+        scope.launch {
+            feed.events(RealtimeScopes.TAKEAWAY).collect { event ->
                 event.aggregateId?.let { changes.tryEmit(it) }
                 refreshSoon()
             }
@@ -177,6 +199,9 @@ class RestaurantRepository(
         )
         val accounts = state.accounts ?: return
         mutableAccounts.value = openDineIn(accounts)
+        // La hora primero: quien ve las cuentas nuevas ya ve también cuándo se leyeron.
+        mutableReadAt.value = TakeawayRead(wallMillis = wallClock(), elapsedMillis = elapsedClock())
+        mutableAllAccounts.value = openAnyMode(accounts)
         dao.saveSnapshot(
             RestaurantSnapshotEntity(
                 kind = KIND_ACCOUNTS,
@@ -207,9 +232,13 @@ class RestaurantRepository(
             mutableView.value = viewOf(dto, readAtElapsed = elapsedClock() - passed)
         }
         val accounts = dao.snapshot(KIND_ACCOUNTS)
-        if (accounts != null && mutableAccounts.value.isEmpty()) {
-            mutableAccounts.value =
-                openDineIn(ApiJson.decodeFromString(ACCOUNTS, accounts.document))
+        if (accounts != null && mutableReadAt.value == null) {
+            val saved = ApiJson.decodeFromString(ACCOUNTS, accounts.document)
+            mutableAccounts.value = openDineIn(saved)
+            val passed = maxOf(0L, wallClock() - accounts.readAt)
+            mutableReadAt.value =
+                TakeawayRead(wallMillis = accounts.readAt, elapsedMillis = elapsedClock() - passed)
+            mutableAllAccounts.value = openAnyMode(saved)
         }
         mutablePermissions.value = savedPermissions(server.activeWaiter.value?.userId)
     }
@@ -232,6 +261,9 @@ class RestaurantRepository(
         accounts
             .filter { it.mode == DINE_IN && it.state == AccountSummary.STATE_OPEN }
             .map(WaiterMapper::account)
+
+    private fun openAnyMode(accounts: List<AccountDto>): List<AccountSummary> =
+        accounts.filter { it.state == AccountSummary.STATE_OPEN }.map(WaiterMapper::account)
 
     companion object {
         private const val KIND_OVERVIEW = "overview"
