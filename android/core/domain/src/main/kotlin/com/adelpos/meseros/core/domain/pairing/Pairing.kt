@@ -82,8 +82,9 @@ sealed interface PairingProblem {
     data object StorageFailed : PairingProblem
 
     /**
-     * «Actualiza el servidor del restaurante»: la computadora principal es anterior a 0.12.0 o no
-     * tiene la entrada con PIN (`waiter-pin-v1`), así que no puede emparejar teléfonos ni tabletas
+     * «Actualiza el servidor del restaurante»: la computadora principal es anterior a 0.13.0 o le
+     * falta una capacidad que usa la aplicación (`waiter-pin-v1`, `takeaway-v1`), así que no puede
+     * emparejar teléfonos ni tabletas
      * ([com.adelpos.meseros.core.domain.server.ServerCompatibility]). [serverVersion] es la que
      * informó, si la informó (solo para la sección de soporte).
      */

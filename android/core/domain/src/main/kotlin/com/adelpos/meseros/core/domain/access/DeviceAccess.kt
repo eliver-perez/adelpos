@@ -126,7 +126,10 @@ sealed interface DeviceStatus {
     /** «Actualiza esta aplicación» (426 o la mínima de Android que anuncia el servidor). */
     data class UpdateApp(val appVersion: String, val minClientVersion: String?) : DeviceStatus
 
-    /** «Actualiza el servidor del restaurante» (anterior a 0.12.0 o sin `waiter-pin-v1`). */
+    /**
+     * «Actualiza el servidor del restaurante» (anterior a 0.13.0 o sin `waiter-pin-v1` o
+     * `takeaway-v1`).
+     */
     data class UpdateServer(val serverVersion: String?) : DeviceStatus
 
     /**

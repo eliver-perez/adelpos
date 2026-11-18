@@ -209,7 +209,10 @@ fun UpdateAppScreen(
     }
 }
 
-/** «Actualiza el servidor del restaurante» (anterior a 0.12.0 o sin la entrada con PIN). */
+/**
+ * «Actualiza el servidor del restaurante» (anterior a 0.13.0 o sin la entrada con PIN o Para
+ * llevar).
+ */
 @Composable
 fun UpdateServerScreen(
     serverVersion: String?,
