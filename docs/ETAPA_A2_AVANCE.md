@@ -1866,11 +1866,14 @@ dice qué falta.
   - abrir la aplicación con el dispositivo listo → arranca si Go dijo `active: true` y no terminó el día; si no,
     **pregunta** con `GET ready-alerts` (sin mover el cursor si está activo; moviéndolo si no, como pide la decisión 5
     de la parte D) y arranca solo si `active`;
-  - `BOOT_COMPLETED`/`MY_PACKAGE_REPLACED` → solo con la condición guardada (sin red ni pantalla todavía).
+  - `BOOT_COMPLETED`/`MY_PACKAGE_REPLACED` → solo con la condición guardada en Room, **sin preguntar a Go** (RD3: ni
+    `deviceAccess.start`; el servicio comprueba el dispositivo al arrancar el canal).
     Sin destinatarios en el día no arranca: no hay notificación permanente.
-- **Parada**: cuando `ReadyAlertsChannel.run` termina (`INACTIVE`, `DEVICE_NOT_READY`, `REPORTED`, `REJECTED`), cuando
-  el estado del dispositivo deja de ser `Ready` y con el borrado del dispositivo. Pasar `day_ends_at` **no** lo detiene:
-  a esa hora (y 30 s) vuelve a preguntar con `GET`; lo detiene el `active: false` de Go.
+- **Parada**: cuando `ReadyAlertsChannel.run` termina (`INACTIVE`, `DEVICE_NOT_READY`, `REPORTED`, `REJECTED`,
+  `DAY_ENDED`), cuando el estado del dispositivo deja de ser `Ready` y con el borrado del dispositivo. Al pasar
+  `day_ends_at` (y 30 s) vuelve a preguntar con `GET`; lo detiene el `active: false` de Go o, **A2-D12** (RD1), 10
+  minutos después del fin del día sin haber alcanzado a Go desde entonces y sin nadie usando el dispositivo
+  (`DAY_ENDED`, sin mover el cursor).
 - **Canal** (`ReadyAlertsChannel`): desde el cursor guardado; un cierre normal de Go (a los 5 minutos, aunque solo
   haya habido `: ping`) se reabre enseguida; sin red, 5xx, `interrupted` temporal o conexión muerta (45 s sin un byte),
   espera 2, 4, 8, 16 y 30 s (`reconnectNow` al volver la red o al entrar un mesero); 429 → lee con `GET` mientras
@@ -1908,12 +1911,14 @@ Ninguna cambia una regla de negocio ni la especificación; son detalles que §4,
    aviso sabido apagado): un `GET ready-alerts` que guarda el estado **sin mover el cursor** si está activo (los avisos
    los entrega el servicio) y moviéndolo si no (decisión 5 de la parte D). Así «sin destinatarios no arranca» sin
    mostrar la notificación permanente ni un instante, y un aviso reactivado en Terminales se descubre al abrir.
-6. **Fin del día** (protocolo ajustado): nunca se detiene por la hora: a `day_ends_at` + 30 s cierra el flujo y
-   pregunta con `GET` (`ReadyAlertsChannel.kt:103-125`; `ReadyAlertsLifecycle.dayCheckIn` no pregunta en bucle si Go
-   sigue dando el mismo fin de día) y sigue mientras Go diga `active: true`. Mi primera versión se detenía si pasaban
-   10 minutos del fin del día sin respuesta; el coordinador decidió que sigue mientras `active` sea true. Consecuencia:
-   una tableta que se quedó sin la computadora principal de noche sigue reintentando (con la espera de hasta 30 s)
-   hasta que vuelva o alguien la abra.
+6. **Fin del día** (protocolo ajustado y **A2-D12**, RD1 de la revisión): a `day_ends_at` + 30 s cierra el flujo y
+   pregunta con `GET` (`ReadyAlertsLifecycle.dayCheckIn` no pregunta en bucle si Go sigue dando el mismo fin de día) y
+   sigue mientras Go diga `active: true`. Si Go no responde: en cada falla, `ReadyAlertsLifecycle.dayOverWithoutGo`
+   — pasados `DAY_END_STOP_MILLIS` (10 min) de `day_ends_at`, sin haber alcanzado a Go desde el fin del día (el canal
+   abrió o llegó una lectura) y sin nadie usando el dispositivo (`inUse`: aplicación a la vista con un mesero, con o
+   sin conexión) — termina con `DAY_ENDED` **sin mover el cursor** (lo de mientras llega al volver a arrancar). Lo
+   vuelve a arrancar la siguiente entrada con conexión (`START`) o abrir la aplicación (pregunta antes); el reinicio
+   pegajoso aplica la misma regla en su primera falla y `BOOT` ya no arranca pasado el fin del día guardado.
 7. **El servicio solo sostiene** el proceso y su notificación; el canal y las decisiones viven en
    `ReadyAlertsController` (uno por proceso), para que el borrado del dispositivo, el estado de la entrada y los
    disparadores puedan detenerlo sin depender de la instancia del servicio. El tipo `specialUse` se pasa a
@@ -1946,8 +1951,14 @@ Ninguna cambia una regla de negocio ni la especificación; son detalles que §4,
 17. **La ayuda** se abre desde el menú del mesero («Avisos de platillos listos») y al tocar «AD-EL POS conectado».
     «Forzar detención»/«Detener» se detecta solo para la salida anterior del proceso (`REASON_USER_REQUESTED`, API
     30+) y se dice en la ayuda.
-18. **Los permisos se piden una sola vez cada uno** (bandera en `device_preferences`), la primera vez que el servicio
-    corre con la aplicación al frente.
+18. **Permisos** (RD6): la primera vez que el servicio corre con la aplicación al frente, la explicación y el diálogo
+    de Android. La batería se pide una sola vez (bandera en `device_preferences`); las **notificaciones** (Android
+    13+), mientras falten, se vuelven a ofrecer en **cada entrada con conexión** (`offerPermissionsAgain`; una vez por
+    entrada) y, si Android ya no muestra su diálogo (`shouldShowRequestPermissionRationale` en false después de
+    haberlo mostrado: se negó dos veces), «Continuar» abre los Ajustes de notificaciones de la aplicación. Mientras los
+    avisos no se vean (`alertsVisible`: sin permiso, notificaciones o el canal apagados), **Mesas** muestra arriba un
+    aviso discreto «Las notificaciones de AD-EL POS están desactivadas…» con «Cómo activarlas» → la ayuda
+    (`ReadyAlertsOffNotice`, una fila en `AdelPosApp` solo en Mesas); se vuelve a comprobar al regresar a la aplicación.
 19. **Cuenta que ya no está abierta al tocar el aviso** (protocolo ajustado, punto 6): si no está entre las cuentas
     abiertas del mesero, se lee la cuenta en Go (`RestaurantSource.bill`, `ReadyAlertsUi.kt:637`): abierta (la lista
     iba atrasada) se abre; combinada (`merged_into_id`) se sigue a la vigente (hasta 3 saltos); cobrada, cancelada o 404,
@@ -2098,9 +2109,7 @@ temporal detenido con su base borrada y emuladores apagados.
 
 ### No verificado
 
-- **Contra el servidor con el protocolo ajustado** (`key`, solo cambios con `: ping`, cierre a los 5 minutos,
-  `interrupted` con `{"code"}`, sin avisos de antes de entrar): solo con MockWebServer (`ReadyAlertsChannelTest`) y la
-  suite `alerts` contra el servidor anterior (compatible). Falta repetir `alerts` cuando se fusione.
+- ~~Contra el servidor con el protocolo ajustado~~: hecho (ver «Contra el servidor corregido»).
 - `ADEL_A1_Tablet_API26` (Android 8) y `Pixel_8`: la matriz de cuatro es de la Fase E. En Android 8–10 `r4` corta la
   red con `adb root` antes de la prueba (el guion lo hace; no corrido) y `r8b` no apaga la wifi (no hace falta root
   para lo demás).
@@ -2112,6 +2121,14 @@ temporal detenido con su base borrada y emuladores apagados.
 - Dispositivo físico: Doze real, gestores de batería de cada marca, la wifi del restaurante y el sonido real del canal.
 - El aviso dentro de la aplicación con dos `MainActivity` a la vez (multiventana): la última que cambia de pantalla
   manda.
+- **RD8 (diseño aceptado)**: las esperas del canal (espera creciente, la nueva consulta del fin del día, los 10 minutos
+  de A2-D12) son temporizadores de corrutinas **sin wake lock** (por batería: el servicio en primer plano no lo
+  necesita para recibir; un paquete del canal despierta la CPU). En un dispositivo físico en Doze profundo pueden
+  alargarse hasta la siguiente ventana de mantenimiento o el siguiente paquete; en el emulador con `force-idle` el
+  aviso llegó (`r2`) y el reinicio tras un corte también (`r4`). No verificado en un dispositivo real.
+- **RD9 (diseño aceptado)**: si el proceso muere justo entre mostrar un aviso y guardarlo en Room, ese aviso vuelve a
+  llegar **una vez** al reconectar (la regla es mostrar y después guardar: nunca perder). La notificación de su cuenta
+  lo reconoce por su `key` en los extras y no vuelve a sonar; solo si el mesero ya la había quitado se ve otra vez.
 
 ### Para el coordinador
 
@@ -2127,8 +2144,9 @@ temporal detenido con su base borrada y emuladores apagados.
   la Fase B con mis dos tablas (la Fase C no la cambia).
 - **Batería y red con el protocolo anterior**: un lote cada 750 ms eran ≈ 1,2 MB/h por dispositivo en el emulador; el
   protocolo ajustado lo resuelve en el servidor. Conviene medir la hora de la Fase E ya con él.
-- Al pasar `day_ends_at` sin respuesta de Go el servicio **sigue** (decisión del coordinador): una tableta que se quedó
-  sin la computadora principal de noche sigue reintentando con su notificación permanente hasta que vuelva.
+- **A2-D12** (RD1): pasados 10 minutos de `day_ends_at` sin alcanzar a Go y sin nadie usando el dispositivo, el
+  servicio se detiene sin mover el cursor (antes seguía reintentando de noche con su notificación permanente). Lo
+  vuelve a arrancar la siguiente entrada con conexión o abrir la aplicación.
 - Cambié dos componentes compartidos, pequeños y opcionales: `ActiveWaiterMenu` (`core:ui`, parámetro
   `onAlertsHelp`) y `AccessContent`/`PinEntryRoute` (`feature:access`, `requestedWaiter`). `ColorsOnlyInPaletteTest`
   admite `@android:color/white` solo en `res/drawable/ic_stat_*.xml`.
@@ -2159,6 +2177,67 @@ la aplicación usa (necesita la versión 0.13.0 o posterior)»). Después de la 
 fallas** (`core:domain` 147, `core:data` 163, `core:ui` 9, `feature:access` 7, `feature:takeaway` 5, `feature:waiter`
 6); `md5` de `docs/etapas/*.md` sin cambios. Las suites `alerts` y `precheck` se repiten cuando llegue el servidor con
 el protocolo corregido.
+
+### Contra el servidor corregido (`843b786`, `61b8ba1`) y correcciones de la revisión (RD1–RD9)
+
+**Alineación con la forma final del servidor** (`0c0bbf4`, tras fusionar `843b786`): el cliente ya coincidía con la
+forma corregida; dos ajustes con sus pruebas: un 401 `DEVICE_REQUIRED` al abrir el canal se avisa como en las demás
+rutas (`deviceAccess.report`: emparejar de nuevo) y un `interrupted` sin `id` con `TEMPORARY` se reintenta con espera
+creciente sin mover el cursor. Contra un Go temporal nuevo de esa rama: **`alerts` en `Pixel_Tablet` 10 de 10**
+(`$SP/d-work/e2e/v2-tablet`) y **`precheck` en `Pixel_Tablet` 7 de 7** (`$SP/d-work/e2e/v2-precheck-tablet`).
+
+**Correcciones de la revisión** (`882a3fa` la reproducción del revisor, `b3f6377` la corrección, `6059890` el paso
+`r10`; fusión de `61b8ba1` con el ajuste A2-D12 del servidor en `fff2322`):
+
+| Hallazgo         | Qué cambió                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **RD1** (A2-D12) | `ReadyAlertsLifecycle.dayOverWithoutGo` y `DAY_END_STOP_MILLIS` (10 min): en cada falla del canal, pasado `day_ends_at` + 10 min, sin haber alcanzado a Go desde el fin del día y sin nadie usando el dispositivo (`inUse`: aplicación a la vista con un mesero activo, con o sin conexión), `run` termina con **`ReadyStopReason.DAY_ENDED` sin mover el cursor** y el servicio se detiene. Lo vuelve a arrancar la siguiente entrada con conexión o abrir la aplicación (que pregunta antes). El reinicio pegajoso (`intent == null`) aplica la regla en su primera falla; tras reiniciar (`BOOT`), pasado el fin del día guardado ya no arranca. `ReadyAlertsReviewTest` (del revisor) pasa: con el servidor apagado una hora después del fin del día, `run` termina a la primera falla. Prueba nueva: con un mesero usándolo sigue reintentando; al dejar de usarlo, `DAY_ENDED` con el cursor igual. Además, la lectura del cambio de día que falla cuenta como falla (antes no sumaba). |
+| **RD3**          | `requestNow(BOOT)` ya no llama a `server.prepare()` (que hacía `deviceAccess.start`: versión y meseros con Go): decide solo con Room (`ledger.status()` + `decide`); el servicio comprueba el dispositivo al arrancar el canal.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| **RD4**          | El alcance del controlador lleva `CoroutineExceptionHandler` (registro, nunca tumba el proceso); `runGuarded` vuelve a correr `channel.run()` con espera creciente si algo inesperado lo interrumpe; dentro del canal, una excepción al procesar un lote (Room, el sistema de notificaciones) se registra (`onUnexpectedError`) y cuenta como falla: se reconecta desde el último cursor guardado (prueba: el presentador falla una vez y el aviso llega en el reintento, con el cursor sin avanzar).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| **RD5**          | `ReadyOngoing` (`CONNECTING`, `CONNECTED`, `WAITING`): la notificación permanente dice «Conectando con la computadora principal…» hasta abrir el canal, «Recibiendo avisos de platillos listos» solo con el canal abierto y el texto de sin conexión mientras reintenta (un `Connecting` después de una falla no lo cambia). Se vuelve a publicar solo cuando cambia el texto; la reapertura de cada 5 minutos no lo cambia salvo que tarde más de 3 s. Prueba JVM de las transiciones y, en `ReadyAlertsOnDeviceTest`, que al arrancar sin servidor no dice «Recibiendo avisos».                                                                                                                                                                                                                                                                                                                                                                                                             |
+| **RD6**          | Ver la decisión 18: las notificaciones se vuelven a ofrecer en cada entrada con conexión mientras falten (Android 13+; si Android ya no muestra su diálogo, «Continuar» abre sus Ajustes) y Mesas muestra el aviso discreto «Las notificaciones de AD-EL POS están desactivadas…» con «Cómo activarlas» → la ayuda. `r1` lo comprueba en Android 13+: tras «Ahora no», el aviso en Mesas; al volver a entrar Ana, la explicación otra vez (una sola).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| **RD7**          | Un `event: alerts` que no se puede leer termina la conexión como falla (`InvalidResponse`): se reconecta desde el último cursor procesado y el lote no se salta (prueba: el lote 22 roto vuelve a llegar en la conexión siguiente).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| **RD8**, **RD9** | Diseño aceptado; en «No verificado».                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+
+**La sesión del último mesero en «¿Quién eres?»** (lo pidió el agente del servidor por A2-D12: cada petición con la
+sesión de un mesero renueva su `last_seen_at`). Revisado en el código y comprobado en el emulador: **sin mesero
+activo la aplicación no usa ninguna sesión de mesero**, con la pantalla encendida o apagada.
+
+- El canal de eventos (`RealtimeClient`), el catálogo (`CatalogSynchronizer`, `CatalogImageCache`,
+  `CatalogUpdateTriggers`) usan `ServerAccess.current` (`DeviceServerAccess`), que es null sin mesero activo con
+  sesión (también con «volver a escribir el PIN»): el canal queda `Stopped` y la descarga del catálogo devuelve
+  `NoSession`. Además el canal de eventos y el periodo de 5 minutos del catálogo solo corren con la aplicación a la
+  vista.
+- Mesas y Para llevar (`RestaurantRepository.refreshNow`, `bill`) y la impresora de precuentas
+  (`PrecheckRepository.refreshSetup`) necesitan un mesero activo; se disparan al entrar o por el canal de eventos
+  (cerrado).
+- La cola (`OrderSender`, `TakeawayRepository.sendPending`) y el guardado de capturas (`CaptureRepository`) usan la
+  sesión **del dueño** de cada pedido, edición o captura pendiente, y solo mientras lo haya (lo que «requiere tu
+  revisión» no se reintenta solo).
+- El canal de avisos usa solo la credencial del dispositivo (no es una sesión de mesero).
+- El bloqueo por inactividad (`IdleLock` → `leave()`) lleva a «¿Quién eres?» salvo que el mesero tenga una captura en
+  curso o pedidos sin enviar (A1-D15): ese mesero sí está usando el dispositivo.
+- **Comprobado** con el paso nuevo **`r10`** de `alerts` (contra el Go temporal de `fff2322`): Ana entra, «Cambiar de
+  mesero» → «¿Quién eres?»; su `last_seen_at` (`GET sessions` de la principal) **no cambió en 450 s**: 330 s con la
+  pantalla encendida (más que el periodo de 5 minutos del catálogo) y 120 s apagada; el servicio de avisos siguió en
+  primer plano.
+
+**Corridas finales** (Go temporal nuevo construido desde `fff2322`, con el ajuste A2-D12 del servidor):
+
+| Qué                                                                                                                                  | Dónde                                                                                                                                                                    | Resultado                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `:core:domain:test` + `testDebugUnitTest`                                                                                            | Mac                                                                                                                                                                      | **344 pruebas, 0 fallas** (337 + `ReadyAlertsReviewTest` + 1 de dominio + 5 del canal; `ReadyAlertsChannelTest` 18, `ReadyAlertsRulesTest` 19)                                                                                                                                                                                                                                                                                                                                         |
+| `ktfmtCheck`, `lintDebug`, `assembleDebug`, `assembleDebugAndroidTest`, `format`/`fmt-check`, `bash -n`, `md5` de `docs/etapas/*.md` | Mac                                                                                                                                                                      | Aprobados; `md5` sin cambios. Lint encontró `InlinedApi` (`POST_NOTIFICATIONS` fuera de la comprobación): `@RequiresApi(33)`, corregido                                                                                                                                                                                                                                                                                                                                                |
+| `:app:connectedDebugAndroidTest` (sobre `b3f6377`)                                                                                   | `Pixel_Tablet`                                                                                                                                                           | **100 pruebas, 0 fallas** (66 omitidas a propósito: las de punta a punta sin argumentos)                                                                                                                                                                                                                                                                                                                                                                                               |
+| Ídem (sobre `fff2322`, ya con `r10`)                                                                                                 | `ADEL_A1_Phone_API33`                                                                                                                                                    | **101 pruebas, 0 fallas** (67 omitidas a propósito)                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `scripts/android-e2e.sh --suite alerts` (r1–r8, r10, r9)                                                                             | `Pixel_Tablet`                                                                                                                                                           | **11 de 11 aprobados** (`$SP/d-work/e2e/v3-tablet`)                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Ídem                                                                                                                                 | `ADEL_A1_Phone_API33`                                                                                                                                                    | **11 de 11 aprobados** (`$SP/d-work/e2e/v3-phone`; `r8b` con el respaldo de root, `r10` sin uso de la sesión en 450 s)                                                                                                                                                                                                                                                                                                                                                                 |
+| `--suite precheck`                                                                                                                   | `Pixel_Tablet`                                                                                                                                                           | **7 de 7 aprobados** (`$SP/d-work/e2e/v3-precheck-tablet`)                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Canal callado 10 minutos (método de §0.5.6, `$SP/d-work/battery.sh … 10`)                                                            | `Pixel_Tablet`, servicio en primer plano (`specialUse`), pantalla apagada, sin cargador, `force-idle` (`IDLE` al empezar), wifi apagada (red móvil simulada), sin avisos | **19,56 KB recibidos y 11,33 KB enviados** (93/97 paquetes), «Mobile radio AP wakeups» 29, **ninguna** alarma ni wake lock de la aplicación, CPU u = 400 ms y s = 50 ms, 0,00123 mAh estimados (perfil ficticio). Con el protocolo anterior, en **5** minutos: 103,6 KB / 25,4 KB (459/461 paquetes), CPU 817/125 ms. Por hora: **≈ 185 KB** contra ≈ 1,55 MB (≈ 8 veces menos; recibido ≈ 10 veces menos). Lo que queda es el `: ping` cada 15 s y la reapertura cada 5 minutos (TLS) |
+
+Al terminar: `force-idle` quitado, batería y pantalla como estaban, wifi encendida y modo avión apagado (comprobado con
+`dumpsys` en los dos emuladores), aplicación y su `.test` desinstaladas, Go temporal detenido con su base borrada y
+emuladores apagados. Ninguna corrida usó la red real ni la instalación de la Mac.
 
 ### Decisiones del coordinador sobre la Fase D
 
@@ -2480,3 +2559,10 @@ prueba. Sin emuladores ni Go temporal en esta parte; árbol limpio.
 - Verificación del coordinador de A2-D12 sobre una copia exacta de `b91ae66`: `fmt-check`, `sync-check`, `go-unit`,
   `go-int` de `apicontract`, `database` y `kitchen` completos, `TestStageA2Ready*` (`operations`) y
   `TestStageTwoAcceptance` y `TestStageA1WaiterPIN` (`administration`), todo aprobado.
+
+### Fusión de las correcciones de la revisión en el dispositivo
+
+`etapa-a2-d` (`27e430c`: RD1 y RD3 a RD7 con sus pruebas, el paso `r10` de `alerts`, la reproducción del revisor
+`ReadyAlertsReviewTest` que ahora pasa, y la fusión de `61b8ba1` con A2-D12) en la etapa, sin cambios fuera de
+`android/`, `scripts/android-e2e.sh`, `docs/ANDROID_INSTALAR.md` y el avance. Con esto, el código de Android de la
+etapa queda completo para la Fase E.
