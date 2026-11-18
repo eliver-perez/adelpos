@@ -83,6 +83,18 @@ function failure(reply: Reply) {
   return error?.message ?? `respuesta ${reply.status}`;
 }
 
+// Rechazo de Go al pedir un código, con su estado y su código de error para que una prueba distinga el límite de
+// solicitudes por origen (429 PAIRING_RATE_LIMITED: 5 cada 10 minutos) de cualquier otra falla.
+export class PairingRequestError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code: string,
+  ) {
+    super(message);
+  }
+}
+
 // Pide el código: solicitud con el compromiso, número del servidor y revelación del número propio. Desde la etapa A1
 // también como teléfono o tableta de meseros (kind 'android', con la versión de su aplicación).
 export async function requestPairingCode(
@@ -99,7 +111,8 @@ export async function requestPairingCode(
     commitment: createHash('sha256').update(nonce).digest('hex'),
   });
   if (created.status !== 200) {
-    throw new Error(failure(created));
+    const error = created.body.error as { code?: string } | undefined;
+    throw new PairingRequestError(failure(created), created.status, error?.code ?? '');
   }
   const requestID = String(created.body.request_id);
   const secret = String(created.body.pairing_secret);

@@ -5,7 +5,7 @@ import { installDriver } from './native-driver';
 import { openAdministration, topBar } from './navigation';
 import { notice } from './notices';
 import { chooseOption, expectSelectText } from './select';
-import { claimPairing, requestPairingCode } from './pairing';
+import { claimPairing, PairingRequestError, requestPairingCode } from './pairing';
 
 const serverURL = process.env.ADEL_BROWSER_SERVER_URL ?? 'http://127.0.0.1:8183';
 
@@ -19,6 +19,24 @@ const serverURL = process.env.ADEL_BROWSER_SERVER_URL ?? 'http://127.0.0.1:8183'
 
 const precheckPrinterName = 'Precuentas A2 E2E';
 
+// En la corrida completa esta es la sexta solicitud de emparejamiento desde 127.0.0.1 en pocos minutos (9G: Caja 2, 3 y
+// 4 y Barra norte; A1: la tableta del PIN) y Go acepta 5 por origen cada 10 minutos (regla de seguridad de la 9G, que no
+// se relaja en modo de pruebas): se espera a que vuelva a aceptarla, como lo haría una terminal real.
+async function requestPairingCodeWhenAllowed(name: string) {
+  const deadline = Date.now() + 11 * 60_000;
+  for (;;) {
+    try {
+      return await requestPairingCode(name, 'Android 15', 'android');
+    } catch (error) {
+      const limited = error instanceof PairingRequestError && error.code === 'PAIRING_RATE_LIMITED';
+      if (!limited || Date.now() > deadline) {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20_000));
+    }
+  }
+}
+
 async function login(page: Page) {
   await page.getByLabel('Usuario', { exact: true }).fill('admin');
   await page.getByLabel('Contraseña', { exact: true }).fill('admin');
@@ -28,13 +46,17 @@ async function login(page: Page) {
 test('Terminales: impresora de precuentas y avisos de platillos listos de un teléfono de meseros (etapa A2, partes C y D)', async ({
   page,
 }) => {
+  // Hasta 11 minutos de espera por el límite de solicitudes, más la prueba.
+  test.setTimeout(15 * 60_000);
+  // Un teléfono de meseros emparejado y la impresora de precuentas de aceptación. El código se pide antes de entrar,
+  // porque puede haber que esperar al límite de solicitudes (y una solicitud vence a los 5 minutos).
+  const pairing = await requestPairingCodeWhenAllowed('Tableta de precuentas A2');
+
   const driver = await installDriver(page);
   await page.goto('/');
   await login(page);
   await expect(topBar(page)).toBeVisible();
 
-  // Un teléfono de meseros emparejado y la impresora de precuentas de aceptación.
-  const pairing = await requestPairingCode('Tableta de precuentas A2', 'Android 15', 'android');
   const approved = await driver.request(
     'POST',
     `devices/pairing-requests/${pairing.requestID}/approve`,
