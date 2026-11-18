@@ -55,6 +55,8 @@ fun AccessViewModel.asActions(): AccessActions {
  * La pantalla de entrada que corresponde al estado del dispositivo, cuando todavía no hay un mesero
  * activo: buscar el servidor y emparejar, entrar con PIN, emparejar de nuevo, actualizar o el aviso
  * de dispositivo retirado. Con un mesero activo, la aplicación muestra el modo Mesero.
+ * [requestedWaiter] (etapa A2): el mesero de un aviso de platillos listos que se tocó; la entrada
+ * con PIN lo deja elegido.
  */
 @Composable
 fun AccessContent(
@@ -63,6 +65,7 @@ fun AccessContent(
     actions: AccessActions,
     layout: PaneLayout,
     modifier: Modifier = Modifier,
+    requestedWaiter: String? = null,
 ) {
     when (status) {
         DeviceStatus.Starting -> LoadingScreen(modifier)
@@ -74,7 +77,12 @@ fun AccessContent(
                     onClearDeviceLog = actions::clearDeviceLog,
                 )
             }
-        is DeviceStatus.Ready -> PinEntryRoute(dependencies = dependencies, layout = layout)
+        is DeviceStatus.Ready ->
+            PinEntryRoute(
+                dependencies = dependencies,
+                layout = layout,
+                requestedWaiter = requestedWaiter,
+            )
         is DeviceStatus.NeedsRepair ->
             RepairScreen(
                 reason = status.reason,

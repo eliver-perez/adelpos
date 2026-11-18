@@ -67,6 +67,9 @@ import com.adelpos.meseros.feature.takeaway.TakeawayRoute
 import com.adelpos.meseros.feature.takeaway.takeawayTitle
 import com.adelpos.meseros.feature.waiter.tables.TablesRoute
 import com.adelpos.meseros.feature.waiter.tables.tablesTitle
+import com.adelpos.meseros.ready.ReadyAlertsController
+import com.adelpos.meseros.ready.ReadyAlertsNavigationEffects
+import com.adelpos.meseros.ready.ReadyAlertsOverlay
 import kotlinx.serialization.Serializable
 
 /** Destinos del modo Mesero (rutas con tipo de navigation-compose). */
@@ -142,6 +145,8 @@ fun AdelPosApp(
             if (gate.switchBlocked) {
                 SwitchBlockedDialog(onDismiss = gate::dismissSwitchBlocked)
             }
+            // Etapa A2, Fase D: permisos, ayuda y aviso dentro de la aplicación.
+            ReadyAlertsOverlay(readyAlerts())
         }
     }
 }
@@ -163,6 +168,9 @@ fun AdelPosNavigation(
 ) {
     val paneLayout = currentPaneLayout()
     val waiter = activeWaiter?.takeIf { status is DeviceStatus.Ready }
+    val readyAlerts = readyAlerts()
+    // Un aviso tocado en «¿Quién eres?»: se le pide el PIN a su mesero (etapa A2, §4.4).
+    val pendingOpen by readyAlerts.pendingOpen.collectAsStateWithLifecycle()
     // Cada mesero empieza su propia navegación: lo que capturó otro no se ve aquí.
     val navController = key(waiter?.userId) { rememberNavController() }
     val backStackEntry by navController.currentBackStackEntryAsState()
@@ -200,6 +208,7 @@ fun AdelPosNavigation(
                             colorHex = waiter.profile.color,
                             onSwitchWaiter = onSwitchWaiter,
                             offline = !waiter.hasServerSession,
+                            onAlertsHelp = { readyAlerts.helpRequested.value = true },
                         )
                     }
                 },
@@ -225,11 +234,17 @@ fun AdelPosNavigation(
                     dependencies = dependencies,
                     actions = actions,
                     layout = paneLayout,
+                    requestedWaiter = pendingOpen?.waiterUserId,
                 )
             }
         }
     }
 }
+
+/** El aviso de platillos listos del proceso (etapa A2, Fase D). */
+@Composable
+private fun readyAlerts(): ReadyAlertsController =
+    (LocalContext.current.applicationContext as AdelPosApplication).container.readyAlerts
 
 /** Si Go le da al mesero activo permiso de ver los pedidos para llevar (`takeaway.read`). */
 @Composable
@@ -324,6 +339,26 @@ private fun WaiterNavigation(navController: NavHostController, paneLayout: PaneL
             selectSection(navController, MainSection.TAKEAWAY)
         }
     }
+    // Etapa A2, Fase D: la cuenta a la vista (aviso dentro de la aplicación) y abrir la cuenta de
+    // un aviso tocado.
+    val current by navController.currentBackStackEntryAsState()
+    ReadyAlertsNavigationEffects(
+        controller = application.container.readyAlerts,
+        capture = waiter.capture,
+        viewingCaptureId =
+            current
+                ?.takeIf { it.destination.hasRoute<CaptureDestination>() }
+                ?.toRoute<CaptureDestination>()
+                ?.captureId,
+        onOpenCapture = { captureId, fromTakeaway ->
+            if (fromTakeaway) {
+                openTakeawayCapture(captureId)
+            } else {
+                openCapture(captureId)
+            }
+        },
+        onOpenTakeawayList = { selectSection(navController, MainSection.TAKEAWAY) },
+    )
     NavHost(navController = navController, startDestination = TablesDestination) {
         composable<TablesDestination> {
             TablesRoute(

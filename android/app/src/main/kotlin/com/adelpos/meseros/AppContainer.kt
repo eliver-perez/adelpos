@@ -37,6 +37,7 @@ import com.adelpos.meseros.core.domain.server.ServerRelocator
 import com.adelpos.meseros.feature.access.AccessDependencies
 import com.adelpos.meseros.feature.takeaway.TakeawayDependencies
 import com.adelpos.meseros.feature.waiter.WaiterDependencies
+import com.adelpos.meseros.ready.ReadyAlertsController
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -57,11 +58,17 @@ class AppContainer(context: Context, private val settings: Settings = Settings()
      *   encontrar nunca el servidor real del restaurante.
      * @param lostResponses solo pruebas: respuestas de Go que se descartan después de procesarse
      *   (la «respuesta perdida» de §9); null en la aplicación.
+     * @param readyAlerts el aviso de platillos listos (etapa A2, Fase D); las pruebas de la A1 lo
+     *   apagan para que su servicio y sus notificaciones no las cambien.
+     * @param askAlertPermissions explicar y pedir los permisos del aviso al arrancar su servicio;
+     *   las pruebas los conceden ellas.
      */
     data class Settings(
         val clientVersion: String = BuildConfig.VERSION_NAME,
         val discoveryServiceType: String = ServerAnnouncements.SERVICE_TYPE,
         val lostResponses: LostResponses? = null,
+        val readyAlerts: Boolean = true,
+        val askAlertPermissions: Boolean = true,
     )
 
     private val appContext: Context = context.applicationContext
@@ -161,6 +168,9 @@ class AppContainer(context: Context, private val settings: Settings = Settings()
                 waiterMode.sender.exclusive { orderQueue.eraseAll() }
                 orderScheduler.schedulePeriodic()
             }
+            // Etapa A2, Fase D: detiene el canal y el servicio de avisos, borra el cursor y los
+            // avisos ya mostrados y quita los avisos a la vista.
+            register("avisos de platillos listos") { readyAlerts.eraseDeviceData() }
         }
 
     private val serverBrowser: NsdServerBrowser by lazy {
@@ -322,6 +332,24 @@ class AppContainer(context: Context, private val settings: Settings = Settings()
         TakeawayDependencies(
             capture = captureDependencies,
             elapsedClock = SystemClock::elapsedRealtime,
+        )
+    }
+
+    /**
+     * El aviso de platillos listos (etapa A2, Fase D): el único canal de avisos del proceso, su
+     * servicio en primer plano y sus notificaciones (lo arranca AdelPosApplication).
+     */
+    val readyAlerts: ReadyAlertsController by lazy {
+        ReadyAlertsController(
+            context = appContext,
+            access = deviceAccess,
+            dao = database.readyAlerts(),
+            preferences = devicePreferences,
+            foreground = appForeground.inForeground,
+            linkState = connectionMonitor.linkState,
+            retryOrders = { orderQueue.retryNow() },
+            enabled = settings.readyAlerts,
+            askPermissions = settings.askAlertPermissions,
         )
     }
 
