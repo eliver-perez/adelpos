@@ -4,7 +4,6 @@ import com.adelpos.meseros.core.data.catalog.CatalogTestSupport
 import com.adelpos.meseros.core.data.session.AuthorizedServer
 import com.adelpos.meseros.core.domain.error.AppError
 import com.adelpos.meseros.core.domain.ready.ReadyAlert
-import com.adelpos.meseros.core.domain.ready.ReadyAlertKey
 import com.adelpos.meseros.core.domain.ready.ReadyAlertPresenter
 import com.adelpos.meseros.core.domain.ready.ReadyAlertSettings
 import com.adelpos.meseros.core.domain.ready.ReadyAlertsBatch
@@ -34,10 +33,12 @@ import org.junit.Test
 
 /**
  * El canal de avisos contra un servidor simulado que escribe como Go
- * (`administration/ready_alerts.go`): `Last-Event-ID` y `after`, cierre a los 30 s con reconexión
- * desde el último cursor, repetidos que se muestran una vez, `interrupted`, 401, 429 con lectura
- * mientras tanto, `active: false`, espera creciente, conexión muerta y fin del día comercial sin
- * respuesta. Solo la credencial del dispositivo (nunca `Authorization`).
+ * (`administration/ready_alerts.go`, con el protocolo ajustado tras la revisión del servidor):
+ * `Last-Event-ID` y `after`, cierre con reconexión desde el último cursor (también el cierre normal
+ * con solo `: ping`), repetidos que se muestran una vez (por `key`), `interrupted` (solo
+ * `DEVICE_REVOKED` es retirado), 401, 429 con lectura mientras tanto, `active: false`, espera
+ * creciente, conexión muerta y la nueva consulta al terminar el día comercial. Solo la credencial
+ * del dispositivo (nunca `Authorization`).
  */
 class ReadyAlertsChannelTest {
     private lateinit var mock: MockWebServer
@@ -66,9 +67,14 @@ class ReadyAlertsChannelTest {
             clock = clock,
             backoff = ReconnectBackoff(initialMillis = 50, maximumMillis = 400),
             onReconnected = { reconnections.incrementAndGet() },
+            healthyConnectionMillis = 100,
         )
 
-    private fun stream(vararg messages: String, stall: Boolean = false): MockResponse {
+    private fun stream(
+        vararg messages: String,
+        stall: Boolean = false,
+        bodyDelayMillis: Long = 0,
+    ): MockResponse {
         val builder =
             MockResponse.Builder()
                 .code(200)
@@ -76,6 +82,10 @@ class ReadyAlertsChannelTest {
                 .body(messages.joinToString(""))
         if (stall) {
             builder.onResponseEnd(SocketEffect.Stall)
+        }
+        if (bodyDelayMillis > 0) {
+            // Las cabeceras salen enseguida (el canal abre) y el cuerpo después.
+            builder.bodyDelay(bodyDelayMillis, TimeUnit.MILLISECONDS)
         }
         return builder.build()
     }
@@ -94,13 +104,14 @@ class ReadyAlertsChannelTest {
             "\"alerts\":[${alerts.joinToString(",")}]}"
 
     private fun alert(id: Long, account: String = "cuenta-4"): String =
-        "{\"id\":$id,\"account_id\":\"$account\",\"mode\":\"dine_in\",\"table_name\":\"Mesa 4\"," +
+        "{\"id\":$id,\"key\":\"k-$id\",\"account_id\":\"$account\",\"mode\":\"dine_in\",\"table_name\":\"Mesa 4\"," +
             "\"folio\":31,\"customer_name\":\"\",\"waiter_user_id\":\"ana\"," +
             "\"waiter_short_name\":\"Ana\",\"items\":[{\"product_name\":\"Filete · Grande\"," +
             "\"quantity\":2}],\"ready_at\":\"2026-11-18T20:41:0$id.12Z\"}"
 
-    private fun interrupted(code: String, status: Int): String =
-        "id: 0\nevent: interrupted\ndata: {\"error\":\"$code\",\"status\":$status}\n\n"
+    /** `event: interrupted` con la forma nueva (`{"code"}`). */
+    private fun interrupted(code: String): String =
+        "id: 0\nevent: interrupted\ndata: {\"code\":\"$code\"}\n\n"
 
     private fun takeRequest(): RecordedRequest =
         requireNotNull(mock.takeRequest(5, TimeUnit.SECONDS)) { "No llegó la petición esperada" }
@@ -144,7 +155,7 @@ class ReadyAlertsChannelTest {
         withTimeout(5_000) { channel().run() }
 
         assertEquals(listOf(5L, 6L), presenter.shown.map { it.id })
-        assertEquals(setOf(5L, 6L), ledger.seen.keys)
+        assertEquals(setOf("k-5", "k-6"), ledger.seen)
     }
 
     @Test
@@ -161,7 +172,7 @@ class ReadyAlertsChannelTest {
     @Test
     fun interruptedDelCanalEsUnRechazoYSuIdNoEsUnCursor() = runBlocking {
         ledger.stored = ReadyAlertsStatus(20, true, FUTURE, ReadyAlertSettings.DEFAULT)
-        mock.enqueue(stream(alerts(21, alert(21)), interrupted("DEVICE_REVOKED", 401)))
+        mock.enqueue(stream(alerts(21, alert(21)), interrupted("DEVICE_REVOKED")))
 
         val reason = withTimeout(5_000) { channel().run() }
 
@@ -237,15 +248,18 @@ class ReadyAlertsChannelTest {
 
     @Test
     fun unaConexionMuertaSeDetectaYSeReconectaDesdeElCursor() = runBlocking {
-        // Abre, entrega un mensaje y se queda callada (sin los mensajes de cada 750 ms).
-        mock.enqueue(stream(alerts(51, alert(51)), stall = true))
-        mock.enqueue(stream(alerts(52, alert(52)), alerts(52, active = false)))
+        ledger.stored = ReadyAlertsStatus(50, true, FUTURE, ReadyAlertSettings.DEFAULT)
+        // Abre y se queda callada: ni avisos ni `: ping` en más de la espera de lectura (en estas
+        // pruebas 300 ms; en la aplicación, 45 s).
+        mock.enqueue(stream(alerts(51, alert(51)), bodyDelayMillis = 2_000))
+        mock.enqueue(stream(alerts(52, alert(51), alert(52)), alerts(52, active = false)))
 
         withTimeout(5_000) { channel().run() }
 
         takeRequest()
-        assertEquals("51", takeRequest().url.queryParameter("after"))
+        assertEquals("desde el cursor guardado", "50", takeRequest().url.queryParameter("after"))
         assertEquals(listOf(51L, 52L), presenter.shown.map { it.id })
+        assertEquals("fue una falla: se pide el envío de la cola al volver", 1, reconnections.get())
     }
 
     @Test
@@ -267,18 +281,75 @@ class ReadyAlertsChannelTest {
     }
 
     @Test
-    fun alTerminarElDiaSinPoderPreguntarSeDetiene() = runBlocking {
+    fun pasadoElFinDelDiaVuelveAPreguntarYSigueMientrasGoDigaActivo() = runBlocking {
         val dayEnds = 1_763_550_000_000L
         ledger.stored = ReadyAlertsStatus(9, true, dayEnds, ReadyAlertSettings.DEFAULT)
-        mock.enqueue(CatalogTestSupport.error(503, "SERVER_BUSY"))
-
-        val reason =
-            withTimeout(5_000) {
-                channel(clock = { dayEnds + ReadyAlertsLifecycle.DAY_END_GRACE_MILLIS }).run()
+        val paths = CopyOnWriteArrayList<String>()
+        val streams = AtomicInteger(0)
+        mock.dispatcher =
+            object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse {
+                    paths.add(request.url.encodedPath)
+                    return when (request.url.encodedPath) {
+                        // Un mesero con su sesión vigente: sigue activo con el día siguiente.
+                        "/api/v1/ready-alerts" -> CatalogTestSupport.json(200, batch(10))
+                        else ->
+                            if (streams.incrementAndGet() == 1) {
+                                // El canal abierto y callado cuando llega la hora de preguntar.
+                                stream(": ping\n\n", bodyDelayMillis = 2_000)
+                            } else {
+                                stream(alerts(11, active = false))
+                            }
+                    }
+                }
             }
+        // Faltan 100 ms para volver a preguntar (fin del día y su margen): antes de que venza la
+        // espera de lectura del canal callado (300 ms en estas pruebas).
+        val now = dayEnds + ReadyAlertsLifecycle.DAY_CHECK_AFTER_MILLIS - 100
 
-        assertEquals(ReadyStopReason.DAY_ENDED, reason)
-        assertEquals(1, mock.requestCount)
+        val reason = withTimeout(5_000) { channel(clock = { now }).run() }
+
+        assertEquals(
+            "se detiene solo cuando Go dice active: false",
+            ReadyStopReason.INACTIVE,
+            reason,
+        )
+        assertEquals(
+            listOf(
+                "/api/v1/ready-alerts/stream",
+                "/api/v1/ready-alerts",
+                "/api/v1/ready-alerts/stream",
+            ),
+            paths,
+        )
+        assertTrue(server.reported.isEmpty())
+    }
+
+    @Test
+    fun unCierreNormalConSoloPingsReconectaEnseguidaSinContarComoFalla() = runBlocking {
+        // Go cierra el canal (a los 5 minutos) sin haber mandado ningún aviso: solo `: ping`.
+        mock.enqueue(stream(": ping\n\n", bodyDelayMillis = 250))
+        mock.enqueue(stream(alerts(3, alert(3)), alerts(3, active = false)))
+
+        withTimeout(5_000) { channel().run() }
+
+        assertEquals(2, mock.requestCount)
+        assertEquals("no fue una falla", 0, reconnections.get())
+        assertEquals(listOf(3L), presenter.shown.map { it.id })
+    }
+
+    @Test
+    fun interruptedConOtroCodigoOUnRechazoDeLaCredencialSonTemporales() = runBlocking {
+        mock.enqueue(stream(alerts(1), interrupted("INTERNAL")))
+        mock.enqueue(CatalogTestSupport.error(401, "DEVICE_REQUIRED"))
+        mock.enqueue(stream(alerts(2, alert(2)), alerts(2, active = false)))
+
+        val reason = withTimeout(5_000) { channel().run() }
+
+        assertEquals(ReadyStopReason.INACTIVE, reason)
+        assertEquals(3, mock.requestCount)
+        assertTrue("nada se dio por retirado", server.reported.isEmpty())
+        assertEquals(listOf(2L), presenter.shown.map { it.id })
     }
 
     @Test
@@ -327,16 +398,16 @@ class ReadyAlertsChannelTest {
 
     private class MemoryLedger : ReadyAlertsLedger {
         @Volatile var stored: ReadyAlertsStatus? = null
-        val seen = mutableMapOf<Long, String>()
+        val seen = mutableSetOf<String>()
 
         override suspend fun status(): ReadyAlertsStatus? = stored
 
         override suspend fun unseen(alerts: List<ReadyAlert>): List<ReadyAlert> = alerts.filter {
-            seen[it.id] != it.readyAt
+            it.key !in seen
         }
 
         override suspend fun commit(batch: ReadyAlertsBatch, shown: List<ReadyAlert>) {
-            shown.forEach { seen[it.id] = it.readyAt }
+            shown.forEach { seen.add(it.key) }
             stored = batch.status
         }
 
@@ -352,7 +423,7 @@ class ReadyAlertsChannelTest {
 
     private class RecordingPresenter : ReadyAlertPresenter {
         val shown = CopyOnWriteArrayList<ReadyAlert>()
-        private val visible = mutableSetOf<ReadyAlertKey>()
+        private val visible = mutableSetOf<String>()
 
         override suspend fun apply(settings: ReadyAlertSettings) = Unit
 

@@ -151,6 +151,12 @@ class ReadyAlertsController(
     /** El mesero tocó un aviso: la navegación abre la cuenta (y pide el PIN si hace falta). */
     val pendingOpen = MutableStateFlow<ReadyOpenRequest?>(null)
 
+    /**
+     * La cuenta del aviso tocado ya no está abierta (cobrada, cancelada o combinada sin una cuenta
+     * vigente a la vista): la pantalla dice «Esta cuenta ya no está abierta».
+     */
+    val openedClosedAccount = MutableStateFlow(false)
+
     /** Se pidió la ayuda «Avisos de platillos listos» (desde la notificación o el menú). */
     val helpRequested = MutableStateFlow(false)
 
@@ -308,7 +314,7 @@ class ReadyAlertsController(
 
     private fun onChannelEnded(reason: ReadyStopReason) {
         stopping = true
-        if (reason == ReadyStopReason.INACTIVE || reason == ReadyStopReason.DAY_ENDED) {
+        if (reason == ReadyStopReason.INACTIVE) {
             Log.i(TAG, "sin a quién avisar: se detiene el servicio")
         }
         stopService()

@@ -26,16 +26,15 @@ class RoomReadyAlertsLedger(
     override suspend fun status(): ReadyAlertsStatus? = dao.state()?.toStatus()
 
     /**
-     * Un aviso cuenta como ya mostrado si hay uno guardado con el mismo número **y** la misma hora;
-     * el mismo número con otra hora es otro aviso (la computadora principal restauró un respaldo y
-     * Go volvió a usar el número): se muestra.
+     * Un aviso cuenta como ya mostrado si hay uno guardado con su misma `key` (la de Go, única):
+     * nunca por su número, que Go puede repetir con otro aviso tras restaurar un respaldo.
      */
     override suspend fun unseen(alerts: List<ReadyAlert>): List<ReadyAlert> {
         if (alerts.isEmpty()) {
             return emptyList()
         }
-        val seen = dao.seen(alerts.map { it.id }).associateBy { it.alertId }
-        return alerts.filter { alert -> seen[alert.id]?.readyAt != alert.readyAt }
+        val seen = dao.seenKeys(alerts.map { it.key }).toSet()
+        return alerts.filter { it.key !in seen }
     }
 
     override suspend fun commit(batch: ReadyAlertsBatch, shown: List<ReadyAlert>) {
@@ -47,8 +46,8 @@ class RoomReadyAlertsLedger(
                 shown =
                     shown.map { alert ->
                         ReadyAlertSeenEntity(
+                            key = alert.key,
                             alertId = alert.id,
-                            readyAt = alert.readyAt,
                             accountId = alert.accountId,
                             dayEndsAt = batch.dayEndsAtMillis,
                             seenAt = now,

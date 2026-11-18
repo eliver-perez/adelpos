@@ -289,6 +289,7 @@ class ReadyAlertsOnDeviceTest {
     ) =
         ReadyAlert(
             id = id,
+            key = "k-$account-$id",
             accountId = account,
             mode = mode,
             tableName = table,

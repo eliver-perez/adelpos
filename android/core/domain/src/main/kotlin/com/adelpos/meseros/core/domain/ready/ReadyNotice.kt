@@ -8,7 +8,7 @@ import com.adelpos.meseros.core.domain.waiter.OrderMode
  * 1 × Tacos»). Guarda qué avisos ya contiene para no mostrar dos veces el mismo (ver
  * [ReadyAlertPresenter.present]).
  *
- * @param shown los avisos que ya contiene (número y hora).
+ * @param shown los avisos que ya contiene (sus `key`).
  * @param items los platillos acumulados, en el orden en que llegaron; el mismo nombre se suma.
  * @param waiterUserId el mesero del último aviso (si la cuenta se transfirió, el nuevo): al tocarla
  *   en «¿Quién eres?» se le pide su PIN.
@@ -21,7 +21,7 @@ data class ReadyNotice(
     val customerName: String,
     val waiterUserId: String,
     val items: List<ReadyItem>,
-    val shown: List<ReadyAlertKey>,
+    val shown: List<String>,
 ) {
     /** Cuántos platillos listos acumula (la suma de las cantidades). */
     val dishCount: Int

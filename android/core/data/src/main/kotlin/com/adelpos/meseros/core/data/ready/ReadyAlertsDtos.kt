@@ -53,6 +53,8 @@ data class ReadyAlertSettingsDto(val enabled: Boolean, val sound: Boolean, val v
 @Serializable
 data class ReadyAlertDto(
     val id: Long,
+    /** La identidad del aviso, única y nunca reutilizada (el `id` solo es el cursor). */
+    val key: String = "",
     @SerialName("account_id") val accountId: String,
     val mode: String,
     @SerialName("table_name") val tableName: String? = null,
@@ -66,6 +68,9 @@ data class ReadyAlertDto(
     fun toDomain(): ReadyAlert =
         ReadyAlert(
             id = id,
+            // Un servidor que no la mandara (no debería pasar con `ready-alerts-v1`): número y
+            // hora.
+            key = key.ifBlank { "$id@$readyAt" },
             accountId = accountId,
             mode = OrderMode.fromWireName(mode),
             tableName = tableName,
@@ -83,3 +88,16 @@ data class ReadyItemDto(
     @SerialName("product_name") val productName: String,
     val quantity: Int,
 )
+
+/**
+ * Contenido de `event: interrupted` del canal de avisos: `{"code": …}` (antes `{"error",
+ * "status"}`; se aceptan las dos formas).
+ */
+@Serializable
+data class ReadyInterruptedDto(
+    val code: String? = null,
+    val error: String? = null,
+    val status: Int? = null,
+) {
+    fun code(): String? = code ?: error
+}

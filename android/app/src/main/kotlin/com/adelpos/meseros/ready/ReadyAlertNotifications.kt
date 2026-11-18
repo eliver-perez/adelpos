@@ -15,7 +15,6 @@ import androidx.core.app.NotificationManagerCompat
 import com.adelpos.meseros.MainActivity
 import com.adelpos.meseros.R
 import com.adelpos.meseros.core.domain.ready.ReadyAlert
-import com.adelpos.meseros.core.domain.ready.ReadyAlertKey
 import com.adelpos.meseros.core.domain.ready.ReadyAlertPresenter
 import com.adelpos.meseros.core.domain.ready.ReadyAlertSettings
 import com.adelpos.meseros.core.domain.ready.ReadyAlertWords
@@ -336,8 +335,7 @@ class ReadyAlertNotifications(
         private const val KEY_WAITER = "adelpos.ready.waiter"
         private const val KEY_ITEM_NAMES = "adelpos.ready.items.names"
         private const val KEY_ITEM_QUANTITIES = "adelpos.ready.items.quantities"
-        private const val KEY_SHOWN_IDS = "adelpos.ready.shown.ids"
-        private const val KEY_SHOWN_AT = "adelpos.ready.shown.at"
+        private const val KEY_SHOWN = "adelpos.ready.shown.keys"
 
         /** Los textos del aviso con las plantillas de `strings.xml` (A2-D10). */
         fun wordsFrom(context: Context): ReadyAlertWords =
@@ -364,8 +362,7 @@ class ReadyAlertNotifications(
             extras.putString(KEY_WAITER, waiterUserId)
             extras.putStringArray(KEY_ITEM_NAMES, items.map { it.productName }.toTypedArray())
             extras.putIntArray(KEY_ITEM_QUANTITIES, items.map { it.quantity }.toIntArray())
-            extras.putLongArray(KEY_SHOWN_IDS, shown.map { it.id }.toLongArray())
-            extras.putStringArray(KEY_SHOWN_AT, shown.map { it.readyAt }.toTypedArray())
+            extras.putStringArray(KEY_SHOWN, shown.toTypedArray())
             return extras
         }
 
@@ -373,9 +370,8 @@ class ReadyAlertNotifications(
             val account = getString(KEY_ACCOUNT) ?: return null
             val names = getStringArray(KEY_ITEM_NAMES) ?: return null
             val quantities = getIntArray(KEY_ITEM_QUANTITIES) ?: return null
-            val ids = getLongArray(KEY_SHOWN_IDS) ?: return null
-            val times = getStringArray(KEY_SHOWN_AT) ?: return null
-            if (names.size != quantities.size || ids.size != times.size) {
+            val shown = getStringArray(KEY_SHOWN) ?: return null
+            if (names.size != quantities.size) {
                 return null
             }
             return ReadyNotice(
@@ -386,7 +382,7 @@ class ReadyAlertNotifications(
                 customerName = getString(KEY_CUSTOMER).orEmpty(),
                 waiterUserId = getString(KEY_WAITER).orEmpty(),
                 items = names.indices.map { ReadyItem(names[it], quantities[it]) },
-                shown = ids.indices.map { ReadyAlertKey(ids[it], times[it]) },
+                shown = shown.toList(),
             )
         }
     }

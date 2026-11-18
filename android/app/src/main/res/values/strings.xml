@@ -32,6 +32,11 @@
     <string name="ready_permission_continue">Continuar</string>
     <string name="ready_permission_later">Ahora no</string>
 
+    <!-- Se tocó el aviso de una cuenta que ya no está abierta. -->
+    <string name="ready_open_closed_title">Esta cuenta ya no está abierta</string>
+    <string name="ready_open_closed_text">Ya se cobró, se canceló o se combinó con otra cuenta.</string>
+    <string name="ready_open_closed_ok">Entendido</string>
+
     <!-- Aviso dentro de la aplicación (el mesero ya está viendo esa cuenta). -->
     <string name="ready_in_app_close">Cerrar aviso</string>
 

@@ -22,7 +22,7 @@ import org.junit.runner.RunWith
 
 /**
  * El registro del aviso en Room (`AppDatabase` v6) con Robolectric: cursor y estado en una sola
- * fila, avisos ya mostrados (por número y hora), día comercial que cambia, consulta previa sin
+ * fila, avisos ya mostrados (por la `key` de Go), día comercial que cambia, consulta previa sin
  * mover el cursor y borrado del dispositivo.
  */
 @RunWith(AndroidJUnit4::class)
@@ -45,9 +45,10 @@ class RoomReadyAlertsLedgerTest {
         database.close()
     }
 
-    private fun alert(id: Long, readyAt: String = "2026-11-18T20:00:0$id Z") =
+    private fun alert(id: Long, key: String = "k-$id") =
         ReadyAlert(
             id = id,
+            key = key,
             accountId = "cuenta-$id",
             mode = OrderMode.DINE_IN,
             tableName = "Mesa $id",
@@ -56,7 +57,7 @@ class RoomReadyAlertsLedgerTest {
             waiterUserId = "ana",
             waiterShortName = "Ana",
             items = listOf(ReadyItem("Filete", 1)),
-            readyAt = readyAt,
+            readyAt = "2026-11-18T20:00:0${id}Z",
         )
 
     private fun batch(
@@ -79,8 +80,10 @@ class RoomReadyAlertsLedgerTest {
         assertEquals(TODAY_ENDS, status.dayEndsAtMillis)
         assertTrue(ledger.unseen(listOf(alert(1), alert(2))).isEmpty())
         assertEquals(listOf(alert(3)), ledger.unseen(listOf(alert(2), alert(3))))
-        // El mismo número con otra hora es otro aviso (respaldo restaurado en la principal).
-        assertEquals(1, ledger.unseen(listOf(alert(2, readyAt = "otra hora"))).size)
+        // El mismo número con otra key es otro aviso (respaldo restaurado en la principal); la
+        // misma key con otro número es el mismo.
+        assertEquals(1, ledger.unseen(listOf(alert(2, key = "k-otro"))).size)
+        assertTrue(ledger.unseen(listOf(alert(7, key = "k-1"))).isEmpty())
     }
 
     @Test

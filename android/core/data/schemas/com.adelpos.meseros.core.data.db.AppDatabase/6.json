@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 6,
-    "identityHash": "f61bdd0d41f5731a7ae529d37e1b770a",
+    "identityHash": "551162e280970b84575f00a6ad45e150",
     "entities": [
       {
         "tableName": "device_preferences",
@@ -735,18 +735,18 @@
       },
       {
         "tableName": "ready_alerts_seen",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`alert_id` INTEGER NOT NULL, `ready_at` TEXT NOT NULL, `account_id` TEXT NOT NULL, `day_ends_at` INTEGER NOT NULL, `seen_at` INTEGER NOT NULL, PRIMARY KEY(`alert_id`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`key` TEXT NOT NULL, `alert_id` INTEGER NOT NULL, `account_id` TEXT NOT NULL, `day_ends_at` INTEGER NOT NULL, `seen_at` INTEGER NOT NULL, PRIMARY KEY(`key`))",
         "fields": [
+          {
+            "fieldPath": "key",
+            "columnName": "key",
+            "affinity": "TEXT",
+            "notNull": true
+          },
           {
             "fieldPath": "alertId",
             "columnName": "alert_id",
             "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "readyAt",
-            "columnName": "ready_at",
-            "affinity": "TEXT",
             "notNull": true
           },
           {
@@ -771,7 +771,7 @@
         "primaryKey": {
           "autoGenerate": false,
           "columnNames": [
-            "alert_id"
+            "key"
           ]
         },
         "indices": [
@@ -789,7 +789,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'f61bdd0d41f5731a7ae529d37e1b770a')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '551162e280970b84575f00a6ad45e150')"
     ]
   }
 }

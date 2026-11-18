@@ -18,15 +18,15 @@ data class ReadyItem(val productName: String, val quantity: Int)
  * Un aviso de `GET ready-alerts` (`ReadyAlert` del contrato): lo que cocina marcó «Listo» en una
  * cuenta de una sola vez, agrupado por platillo.
  *
- * @param id el número del aviso en Go (el último de su grupo). Un aviso ya mostrado en este
- *   dispositivo nunca se vuelve a mostrar.
- * @param readyAt la hora de Go tal como llega (RFC 3339). Junto con [id] identifica el aviso: si la
- *   computadora principal restaurara un respaldo, Go podría volver a usar un número con otro aviso
- *   (otra hora), que sí se muestra.
+ * @param id el número del aviso en Go: **solo** sirve de cursor (`after`, `Last-Event-ID`). Tras
+ *   restaurar un respaldo en la computadora principal, Go puede repetir números con otro contenido.
+ * @param key la identidad del aviso que da Go, única y que nunca se reutiliza: un aviso con una
+ *   [key] ya mostrada en este dispositivo nunca se vuelve a mostrar.
  * @param waiterUserId el mesero del aviso: al tocarlo en «¿Quién eres?» se le pide su PIN.
  */
 data class ReadyAlert(
     val id: Long,
+    val key: String,
     val accountId: String,
     val mode: OrderMode,
     val tableName: String?,
@@ -36,14 +36,7 @@ data class ReadyAlert(
     val waiterShortName: String,
     val items: List<ReadyItem>,
     val readyAt: String,
-) {
-    /** La identidad del aviso para no mostrarlo dos veces (ver [readyAt]). */
-    val key: ReadyAlertKey
-        get() = ReadyAlertKey(id, readyAt)
-}
-
-/** Número y hora de un aviso: lo que se guarda como «ya avisado». */
-data class ReadyAlertKey(val id: Long, val readyAt: String)
+)
 
 /**
  * Lo que se eligió en Administración › Sistema › Terminales › Editar del dispositivo (§4.5).

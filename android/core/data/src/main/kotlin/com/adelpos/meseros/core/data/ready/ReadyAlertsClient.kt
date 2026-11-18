@@ -3,8 +3,6 @@ package com.adelpos.meseros.core.data.ready
 import com.adelpos.meseros.core.data.access.AccessRepository
 import com.adelpos.meseros.core.data.api.ApiErrors
 import com.adelpos.meseros.core.data.api.ApiJson
-import com.adelpos.meseros.core.data.api.ApiProblem
-import com.adelpos.meseros.core.data.realtime.InterruptedDto
 import com.adelpos.meseros.core.data.session.AuthorizedServer
 import com.adelpos.meseros.core.data.session.apiUrl
 import com.adelpos.meseros.core.data.session.execute
@@ -110,8 +108,12 @@ sealed interface ReadyRead {
 
 /** Cómo terminó una conexión del canal `ready-alerts/stream`. */
 sealed interface ReadyStreamEnd {
-    /** Go cerró el flujo (a los 30 s) después de [received] mensajes: reconectar enseguida. */
-    data class Closed(val received: Int) : ReadyStreamEnd
+    /**
+     * Go cerró el flujo (lo hace a los 5 minutos) después de [received] mensajes; [opened] dice si
+     * llegó a abrir y [lastedMillis] cuánto duró abierto (con solo `: ping` no hay mensajes).
+     */
+    data class Closed(val received: Int, val opened: Boolean = true, val lastedMillis: Long = 0) :
+        ReadyStreamEnd
 
     /**
      * Se cortó o se rechazó (sin red, conexión muerta, `event: interrupted`, 401, 429…) después de
@@ -128,11 +130,13 @@ sealed interface ReadyStreamEnd {
  * contrato v1, parte D del servidor). Habla por el cliente con la huella fijada de la conexión
  * ([AuthorizedServer.client]): nunca acepta otro certificado.
  *
- * - El canal manda un mensaje `alerts` con `id: <cursor>` cada 750 ms aunque no haya avisos y Go lo
- *   cierra a los 30 s: un [readTimeoutMillis] sin ningún byte da la conexión por muerta.
+ * - El canal manda un mensaje `alerts` con `id: <cursor>` solo cuando hay avisos nuevos o cambia
+ *   `active`, la configuración o `day_ends_at`; callado, un comentario `: ping` cada 15 s, y Go lo
+ *   cierra a los 5 minutos. Un [readTimeoutMillis] (45 s) sin ningún byte da la conexión por
+ *   muerta.
  * - Al reconectar se manda el cursor en `?after=` **y** en `Last-Event-ID` (Go usa el primero).
- * - `event: interrupted` (`id: 0`, `{"error", "status"}`) es un rechazo con ese código; su `id`
- *   nunca es un cursor.
+ * - `event: interrupted` (`id: 0`, `{"code"}`): solo `DEVICE_REVOKED` es el dispositivo retirado;
+ *   cualquier otro código es temporal (se reintenta). Su `id` nunca es un cursor.
  */
 class ReadyAlertsClient(
     private val readTimeoutMillis: Long = DEFAULT_READ_TIMEOUT_MILLIS,
@@ -173,12 +177,14 @@ class ReadyAlertsClient(
     }
 
     /**
-     * Abre una conexión del canal desde [after] y la atiende hasta que termina. Cada lote va a
-     * [onBatch] en orden; si devuelve false, la conexión se cierra ([ReadyStreamEnd.Stopped]).
+     * Abre una conexión del canal desde [after] y la atiende hasta que termina: [onOpened] cuando
+     * Go la acepta y cada lote a [onBatch] en orden; si devuelve false, la conexión se cierra
+     * ([ReadyStreamEnd.Stopped]).
      */
     suspend fun stream(
         server: AuthorizedServer,
         after: Long,
+        onOpened: () -> Unit = {},
         onBatch: suspend (ReadyAlertsBatch) -> Boolean,
     ): ReadyStreamEnd {
         val url = server.apiUrl(STREAM_PATH).newBuilder()
@@ -195,10 +201,14 @@ class ReadyAlertsClient(
         val items = Channel<StreamItem>(capacity = 64)
         val source = EventSources.createFactory(client).newEventSource(request, Listener(items))
         var received = 0
+        var openedAt: Long? = null
         try {
             for (item in items) {
                 when (item) {
-                    StreamItem.Opened -> Unit
+                    StreamItem.Opened -> {
+                        openedAt = System.nanoTime()
+                        onOpened()
+                    }
                     is StreamItem.Message ->
                         when (item.type) {
                             ALERTS -> {
@@ -213,11 +223,11 @@ class ReadyAlertsClient(
                             // v1).
                             else -> Unit
                         }
-                    StreamItem.Closed -> return ReadyStreamEnd.Closed(received)
+                    StreamItem.Closed -> return closed(received, openedAt)
                     is StreamItem.Failed -> return ReadyStreamEnd.Failed(received, failure(item))
                 }
             }
-            return ReadyStreamEnd.Closed(received)
+            return closed(received, openedAt)
         } finally {
             // Cancelar cierra el socket; cancelar el canal evita que el hilo de OkHttp se quede
             // esperando para entregar un mensaje que ya nadie va a leer.
@@ -235,16 +245,37 @@ class ReadyAlertsClient(
             null
         }
 
+    private fun closed(received: Int, openedAt: Long?): ReadyStreamEnd.Closed =
+        ReadyStreamEnd.Closed(
+            received = received,
+            opened = openedAt != null,
+            lastedMillis =
+                if (openedAt == null) {
+                    0
+                } else {
+                    (System.nanoTime() - openedAt) / 1_000_000
+                },
+        )
+
+    /**
+     * `event: interrupted`: solo `DEVICE_REVOKED` es el dispositivo retirado; cualquier otro código
+     * (o un mensaje que no se entiende) es temporal, como un 5xx: se reintenta con espera
+     * creciente.
+     */
     private fun interrupted(message: StreamItem.Message): AppError {
-        val body =
+        val code =
             try {
-                json.decodeFromString(InterruptedDto.serializer(), message.data)
+                json.decodeFromString(ReadyInterruptedDto.serializer(), message.data).code()
             } catch (_: SerializationException) {
-                return AppError.InvalidResponse(200)
+                null
             } catch (_: IllegalArgumentException) {
-                return AppError.InvalidResponse(200)
+                null
             }
-        return ApiErrors.toAppError(ApiProblem(body.status, body.error, null, null, null))
+        return if (code == DEVICE_REVOKED) {
+            AppError.DeviceRevoked(null, null)
+        } else {
+            AppError.ServerProblem(TEMPORARY_STATUS, code, null, null)
+        }
     }
 
     /** Rechazo al abrir (JSON de error con su estado) o falla de red (o de la huella). */
@@ -307,8 +338,11 @@ class ReadyAlertsClient(
     }
 
     companion object {
-        /** Sin ningún byte en 10 s (Go escribe cada 750 ms) la conexión se da por muerta. */
-        const val DEFAULT_READ_TIMEOUT_MILLIS: Long = 10_000
+        /** Sin ningún byte en 45 s (Go manda `: ping` cada 15 s) la conexión se da por muerta. */
+        const val DEFAULT_READ_TIMEOUT_MILLIS: Long = 45_000
+
+        private const val DEVICE_REVOKED = "DEVICE_REVOKED"
+        private const val TEMPORARY_STATUS = 503
 
         const val READ_PATH = "ready-alerts"
         const val STREAM_PATH = "ready-alerts/stream"

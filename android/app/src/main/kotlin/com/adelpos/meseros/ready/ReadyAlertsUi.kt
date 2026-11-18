@@ -57,6 +57,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.adelpos.meseros.R
 import com.adelpos.meseros.core.capture.CaptureDependencies
 import com.adelpos.meseros.core.domain.access.ActiveWaiter
+import com.adelpos.meseros.core.domain.error.AppError
+import com.adelpos.meseros.core.domain.error.AppResult
 import com.adelpos.meseros.core.domain.ready.ReadyNotice
 import com.adelpos.meseros.core.domain.waiter.AccountSummary
 import com.adelpos.meseros.core.domain.waiter.OrderMode
@@ -93,6 +95,24 @@ fun ReadyAlertsOverlay(controller: ReadyAlertsController) {
         )
     }
     ReadyInAppNotice(controller)
+    val closed by controller.openedClosedAccount.collectAsStateWithLifecycle()
+    if (closed) {
+        AlertDialog(
+            onDismissRequest = { controller.openedClosedAccount.value = false },
+            modifier =
+                Modifier.reportsUserActivity(LocalUserActivity.current).testTag(TAG_ACCOUNT_CLOSED),
+            title = { Text(stringResource(R.string.ready_open_closed_title)) },
+            text = { Text(stringResource(R.string.ready_open_closed_text)) },
+            confirmButton = {
+                TextButton(
+                    onClick = { controller.openedClosedAccount.value = false },
+                    modifier = Modifier.heightIn(min = AdelDimens.MinTouchTarget),
+                ) {
+                    Text(stringResource(R.string.ready_open_closed_ok))
+                }
+            },
+        )
+    }
 }
 
 /** Qué permiso falta explicar y pedir. */
@@ -536,29 +556,45 @@ fun ReadyAlertsNavigationEffects(
         val request = pending ?: return@LaunchedEffect
         val current = waiter?.takeIf { !it.mustReenterPin } ?: return@LaunchedEffect
         // Se consume al terminar: consumirlo antes cambiaría la llave de este efecto y lo
-        // cancelaría
-        // a la mitad (antes de abrir la cuenta). Si se cancela por otro motivo (cambió el mesero),
-        // el efecto nuevo lo vuelve a intentar.
+        // cancelaría a la mitad (antes de abrir la cuenta). Si se cancela por otro motivo (cambió
+        // el mesero), el efecto nuevo lo vuelve a intentar.
         if (!request.expired(SystemClock.elapsedRealtime())) {
-            openAccount(capture, current, request, onOpenCapture, onOpenTakeawayList)
+            val closed = !openAccount(capture, current, request, onOpenCapture, onOpenTakeawayList)
+            if (closed) {
+                controller.openedClosedAccount.value = true
+            }
         }
         controller.consumeOpen(request)
     }
 }
 
+/**
+ * Abre la cuenta del aviso (o la vigente, si Go dice que se combinó en otra). Devuelve false si Go
+ * dice que ya no está abierta (cobrada, cancelada o combinada sin una vigente); true si se abrió o
+ * si no se pudo saber (sin conexión, o este mesero no puede verla: no se abre nada).
+ */
 private suspend fun openAccount(
     capture: CaptureDependencies,
     waiter: ActiveWaiter,
     request: ReadyOpenRequest,
     onOpenCapture: (String, Boolean) -> Unit,
     onOpenTakeawayList: () -> Unit,
-) {
-    val account = findAccount(capture.restaurant, request.accountId)
-    if (account == null) {
-        // No está entre las cuentas que este mesero puede ver (o ya se cerró): no se abre nada.
-        Log.i(TAG, "la cuenta ${request.accountId} del aviso no está a la vista de este mesero")
-        return
-    }
+): Boolean {
+    val account =
+        when (val target = resolve(capture.restaurant, request.accountId)) {
+            is AccountTarget.Open -> target.account
+            AccountTarget.Closed -> {
+                Log.i(TAG, "la cuenta ${request.accountId} del aviso ya no está abierta")
+                return false
+            }
+            AccountTarget.Unknown -> {
+                Log.i(
+                    TAG,
+                    "la cuenta ${request.accountId} del aviso no está a la vista de este mesero",
+                )
+                return true
+            }
+        }
     val permissions = capture.restaurant.permissions.value
     if (account.mode == OrderMode.TAKEAWAY) {
         if (permissions.allows(WaiterAction.MANAGE_TAKEAWAY)) {
@@ -566,9 +602,9 @@ private suspend fun openAccount(
         } else {
             onOpenTakeawayList()
         }
-        return
+        return true
     }
-    val tableId = account.tableId ?: return
+    val tableId = account.tableId ?: return true
     val seen = capture.restaurant.openAccounts.value.filter { it.tableId == tableId }.map { it.id }
     val opened =
         capture.captures.open(
@@ -580,6 +616,49 @@ private suspend fun openAccount(
         )
     onOpenCapture(opened.id, false)
     Log.i(TAG, "abierta la cuenta ${account.id} del aviso")
+    return true
+}
+
+/** Qué cuenta abrir para un aviso tocado. */
+private sealed interface AccountTarget {
+    data class Open(val account: AccountSummary) : AccountTarget
+
+    /** Go dice que ya no está abierta y no hay una vigente en su lugar. */
+    data object Closed : AccountTarget
+
+    /** No se pudo saber (sin conexión o sin permiso de verla). */
+    data object Unknown : AccountTarget
+}
+
+/**
+ * Entre las cuentas abiertas que ve el mesero; si no está, se pregunta a Go por esa cuenta: abierta
+ * (la lectura estaba atrasada), combinada en otra (se sigue a la vigente) o cerrada.
+ */
+private suspend fun resolve(
+    restaurant: RestaurantSource,
+    accountId: String,
+    hops: Int = 0,
+): AccountTarget {
+    findAccount(restaurant, accountId)?.let {
+        return AccountTarget.Open(it)
+    }
+    return when (val read = restaurant.bill(accountId)) {
+        is AppResult.Success -> {
+            val account = read.value.account
+            val merged = account.mergedIntoId
+            when {
+                account.isOpen -> AccountTarget.Open(account)
+                merged != null && hops < MAX_MERGE_HOPS -> resolve(restaurant, merged, hops + 1)
+                else -> AccountTarget.Closed
+            }
+        }
+        is AppResult.Failure ->
+            if ((read.error as? AppError.Rejected)?.status == NOT_FOUND) {
+                AccountTarget.Closed
+            } else {
+                AccountTarget.Unknown
+            }
+    }
 }
 
 /**
@@ -607,7 +686,9 @@ private suspend fun findAccount(restaurant: RestaurantSource, accountId: String)
 
 private const val TAG = "AdelAvisos"
 private const val IN_APP_MILLIS = 6_000L
-private const val FIND_ACCOUNT_MILLIS = 10_000L
+private const val FIND_ACCOUNT_MILLIS = 5_000L
+private const val MAX_MERGE_HOPS = 3
+private const val NOT_FOUND = 404
 private const val FIND_POLL_MILLIS = 250L
 
 const val TAG_PERMISSION = "ready-permission"
@@ -622,3 +703,4 @@ const val TAG_HELP_BATTERY = "ready-help-battery"
 const val TAG_HELP_BATTERY_SETTINGS = "ready-help-battery-settings"
 const val TAG_HELP_STOPPED_BY_USER = "ready-help-stopped-by-user"
 const val TAG_IN_APP = "ready-in-app"
+const val TAG_ACCOUNT_CLOSED = "ready-account-closed"

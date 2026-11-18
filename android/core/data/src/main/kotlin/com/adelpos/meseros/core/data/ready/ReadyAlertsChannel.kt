@@ -31,9 +31,6 @@ enum class ReadyStopReason {
     /** Go dijo `active: false`: nadie a quien avisar hoy, o el aviso se apagó en Terminales. */
     INACTIVE,
 
-    /** Terminó el día comercial y no se pudo volver a preguntar a Go. */
-    DAY_ENDED,
-
     /** El dispositivo ya no está listo (retirado, sin emparejar, por emparejar o actualizar). */
     DEVICE_NOT_READY,
 
@@ -51,16 +48,19 @@ enum class ReadyStopReason {
  *
  * - Abre `ready-alerts/stream` desde el cursor guardado en Room y procesa cada lote
  *   ([ReadyAlertsProcessor]: quita lo ya avisado, muestra lo nuevo y guarda el cursor).
- * - Go cierra cada flujo a los 30 s: si llegaron mensajes, reconecta enseguida desde el último
- *   cursor. Sin red, 5xx o una conexión muerta: espera creciente (2, 4, 8, 16 y 30 s), que
- *   [reconnectNow] acorta (al recuperar la red). Lo que pasó mientras tanto llega al volver, una
- *   sola vez.
- * - 429 (el canal anterior que Go todavía no cierra, o un segundo proceso): no abre otro en
- *   paralelo; espera y mientras lee con `GET ready-alerts?after=`.
+ * - Go manda solo lo que cambia, `: ping` cada 15 s y cierra cada flujo a los 5 minutos: un cierre
+ *   normal (la conexión duró o trajo mensajes) se reabre **enseguida** desde el último cursor. Sin
+ *   red, 5xx, un `interrupted` temporal o una conexión muerta (45 s sin un byte): espera creciente
+ *   (2, 4, 8, 16 y 30 s), que [reconnectNow] acorta (al recuperar la red). Lo que pasó mientras
+ *   tanto llega al volver, una sola vez.
+ * - Pasado `day_ends_at`, vuelve a preguntar con `GET ready-alerts` (aunque el canal siga callado):
+ *   mientras Go diga `active: true`, sigue.
+ * - 429 (no debería pasar: un canal nuevo reemplaza al anterior en Go): no abre otro en paralelo;
+ *   espera y mientras lee con `GET ready-alerts?after=`.
  * - Tras [ReadyAlertsLifecycle.RELOCATE_AFTER_FAILURES] fallas seguidas pide buscar el servidor en
  *   otra dirección (cambio de IP), como mucho una vez por minuto.
- * - Termina con `active: false`, al terminar el día comercial sin poder preguntar, si el
- *   dispositivo deja de estar listo o con un rechazo de la credencial (que avisa a la entrada).
+ * - Termina con `active: false`, si el dispositivo deja de estar listo o si Go lo da por retirado
+ *   (`DEVICE_REVOKED`, que avisa a la entrada).
  *
  * @param onReconnected se llama cuando el canal vuelve a recibir después de fallar: ahí se pide un
  *   envío de la cola (como los demás disparadores de la A1); el canal nunca envía pedidos.
@@ -73,6 +73,7 @@ class ReadyAlertsChannel(
     private val clock: () -> Long = System::currentTimeMillis,
     private val backoff: ReconnectBackoff = ReadyAlertsLifecycle.backoff(),
     private val onReconnected: () -> Unit = {},
+    private val healthyConnectionMillis: Long = ReadyAlertsLifecycle.HEALTHY_CONNECTION_MILLIS,
 ) {
     private val mutableState = MutableStateFlow<ReadyChannelState>(ReadyChannelState.Connecting)
     private val wakeUps = Channel<Unit>(Channel.CONFLATED)
@@ -98,19 +99,38 @@ class ReadyAlertsChannel(
             val connection = server.connection() ?: return ReadyStopReason.DEVICE_NOT_READY
             mutableState.value = ReadyChannelState.Connecting
             var stop: ReadyStopReason? = null
-            val end =
-                client.stream(connection, loop.cursor) { batch ->
+            // Pasado el fin del día comercial (y un margen) se cierra el flujo para preguntar.
+            val dayCheck = ReadyAlertsLifecycle.dayCheckIn(loop.dayEndsAt, clock())
+            val streamed: suspend () -> ReadyStreamEnd = {
+                client.stream(connection, loop.cursor, onOpened = { loop.onOpened() }) { batch ->
                     stop = loop.onBatch(batch)
                     stop == null
+                }
+            }
+            val end =
+                if (dayCheck == null) {
+                    streamed()
+                } else {
+                    withTimeoutOrNull(dayCheck) { streamed() }
                 }
             stop?.let {
                 return it
             }
             when (end) {
+                null -> {
+                    // Cambió el día: Go dice si sigue activo (un mesero con su sesión vigente).
+                    val reason = readMeanwhile(loop)
+                    if (reason != null) {
+                        return reason
+                    }
+                }
                 ReadyStreamEnd.Stopped -> Unit
                 is ReadyStreamEnd.Closed ->
                     loop.failures =
-                        if (end.received > 0) {
+                        if (
+                            end.opened &&
+                                (end.received > 0 || end.lastedMillis >= healthyConnectionMillis)
+                        ) {
                             0
                         } else {
                             loop.failures + 1
@@ -125,13 +145,6 @@ class ReadyAlertsChannel(
             if (loop.failures > 0) {
                 loop.interrupted = true
             }
-            val dayEndsAt = loop.dayEndsAt
-            if (
-                dayEndsAt != null &&
-                    ReadyAlertsLifecycle.dayEnded(dayEndsAt, loop.lastRead, clock())
-            ) {
-                return ReadyStopReason.DAY_ENDED
-            }
             relocateIfStuck(loop)
             if (loop.failures > 0) {
                 val delayMillis = backoff.delayFor(loop.failures)
@@ -144,22 +157,27 @@ class ReadyAlertsChannel(
     /** Lo que se recuerda entre conexiones mientras corre [run]. */
     private inner class Loop(var cursor: Long, var dayEndsAt: Long?) {
         var failures = 0
-        var lastRead: Long? = null
         var lastRelocate = 0L
 
         /** El canal falló desde la última vez que recibió (para pedir el envío de la cola). */
         var interrupted = false
 
         /** Procesa un lote; devuelve por qué detenerse, o null para seguir. */
-        suspend fun onBatch(batch: ReadyAlertsBatch): ReadyStopReason? {
-            lastRead = clock()
-            dayEndsAt = batch.dayEndsAtMillis
-            failures = 0
+        /**
+         * El canal abrió (con el protocolo nuevo, Go puede quedarse callado hasta que haya algo).
+         */
+        fun onOpened() {
             mutableState.value = ReadyChannelState.Connected
             if (interrupted) {
                 interrupted = false
                 onReconnected()
             }
+        }
+
+        suspend fun onBatch(batch: ReadyAlertsBatch): ReadyStopReason? {
+            dayEndsAt = batch.dayEndsAtMillis
+            failures = 0
+            onOpened()
             val outcome = processor.onBatch(batch)
             cursor = batch.cursor
             return if (outcome == ReadyBatchOutcome.INACTIVE) {

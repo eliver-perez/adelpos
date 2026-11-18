@@ -43,10 +43,11 @@ class ReadyAlertsRulesTest {
         customer: String = "",
         waiter: String = "ana",
         items: List<ReadyItem> = listOf(ReadyItem("Filete de res", 2)),
-        readyAt: String = "2026-11-18T20:41:0$id.120Z",
+        key: String = "aviso-$id",
     ) =
         ReadyAlert(
             id = id,
+            key = key,
             accountId = account,
             mode = mode,
             tableName = table,
@@ -55,7 +56,7 @@ class ReadyAlertsRulesTest {
             waiterUserId = waiter,
             waiterShortName = waiter.replaceFirstChar { it.uppercase() },
             items = items,
-            readyAt = readyAt,
+            readyAt = "2026-11-18T20:41:0$id.120Z",
         )
 
     private fun batch(
@@ -131,7 +132,7 @@ class ReadyAlertsRulesTest {
         val table4 = notices.first()
         assertEquals("Mesa 4 · 4 platillos listos", words.title(table4))
         assertEquals("3 × Filete de res, 1 × Sopa", words.text(table4))
-        assertEquals(listOf(1L, 3L), table4.shown.map { it.id })
+        assertEquals(listOf("aviso-1", "aviso-3"), table4.shown)
         assertEquals("Mesa 4, Mesa 7", words.summaryText(notices))
     }
 
@@ -142,7 +143,7 @@ class ReadyAlertsRulesTest {
         assertSame("un aviso que ya contiene no cambia nada", visible, again)
         val notices = ReadyNotice.accumulate(listOf(alert(5))) { visible }
         assertEquals("Mesa 4 · 4 platillos listos", words.title(notices.single()))
-        assertEquals(listOf(1L, 5L), notices.single().shown.map { it.id })
+        assertEquals(listOf("aviso-1", "aviso-5"), notices.single().shown)
     }
 
     @Test
@@ -218,13 +219,16 @@ class ReadyAlertsRulesTest {
     }
 
     @Test
-    fun elMismoNumeroConOtraHoraEsOtroAvisoTrasRestaurarUnRespaldo() = runBlocking {
+    fun seDescartaPorLaKeyDeGoNoPorElNumeroQuePuedeRepetirseTrasUnRespaldo() = runBlocking {
         val ledger = MemoryLedger()
         val presenter = RecordingPresenter()
         val processor = ReadyAlertsProcessor(ledger, presenter)
-        processor.onBatch(batch(5, alert(5, readyAt = "2026-11-18T20:00:00Z")))
-        processor.onBatch(batch(5, alert(5, readyAt = "2026-11-18T21:30:00Z")))
-        assertEquals(2, presenter.shown.size)
+        processor.onBatch(batch(5, alert(5, key = "k-original")))
+        // Tras restaurar un respaldo, Go repite el número 5 con otro aviso (otra key): se muestra.
+        processor.onBatch(batch(5, alert(5, key = "k-nuevo")))
+        // Y la misma key con otro número (cursor distinto) es el mismo aviso: no se repite.
+        processor.onBatch(batch(9, alert(9, key = "k-nuevo")))
+        assertEquals(listOf("k-original", "k-nuevo"), presenter.shown.map { it.key })
     }
 
     @Test
@@ -297,13 +301,13 @@ class ReadyAlertsRulesTest {
     }
 
     @Test
-    fun alTerminarElDiaSeDetieneSoloSiNoPudoVolverAPreguntar() {
-        val grace = ReadyAlertsLifecycle.DAY_END_GRACE_MILLIS
-        assertFalse(ReadyAlertsLifecycle.dayEnded(DAY_ENDS, DAY_ENDS - 1, DAY_ENDS + grace - 1))
-        assertTrue(ReadyAlertsLifecycle.dayEnded(DAY_ENDS, DAY_ENDS - 1, DAY_ENDS + grace))
-        assertTrue(ReadyAlertsLifecycle.dayEnded(DAY_ENDS, null, DAY_ENDS + grace))
-        // Go respondió después del corte (un mesero con sesión vigente): sigue.
-        assertFalse(ReadyAlertsLifecycle.dayEnded(DAY_ENDS, DAY_ENDS + 5, DAY_ENDS + 2 * grace))
+    fun alTerminarElDiaVuelveAPreguntarSinDetenerse() {
+        val after = ReadyAlertsLifecycle.DAY_CHECK_AFTER_MILLIS
+        assertEquals(60_000L + after, ReadyAlertsLifecycle.dayCheckIn(DAY_ENDS, DAY_ENDS - 60_000))
+        assertEquals(1L, ReadyAlertsLifecycle.dayCheckIn(DAY_ENDS, DAY_ENDS + after - 1))
+        // Ya pasó (Go sigue con el mismo fin de día): no se pregunta en bucle; lo dirá el canal.
+        assertNull(ReadyAlertsLifecycle.dayCheckIn(DAY_ENDS, DAY_ENDS + after))
+        assertNull(ReadyAlertsLifecycle.dayCheckIn(null, DAY_ENDS))
     }
 
     @Test
@@ -312,8 +316,9 @@ class ReadyAlertsRulesTest {
             ErrorAction.STOP_AND_REPORT,
             ReadyAlertsLifecycle.onError(AppError.DeviceRevoked(null, null)),
         )
+        // Solo DEVICE_REVOKED es «retirado»; cualquier otro rechazo de la credencial es temporal.
         assertEquals(
-            ErrorAction.STOP_AND_REPORT,
+            ErrorAction.RETRY,
             ReadyAlertsLifecycle.onError(
                 AppError.DeviceNotRecognized("DEVICE_REQUIRED", null, null),
             ),
@@ -386,14 +391,14 @@ class ReadyAlertsRulesTest {
     /** El registro en memoria (Room en `core:data`), con una falla a pedido al guardar. */
     private class MemoryLedger : ReadyAlertsLedger {
         private var stored: ReadyAlertsStatus? = null
-        private val seen = mutableMapOf<Long, String>()
+        private val seen = mutableSetOf<String>()
         var commits = 0
         var failNextCommit = false
 
         override suspend fun status(): ReadyAlertsStatus? = stored
 
         override suspend fun unseen(alerts: List<ReadyAlert>): List<ReadyAlert> = alerts.filter {
-            seen[it.id] != it.readyAt
+            it.key !in seen
         }
 
         override suspend fun commit(batch: ReadyAlertsBatch, shown: List<ReadyAlert>) {
@@ -402,7 +407,7 @@ class ReadyAlertsRulesTest {
                 error("el proceso murió")
             }
             commits += 1
-            shown.forEach { seen[it.id] = it.readyAt }
+            shown.forEach { seen.add(it.key) }
             stored = batch.status
         }
 
@@ -422,7 +427,7 @@ class ReadyAlertsRulesTest {
      */
     private class RecordingPresenter : ReadyAlertPresenter {
         val shown = mutableListOf<ReadyAlert>()
-        private val visible = mutableSetOf<ReadyAlertKey>()
+        private val visible = mutableSetOf<String>()
 
         override suspend fun apply(settings: ReadyAlertSettings) = Unit
 

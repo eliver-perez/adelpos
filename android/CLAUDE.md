@@ -451,25 +451,31 @@ aplicación (A2-D10) con las plantillas de `app/src/main/res/values/strings.xml`
   terminó el día; si no, pregunta antes con `GET ready-alerts` sin mover el cursor) y desde `BOOT_COMPLETED` /
   `MY_PACKAGE_REPLACED` (`ReadyAlertsBootReceiver`, solo con esa condición guardada). Sin destinatarios en el día no
   arranca: no hay notificación permanente.
-- **Se detiene** cuando el canal termina: `active: false` (nadie entró hoy o «Avisar platillos listos» apagado), el
-  día comercial terminó sin poder volver a preguntar (10 min de margen), la credencial dejó de valer (401
-  `DEVICE_*`, otra huella, 426: se avisa a `deviceAccess.report`) o un rechazo permanente (403/400); también cuando el
+- **Se detiene** cuando el canal termina: `active: false` (nadie entró hoy o «Avisar platillos listos» apagado; al
+  pasar `day_ends_at` vuelve a preguntar con `GET` y, mientras Go diga `active: true`, sigue), el dispositivo retirado
+  (solo `DEVICE_REVOKED`, por `interrupted` o un 401), otra huella o 426 (se avisa a `deviceAccess.report`) o un
+  rechazo permanente al abrir (403/400); cualquier otro código de `interrupted`, otro `DEVICE_*` o un 5xx es temporal
+  (espera creciente). También cuando el
   dispositivo deja de estar listo y con «borrar los datos de este dispositivo» (registrado en `deviceDataWipe` como
   «avisos de platillos listos»: detiene canal y servicio, borra Room y quita los avisos a la vista).
 - **Sin duplicados ni pérdidas** (§4.1): Room guarda el cursor y lo último de Go (`ready_alerts_state`) y los avisos ya
-  mostrados del día por número y hora (`ready_alerts_seen`; al cambiar de día se borran los anteriores). Cada lote:
+  mostrados del día por la **`key`** de Go, única y nunca reutilizada (`ready_alerts_seen`; el `id` solo es el cursor,
+  que Go puede repetir tras restaurar un respaldo; al cambiar de día se borran los anteriores). Cada lote:
   quitar lo ya mostrado → mostrar → guardar ids y cursor en una transacción. Si el proceso muere entre mostrar y
-  guardar, el aviso vuelve a llegar y la notificación de su cuenta lo reconoce en sus extras (no vuelve a sonar). Sin
-  cambios no escribe en Room (Go manda un mensaje cada 750 ms).
-- **Reconexión**: Go cierra cada flujo a los 30 s y se reconecta enseguida desde el último cursor; sin red, 5xx o
-  conexión muerta (10 s sin un byte), espera creciente; 429 (el canal anterior todavía abierto) lee con `GET` mientras
-  espera; tras tres fallas pide buscar el servidor en otra dirección (`deviceAccess.recheck`, cambio de IP); al volver
-  la red, reconecta enseguida.
+  guardar, el aviso vuelve a llegar y la notificación de su cuenta lo reconoce en sus extras (por su `key`: no vuelve a
+  sonar). Sin cambios no escribe en Room.
+- **Reconexión**: Go manda solo lo que cambia, `: ping` cada 15 s y cierra cada flujo a los 5 minutos: un cierre normal
+  (duró o trajo mensajes) se reabre **enseguida** desde el último cursor (`after` y `Last-Event-ID`); sin red, 5xx,
+  `interrupted` temporal o conexión muerta (45 s sin un byte), espera creciente; 429 (no debería pasar: un canal nuevo
+  reemplaza al anterior) lee con `GET` mientras espera; tras tres fallas pide buscar el servidor en otra dirección
+  (`deviceAccess.recheck`, cambio de IP); al volver la red, reconecta enseguida.
 - **Notificaciones**: un solo canal visible «Platillos listos» cuyo id depende del sonido y la vibración de Terminales
   (A2-D7); una notificación por cuenta (etiqueta = la cuenta) con el acumulado, y el resumen del grupo con dos o más.
   Al tocarla, `MainActivity` recibe la cuenta (`ReadyAlertsController.pendingOpen`): en «¿Quién eres?» la entrada con
   PIN deja elegido a su mesero y, al entrar (él u otro que pueda ver la cuenta), se abre su captura
-  (`ReadyAlertsNavigationEffects`). Con esa cuenta a la vista, el aviso va dentro de la aplicación (`inAppNotices`).
+  (`ReadyAlertsNavigationEffects`); si ya no está abierta, se pregunta a Go: combinada en otra, abre la vigente;
+  cobrada o cancelada, «Esta cuenta ya no está abierta». Con esa cuenta a la vista, el aviso va dentro de la
+  aplicación (`inAppNotices`).
 - **Permisos** (`ReadyAlertsOverlay`): la primera vez que el servicio corre, una explicación antes del diálogo de
   Android, una sola vez cada uno: notificaciones (API 33+) y la exclusión de la optimización de batería
   (`tools:ignore="BatteryLife"`, con su porqué en el manifiesto). Si se niegan, la ayuda «Avisos de platillos listos»

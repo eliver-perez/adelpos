@@ -282,7 +282,8 @@ resumen. Se ve también en «¿Quién eres?» y en la pantalla de bloqueo.
 
 - **Al tocarlo**, la aplicación abre esa cuenta o ese pedido. Si el dispositivo está en «¿Quién eres?», primero pide
   el PIN del mesero del aviso (ya elegido) y después abre la cuenta. Si entra otro mesero, solo se abre si él puede
-  ver esa cuenta.
+  ver esa cuenta. Si mientras tanto la cuenta se combinó con otra, abre esa; si ya se cobró o se canceló, dice **«Esta
+  cuenta ya no está abierta»**.
 - **Si el mesero ya está viendo esa cuenta** en la aplicación, el aviso aparece arriba de la pantalla unos segundos,
   en lugar de la notificación.
 - **Solo funciona si la cocina marca «Listo» en la pantalla de cocina.** Si la cocina solo imprime comandas, no hay
@@ -298,9 +299,10 @@ resumen. Se ve también en «¿Quién eres?» y en la pantalla de bloqueo.
 **«AD-EL POS conectado».** Para que los avisos lleguen con la pantalla apagada, Android exige que la aplicación muestre
 una **notificación permanente** mientras mantiene la conexión con la computadora principal: «AD-EL POS conectado»
 («Sin conexión con la computadora principal. Reintentando…» si se cortó la red). Aparece cuando un mesero entra con su
-PIN **con conexión** y se queda mientras haya meseros que entraron ese día en el dispositivo; desaparece sola al
-terminar el día comercial (a la «Hora de inicio del día» de la computadora principal), si se apaga «Avisar platillos
-listos», al retirar el dispositivo o al emparejarlo de nuevo. Se ve discreta, sin sonido. Al tocarla se abre la ayuda
+PIN **con conexión** y se queda mientras haya meseros que entraron ese día en el dispositivo (o que siguen con su sesión
+abierta); desaparece sola cuando ya no hay a quién avisar (al terminar el día comercial, a la «Hora de inicio del día»
+de la computadora principal, si nadie sigue con su sesión), si se apaga «Avisar platillos listos», al retirar el
+dispositivo o al emparejarlo de nuevo. Se ve discreta, sin sonido. Al tocarla se abre la ayuda
 «Avisos de platillos listos». Después de reiniciar el teléfono vuelve sola (desde el primer desbloqueo) si el día
 comercial no ha terminado.
 

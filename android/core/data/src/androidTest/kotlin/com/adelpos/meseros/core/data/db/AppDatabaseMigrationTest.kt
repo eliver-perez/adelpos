@@ -278,8 +278,8 @@ class AppDatabaseMigrationTest {
                     "sound, vibration, updated_at) VALUES (0, 812, 1, 1763550000000, 1, 1, 0, 9)",
             )
             database.execSQL(
-                "INSERT INTO ready_alerts_seen (alert_id, ready_at, account_id, day_ends_at, " +
-                    "seen_at) VALUES (812, '2026-11-18T20:41:07.12Z', 'cuenta', 1763550000000, 9)",
+                "INSERT INTO ready_alerts_seen (`key`, alert_id, account_id, day_ends_at, " +
+                    "seen_at) VALUES ('k-812', 812, 'cuenta', 1763550000000, 9)",
             )
             database.query("SELECT cursor FROM ready_alerts_state").use { cursor ->
                 cursor.moveToFirst()

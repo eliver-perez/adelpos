@@ -38,14 +38,15 @@ data class ReadyAlertsStateEntity(
 
 /**
  * Un aviso ya mostrado en este dispositivo (§4.1: «cada partida lista se avisa una sola vez por
- * dispositivo»): se descarta si vuelve a llegar, venga de donde venga. [readyAt] es parte de su
- * identidad (ver `ReadyAlert.readyAt`); [dayEndsAt] es el fin del día comercial en que llegó: al
+ * dispositivo»): se descarta si vuelve a llegar, venga de donde venga. Se identifica por la [key]
+ * de Go (única y nunca reutilizada); [alertId] es el número, que solo sirve de cursor y puede
+ * repetirse tras restaurar un respaldo. [dayEndsAt] es el fin del día comercial en que llegó: al
  * cambiar de día se borran los de días anteriores.
  */
 @Entity(tableName = "ready_alerts_seen", indices = [Index("day_ends_at")])
 data class ReadyAlertSeenEntity(
-    @PrimaryKey @ColumnInfo(name = "alert_id") val alertId: Long,
-    @ColumnInfo(name = "ready_at") val readyAt: String,
+    @PrimaryKey val key: String,
+    @ColumnInfo(name = "alert_id") val alertId: Long,
     @ColumnInfo(name = "account_id") val accountId: String,
     @ColumnInfo(name = "day_ends_at") val dayEndsAt: Long,
     @ColumnInfo(name = "seen_at") val seenAt: Long,
@@ -62,10 +63,10 @@ internal val READY_ALERTS_TABLES_V6: List<String> =
             "`day_ends_at` INTEGER NOT NULL, `enabled` INTEGER NOT NULL, " +
             "`sound` INTEGER NOT NULL, `vibration` INTEGER NOT NULL, " +
             "`updated_at` INTEGER NOT NULL, PRIMARY KEY(`slot`))",
-        "CREATE TABLE IF NOT EXISTS `ready_alerts_seen` (`alert_id` INTEGER NOT NULL, " +
-            "`ready_at` TEXT NOT NULL, `account_id` TEXT NOT NULL, " +
+        "CREATE TABLE IF NOT EXISTS `ready_alerts_seen` (`key` TEXT NOT NULL, " +
+            "`alert_id` INTEGER NOT NULL, `account_id` TEXT NOT NULL, " +
             "`day_ends_at` INTEGER NOT NULL, `seen_at` INTEGER NOT NULL, " +
-            "PRIMARY KEY(`alert_id`))",
+            "PRIMARY KEY(`key`))",
         "CREATE INDEX IF NOT EXISTS `index_ready_alerts_seen_day_ends_at` " +
             "ON `ready_alerts_seen` (`day_ends_at`)",
     )
@@ -77,15 +78,15 @@ interface ReadyAlertsDao {
 
     @Upsert suspend fun saveState(state: ReadyAlertsStateEntity)
 
-    @Query("SELECT * FROM ready_alerts_seen WHERE alert_id IN (:ids)")
-    suspend fun seen(ids: List<Long>): List<ReadyAlertSeenEntity>
+    @Query("SELECT `key` FROM ready_alerts_seen WHERE `key` IN (:keys)")
+    suspend fun seenKeys(keys: List<String>): List<String>
 
     @Upsert suspend fun markSeen(rows: List<ReadyAlertSeenEntity>)
 
     @Query("DELETE FROM ready_alerts_seen WHERE day_ends_at < :dayEndsAt")
     suspend fun forgetSeenBefore(dayEndsAt: Long)
 
-    @Query("SELECT * FROM ready_alerts_seen ORDER BY alert_id")
+    @Query("SELECT * FROM ready_alerts_seen ORDER BY alert_id, `key`")
     suspend fun allSeen(): List<ReadyAlertSeenEntity>
 
     @Query("DELETE FROM ready_alerts_seen") suspend fun deleteAllSeen()

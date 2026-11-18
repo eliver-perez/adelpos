@@ -313,7 +313,7 @@ class AlertsOnGoTest {
         Thread.sleep(QUIET_MILLIS)
         assertEquals(1, alertsOf(accountId).size)
         assertEquals(posted, alertsOf(accountId).single().postTime)
-        val shown = alertsOf(accountId).single().notification.extras.getLongArray(SHOWN_IDS_KEY)
+        val shown = alertsOf(accountId).single().notification.extras.getStringArray(SHOWN_KEY)
         assertEquals(1, shown?.size)
         shell("rm -f $CUT_DONE_FILE")
     }
@@ -967,8 +967,8 @@ class AlertsOnGoTest {
         /** Lo crea el guion (como shell) cuando ya marcó «Listo» y devolvió la red en `r4`. */
         const val CUT_DONE_FILE = "/data/local/tmp/adelpos-r4-listo"
 
-        /** Los avisos que contiene la notificación de una cuenta (sus extras). */
-        const val SHOWN_IDS_KEY = "adelpos.ready.shown.ids"
+        /** Los avisos (sus `key`) que contiene la notificación de una cuenta (sus extras). */
+        const val SHOWN_KEY = "adelpos.ready.shown.keys"
 
         val JSON = "application/json; charset=utf-8".toMediaType()
 
