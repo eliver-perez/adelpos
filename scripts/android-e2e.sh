@@ -10,7 +10,8 @@
 #   ADELPOS_E2E_NETWORK_URL=https://127.0.0.1:8454 \
 #   ADELPOS_E2E_PROVISIONING_FILE=/ruta/al/provisioning-token \
 #   [ADELPOS_E2E_DATABASE_URL=postgresql://usuario:clave@127.0.0.1:55499/adel_pos_test_…] \
-#   scripts/android-e2e.sh [--suite access|catalog|waiter|field|all] [--steps "…"] [--no-install] [--out <carpeta>]
+#   scripts/android-e2e.sh [--suite access|catalog|waiter|field|takeaway|all] [--steps "…"] [--no-install] \
+#       [--out <carpeta>]
 #
 # Variables:
 #   ANDROID_SERIAL                  obligatorio: el emulador o dispositivo (nunca se corre en todos los conectados).
@@ -65,11 +66,19 @@
 # muerte de la actividad a mitad de una captura y del personalizador · f9 Atrás y bloqueo por inactividad al volver ·
 # f10 tema oscuro: capturas de las pantallas principales y botones de 48 dp (las copia a <salida>/screens).
 #
+# Suite `takeaway` (etapa A2, Fase B, TakeawayOnGoTest, con un servidor temporal nuevo): t1 restaurante con cocina
+# y el rol de meseros con takeaway.*, emparejar y entrar (navegación «Mesas» y «Para llevar») · t2 «Nuevo pedido» sin
+# productos no deja nada · t3 captura y envío en línea (nace con el primer producto, con nombre y teléfono) · t4 (SIN
+# red) lo último que se vio con su hora, pedido nuevo «Por enviar» y nombre y teléfono editados sin conexión · t5 (con
+# red) sale el pedido (`destination.takeaway`) y después las ediciones del cliente · t6 nombre y teléfono en línea ·
+# t7 preparación de cocina y pago de la caja al momento · t8 entrega bloqueada sin pago y permitida pagado; entregado
+# y pagado sale de la lista.
+#
 # La red la corta y la devuelve este guion entre pasos (modo avión desde la Mac en Android 11+; `adb root` + `svc
 # wifi/data` en Android 8–10).
 #
 # Suite `all`: con ADELPOS_E2E_NEW_SERVER, un servidor temporal nuevo para cada parte: access 1–5, access 6–7 (otra
-# identidad, sin reinstalar), catalog, waiter y field. Resultados en <salida>/<suite>.
+# identidad, sin reinstalar), catalog, waiter, field y takeaway. Resultados en <salida>/<suite>.
 #
 # Seguridad: se niega a correr con los puertos del servicio real (8181, 8443), con un host que no sea la propia Mac
 # o si `GET version` de alguna de las dos escuchas no responde `test_mode: true`; la base solo con las guardas de
@@ -109,7 +118,8 @@ suite_class() {
         catalog) echo "CatalogOnGoTest" ;;
         waiter) echo "WaiterModeOnGoTest" ;;
         field) echo "FieldOnGoTest" ;;
-        *) fail "suite desconocida: $1 (access, catalog, waiter, field o all)" ;;
+        takeaway) echo "TakeawayOnGoTest" ;;
+        *) fail "suite desconocida: $1 (access, catalog, waiter, field, takeaway o all)" ;;
     esac
 }
 
@@ -119,6 +129,7 @@ suite_steps() {
         catalog) echo "a b c" ;;
         waiter) echo "w1 w2 w3 w4 w5 w6 w7a w7b w7c w8 w9 w10 w11 w12a w12b w12c w13a w13b w13c" ;;
         field) echo "f1 f2 f3 f4 f5a f5b f6 f7 f8 f9 f10" ;;
+        takeaway) echo "t1 t2 t3 t4 t5 t6 t7 t8" ;;
     esac
 }
 
@@ -479,6 +490,21 @@ field_step() {
     esac
 }
 
+# Etapa A2, Fase B: Para llevar en el dispositivo.
+takeaway_step() {
+    case "$1" in
+        t1) run_step t1_prepararEmparejarYEntrar ;;
+        t2) run_step t2_nuevoPedidoSinProductosNoDejaNada ;;
+        t3) run_step t3_capturaYEnvioEnLinea ;;
+        t4) device_network off; run_step t4_sinConexionNaceAlEnviarseYElClienteSeEditaSinConexion; device_network on ;;
+        t5) run_step t5_alVolverLaRedSaleElPedidoYDespuesElCliente ;;
+        t6) run_step t6_nombreYTelefonoDespuesEnLinea ;;
+        t7) run_step t7_listaConPreparacionYPagoAlMomento ;;
+        t8) run_step t8_entregaBloqueadaSinPagoYPermitidaPagado ;;
+        *) fail "paso desconocido de la suite takeaway: $1" ;;
+    esac
+}
+
 # Corre los pasos [steps] de [suite] contra el servidor ya preparado.
 run_suite() {
     local suite="$1" steps="$2" install="$3"
@@ -502,6 +528,7 @@ run_suite() {
             catalog) catalog_step "$step" ;;
             waiter) waiter_step "$step" ;;
             field) field_step "$step" ;;
+            takeaway) takeaway_step "$step" ;;
         esac
     done
 }
@@ -536,7 +563,7 @@ if [ "$SUITE" = all ]; then
     run_suite access "1 2 3 4 5" 1 "$OUT/access"
     new_server
     run_suite access "6 7" 0 "$OUT/access"
-    for part in catalog waiter field; do
+    for part in catalog waiter field takeaway; do
         new_server
         run_suite "$part" "$(suite_steps "$part")" 1 "$OUT/$part"
     done
