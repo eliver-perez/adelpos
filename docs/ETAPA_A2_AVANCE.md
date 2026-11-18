@@ -1366,7 +1366,7 @@ nueva de su conteo, como ya excluía las de la 0025), `c988d16` (servidor, contr
   - `GET ready-alerts?after=` en `dispatch` después de `authenticateDevice` y `matchClientKind`, antes de la sesión
     (solo la credencial del dispositivo); solo `android` (si no, 403 `READY_ALERTS_DEVICE_NOT_ALLOWED`).
   - `GET ready-alerts/stream` (`serveReadyAlerts`): el patrón de `serveEvents` (750 ms, 30 s, `Last-Event-ID`,
-    `interrupted`), con su contador `readyStreams`, **uno por dispositivo** (429 `READY_ALERTS_CONNECTION_LIMIT`).
+    `interrupted`), con su contador `readyStreams`, **uno por dispositivo** (429 `READY_ALERTS_CONNECTION_LIMIT`; **reemplazado** en las correcciones de la revisión, R12: un canal nuevo cierra el anterior y ya no hay 429).
   - Lock 7820148305 **compartido** al leer (cocina escribe con él en exclusiva): ningún aviso queda detrás del cursor.
   - Filtro (A2-D4, A2-D9): para el dispositivo D, avisos cuyo mesero entró con PIN en D desde el inicio del día
     comercial (`businessday`, «Hora de inicio del día») y con `recipient_device_id` = D o vacío; agrupados por la
@@ -1414,15 +1414,19 @@ como `restaurant/state`; la escritura va dentro de las operaciones de cocina, qu
 5. **Decisión propuesta · Apagado o inactivo, el cursor avanza** hasta el último aviso: al volver a activarse (o al
    entrar un mesero) no llegan avisos viejos de ese tiempo.
 6. **Decisión propuesta · Un cursor mayor que el último aviso** (solo si la base volvió atrás, un respaldo restaurado)
-   se trata como 0: se lee desde el inicio del día y el dispositivo descarta los `id` ya avisados.
-7. **Decisión propuesta · Un canal por dispositivo** (429 `READY_ALERTS_CONNECTION_LIMIT`), como pide el encargo; la
-   lectura `GET ready-alerts` no tiene límite y sirve mientras tanto.
+   se trata como 0: se lee desde el inicio del día y el dispositivo descarta los ya avisados (por `key`, desde las
+   correcciones de la revisión).
+7. ~~**Un canal por dispositivo** (429 `READY_ALERTS_CONNECTION_LIMIT`)~~: **reemplazada** en las correcciones de la
+   revisión (R12): un canal nuevo del mismo dispositivo cierra el anterior; ya no hay 429.
 8. **Decisión propuesta · `product_name` con la presentación** («Filete · Grande», el mismo formato de la comanda);
    `quote_line.name` de la cuenta solo trae el producto.
 9. **Decisión propuesta · 403 `READY_ALERTS_DEVICE_NOT_ALLOWED`** a un dispositivo que no es `android` y 400 al
    configurar los avisos de una terminal de escritorio.
 
 ### Forma final para el agente de Android
+
+(Corregida con el protocolo acordado tras la revisión independiente; lo que cambió está en «Correcciones de la
+revisión», al final.)
 
 Exigir **`ready-alerts-v1`** (servidor 0.13.0). Todas las peticiones con `X-Device-ID`, `X-Device-Token`,
 `X-Client-Version` y `X-Client-Kind: android`, **sin `Authorization`** ni credencial de envío.
@@ -1438,6 +1442,7 @@ Exigir **`ready-alerts-v1`** (servidor 0.13.0). Todas las peticiones con `X-Devi
     "alerts": [
       {
         "id": 812,
+        "key": "5f0c2d6e-3b1a-4c8e-9f27-6d4b1a0e7c35",
         "account_id": "…",
         "mode": "dine_in",
         "table_name": "Mesa 4",
@@ -1454,21 +1459,31 @@ Exigir **`ready-alerts-v1`** (servidor 0.13.0). Todas las peticiones con `X-Devi
 
   En un pedido para llevar: `"mode": "takeaway"`, `"table_name": null` y `customer_name` el capturado (o vacío).
 
-- **Canal**: `GET /api/v1/ready-alerts/stream?after=<cursor>` (o `Last-Event-ID: <cursor>`): `text/event-stream` con
-  mensajes `id: <cursor>`, `event: alerts`, `data: <el mismo JSON>` cada 750 ms; el primero llega enseguida. A los 30 s
-  el servidor cierra: reconectar enseguida desde el último `id`. `event: interrupted` (con `id: 0` y
-  `{"error": "<código>", "status": <http>}`) = el dispositivo dejó de valer: tratarlo como ese error.
+- **Canal**: `GET /api/v1/ready-alerts/stream?after=<cursor>` (o `Last-Event-ID: <cursor>`): `text/event-stream`. El
+  primer mensaje (`id: <cursor>`, `event: alerts`, `data: <el mismo JSON>`) llega enseguida; después **solo** llega
+  otro cuando hay avisos nuevos o cambian `active`, `settings` o `day_ends_at`. En silencio, el comentario SSE
+  `: ping` cada **15 s** (si pasan ~45 s sin nada, la conexión está muerta: reconectar). A los **5 minutos** el servidor
+  cierra: reconectar enseguida con `Last-Event-ID` = el último `id`. **Un canal nuevo del mismo dispositivo reemplaza
+  al anterior** (el viejo se cierra): tras un cambio de red, abrir uno nuevo sin esperar. `event: interrupted` llega
+  **sin `id`** (el cursor no cambia) con `data: {"code": "<código>"}`: **solo `DEVICE_REVOKED` significa retirado**;
+  con cualquier otro (`TEMPORARY`, …) reconectar con espera creciente.
 - **Cursor**: guardarlo en Room al recibir cada mensaje (después de mostrar sus avisos). Sin cursor guardado (primera
-  vez), `after=0`: llega lo del día comercial en curso que le corresponde. Es el último aviso que Go revisó para el
-  dispositivo, le correspondan o no: siempre crece. No calcularlo con los `id` de los avisos.
-- **`id` repetido**: descartarlo. Puede volver a llegar (relectura desde un cursor anterior, dos procesos, reintento):
-  guardar en Room los `id` avisados del día y no notificar dos veces.
+  vez), `after=0`: llega lo del día comercial en curso que le corresponde, **solo desde que el mesero entró en este
+  dispositivo**. Es el último aviso que Go revisó para el dispositivo, le correspondan o no. No calcularlo con los `id`
+  de los avisos. Si la base volvió atrás (respaldo restaurado), Go lee desde el inicio del día: el cursor puede bajar.
+- **`key` repetida**: descartarla. Un aviso puede volver a llegar (relectura desde un cursor anterior, dos procesos,
+  reintento, respaldo restaurado): guardar en Room las `key` avisadas del día y no notificar dos veces. **`id` es solo
+  el cursor**: tras restaurar un respaldo el mismo número puede ser otro aviso.
+- **`account_id`** es la cuenta vigente (si se combinó, la de destino). Las unidades canceladas después del «Listo» no
+  vienen en `items` y un aviso sin unidades vigentes no llega. Si al tocarlo la cuenta ya no está abierta, mostrar
+  «Esta cuenta ya no está abierta».
 - **`active: false`**: no hay avisos (no es un error). Detener el servicio en primer plano; volver a preguntar al
-  entrar un mesero con PIN con conexión o al abrir la app (A2-D8). Pasa con el aviso apagado en Terminales o si nadie
-  entró en el dispositivo hoy.
+  entrar un mesero con PIN con conexión o al abrir la app (A2-D8). Pasa con el aviso apagado en Terminales o si ningún
+  mesero tiene en el dispositivo una sesión con PIN vigente o creada hoy.
 - **`day_ends_at`**: programar ahí una nueva lectura (no detener a ciegas): si sigue `active` (un mesero con sesión
-  vigente), continuar; si no, detener. Al cambiar de día, borrar los `id` avisados del día anterior (Go ya no los
-  entrega). Conservar el cursor.
+  vigente), continuar; si no, detener. Al cambiar de día, borrar las `key` avisadas del día anterior (Go ya no
+  entrega avisos de ese día; lo que no llegó antes de esa hora se pierde, regla del día comercial). Conservar el
+  cursor.
 - **`settings`**: `sound`/`vibration` eligen el canal «Platillos listos» (A2-D7); `enabled: false` llega con
   `active: false`. Pueden cambiar en cualquier mensaje. También están en `terminal.ready_alerts_enabled`,
   `ready_alerts_sound` y `ready_alerts_vibration` de `getIdentity`/`getRecoveryState`.
@@ -1477,16 +1492,20 @@ Exigir **`ready-alerts-v1`** (servidor 0.13.0). Todas las peticiones con `X-Devi
   agrupan en la notificación. Al tocarlo: abrir `account_id` y, si el dispositivo está en «¿Quién eres?», pedir el PIN
   (`waiter_user_id` es el mesero del aviso).
 - **Errores**:
-  - **401 `DEVICE_REVOKED`** o `DEVICE_REQUIRED`: detener el servicio y hacer lo de siempre (credencial inválida).
-  - **429 `READY_ALERTS_CONNECTION_LIMIT`** (solo el canal): el dispositivo ya tiene uno abierto (casi siempre el
-    anterior, que el servidor cierra en unos segundos, o un segundo proceso). No abrir otro en paralelo: esperar con
-    espera creciente (1, 2, 4… hasta 30 s) y reintentar; mientras tanto `GET ready-alerts?after=` funciona.
+  - **401 `DEVICE_REVOKED`** al abrir o leer, o `interrupted` con `DEVICE_REVOKED`: detener el servicio y hacer lo de
+    siempre (credencial inválida). 401 `DEVICE_REQUIRED`: igual que en las demás rutas.
   - 403 `READY_ALERTS_DEVICE_NOT_ALLOWED`: no es un dispositivo `android` (no debería pasar).
   - 400: cursor inválido o un parámetro de más. 426: actualizar la app.
-  - Sin red o 5xx: espera creciente y reconectar desde el cursor; lo de mientras llega al volver, una sola vez.
+  - Sin red, 5xx o `interrupted` con otro código: espera creciente y reconectar desde el cursor; lo de mientras llega
+    al volver (y `key` evita repetirlo).
+  - Ya no hay 429 en este canal.
+- **A quién llega** (lo decide Go; para entender lo que ve el mesero): el mesero «está» en el dispositivo si tiene en
+  él una sesión con PIN vigente o creada desde el inicio del día comercial. Al «Listo», el aviso se fija al dispositivo
+  de su sesión vigente más reciente **que pueda recibirlo** (android, «Avisar platillos listos» activado y, si Go
+  conoce la versión, app 0.2.0 o posterior); si ninguno sirve, va a todos los dispositivos donde está.
 - **Cerrar sesión**: llamar `POST /api/v1/auth/logout` con la sesión del mesero al cerrar su sesión en la app (A2-D4):
-  así ese dispositivo deja de ser «su sesión más reciente» y los avisos van a su otra sesión vigente o, si no tiene
-  ninguna, a todos los dispositivos donde entró hoy.
+  así los «Listo» siguientes ya no se fijan a ese dispositivo; van a su otra sesión vigente o, si no tiene ninguna, a
+  todos los dispositivos donde entró hoy (este incluido, hasta el fin del día comercial).
 - **Entrada sin conexión**: no crea sesión en Go; ese mesero no cuenta en el dispositivo hasta su primera entrada con
   conexión.
 
@@ -1498,12 +1517,14 @@ Exigir **`ready-alerts-v1`** (servidor 0.13.0). Todas las peticiones con `X-Devi
 - **Solo funciona si la cocina marca «Listo» en la pantalla de cocina (KDS)**. Si la cocina solo imprime comandas, no
   hay avisos.
 - **A quién llega**: al mesero responsable de la cuenta (el que la abrió o a quien se transfirió), en el dispositivo
-  donde tiene la sesión abierta más reciente; si no tiene ninguna abierta, en todos los dispositivos donde entró con su
-  PIN durante el día (desde la «Hora de inicio del día»). Transferir la cuenta cambia a quién llegan los platillos que
-  aún no estaban listos.
+  donde tiene la sesión abierta más reciente con «Avisar platillos listos» activado; si no tiene ninguna así, en todos
+  los dispositivos donde entró con su PIN durante el día (desde la «Hora de inicio del día»). Un dispositivo solo recibe
+  lo que cocina terminó después de que el mesero entró en él. Transferir la cuenta cambia a quién llegan los platillos
+  que aún no estaban listos.
 - **Entrar sin conexión** no cuenta: el mesero recibe avisos en ese dispositivo desde su primera entrada con conexión.
 - **Al terminar el día comercial** (la hora de inicio del día siguiente) dejan de contar los meseros que entraron ese
-  día; el aviso se detiene si nadie tiene la sesión abierta.
+  día; el aviso se detiene si nadie tiene la sesión abierta. Lo que cocina terminó antes de esa hora y no llegó (por
+  ejemplo, por un corte de red que cruza esa hora) ya no se avisa.
 - No hace falta ningún permiso nuevo para el rol Mesero.
 - Requiere la computadora principal en la versión **0.13.0**.
 
@@ -1529,6 +1550,60 @@ Exigir **`ready-alerts-v1`** (servidor 0.13.0). Todas las peticiones con `X-Devi
   emuladores (pantalla apagada, app cerrada, corte de red).
 - El canal con muchos dispositivos a la vez: cada uno lee cada 750 ms con el lock 7820148305 compartido (igual que el
   canal de eventos); no se midió con carga.
+
+### Correcciones de la revisión
+
+Hallazgos R1–R12 de la revisión independiente («Parte 1 · Servidor» de `$SP/doc-rev.md`), con el protocolo de
+`ready-alerts` acordado con el agente de la Fase D de Android. Rama `etapa-a2-srv`: `git merge etapa-a2-android` (avance
+rápido de `084f46a`, la corrección de la prueba de Terminales, a `394cab6`: solo Android y documentación), después
+`git cherry-pick 712e869` (la prueba de la revisión, `82bf1a7`) y encima `70d3165` (0026, servidor, contrato y
+pruebas) y `e3a3a88` (`docs/API_V1.md` y `API_CONTRACTS.md`). La `0026` se corrigió en su lugar (no se había
+entregado); no hay migración nueva. El escritorio no cambió.
+
+| #   | Qué cambió                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R1  | `recordReadyNotices` registra también la unidad que queda con todas sus tareas vivas listas porque **en esta transacción se canceló la que faltaba** (una tarea cancelada ahora sin haber estado lista: `state='cancelled'`, `ready_at IS NULL`, `updated_at=now()`). Revisé los tres caminos que escriben tareas: `states.go` (KDS), `changes.go` (modificaciones, cancelaciones y sus reintentos) y `releases.go` (solo crea pendientes); todos pasan por `publishPreparation`. Quitar una parte que ya estaba lista no vuelve a avisar (la cancelación conserva su `ready_at`). |
+| R2  | «Entró en el dispositivo» = la regla de `active`: sesión con PIN en D **vigente o creada desde el inicio del día comercial**. Un mesero que entró antes de la hora de inicio y sigue con la sesión vigente recibe sus avisos.                                                                                                                                                                                                                                                                                                                                                      |
+| R3  | Columna `ready_notices.alert_key uuid NOT NULL` (`gen_random_uuid()` por cuenta y operación, compartida por las filas del grupo) y campo **`key`** en cada aviso: el dispositivo descarta repetidos por `key`; `id` es solo el cursor. Se conserva la decisión 6.                                                                                                                                                                                                                                                                                                                  |
+| R4  | El canal revisa cada 750 ms pero **solo escribe** al abrir y con avisos nuevos o un cambio de `active`/`settings`/`day_ends_at`; en silencio `: ping` cada 15 s; dura 5 minutos. `authenticateDevice` actualiza `last_seen_at` de `GET ready-alerts` como mucho una vez por minuto (Terminales considera en línea lo de los últimos 2).                                                                                                                                                                                                                                            |
+| R5  | Índices parciales en la `0026`: `sessions_pin_device_created_idx (device_id, created_at) WHERE opened_with_pin` y `sessions_pin_device_open_idx (device_id) WHERE opened_with_pin AND revoked_at IS NULL`; `active` son dos `EXISTS` y la presencia un `UNION ALL` de dos consultas, cada una con su índice. Medición abajo.                                                                                                                                                                                                                                                       |
+| R6  | `event: interrupted` **sin `id`** y con `data: {"code": "…"}`: el código del rechazo si es 4xx (`DEVICE_REVOKED`, …) o `TEMPORARY` (5xx, la base no respondió a tiempo). Solo `DEVICE_REVOKED` significa retirado.                                                                                                                                                                                                                                                                                                                                                                 |
+| R7  | El dispositivo fijado al «Listo» se elige solo entre `android` no revocados, con `ready_alerts_enabled` y, si `app_version` es una versión, 0.2.0 o posterior; si ninguno sirve, `recipient_device_id` nulo (para todos los dispositivos donde el mesero está).                                                                                                                                                                                                                                                                                                                    |
+| R8  | `dispatch` toma 7820148305 compartido **antes** de `authenticateDevice` en `GET ready-alerts` (el orden de los escritores: lock y después la fila del dispositivo); además la fila casi nunca se toca (R4).                                                                                                                                                                                                                                                                                                                                                                        |
+| R9  | Se queda como regla del día comercial y está en la guía (`docs/API_V1.md`, `day_ends_at`) y en «Para la guía»: lo marcado «Listo» antes de la hora de inicio que no llegó ya no se avisa después de esa hora.                                                                                                                                                                                                                                                                                                                                                                      |
+| R10 | Al leer, `account_id` sigue `merged_into_id` hasta la cuenta vigente (recursivo, hasta 20 saltos) y `items` solo trae unidades activas; un aviso sin unidades activas no se manda pero el cursor avanza. Una cuenta cerrada o cancelada no se filtra: al tocar el aviso, la app muestra «Esta cuenta ya no está abierta».                                                                                                                                                                                                                                                          |
+| R11 | Solo llegan los avisos con `ready_at` **desde la primera sesión con PIN que cuente** del mesero en D: un dispositivo nuevo o una lectura sin cursor no recibe lo de antes de que el mesero entrara en él.                                                                                                                                                                                                                                                                                                                                                                          |
+| R12 | Un canal nuevo del mismo dispositivo **reemplaza** al anterior (`readyStreams` guarda el canal abierto y el nuevo cierra el viejo); ya no hay 429 `READY_ALERTS_CONNECTION_LIMIT` (se quitó del contrato y de la guía).                                                                                                                                                                                                                                                                                                                                                            |
+
+**R5, medición** (Go temporal `iso.sh server-up` con 8211/8541, base desechable; 10 dispositivos android con 58 000
+sesiones con PIN cada uno, 580 000 en total, una cada 9 minutos durante un año, todas cerradas salvo la última de cada
+mesero; `EXPLAIN (ANALYZE, BUFFERS)` de las dos consultas de sesiones de cada lectura, segunda corrida; servidor
+detenido y base borrada con `server-down`; scripts `$SP/srv-tools/r5-seed.sql` y `r5-explain.sql`):
+
+| Consulta (un dispositivo)                                                 | Sin los índices parciales                                                  | Con los índices de la `0026`                     |
+| ------------------------------------------------------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------ |
+| `active`, con un mesero que entró hoy                                     | 0,04 ms (recorrido secuencial que acertó pronto: depende del orden físico) | 0,02 ms (`Index Only Scan` del índice por fecha) |
+| `active`, nadie entró hoy pero hay una sesión vigente                     | 4,6 ms (58 000 filas descartadas)                                          | 0,01 ms                                          |
+| Presencia (`readyAlertsQuery`), con un mesero que entró hoy (58 sesiones) | 4,9 ms (57 942 filas descartadas)                                          | 0,07 ms                                          |
+| Presencia, nadie entró hoy                                                | 4,6 ms (58 000 filas descartadas)                                          | 0,03 ms                                          |
+
+**Pruebas de las correcciones**
+
+| Qué                                                                                                                                                                             | Dónde                               | Resultado                                    |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- | -------------------------------------------- |
+| `TestStageA2ReadyReview` (`-v`, ajustada al protocolo: R1 se avisa, R2 llega, R3 `key` distinta, R4 sin mensajes en silencio e `interrupted` sin `id` con `DEVICE_REVOKED`)     | `./internal/operations`, base `_s_` | **PASS** las 4 (27,9 s)                      |
+| `TestStageA2ReadyAlerts` (`-v`, 9 subpruebas: las 8 de la parte D ajustadas, con el reemplazo del canal y `key`, y la nueva de las correcciones: R11, R7, R10 y `last_seen_at`) | idem                                | **PASS** las 9 (28,9 s)                      |
+| `TestContractV1` y `TestDocumentedInAPIV1` (`-v`; `contractReadyAlerts` exige `key`)                                                                                            | `./internal/apicontract`            | **PASS** (32,9 s)                            |
+| `TestStageA2Upgrade` (con `alert_key` y los dos índices parciales) y `TestStage9HUpgrade` (`-v`)                                                                                | `./internal/database`               | **PASS**                                     |
+| `go-unit` (vet normal e integración, `test -race`, `GOOS=windows` build y vet)                                                                                                  | `iso.sh go-unit`                    | **aprobado**                                 |
+| `go-int` completos: `database`, `administration`, `operations`, `kitchen`, `apicontract`                                                                                        | `iso.sh go-int`                     | **ok** los 5 (14 s, 225 s, 467 s, 6 s, 38 s) |
+| `format`, `fmt-check`, `sync-check`; md5 de `docs/etapas/*.md`                                                                                                                  | árbol `srv`                         | Correctos; idénticos                         |
+| Playwright                                                                                                                                                                      | —                                   | No se corrió: el escritorio no cambió        |
+
+**No verificado (además de lo de arriba)**: la aplicación Android con el protocolo nuevo (la Fase D de Android); el
+consumo real de batería y datos del canal con `: ping` (R4 midió el tráfico de antes; con el canal nuevo, en silencio
+son 2 líneas cada 15 s y una reconexión cada 5 minutos); la restauración real de un respaldo (R3 se reproduce
+simulándola en `ready_notices`, como la revisión).
 
 ### Decisiones del coordinador sobre la parte D
 
@@ -2052,3 +2127,10 @@ de la fase en su rama (`0357705`: unión de las dos en `ServerCompatibility`, el
 y `update_server_text` general) y se pasó a la etapa sin cambios. Pendiente al fusionar: las suites `alerts` y
 `precheck` contra el servidor con las correcciones de la revisión independiente (protocolo acordado: `key`, `: ping`,
 reemplazo del canal, `interrupted` con código).
+
+### Verificación del coordinador de las correcciones de la revisión (servidor)
+
+Sobre una copia exacta de `e3a3a88` (`git archive`): `fmt-check`, `sync-check`, `go-unit`, `go-int` de `apicontract`,
+`database` y `kitchen` completos, `TestStageA2Ready*` de `operations` (`TestStageA2ReadyAlerts` y
+`TestStageA2ReadyReview`, las reproducciones del revisor, que ahora pasan y se quedan como pruebas de regresión) y
+`TestStageTwoAcceptance` y `TestStageA1WaiterPIN` de `administration`, todo aprobado. Fusión en `2bf8183`.
