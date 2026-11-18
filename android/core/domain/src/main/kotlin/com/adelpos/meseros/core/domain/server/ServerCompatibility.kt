@@ -49,21 +49,27 @@ data class SemanticVersion(
  * Si el servidor del restaurante sirve para esta aplicación (§4, «Versiones»). La aplicación exige
  * un servidor 0.13.0 o posterior con las capacidades que usa: `waiter-pin-v1` (A1-D4: la entrada
  * con PIN y la credencial de envío) y, desde la A2, `takeaway-v1` (Para llevar: el pedido para
- * llevar sin conexión, el nombre y el teléfono y «Entregado») y `ready-alerts-v1` (el aviso de
- * platillos listos con la credencial del dispositivo); A2-D6, cada fase agrega la suya. Y respeta
- * la mínima de Android que anuncia el servidor (`min_client_versions.android`). El servidor también
- * responde 426 a una versión vieja en cualquier ruta; esto solo lo dice antes, al comprobar `GET
- * version`.
+ * llevar sin conexión, el nombre y el teléfono y «Entregado»), `device-precheck-printer-v1` (la
+ * precuenta en la impresora de este dispositivo) y `ready-alerts-v1` (el aviso de platillos listos
+ * con la credencial del dispositivo); A2-D6, cada fase agrega la suya. Y respeta la mínima de
+ * Android que anuncia el servidor (`min_client_versions.android`). El servidor también responde 426
+ * a una versión vieja en cualquier ruta; esto solo lo dice antes, al comprobar `GET version`.
  */
 object ServerCompatibility {
     const val CAPABILITY_WAITER_PIN = "waiter-pin-v1"
     const val CAPABILITY_TAKEAWAY = "takeaway-v1"
+    const val CAPABILITY_PRECHECK_PRINTER = "device-precheck-printer-v1"
     const val CAPABILITY_READY_ALERTS = "ready-alerts-v1"
     val MIN_SERVER_VERSION = SemanticVersion(0, 13, 0)
 
     /** Capacidades que esta versión de la aplicación exige al servidor. */
     val REQUIRED_CAPABILITIES: List<String> =
-        listOf(CAPABILITY_WAITER_PIN, CAPABILITY_TAKEAWAY, CAPABILITY_READY_ALERTS)
+        listOf(
+            CAPABILITY_WAITER_PIN,
+            CAPABILITY_TAKEAWAY,
+            CAPABILITY_PRECHECK_PRINTER,
+            CAPABILITY_READY_ALERTS,
+        )
 
     /** Resultado de la comprobación. */
     sealed interface Verdict {

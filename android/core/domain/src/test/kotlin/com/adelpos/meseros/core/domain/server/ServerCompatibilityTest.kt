@@ -9,7 +9,13 @@ import org.junit.Test
 /** «Actualiza esta aplicación» y «Actualiza el servidor del restaurante» (§4, «Versiones»). */
 class ServerCompatibilityTest {
     private val withPin =
-        listOf("offline-orders-v1", "waiter-pin-v1", "takeaway-v1", "ready-alerts-v1")
+        listOf(
+            "offline-orders-v1",
+            "waiter-pin-v1",
+            "takeaway-v1",
+            "device-precheck-printer-v1",
+            "ready-alerts-v1",
+        )
 
     @Test
     fun ordenDeLasVersiones() {
@@ -81,6 +87,27 @@ class ServerCompatibilityTest {
     }
 
     /**
+     * La Fase C de la A2 exige además la impresora de precuentas por dispositivo
+     * (`device-precheck-printer-v1`, A2-D6): sin ella, la precuenta podría salir en otra impresora.
+     */
+    @Test
+    fun servidorSinImpresoraDePrecuentasPorDispositivo() {
+        assertEquals(
+            Verdict.UpdateServer("0.13.0"),
+            ServerCompatibility.check(
+                "0.2.0",
+                "0.13.0",
+                listOf("offline-orders-v1", "waiter-pin-v1", "takeaway-v1", "ready-alerts-v1"),
+                "0.1.0",
+            ),
+        )
+        assertTrue(
+            ServerCompatibility.CAPABILITY_PRECHECK_PRINTER in
+                ServerCompatibility.REQUIRED_CAPABILITIES,
+        )
+    }
+
+    /**
      * La Fase D de la A2 exige además el aviso de platillos listos (`ready-alerts-v1`, A2-D6): un
      * 0.13.0 sin el registro de «listos» no sirve.
      */
@@ -91,11 +118,19 @@ class ServerCompatibilityTest {
             ServerCompatibility.check(
                 "0.2.0",
                 "0.13.0",
-                listOf("offline-orders-v1", "waiter-pin-v1", "takeaway-v1"),
+                listOf(
+                    "offline-orders-v1",
+                    "waiter-pin-v1",
+                    "takeaway-v1",
+                    "device-precheck-printer-v1",
+                ),
                 "0.1.0",
             ),
         )
-        assertTrue(ServerCompatibility.REQUIRED_CAPABILITIES.contains("ready-alerts-v1"))
+        assertTrue(
+            ServerCompatibility.CAPABILITY_READY_ALERTS in
+                ServerCompatibility.REQUIRED_CAPABILITIES,
+        )
     }
 
     @Test

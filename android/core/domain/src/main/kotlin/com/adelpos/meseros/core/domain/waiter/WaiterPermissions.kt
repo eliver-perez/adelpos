@@ -37,6 +37,12 @@ enum class WaiterAction(val requiredPermissions: Set<String>) {
 
     /** Marcar «Entregado» un pedido para llevar ya pagado (A2-D2). */
     DELIVER_TAKEAWAY(setOf("takeaway.deliver")),
+
+    /**
+     * «Imprimir precuenta» (o el nombre visible) desde el dispositivo (A2, §5): el permiso que ya
+     * exige Go para imprimir tickets y precuentas.
+     */
+    PRINT_PRECHECK(setOf("payments.tickets.print")),
 }
 
 /**

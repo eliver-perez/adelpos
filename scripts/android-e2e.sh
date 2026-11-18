@@ -10,8 +10,8 @@
 #   ADELPOS_E2E_NETWORK_URL=https://127.0.0.1:8454 \
 #   ADELPOS_E2E_PROVISIONING_FILE=/ruta/al/provisioning-token \
 #   [ADELPOS_E2E_DATABASE_URL=postgresql://usuario:clave@127.0.0.1:55499/adel_pos_test_…] \
-#   scripts/android-e2e.sh [--suite access|catalog|waiter|field|takeaway|alerts|all] [--steps "…"] [--no-install] \
-#       [--out <carpeta>]
+#   scripts/android-e2e.sh [--suite access|catalog|waiter|field|takeaway|precheck|alerts|all] [--steps "…"] \
+#       [--no-install] [--out <carpeta>]
 #
 # Variables:
 #   ANDROID_SERIAL                  obligatorio: el emulador o dispositivo (nunca se corre en todos los conectados).
@@ -74,6 +74,14 @@
 # t7 preparación de cocina y pago de la caja al momento · t8 entrega bloqueada sin pago y permitida pagado; entregado
 # y pagado sale de la lista.
 #
+# Suite `precheck` (etapa A2, Fase C, PrecheckOnGoTest, con un servidor temporal nuevo; la prueba hace de principal y
+# del agente de impresión de una terminal de prueba «Caja 2»): p1 restaurante, la terminal con su impresora USB y una
+# impresora de red que no responde, emparejar, entrar y enviar una cuenta (sin `payments.tickets.print` no hay botón)
+# · p2 sin impresora asignada (no se encola nada) · p3 la USB de «Caja 2» desconectada y, al volver, los bytes ESC/POS
+# de la precuenta (título, «Atendió:», folio, mesa y partidas) · p4 el nombre visible (Ticket de venta, Cuenta) en el
+# botón y en el impreso · p5 un pedido para llevar con su folio · p6 (SIN red) el botón lo dice · p7 la impresora de
+# red no responde y «Reintentar» sin motivo. La impresora de red usa el puerto 9106 de la Mac: nada debe escuchar ahí.
+#
 # La red la corta y la devuelve este guion entre pasos (modo avión desde la Mac en Android 11+; `adb root` + `svc
 # wifi/data` en Android 8–10).
 #
@@ -91,7 +99,7 @@
 # del administrador de la terminal principal por la escucha local (127.0.0.1).
 #
 # Suite `all`: con ADELPOS_E2E_NEW_SERVER, un servidor temporal nuevo para cada parte: access 1–5, access 6–7 (otra
-# identidad, sin reinstalar), catalog, waiter, field, takeaway y alerts. Resultados en <salida>/<suite>.
+# identidad, sin reinstalar), catalog, waiter, field, takeaway, precheck y alerts. Resultados en <salida>/<suite>.
 #
 # Seguridad: se niega a correr con los puertos del servicio real (8181, 8443), con un host que no sea la propia Mac
 # o si `GET version` de alguna de las dos escuchas no responde `test_mode: true`; la base solo con las guardas de
@@ -132,8 +140,9 @@ suite_class() {
         waiter) echo "WaiterModeOnGoTest" ;;
         field) echo "FieldOnGoTest" ;;
         takeaway) echo "TakeawayOnGoTest" ;;
+        precheck) echo "PrecheckOnGoTest" ;;
         alerts) echo "AlertsOnGoTest" ;;
-        *) fail "suite desconocida: $1 (access, catalog, waiter, field, takeaway, alerts o all)" ;;
+        *) fail "suite desconocida: $1 (access, catalog, waiter, field, takeaway, precheck, alerts o all)" ;;
     esac
 }
 
@@ -144,6 +153,7 @@ suite_steps() {
         waiter) echo "w1 w2 w3 w4 w5 w6 w7a w7b w7c w8 w9 w10 w11 w12a w12b w12c w13a w13b w13c" ;;
         field) echo "f1 f2 f3 f4 f5a f5b f6 f7 f8 f9 f10" ;;
         takeaway) echo "t1 t2 t3 t4 t5 t6 t7 t8" ;;
+        precheck) echo "p1 p2 p3 p4 p5 p6 p7" ;;
         alerts) echo "r1 r2 r3 r4 r5 r6 r7 r8 r9" ;;
     esac
 }
@@ -520,6 +530,20 @@ takeaway_step() {
     esac
 }
 
+# Etapa A2, Fase C: imprimir la precuenta desde el dispositivo.
+precheck_step() {
+    case "$1" in
+        p1) run_step p1_prepararEnviarACocinaYSinPermisoNoHayBoton ;;
+        p2) run_step p2_sinImpresoraAsignadaNoSeImprime ;;
+        p3) run_step p3_terminalDesconectadaYLosBytesEscPos ;;
+        p4) run_step p4_elNombreVisibleEnElBotonYEnElImpreso ;;
+        p5) run_step p5_unPedidoParaLlevarConSuFolio ;;
+        p6) device_network off; run_step p6_sinConexionElBotonLoDice; device_network on ;;
+        p7) run_step p7_laImpresoraNoRespondeYReintentarSinMotivo ;;
+        *) fail "paso desconocido de la suite precheck: $1" ;;
+    esac
+}
+
 # Etapa A2, Fase D: aviso de platillos listos. «Listo» de cocina desde la Mac (por la escucha local, con la sesión del
 # administrador de la terminal principal) para lo que la prueba no puede hacer desde el dispositivo: durante un corte
 # de red (r4) o con el proceso de la aplicación muerto (r8).
@@ -725,6 +749,7 @@ run_suite() {
             waiter) waiter_step "$step" ;;
             field) field_step "$step" ;;
             takeaway) takeaway_step "$step" ;;
+            precheck) precheck_step "$step" ;;
             alerts) alerts_step "$step" ;;
         esac
     done
@@ -760,7 +785,7 @@ if [ "$SUITE" = all ]; then
     run_suite access "1 2 3 4 5" 1 "$OUT/access"
     new_server
     run_suite access "6 7" 0 "$OUT/access"
-    for part in catalog waiter field takeaway alerts; do
+    for part in catalog waiter field takeaway precheck alerts; do
         new_server
         run_suite "$part" "$(suite_steps "$part")" 1 "$OUT/$part"
     done

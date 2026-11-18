@@ -20,6 +20,7 @@ import com.adelpos.meseros.core.domain.catalog.CatalogImages
 import com.adelpos.meseros.core.domain.catalog.CatalogProduct
 import com.adelpos.meseros.core.domain.catalog.LineSelection
 import com.adelpos.meseros.core.domain.waiter.OfflineOrderPlan
+import com.adelpos.meseros.core.domain.waiter.WaiterAction
 import com.adelpos.meseros.core.ui.catalog.CatalogBrowser
 import com.adelpos.meseros.core.ui.catalog.ProductCustomizer
 import com.adelpos.meseros.core.ui.components.LocalUserActivity
@@ -46,6 +47,9 @@ fun CaptureRoute(
     val products by viewModel.products.collectAsState()
     val category by viewModel.selectedCategoryId.collectAsState()
     val customer by viewModel.customer.collectAsState()
+    val precheckSetup by viewModel.precheckSetup.collectAsState()
+    val precheckState by viewModel.precheckState.collectAsState()
+    val canPrintNow by viewModel.canPrintNow.collectAsState()
     var confirmingDiscard by remember { mutableStateOf(false) }
     var editingCustomer by rememberSaveable { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
@@ -136,6 +140,21 @@ fun CaptureRoute(
                         onEditCustomer = { editingCustomer = true },
                     ),
                 customer = customer,
+                // La precuenta (etapa A2, §5): solo con la cuenta ya en Go y el permiso de Go.
+                precheck =
+                    if (
+                        current.accountId != null && permissions.grants(WaiterAction.PRINT_PRECHECK)
+                    ) {
+                        PrecheckSection(
+                            setup = precheckSetup,
+                            state = precheckState,
+                            available = canPrintNow,
+                            onPrint = viewModel::onPrintPrecheck,
+                            onRetry = viewModel::onRetryPrecheck,
+                        )
+                    } else {
+                        null
+                    },
             )
         },
         modifier = Modifier.testTag(TAG_CAPTURE),

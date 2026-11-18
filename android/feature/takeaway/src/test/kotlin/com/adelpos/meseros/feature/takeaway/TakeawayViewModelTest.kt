@@ -21,6 +21,7 @@ import com.adelpos.meseros.core.domain.waiter.OrderMode
 import com.adelpos.meseros.core.domain.waiter.OrderQueueService
 import com.adelpos.meseros.core.domain.waiter.OrderState
 import com.adelpos.meseros.core.domain.waiter.PendingOrder
+import com.adelpos.meseros.core.domain.waiter.PrecheckService
 import com.adelpos.meseros.core.domain.waiter.PreparationState
 import com.adelpos.meseros.core.domain.waiter.RestaurantSource
 import com.adelpos.meseros.core.domain.waiter.RestaurantStatus
@@ -165,6 +166,7 @@ class TakeawayViewModelTest {
                                 ),
                             ),
                         takeaway = takeaway,
+                        precheck = unused<PrecheckService>(),
                     ),
                 elapsedClock = { 10_000L },
                 wallClock = { 1_700_000_000_000L },

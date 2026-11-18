@@ -315,6 +315,7 @@ class AppContainer(context: Context, private val settings: Settings = Settings()
             images = catalogRealtime.images,
             activeWaiter = deviceAccess.activeWaiter,
             takeaway = waiterMode.takeaway,
+            precheck = waiterMode.precheck,
         )
     }
 

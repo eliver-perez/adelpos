@@ -376,4 +376,40 @@ class TakeawayRulesTest {
         assertEquals(listOf("op-a-go"), alone.map(TakeawayEntry::key))
         assertFalse(alone.single().customerPending)
     }
+
+    /**
+     * «Enviar a cocina» sin conexión pasa la captura a la cola en una transacción, pero la lista
+     * puede leer la cola nueva antes de que se vaya la captura: nunca dos renglones con la misma
+     * clave (Compose cerraría la aplicación).
+     */
+    @Test
+    fun laCapturaYSuPedidoDeLaColaNuncaSeVenDosVeces() {
+        val capture =
+            takeawayCapture(
+                id = "op-1",
+                operations = listOf(DraftOperation.Add(draft("n1", BURGER))),
+                own = setOf("n1"),
+            )
+        val queued = WaiterFixtures.order(capture, operationId = "op-1")
+        val entries =
+            TakeawayBoard.entries(
+                accounts = emptyList(),
+                orders = listOf(queued),
+                captures = listOf(capture),
+                edits = emptyList(),
+            )
+        assertEquals(listOf("op-1"), entries.map(TakeawayEntry::key))
+        assertTrue(entries.single() is TakeawayEntry.Queued)
+        // Ya recibido (o «Corregir en la captura» a medias): tampoco se repite la clave.
+        val received = queued.copy(state = OrderState.RECEIVED)
+        val keys =
+            TakeawayBoard.entries(
+                    accounts = emptyList(),
+                    orders = listOf(received),
+                    captures = listOf(capture),
+                    edits = emptyList(),
+                )
+                .map(TakeawayEntry::key)
+        assertEquals(keys.toSet().size, keys.size)
+    }
 }

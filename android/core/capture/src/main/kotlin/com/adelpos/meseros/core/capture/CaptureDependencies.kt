@@ -5,6 +5,7 @@ import com.adelpos.meseros.core.domain.catalog.CatalogImages
 import com.adelpos.meseros.core.domain.catalog.CatalogSource
 import com.adelpos.meseros.core.domain.waiter.CaptureService
 import com.adelpos.meseros.core.domain.waiter.OrderQueueService
+import com.adelpos.meseros.core.domain.waiter.PrecheckService
 import com.adelpos.meseros.core.domain.waiter.RestaurantSource
 import com.adelpos.meseros.core.domain.waiter.SentLineService
 import com.adelpos.meseros.core.domain.waiter.TakeawayService
@@ -25,4 +26,6 @@ class CaptureDependencies(
     val activeWaiter: StateFlow<ActiveWaiter?>,
     /** Para llevar (etapa A2): el nombre y el teléfono por enviar y la lista. */
     val takeaway: TakeawayService,
+    /** Imprimir la precuenta desde la cuenta (etapa A2, Fase C): nunca en la cola. */
+    val precheck: PrecheckService,
 )

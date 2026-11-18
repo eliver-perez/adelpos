@@ -28,6 +28,9 @@ import com.adelpos.meseros.core.domain.waiter.OrderQueueService
 import com.adelpos.meseros.core.domain.waiter.OrderState
 import com.adelpos.meseros.core.domain.waiter.OthersPending
 import com.adelpos.meseros.core.domain.waiter.PendingOrder
+import com.adelpos.meseros.core.domain.waiter.PrecheckService
+import com.adelpos.meseros.core.domain.waiter.PrecheckSetup
+import com.adelpos.meseros.core.domain.waiter.PrintAnswer
 import com.adelpos.meseros.core.domain.waiter.RestaurantSource
 import com.adelpos.meseros.core.domain.waiter.RestaurantStatus
 import com.adelpos.meseros.core.domain.waiter.RestaurantView
@@ -58,6 +61,16 @@ class FakeWaiter(catalog: Catalog = Catalog.EMPTY) {
     val storedView = MutableStateFlow(TablesView.DEFAULT)
     val edits = MutableStateFlow<List<CustomerEdit>>(emptyList())
     val customers = mutableListOf<Pair<String, TakeawayCustomer>>()
+
+    // La precuenta (etapa A2, Fase C): respuestas de Go en orden y lo que se le pidió.
+    val precheckSetup = MutableStateFlow(PrecheckSetup.UNKNOWN)
+    val connected = MutableStateFlow(true)
+    val printAnswers = ArrayDeque<PrintAnswer>()
+    val statusAnswers = ArrayDeque<PrintAnswer>()
+    val retryAnswers = ArrayDeque<PrintAnswer>()
+    val printed = mutableListOf<Pair<String, String>>()
+    val retried = mutableListOf<String>()
+    val setupReads = mutableListOf<String>()
 
     val restaurant =
         object : RestaurantSource {
@@ -210,6 +223,41 @@ class FakeWaiter(catalog: Catalog = Catalog.EMPTY) {
                 DeliveryResult.NoConnection
         }
 
+    val precheck =
+        object : PrecheckService {
+            override val setup: StateFlow<PrecheckSetup> = precheckSetup
+            override val connected: StateFlow<Boolean> = this@FakeWaiter.connected
+
+            override suspend fun refreshSetup(userId: String) {
+                setupReads.add(userId)
+            }
+
+            override suspend fun print(
+                userId: String,
+                accountId: String,
+                operationId: String,
+            ): PrintAnswer {
+                printed.add(accountId to operationId)
+                return printAnswers.removeFirstOrNull() ?: PrintAnswer.NoConnection
+            }
+
+            override suspend fun status(
+                userId: String,
+                accountId: String,
+                ticketId: String,
+            ): PrintAnswer = statusAnswers.removeFirstOrNull() ?: PrintAnswer.NoConnection
+
+            override suspend fun retry(
+                userId: String,
+                accountId: String,
+                ticketId: String,
+                operationId: String,
+            ): PrintAnswer {
+                retried.add(ticketId)
+                return retryAnswers.removeFirstOrNull() ?: PrintAnswer.NoConnection
+            }
+        }
+
     val catalogSource =
         object : CatalogSource {
             override val catalog: StateFlow<Catalog> = MutableStateFlow(catalog)
@@ -248,6 +296,7 @@ class FakeWaiter(catalog: Catalog = Catalog.EMPTY) {
             images = null,
             activeWaiter = active,
             takeaway = takeaway,
+            precheck = precheck,
         )
 
     fun dependencies(): WaiterDependencies =

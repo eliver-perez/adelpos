@@ -6,8 +6,10 @@ A2). Con ella cada mesero:
 - Entra con **su nombre y su PIN** en un teléfono o una tableta que comparten varios meseros.
 - Ve las mesas y sus cuentas, captura los pedidos y los manda a cocina con **«Enviar a cocina»**.
 - Toma pedidos **Para llevar** con el mismo catálogo y ve si ya están listos y pagados (sección 6).
-- Recibe un **aviso cuando la cocina termina sus platillos**, aunque la pantalla esté apagada o la aplicación cerrada
+- Imprime la **precuenta** de una mesa o de un pedido para llevar en la impresora asignada a ese dispositivo
   (sección 7).
+- Recibe un **aviso cuando la cocina termina sus platillos**, aunque la pantalla esté apagada o la aplicación cerrada
+  (sección 8).
 - Sigue capturando **sin conexión**: los pedidos se mandan solos cuando vuelve la red.
 
 La **computadora principal** sigue mandando en todo: precios, impuestos, permisos y estados los decide ella al recibir
@@ -51,7 +53,7 @@ pedidos sin enviar) y avisa a soporte. **De la 0.1.0 a la 0.2.0 es distinto**: n
 
 **Si desinstalas la aplicación** (o borras sus datos en los Ajustes de Android), el dispositivo olvida el
 emparejamiento y se pierden los pedidos que no se hayan enviado. Al volver a instalarla hay que emparejarlo de nuevo
-(sección 3). En la computadora principal, revoca el registro anterior de ese dispositivo (sección 9).
+(sección 3). En la computadora principal, revoca el registro anterior de ese dispositivo (sección 10).
 
 ### Pasar de la 0.1.0 a la 0.2.0
 
@@ -71,7 +73,7 @@ En cada teléfono o tableta que tenga la 0.1.0, en este orden:
 2. **Desinstala la 0.1.0**: en los **Ajustes** del dispositivo, **Aplicaciones › AD-EL POS › Desinstalar** (o
    mantén presionado su ícono y elige «Desinstalar»). Los nombres cambian un poco según la marca.
 3. **Retira el dispositivo en la computadora principal**: en **Administración › Sistema › Terminales**, busca ese
-   teléfono o esa tableta, toca **«Revocar»** y **«Confirmar revocación»** (sección 9). Así su autorización anterior
+   teléfono o esa tableta, toca **«Revocar»** y **«Confirmar revocación»** (sección 10). Así su autorización anterior
    ya no sirve.
 4. **Instala la 0.2.0** con los pasos del principio de esta sección y **empareja** el dispositivo con su código
    (sección 3). Puedes ponerle el mismo nombre de antes. Cada mesero entra con su PIN de siempre; la primera vez en
@@ -80,7 +82,7 @@ En cada teléfono o tableta que tenga la 0.1.0, en este orden:
    explica y pide dos permisos nuevos: **mostrar notificaciones** (Android 13 o posterior; toca **«Continuar»** y
    después **«Permitir»**) y **quitar la optimización de batería** (toca **«Continuar»** y después **«Permitir»**).
    Sin ellos la aplicación sigue funcionando, pero los avisos no se ven o pueden llegar tarde con la pantalla apagada
-   (sección 7, «Si los avisos no llegan»). La 0.1.0 no tenía avisos: no hay nada que pasar de una a otra.
+   (sección 8, «Si los avisos no llegan»). La 0.1.0 no tenía avisos: no hay nada que pasar de una a otra.
 
 Si en un dispositivo nunca se instaló la 0.1.0, no hace falta nada de esto: instala la 0.2.0 directamente. Si por
 error quedaron las dos, la 0.1.0 es la que ya estaba emparejada (en **Ajustes › Aplicaciones › AD-EL POS** se ve la
@@ -169,6 +171,16 @@ necesita la computadora principal en la versión **0.13.0**. Si a un mesero le f
 dispositivo lo dice («No tienes permiso para ver las mesas…», «Sin permiso para enviar a cocina.») y la computadora
 principal rechaza lo que no tenga permitido. El permiso de marcar productos como agotados no hace falta: desde el
 teléfono no se marcan.
+
+Para **imprimir la precuenta** desde el teléfono o la tableta (sección 7), marca además:
+
+| Para que el mesero pueda…                                 | Marca                           |
+| --------------------------------------------------------- | ------------------------------- |
+| Imprimir la precuenta (o el ticket de venta, o la cuenta) | «Imprimir tickets y precuentas» |
+
+No hace falta «Reimprimir tickets»: volver a imprimir arma otra precuenta con lo que tenga la cuenta en ese momento,
+como en la caja. Sin el permiso, el botón no aparece. Imprimir desde el dispositivo necesita la computadora principal
+en la versión **0.13.0** y una impresora asignada a ese dispositivo (sección 7).
 
 **Una sesión con PIN solo permite lo del mesero**, aunque la persona sea administrador o supervisor: lo
 administrativo se sigue haciendo en la computadora con su contraseña.
@@ -272,7 +284,47 @@ solo cambia si la cocina marca los platillos en la pantalla de cocina.
   siempre, y después se entrega.
 - Sin el permiso de registrar entregas, el mesero ve si está pagado y entregado, y la entrega se marca en la caja.
 
-## 7. Avisos de platillos listos
+## 7. Imprimir la precuenta
+
+En la cuenta de una mesa o de un pedido para llevar (en el teléfono, en «Ver la cuenta»), al final, está el botón
+**«Imprimir precuenta»**. Dice el nombre elegido en **Administración › Documentos**: «Imprimir precuenta», «Imprimir
+ticket de venta» o «Imprimir cuenta», y el papel sale con ese mismo título. Aparece cuando la cuenta ya está en la
+computadora principal (con el primer producto guardado) y el rol tiene el permiso (sección 4).
+
+- La precuenta es **la misma que imprime la caja** (la misma plantilla), con lo que tenga la cuenta en ese momento y
+  **«Atendió: <el mesero que la imprime>»**. Tocar el botón otra vez arma otra precuenta, como en la caja.
+- Sale **solo** en la impresora asignada a ese teléfono o tableta (abajo). Debajo del botón se ve a dónde va («Se
+  imprime en Caja 1.»).
+- **Necesita conexión.** Sin conexión el botón no se puede tocar y dice **«Para imprimir necesitas conexión con la
+  computadora principal.»**. Nunca queda pendiente para después: cuando vuelva la conexión, tócalo otra vez.
+- Mientras sigues en la cuenta, el dispositivo revisa unos segundos qué pasó con la precuenta, sin detener la captura:
+
+| El dispositivo dice                                       | Qué pasa y qué hacer                                                                                                                                                           |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| «Enviada a Caja 1» (o el nombre de la impresora)          | Llegó a esa impresora (o a la cola de esa caja).                                                                                                                               |
+| «La Caja 2 está desconectada.»                            | La impresora es la USB de esa caja y ahí AD-EL POS está cerrado, o la computadora está apagada o sin red. Se imprime sola en cuanto esa caja vuelva; no hace falta reintentar. |
+| «La impresora no responde.» con **«Reintentar»**          | No salió en papel. Revisa que esté encendida, con papel y conectada, y toca «Reintentar» (manda la misma precuenta, sin pedir motivo).                                         |
+| «La impresora necesita revisión: avisa al administrador.» | La impresora no está bien configurada (se revisa en Cocina › Impresoras). Con «Reintentar», cuando esté corregida.                                                             |
+| «No se sabe si salió en papel…»                           | Revisa el papel en la impresora antes de imprimir otra.                                                                                                                        |
+| «Este dispositivo no tiene impresora asignada.»           | Hay que elegirle una impresora (abajo). La precuenta no se manda a ninguna otra.                                                                                               |
+| «La impresora … está desactivada.»                        | La impresora asignada no puede imprimir ahora: el administrador la revisa en Terminales o en Cocina › Impresoras.                                                              |
+
+### Impresora de precuentas por dispositivo
+
+Cada teléfono o tableta imprime sus precuentas en **su** impresora. Para elegirla, en la computadora principal:
+
+1. Abre **Administración › Sistema › Terminales** y toca **«Editar»** en la fila del teléfono o la tableta.
+2. En **«Impresora de precuentas»**, elige una impresora de red o la impresora USB de una caja (aparece como «… · en
+   Caja 1»). Las que no sirven aparecen deshabilitadas con el motivo.
+3. Toca **«Guardar cambios»**. **«Ver configuración»** muestra cuál tiene.
+
+- **Sin impresora, ese dispositivo no imprime precuentas**: nunca las manda a otra impresora (tampoco a la de tickets
+  de Cobros). El mesero ve «Este dispositivo no tiene impresora asignada» y el aviso de pedírsela al administrador.
+- Si es la impresora USB de una caja, esa caja debe tener **AD-EL POS abierto**; si no, el teléfono dice «La Caja 2
+  está desconectada» y la precuenta sale cuando vuelva a abrirse.
+- El dispositivo toma el cambio la próxima vez que se abre una cuenta (o que un mesero entra con conexión).
+
+## 8. Avisos de platillos listos
 
 Cuando la cocina marca **«Listo»** un platillo en la **pantalla de cocina** (KDS), el mesero responsable de esa cuenta
 recibe un aviso en su teléfono o su tableta, **aunque la pantalla esté apagada o la aplicación cerrada**: «Mesa 4 · 2
@@ -329,7 +381,7 @@ Ajustes de Android.
 - Algunas marcas de teléfonos cierran las aplicaciones en segundo plano por su cuenta; si pasa, busca en los Ajustes
   de esa marca la opción para dejar que AD-EL POS siga activa.
 
-## 8. Si no encuentra la computadora principal
+## 9. Si no encuentra la computadora principal
 
 Revisa en este orden:
 
@@ -361,7 +413,7 @@ Otros avisos que puede mostrar el dispositivo:
   encima de la actual (sección 1) y **no la desinstales**, porque se perderían los pedidos sin enviar. De la 0.1.0 a
   la 0.2.0, en cambio, sigue «Pasar de la 0.1.0 a la 0.2.0» (sección 1).
 
-## 9. Retirar un teléfono o una tableta
+## 10. Retirar un teléfono o una tableta
 
 1. En **Administración › Sistema › Terminales**, busca el dispositivo, toca **«Revocar»** y **«Confirmar
    revocación»**. Desde ese momento ya no puede hacer nada en el restaurante, y queda en el Registro de movimientos.
@@ -375,9 +427,8 @@ Otros avisos que puede mostrar el dispositivo:
    el restaurante. Por precaución, cambia el PIN de los meseros que lo usaban.
 5. Para volver a usarlo, toca **«Emparejar de nuevo»** en el dispositivo y apruébalo otra vez con su código (sección 3).
 
-## 10. Lo que todavía no hace esta versión de prueba
+## 11. Lo que todavía no hace esta versión de prueba
 
-- **Imprimir la precuenta** desde el dispositivo: llega más adelante en esta misma etapa (A2).
 - El aviso de platillos listos **no se ha probado con la pantalla apagada en un dispositivo real** (Doze y gestores de
   batería de cada marca), solo en emuladores.
 - **No cobra**, ni mesas ni Para llevar: se cobra en la caja.
