@@ -95,7 +95,9 @@
 # desde Terminales y aviso apagado que detiene el servicio · r8 (r8a + r8b) este guion abre la aplicación (con la
 # wifi del emulador apagada en Android 11+: el emulador alcanza 10.0.2.2 por la red móvil y no ve el anuncio real),
 # mata el proceso, espera el reinicio pegajoso, marca «Listo» desde la Mac y busca el aviso con `dumpsys
-# notification --noredact` · r9 al retirar el dispositivo el servicio se detiene. «Listo» desde la Mac usa la sesión
+# notification --noredact` · r10 (antes de r9) en «¿Quién eres?» la aplicación no usa la sesión del último mesero
+# (Go no renueva su `last_seen_at` en 5,5 minutos con la pantalla encendida y 2 apagada) · r9 al retirar el
+# dispositivo el servicio se detiene. «Listo» desde la Mac usa la sesión
 # del administrador de la terminal principal por la escucha local (127.0.0.1).
 #
 # Suite `all`: con ADELPOS_E2E_NEW_SERVER, un servidor temporal nuevo para cada parte: access 1–5, access 6–7 (otra
@@ -154,7 +156,7 @@ suite_steps() {
         field) echo "f1 f2 f3 f4 f5a f5b f6 f7 f8 f9 f10" ;;
         takeaway) echo "t1 t2 t3 t4 t5 t6 t7 t8" ;;
         precheck) echo "p1 p2 p3 p4 p5 p6 p7" ;;
-        alerts) echo "r1 r2 r3 r4 r5 r6 r7 r8 r9" ;;
+        alerts) echo "r1 r2 r3 r4 r5 r6 r7 r8 r10 r9" ;;
     esac
 }
 
@@ -716,6 +718,7 @@ alerts_step() {
         r5) run_step r5_agrupadoPorCuentaYResumenConVariasCuentas -e readyAlerts on ;;
         r6) run_step r6_enQuienEresAlTocarloPideElPinYAbreLaCuenta -e readyAlerts on ;;
         r7) run_step r7_sonidoYVibracionApagadosDesdeTerminalesYAvisoApagado -e readyAlerts on ;;
+        r10) run_step r10_enQuienEresNoSeUsaLaSesionDelUltimoMesero -e readyAlerts on ;;
         r8)
             run_step r8a_servicioConUnaCuentaEnCocinaParaElReinicioPegajoso -e readyAlerts on
             alerts_sticky_restart
