@@ -1366,7 +1366,7 @@ nueva de su conteo, como ya excluía las de la 0025), `c988d16` (servidor, contr
   - `GET ready-alerts?after=` en `dispatch` después de `authenticateDevice` y `matchClientKind`, antes de la sesión
     (solo la credencial del dispositivo); solo `android` (si no, 403 `READY_ALERTS_DEVICE_NOT_ALLOWED`).
   - `GET ready-alerts/stream` (`serveReadyAlerts`): el patrón de `serveEvents` (750 ms, 30 s, `Last-Event-ID`,
-    `interrupted`), con su contador `readyStreams`, **uno por dispositivo** (429 `READY_ALERTS_CONNECTION_LIMIT`).
+    `interrupted`), con su contador `readyStreams`, **uno por dispositivo** (429 `READY_ALERTS_CONNECTION_LIMIT`; **reemplazado** en las correcciones de la revisión, R12: un canal nuevo cierra el anterior y ya no hay 429).
   - Lock 7820148305 **compartido** al leer (cocina escribe con él en exclusiva): ningún aviso queda detrás del cursor.
   - Filtro (A2-D4, A2-D9): para el dispositivo D, avisos cuyo mesero entró con PIN en D desde el inicio del día
     comercial (`businessday`, «Hora de inicio del día») y con `recipient_device_id` = D o vacío; agrupados por la
