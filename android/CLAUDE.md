@@ -490,7 +490,11 @@ aplicación (A2-D10) con las plantillas de `app/src/main/res/values/strings.xml`
   pasar `day_ends_at` vuelve a preguntar con `GET` y, mientras Go diga `active: true`, sigue); **A2-D12**: pasados
   10 minutos de `day_ends_at` (`DAY_END_STOP_MILLIS`) sin alcanzar a Go desde entonces y sin nadie usando el
   dispositivo (aplicación a la vista con un mesero), sin mover el cursor (`ReadyStopReason.DAY_ENDED`; también tras el
-  reinicio pegajoso; lo vuelve a arrancar la siguiente entrada con conexión o abrir la aplicación); el dispositivo retirado
+  reinicio pegajoso; lo vuelve a arrancar la siguiente entrada con conexión o abrir la aplicación). En Go (A2-D12) una
+  sesión de antes del inicio del día solo cuenta si se usó en los últimos 30 minutos: **en «¿Quién eres?» nada usa la
+  sesión del último mesero** (canal de eventos, catálogo y mesas van con `ServerAccess.current`, null sin mesero
+  activo; la cola solo envía lo pendiente de cada dueño; el aviso va con la credencial del dispositivo), así que de
+  noche Go responde `active: false` solo (`r10` lo comprueba); el dispositivo retirado
   (solo `DEVICE_REVOKED`, por `interrupted` o un 401), otra huella o 426 (se avisa a `deviceAccess.report`) o un
   rechazo permanente al abrir (403/400); un 401 con otro `DEVICE_*` al abrir se avisa como en las demás rutas
   (emparejar de nuevo); cualquier otro código de `interrupted` (`TEMPORARY`) o un 5xx es temporal (espera creciente). También cuando el
@@ -530,7 +534,7 @@ aplicación (A2-D10) con las plantillas de `app/src/main/res/values/strings.xml`
 - **Pruebas**: `ReadyAlertsRulesTest` (dominio), `ReadyAlertsChannelTest` (MockWebServer como Go),
   `RoomReadyAlertsLedgerTest` (Robolectric); instrumentadas `ReadyAlertsOnDeviceTest` (servicio, canales,
   notificaciones, ayuda) y el caso 5 → 6 de `AppDatabaseMigrationTest`; contra el Go temporal, `AlertsOnGoTest` con
-  **`scripts/android-e2e.sh --suite alerts`** (`r1`–`r9`; el guion corta la red en `r4`, mata el proceso en `r8b` y
+  **`scripts/android-e2e.sh --suite alerts`** (`r1`–`r10`, `r10` antes de `r9`: en «¿Quién eres?» no se usa la sesión del último mesero; el guion corta la red en `r4`, mata el proceso en `r8b` y
   marca «Listo» desde la Mac). En las pruebas instrumentadas el aviso va **apagado** salvo con `readyAlerts=on`
   (`AdelTestRunner`): su servicio y sus notificaciones no deben cambiar las pruebas de la A1; sus permisos se piden
   solo con `alertPermissions=ask`.
