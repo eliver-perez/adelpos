@@ -289,3 +289,13 @@ Las imágenes del catálogo usan una caché propia (OkHttp con `ETag`), no Coil.
 Robolectric MIT y JUnit 4 EPL 1.0. **SDK de Android**: no se instaló
 ningún paquete nuevo (`android-37.0`, build-tools 36.0.0, platform-tools 37.0.1 y las imágenes de los emuladores ya
 estaban, avance §1.1).
+
+## Etapa A2 · Android, servidor y escritorio
+
+**Sin dependencias nuevas** (18 de noviembre de 2026). En Android, los dos módulos nuevos (`core:capture` y
+`feature:takeaway`) tienen su `gradle.lockfile`, igual al de `feature:waiter` salvo el encabezado (mismas bibliotecas
+y versiones); `gradle/libs.versions.toml`, `verification-metadata.xml` y los demás bloqueos no cambiaron. El servicio en
+primer plano, las notificaciones, el permiso de notificaciones y la exclusión de la optimización de batería usan solo
+el SDK de Android y las bibliotecas que ya estaban. En el servidor y el escritorio, `go.mod`, `go.sum`, los módulos npm
+y los crates no cambiaron: `package.json`, `package-lock.json`, `Cargo.toml` y `Cargo.lock` solo cambian el número de
+versión del propio paquete (0.13.0). El SDK de Android, igual que en la A1.
