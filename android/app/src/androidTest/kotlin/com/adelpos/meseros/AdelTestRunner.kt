@@ -16,7 +16,11 @@ import java.util.concurrent.atomic.AtomicInteger
  * - con `lostOfflineResponses` (un número), esa cantidad de respuestas de `submitOfflineOrder` se
  *   descarta **después** de que Go la procesó: la «respuesta perdida» de §9 (Fase E); igual con
  *   `lostDraftResponses` (guardar el borrador) y `lostConfirmResponses` («Enviar a cocina» en
- *   línea) para la revisión R6.
+ *   línea) para la revisión R6;
+ * - el aviso de platillos listos (etapa A2, Fase D) queda **apagado** salvo con `readyAlerts=on`
+ *   (la suite `alerts` y las pruebas del aviso): su servicio y sus notificaciones no deben cambiar
+ *   las pruebas de la A1. Sus permisos no se explican ni se piden salvo con `alertPermissions=ask`
+ *   (las pruebas los conceden ellas).
  */
 class AdelTestRunner : AndroidJUnitRunner() {
     override fun callApplicationOnCreate(app: Application) {
@@ -31,6 +35,8 @@ class AdelTestRunner : AndroidJUnitRunner() {
                         drafts = arguments.getString("lostDraftResponses"),
                         confirms = arguments.getString("lostConfirmResponses"),
                     ),
+                readyAlerts = arguments.getString("readyAlerts") == "on",
+                askAlertPermissions = arguments.getString("alertPermissions") == "ask",
             )
         super.callApplicationOnCreate(app)
     }

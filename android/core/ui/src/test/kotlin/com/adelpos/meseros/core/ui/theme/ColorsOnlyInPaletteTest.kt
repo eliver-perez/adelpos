@@ -9,7 +9,9 @@ import org.junit.Test
  * Los colores solo se escriben en AdelPalette.kt (como los tokens de styles.css en el escritorio):
  * ningún otro archivo de la aplicación usa `Color(0x…)`, colores con nombre de Compose
  * (`Color.Red`…), `Color.parse`/`toColorInt` ni colores hexadecimales en los recursos XML.
- * `Color.Transparent` y `Color.Unspecified` se permiten.
+ * `Color.Transparent` y `Color.Unspecified` se permiten. Única excepción: los íconos de
+ * notificación (`res/drawable/ic_stat_*.xml`, etapa A2) pueden usar `@android:color/white`, porque
+ * Android solo toma su transparencia y los pinta él mismo; no son un color de la interfaz.
  */
 class ColorsOnlyInPaletteTest {
     private val androidRoot =
@@ -54,12 +56,23 @@ class ColorsOnlyInPaletteTest {
         )
     }
 
+    private val notificationIconWhite = Regex("@android:color/white\\b")
+
+    private fun isNotificationIcon(file: File): Boolean =
+        file.parentFile?.name == "drawable" && file.name.startsWith("ic_stat_")
+
     @Test
     fun losRecursosNoEscribenColores() {
         val offenders =
             sources("xml").flatMap { file ->
                 file.readLines().mapIndexedNotNull { index, line ->
-                    if (xmlColor.containsMatchIn(line))
+                    val checked =
+                        if (isNotificationIcon(file)) {
+                            line.replace(notificationIconWhite, "")
+                        } else {
+                            line
+                        }
+                    if (xmlColor.containsMatchIn(checked))
                         "${file.relativeTo(androidRoot)}:${index + 1}: $line"
                     else null
                 }

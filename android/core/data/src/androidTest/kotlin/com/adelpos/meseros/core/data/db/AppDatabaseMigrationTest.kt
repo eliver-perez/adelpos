@@ -183,7 +183,8 @@ class AppDatabaseMigrationTest {
      * 5 → 6 (etapa A2, Para llevar): `captures` se copia a la tabla nueva (con `table_id` opcional)
      * sin perder nada; las capturas que había quedan como de salón y sin cliente, la cola no cambia
      * y aparece la tabla de ediciones del cliente, vacía. Después se puede guardar una captura para
-     * llevar (sin mesa).
+     * llevar (sin mesa). Fase D: también aparecen, vacías, las dos tablas del aviso de platillos
+     * listos.
      */
     @Test
     fun de5a6ConservaLasCapturasYLaColaYAdmitePedidosParaLlevar() {
@@ -263,6 +264,26 @@ class AppDatabaseMigrationTest {
             database.query("SELECT count(*) FROM captures WHERE table_id IS NULL").use { cursor ->
                 cursor.moveToFirst()
                 assertEquals(1, cursor.getInt(0))
+            }
+            // Fase D: las tablas del aviso de platillos listos, vacías (sin cursor: el dispositivo
+            // pregunta desde el principio del día comercial), y se pueden usar.
+            for (table in listOf("ready_alerts_state", "ready_alerts_seen")) {
+                database.query("SELECT count(*) FROM $table").use { cursor ->
+                    cursor.moveToFirst()
+                    assertEquals(table, 0, cursor.getInt(0))
+                }
+            }
+            database.execSQL(
+                "INSERT INTO ready_alerts_state (slot, cursor, active, day_ends_at, enabled, " +
+                    "sound, vibration, updated_at) VALUES (0, 812, 1, 1763550000000, 1, 1, 0, 9)",
+            )
+            database.execSQL(
+                "INSERT INTO ready_alerts_seen (`key`, alert_id, account_id, day_ends_at, " +
+                    "seen_at) VALUES ('k-812', 812, 'cuenta', 1763550000000, 9)",
+            )
+            database.query("SELECT cursor FROM ready_alerts_state").use { cursor ->
+                cursor.moveToFirst()
+                assertEquals(812L, cursor.getLong(0))
             }
         }
     }

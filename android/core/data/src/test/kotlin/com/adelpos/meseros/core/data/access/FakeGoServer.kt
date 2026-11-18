@@ -32,6 +32,7 @@ class FakeGoServer(
             "waiter-pin-v1",
             "takeaway-v1",
             "device-precheck-printer-v1",
+            "ready-alerts-v1",
         )
     var minAndroid = "0.1.0"
     var deviceId = "0b5d2f6c-6b1a-4c4b-9b70-3f0f8e1c2a10"

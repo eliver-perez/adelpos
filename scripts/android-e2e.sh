@@ -10,8 +10,8 @@
 #   ADELPOS_E2E_NETWORK_URL=https://127.0.0.1:8454 \
 #   ADELPOS_E2E_PROVISIONING_FILE=/ruta/al/provisioning-token \
 #   [ADELPOS_E2E_DATABASE_URL=postgresql://usuario:clave@127.0.0.1:55499/adel_pos_test_…] \
-#   scripts/android-e2e.sh [--suite access|catalog|waiter|field|takeaway|precheck|all] [--steps "…"] [--no-install] \
-#       [--out <carpeta>]
+#   scripts/android-e2e.sh [--suite access|catalog|waiter|field|takeaway|precheck|alerts|all] [--steps "…"] \
+#       [--no-install] [--out <carpeta>]
 #
 # Variables:
 #   ANDROID_SERIAL                  obligatorio: el emulador o dispositivo (nunca se corre en todos los conectados).
@@ -85,8 +85,21 @@
 # La red la corta y la devuelve este guion entre pasos (modo avión desde la Mac en Android 11+; `adb root` + `svc
 # wifi/data` en Android 8–10).
 #
+# Suite `alerts` (etapa A2, Fase D, AlertsOnGoTest con `readyAlerts=on`, con un servidor temporal nuevo): r1 preparar
+# (Ana y Beto, cocina en pantalla, mesas), emparejar y entrar: arranca el servicio con «AD-EL POS conectado» y la
+# explicación de los permisos · r2 aviso con la aplicación cerrada (tarea quitada de recientes), la pantalla apagada y
+# Doze forzado · r3 no llega a otro mesero ni a otro dispositivo (un segundo android emparejado por la API) y
+# transferir la cuenta cambia el destinatario · r4 este guion corta la red, marca «Listo» desde la Mac durante el
+# corte y la devuelve: llega una sola vez · r5 agrupado por cuenta y resumen · r6 en «¿Quién eres?», al tocarlo pide
+# el PIN y abre la cuenta; con la cuenta a la vista, aviso dentro de la aplicación · r7 sonido y vibración apagados
+# desde Terminales y aviso apagado que detiene el servicio · r8 (r8a + r8b) este guion abre la aplicación (con la
+# wifi del emulador apagada en Android 11+: el emulador alcanza 10.0.2.2 por la red móvil y no ve el anuncio real),
+# mata el proceso, espera el reinicio pegajoso, marca «Listo» desde la Mac y busca el aviso con `dumpsys
+# notification --noredact` · r9 al retirar el dispositivo el servicio se detiene. «Listo» desde la Mac usa la sesión
+# del administrador de la terminal principal por la escucha local (127.0.0.1).
+#
 # Suite `all`: con ADELPOS_E2E_NEW_SERVER, un servidor temporal nuevo para cada parte: access 1–5, access 6–7 (otra
-# identidad, sin reinstalar), catalog, waiter, field, takeaway y precheck. Resultados en <salida>/<suite>.
+# identidad, sin reinstalar), catalog, waiter, field, takeaway, precheck y alerts. Resultados en <salida>/<suite>.
 #
 # Seguridad: se niega a correr con los puertos del servicio real (8181, 8443), con un host que no sea la propia Mac
 # o si `GET version` de alguna de las dos escuchas no responde `test_mode: true`; la base solo con las guardas de
@@ -128,7 +141,8 @@ suite_class() {
         field) echo "FieldOnGoTest" ;;
         takeaway) echo "TakeawayOnGoTest" ;;
         precheck) echo "PrecheckOnGoTest" ;;
-        *) fail "suite desconocida: $1 (access, catalog, waiter, field, takeaway, precheck o all)" ;;
+        alerts) echo "AlertsOnGoTest" ;;
+        *) fail "suite desconocida: $1 (access, catalog, waiter, field, takeaway, precheck, alerts o all)" ;;
     esac
 }
 
@@ -140,6 +154,7 @@ suite_steps() {
         field) echo "f1 f2 f3 f4 f5a f5b f6 f7 f8 f9 f10" ;;
         takeaway) echo "t1 t2 t3 t4 t5 t6 t7 t8" ;;
         precheck) echo "p1 p2 p3 p4 p5 p6 p7" ;;
+        alerts) echo "r1 r2 r3 r4 r5 r6 r7 r8 r9" ;;
     esac
 }
 
@@ -334,7 +349,7 @@ run_step() {
         -e net "https://$DEVICE_HOST:$NETWORK_PORT" -e pin "$PIN" \
         ${server_id[@]+"${server_id[@]}"} -e mainDevice "$MAIN_DEVICE" -e mainToken "$MAIN_TOKEN" "$@" \
         "$TEST_RUNNER" >"$log" 2>&1 || true
-    "$ADB" -s "$ANDROID_SERIAL" logcat -d -s AdelOnGo:V CatalogOnGoTest:V TestRunner:V AndroidRuntime:E \
+    "$ADB" -s "$ANDROID_SERIAL" logcat -d -s AdelOnGo:V CatalogOnGoTest:V TestRunner:V AndroidRuntime:E AdelAvisos:V \
         >"$SUITE_OUT/$method-logcat.txt" 2>/dev/null || true
     local codes verdict
     # Sin ningún código (am no llegó a correr la prueba) grep no encuentra nada: «SIN RESULTADO».
@@ -529,6 +544,187 @@ precheck_step() {
     esac
 }
 
+# Etapa A2, Fase D: aviso de platillos listos. «Listo» de cocina desde la Mac (por la escucha local, con la sesión del
+# administrador de la terminal principal) para lo que la prueba no puede hacer desde el dispositivo: durante un corte
+# de red (r4) o con el proceso de la aplicación muerto (r8).
+main_session() {
+    curl -fsS --max-time 10 -X POST "$LOCAL_URL/api/v1/auth/login" -H "Content-Type: application/json" \
+        -H "X-Device-ID: $MAIN_DEVICE" -H "X-Device-Token: $MAIN_TOKEN" \
+        -d '{"username":"admin","password":"admin"}' | json_field session_token
+}
+
+kitchen_ready() {
+    local account="$1" session tasks operation
+    session="$(main_session)" || return 1
+    tasks="$(curl -fsS --max-time 10 "$LOCAL_URL/api/v1/kitchen/board?state=all&account_id=$account" \
+        -H "X-Device-ID: $MAIN_DEVICE" -H "X-Device-Token: $MAIN_TOKEN" -H "Authorization: Bearer $session" |
+        python3 -I -c 'import json, sys
+tasks = json.load(sys.stdin)["tasks"]
+print(json.dumps([{"id": t["id"], "revision": t["revision"]} for t in tasks if t["state"] not in ("cancelled", "ready")]))')" ||
+        return 1
+    [ "$tasks" != "[]" ] || return 1
+    operation="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+    curl -fsS --max-time 10 -X POST "$LOCAL_URL/api/v1/kitchen/states" -H "Content-Type: application/json" \
+        -H "X-Device-ID: $MAIN_DEVICE" -H "X-Device-Token: $MAIN_TOKEN" -H "Authorization: Bearer $session" \
+        -d "{\"operation_id\":\"$operation\",\"state\":\"ready\",\"tasks\":$tasks}" >/dev/null
+}
+
+# La cuenta que la prueba anotó en su registro (AdelOnGo) con la marca [mark] («r4 listo para cortar cuenta=»…).
+logged_account() {
+    sed -n "s/.*$1\([0-9a-f-]*\).*/\1/p" "$2" 2>/dev/null | tail -1
+}
+
+# r4 (en segundo plano mientras corre la prueba): espera a que la prueba pida el corte, corta la red, marca «Listo»
+# desde la Mac durante el corte, devuelve la red y se lo dice a la prueba con un archivo (adb llega al emulador sin
+# red). En Android 8–10 la red se corta con root, que se toma antes de la prueba (reiniciar adbd la cortaría).
+alerts_cut_during_ready() {
+    local log="$SUITE_OUT/r4-guion.txt" account="" deadline=$((SECONDS + 180)) logcat="$SUITE_OUT/r4-logcat-vivo.txt"
+    : >"$log"
+    while [ -z "$account" ] && [ "$SECONDS" -lt "$deadline" ]; do
+        sleep 2
+        "$ADB" -s "$ANDROID_SERIAL" logcat -d -s AdelOnGo:V >"$logcat" 2>/dev/null || true
+        account="$(logged_account "r4 listo para cortar cuenta=" "$logcat")"
+    done
+    if [ -z "$account" ]; then
+        echo "r4: la prueba no pidió el corte" >>"$log"
+        return 1
+    fi
+    echo "r4: corte de red (cuenta $account)" >>"$log"
+    if [ "$SDK" -lt 30 ]; then
+        host_network disable >>"$log" 2>&1 || true
+    else
+        "$ADB" -s "$ANDROID_SERIAL" shell cmd connectivity airplane-mode enable >>"$log" 2>&1 || true
+    fi
+    sleep 6
+    if kitchen_ready "$account" >>"$log" 2>&1; then
+        echo "r4: «Listo» marcado desde la Mac durante el corte" >>"$log"
+    else
+        echo "r4: no se pudo marcar «Listo»" >>"$log"
+    fi
+    sleep 6
+    if [ "$SDK" -lt 30 ]; then
+        host_network enable >>"$log" 2>&1 || true
+    else
+        "$ADB" -s "$ANDROID_SERIAL" shell cmd connectivity airplane-mode disable >>"$log" 2>&1 || true
+    fi
+    "$ADB" -s "$ANDROID_SERIAL" shell touch /data/local/tmp/adelpos-r4-listo || true
+    echo "r4: red devuelta" >>"$log"
+}
+
+# r8b: reinicio pegajoso tras matar el proceso (fuera de la instrumentación, que detiene la aplicación al terminar).
+alerts_sticky_restart() {
+    local account pid newpid deadline verdict="FALLA" reason="" service="$APP_ID/.ready.ReadyAlertsService"
+    local log="$SUITE_OUT/r8b_reinicioPegajoso.txt"
+    : >"$log"
+    account="$(logged_account "r8 cuenta=" "$SUITE_OUT/r8a_servicioConUnaCuentaEnCocinaParaElReinicioPegajoso-logcat.txt")"
+    if [ -z "$account" ]; then
+        echo "$SUITE_NAME r8b_reinicioPegajoso: FALLA (r8a no dejó su cuenta)" | tee -a "$SUMMARY"
+        FAILED=1
+        return
+    fi
+    # La aplicación normal (ya emparejada con el Go temporal por su dirección: no busca nada); con la wifi apagada en
+    # Android 11+ el emulador no ve el anuncio del servicio real y alcanza 10.0.2.2 por la red móvil simulada.
+    if [ "$SDK" -ge 30 ]; then
+        "$ADB" -s "$ANDROID_SERIAL" shell cmd wifi set-wifi-enabled disabled >>"$log" 2>&1 || true
+    fi
+    "$ADB" -s "$ANDROID_SERIAL" logcat -c >/dev/null 2>&1 || true
+    "$ADB" -s "$ANDROID_SERIAL" shell am start -W -n "$APP_ID/.MainActivity" >>"$log" 2>&1 || true
+    deadline=$((SECONDS + 45))
+    until "$ADB" -s "$ANDROID_SERIAL" shell dumpsys activity services "$service" | grep -q "isForeground=true"; do
+        [ "$SECONDS" -lt "$deadline" ] || { reason="el servicio no arrancó al abrir la aplicación"; break; }
+        sleep 2
+    done
+    if [ -z "$reason" ]; then
+        "$ADB" -s "$ANDROID_SERIAL" shell input keyevent KEYCODE_HOME || true
+        sleep 2
+        # Con `set -e`, cada orden que puede fallar (pidof sin proceso, kill) lleva su `|| true`.
+        pid="$("$ADB" -s "$ANDROID_SERIAL" shell pidof "$APP_ID" | tr -d '\r' || true)"
+        echo "r8b: proceso $pid; kill -9" >>"$log"
+        "$ADB" -s "$ANDROID_SERIAL" shell run-as "$APP_ID" kill -9 "$pid" >>"$log" 2>&1 || true
+        sleep 1
+        if [ "$("$ADB" -s "$ANDROID_SERIAL" shell pidof "$APP_ID" | tr -d '\r' || true)" = "$pid" ]; then
+            # Algunas imágenes no dejan a run-as matar el proceso (Android 13: «unknown pid»): con root
+            # (imágenes google_apis), fuera de la instrumentación.
+            echo "r8b: run-as no pudo; kill -9 con root" >>"$log"
+            "$ADB" -s "$ANDROID_SERIAL" root >>"$log" 2>&1 || true
+            "$ADB" -s "$ANDROID_SERIAL" wait-for-device
+            "$ADB" -s "$ANDROID_SERIAL" shell kill -9 "$pid" >>"$log" 2>&1 || true
+            "$ADB" -s "$ANDROID_SERIAL" unroot >>"$log" 2>&1 || true
+            "$ADB" -s "$ANDROID_SERIAL" wait-for-device
+        fi
+        deadline=$((SECONDS + 90))
+        while :; do
+            newpid="$("$ADB" -s "$ANDROID_SERIAL" shell pidof "$APP_ID" | tr -d '\r' || true)"
+            if [ -n "$newpid" ] && [ "$newpid" != "$pid" ] &&
+                "$ADB" -s "$ANDROID_SERIAL" shell dumpsys activity services "$service" | grep -q "isForeground=true"; then
+                echo "r8b: reinicio pegajoso en el proceso $newpid" >>"$log"
+                break
+            fi
+            [ "$SECONDS" -lt "$deadline" ] || { reason="Android no reinició el servicio"; break; }
+            sleep 2
+        done
+    fi
+    if [ -z "$reason" ]; then
+        sleep 5
+        kitchen_ready "$account" >>"$log" 2>&1 || reason="no se pudo marcar «Listo» desde la Mac"
+    fi
+    if [ -z "$reason" ]; then
+        deadline=$((SECONDS + 60))
+        until "$ADB" -s "$ANDROID_SERIAL" shell dumpsys notification --noredact |
+            grep -q "android.title=String (Mesa R10 · 2 platillos listos)"; do
+            [ "$SECONDS" -lt "$deadline" ] || { reason="el aviso no llegó tras el reinicio"; break; }
+            sleep 2
+        done
+    fi
+    [ -n "$reason" ] || verdict="APROBADA"
+    "$ADB" -s "$ANDROID_SERIAL" shell dumpsys notification --noredact | grep -E "pkg=$APP_ID|android.title=" >>"$log" 2>&1 || true
+    "$ADB" -s "$ANDROID_SERIAL" logcat -d -s AdelAvisos:V AndroidRuntime:E >"$SUITE_OUT/r8b_reinicioPegajoso-logcat.txt" 2>/dev/null || true
+    "$ADB" -s "$ANDROID_SERIAL" shell am force-stop "$APP_ID" >/dev/null 2>&1 || true
+    if [ "$SDK" -ge 30 ]; then
+        "$ADB" -s "$ANDROID_SERIAL" shell cmd wifi set-wifi-enabled enabled >>"$log" 2>&1 || true
+    fi
+    if [ "$verdict" = "APROBADA" ]; then
+        echo "$SUITE_NAME r8b_reinicioPegajoso: APROBADA" | tee -a "$SUMMARY"
+    else
+        echo "$SUITE_NAME r8b_reinicioPegajoso: FALLA ($reason)" | tee -a "$SUMMARY"
+        FAILED=1
+    fi
+}
+
+# Etapa A2, Fase D: aviso de platillos listos (el aviso va encendido solo en esta suite: readyAlerts=on).
+alerts_step() {
+    case "$1" in
+        r1) run_step r1_prepararEmparejarYEntrarArrancaElServicio -e readyAlerts on -e alertPermissions ask ;;
+        r2) run_step r2_llegaConLaPantallaApagadaYLaAplicacionCerrada -e readyAlerts on ;;
+        r3) run_step r3_noLlegaAOtroMeseroNiAOtroDispositivoYTransferirCambiaElDestinatario -e readyAlerts on ;;
+        r4)
+            if [ "$SDK" -lt 30 ]; then
+                "$ADB" -s "$ANDROID_SERIAL" root >/dev/null 2>&1
+                "$ADB" -s "$ANDROID_SERIAL" wait-for-device
+            fi
+            alerts_cut_during_ready &
+            local helper=$!
+            run_step r4_corteDeRedDuranteElListoLlegaUnaSolaVez -e readyAlerts on
+            wait "$helper" || echo "r4: el guion no pudo cortar la red ($SUITE_OUT/r4-guion.txt)" | tee -a "$SUMMARY"
+            if [ "$SDK" -lt 30 ]; then
+                "$ADB" -s "$ANDROID_SERIAL" unroot >/dev/null 2>&1 || true
+                "$ADB" -s "$ANDROID_SERIAL" wait-for-device
+            else
+                "$ADB" -s "$ANDROID_SERIAL" shell cmd connectivity airplane-mode disable >/dev/null 2>&1 || true
+            fi
+            ;;
+        r5) run_step r5_agrupadoPorCuentaYResumenConVariasCuentas -e readyAlerts on ;;
+        r6) run_step r6_enQuienEresAlTocarloPideElPinYAbreLaCuenta -e readyAlerts on ;;
+        r7) run_step r7_sonidoYVibracionApagadosDesdeTerminalesYAvisoApagado -e readyAlerts on ;;
+        r8)
+            run_step r8a_servicioConUnaCuentaEnCocinaParaElReinicioPegajoso -e readyAlerts on
+            alerts_sticky_restart
+            ;;
+        r9) run_step r9_alRetirarElDispositivoSeDetieneElServicio -e readyAlerts on ;;
+        *) fail "paso desconocido de la suite alerts: $1" ;;
+    esac
+}
+
 # Corre los pasos [steps] de [suite] contra el servidor ya preparado.
 run_suite() {
     local suite="$1" steps="$2" install="$3"
@@ -554,6 +750,7 @@ run_suite() {
             field) field_step "$step" ;;
             takeaway) takeaway_step "$step" ;;
             precheck) precheck_step "$step" ;;
+            alerts) alerts_step "$step" ;;
         esac
     done
 }
@@ -588,7 +785,7 @@ if [ "$SUITE" = all ]; then
     run_suite access "1 2 3 4 5" 1 "$OUT/access"
     new_server
     run_suite access "6 7" 0 "$OUT/access"
-    for part in catalog waiter field takeaway precheck; do
+    for part in catalog waiter field takeaway precheck alerts; do
         new_server
         run_suite "$part" "$(suite_steps "$part")" 1 "$OUT/$part"
     done

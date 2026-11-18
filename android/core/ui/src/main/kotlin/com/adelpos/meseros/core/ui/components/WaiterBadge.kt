@@ -64,7 +64,8 @@ fun WaiterBadge(
 /**
  * Menú del mesero activo en la barra superior, siempre visible (§3.2, «Cambio rápido de usuario»):
  * su distintivo y su nombre; al tocarlo, «Cambiar de mesero» regresa a la lista de meseros. Cada
- * mesero conserva su propia sesión en el dispositivo.
+ * mesero conserva su propia sesión en el dispositivo. Con [onAlertsHelp] (etapa A2), también
+ * «Avisos de platillos listos», la ayuda del aviso.
  */
 @Composable
 fun ActiveWaiterMenu(
@@ -74,6 +75,7 @@ fun ActiveWaiterMenu(
     onSwitchWaiter: () -> Unit,
     modifier: Modifier = Modifier,
     offline: Boolean = false,
+    onAlertsHelp: (() -> Unit)? = null,
 ) {
     var open by remember { mutableStateOf(false) }
     Box(modifier = modifier) {
@@ -124,6 +126,20 @@ fun ActiveWaiterMenu(
                 modifier =
                     Modifier.heightIn(min = AdelDimens.MinTouchTarget).testTag(TAG_WAITER_SWITCH),
             )
+            // Etapa A2: la ayuda «Avisos de platillos listos».
+            if (onAlertsHelp != null) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.waiter_menu_alerts)) },
+                    leadingIcon = { Icon(AdelIcons.Alert, contentDescription = null) },
+                    onClick = {
+                        open = false
+                        onAlertsHelp()
+                    },
+                    modifier =
+                        Modifier.heightIn(min = AdelDimens.MinTouchTarget)
+                            .testTag(TAG_WAITER_ALERTS_HELP),
+                )
+            }
         }
     }
 }
@@ -131,3 +147,4 @@ fun ActiveWaiterMenu(
 /** Etiquetas para las pruebas. */
 const val TAG_WAITER_MENU = "waiter-menu"
 const val TAG_WAITER_SWITCH = "waiter-menu-switch"
+const val TAG_WAITER_ALERTS_HELP = "waiter-menu-alerts-help"

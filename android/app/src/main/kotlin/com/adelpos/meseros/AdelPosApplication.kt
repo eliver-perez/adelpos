@@ -30,6 +30,9 @@ class AdelPosApplication : Application(), Configuration.Provider {
         // y el modo Mesero.
         container.waiterMode.start()
         container.orderScheduler.schedulePeriodic()
+        // Etapa A2, Fase D: el aviso de platillos listos (arranca su servicio al entrar un mesero
+        // con conexión o al abrir la aplicación; tras reiniciar, ReadyAlertsBootReceiver).
+        container.readyAlerts.start()
     }
 
     /**

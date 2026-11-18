@@ -3,6 +3,25 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <!--
+    Aviso de platillos listos (etapa A2, Fase D; A2-D8):
+    - Servicio en primer plano de tipo specialUse (sin límite de horas, puede arrancar tras
+      reiniciar el equipo) con su permiso; POST_NOTIFICATIONS se pide en tiempo de ejecución desde
+      Android 13, con una explicación antes del diálogo del sistema.
+    - RECEIVE_BOOT_COMPLETED: volver a arrancarlo tras reiniciar si lo último que dijo Go fue que
+      está activo y el día comercial no ha terminado.
+    - REQUEST_IGNORE_BATTERY_OPTIMIZATIONS: pedir (con su porqué) la exclusión de la optimización
+      de batería. La red es la del restaurante (sin servidores de Google ni FCM, la wifi puede no
+      tener internet) y la app no se distribuye por Google Play; ver el avance de la etapa, §0.5.4.
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission
+        android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"
+        tools:ignore="BatteryLife" />
+
+    <!--
     Seguridad (A1-D8 y avance §1.6):
     - allowBackup="false", dataExtractionRules (Android 12+) y fullBackupContent (Android 8 a 11)
       excluyen todo: ni la base local ni las credenciales viajan en copias de seguridad ni en la
@@ -34,6 +53,29 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!--
+        Servicio en primer plano del aviso (no exportado). El subtipo describe el uso, como lo
+        pediría Google Play si algún día se publica (avance de la etapa, §0.5.1).
+        -->
+        <service
+            android:name=".ready.ReadyAlertsService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Recibe en tiempo real, desde la computadora principal del restaurante en la red local, el aviso de que un platillo esta listo para que el mesero lo recoja, aunque la pantalla este apagada." />
+        </service>
+
+        <!-- Tras reiniciar el equipo o actualizar la aplicación (solo acciones del sistema). -->
+        <receiver
+            android:name=".ready.ReadyAlertsBootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
 
         <!--
         WorkManager se inicia a pedido desde AdelPosApplication (Configuration.Provider) para darle

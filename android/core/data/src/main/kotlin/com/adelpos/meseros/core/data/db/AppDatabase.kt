@@ -6,6 +6,10 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import com.adelpos.meseros.core.data.ready.db.READY_ALERTS_TABLES_V6
+import com.adelpos.meseros.core.data.ready.db.ReadyAlertSeenEntity
+import com.adelpos.meseros.core.data.ready.db.ReadyAlertsDao
+import com.adelpos.meseros.core.data.ready.db.ReadyAlertsStateEntity
 import com.adelpos.meseros.core.data.waiter.db.CaptureEntity
 import com.adelpos.meseros.core.data.waiter.db.CustomerEditEntity
 import com.adelpos.meseros.core.data.waiter.db.PendingOrderEntity
@@ -30,8 +34,9 @@ import com.adelpos.meseros.core.data.waiter.db.WaiterPermissionsEntity
  * - Versión 5 (revisión R6): columnas de la cola y las capturas.
  * - Versión 6 (etapa A2, **una sola versión para toda la etapa**): Para llevar (Fase B): capturas
  *   sin mesa con su modalidad y los datos del cliente, y las ediciones del cliente por enviar
- *   (`takeaway_customer_edits`). Las fases C y D agregan sus tablas a esta misma versión antes de
- *   la entrega.
+ *   (`takeaway_customer_edits`); aviso de platillos listos (Fase D): el cursor y lo último que dijo
+ *   Go (`ready_alerts_state`) y los avisos ya mostrados del día (`ready_alerts_seen`). Las fases
+ *   que falten agregan sus tablas a esta misma versión antes de la entrega.
  *
  * Reglas para las fases siguientes: cada cambio sube [version][Database.version] en uno, agrega su
  * `Migration` a [MIGRATIONS] y una prueba con `MigrationTestHelper` (`AppDatabaseMigrationTest`).
@@ -50,6 +55,8 @@ import com.adelpos.meseros.core.data.waiter.db.WaiterPermissionsEntity
             RestaurantSnapshotEntity::class,
             WaiterPermissionsEntity::class,
             CustomerEditEntity::class,
+            ReadyAlertsStateEntity::class,
+            ReadyAlertSeenEntity::class,
         ],
     version = 6,
     exportSchema = true,
@@ -61,6 +68,9 @@ abstract class AppDatabase : RoomDatabase() {
 
     /** Capturas por mesero, cola de pedidos y lo último leído de Go (Fase E). */
     abstract fun waiter(): WaiterDao
+
+    /** Aviso de platillos listos (etapa A2, Fase D): cursor y avisos ya mostrados. */
+    abstract fun readyAlerts(): ReadyAlertsDao
 
     companion object {
         const val FILE_NAME = "adel-pos.db"
@@ -178,12 +188,14 @@ abstract class AppDatabase : RoomDatabase() {
          * 5 → 6 (etapa A2, Para llevar): `captures` admite capturas sin mesa (la tabla se copia:
          * Android 8 no cambia una columna a opcional) con su modalidad y los datos del cliente, y
          * la tabla nueva de ediciones del cliente por enviar; las capturas que había quedan como de
-         * salón, sin cambios. El SQL es el de `schemas/…/6.json`.
+         * salón, sin cambios. Fase D: las dos tablas del aviso de platillos listos, vacías (el
+         * dispositivo empieza sin cursor y pregunta desde el principio del día comercial). El SQL
+         * es el de `schemas/…/6.json`.
          */
         val MIGRATION_5_6: Migration =
             object : Migration(5, 6) {
                 override fun migrate(db: SupportSQLiteDatabase) {
-                    for (statement in WAITER_CHANGES_V6) {
+                    for (statement in WAITER_CHANGES_V6 + READY_ALERTS_TABLES_V6) {
                         db.execSQL(statement)
                     }
                 }

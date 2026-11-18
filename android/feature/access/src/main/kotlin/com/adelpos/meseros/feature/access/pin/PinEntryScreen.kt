@@ -54,7 +54,8 @@ import kotlinx.coroutines.delay
 
 /**
  * Entrada con PIN con su ViewModel: pide la lista al mostrarse y cada [refreshMillis] mientras está
- * a la vista (aparecen los meseros a los que se les acaba de asignar un PIN).
+ * a la vista (aparecen los meseros a los que se les acaba de asignar un PIN). Con
+ * [requestedWaiter], ese mesero queda elegido para escribir su PIN.
  */
 @Composable
 fun PinEntryRoute(
@@ -63,11 +64,21 @@ fun PinEntryRoute(
     viewModel: PinEntryViewModel =
         viewModel(factory = PinEntryViewModel.factory(dependencies.access)),
     refreshMillis: Long = REFRESH_MILLIS,
+    requestedWaiter: String? = null,
 ) {
     LaunchedEffect(viewModel) {
         while (true) {
             viewModel.refresh()
             delay(refreshMillis)
+        }
+    }
+    // Etapa A2: se tocó un aviso de platillos listos en «¿Quién eres?»: se le pide el PIN a su
+    // mesero (si está en la lista y nadie eligió otro).
+    val roster = viewModel.roster
+    LaunchedEffect(requestedWaiter, roster) {
+        val requested = roster?.waiters?.firstOrNull { it.userId == requestedWaiter }
+        if (requested != null && viewModel.selectedId == null) {
+            viewModel.select(requested)
         }
     }
     PinEntryScreen(

@@ -20,7 +20,20 @@ class DevicePreferencesRepository(
         dao.put(DevicePreference(KEY_TABLES_VIEW, view.storedName, clock()))
     }
 
+    /**
+     * Si ya se explicó y se pidió [permission] para el aviso de platillos listos (etapa A2, §4.3:
+     * notificaciones y exclusión de la optimización de batería): se pide una sola vez; después, la
+     * pantalla de ayuda dice qué falta.
+     */
+    suspend fun alertPermissionAsked(permission: String): Boolean =
+        dao.get(KEY_ALERT_ASKED_PREFIX + permission) != null
+
+    suspend fun markAlertPermissionAsked(permission: String) {
+        dao.put(DevicePreference(KEY_ALERT_ASKED_PREFIX + permission, "asked", clock()))
+    }
+
     private companion object {
         const val KEY_TABLES_VIEW = "tables_view"
+        const val KEY_ALERT_ASKED_PREFIX = "ready_alerts.asked."
     }
 }

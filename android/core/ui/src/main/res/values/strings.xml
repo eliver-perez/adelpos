@@ -28,6 +28,7 @@
     <!-- Menú del mesero activo (cambio rápido de usuario, §3.2). -->
     <string name="waiter_menu_switch">Cambiar de mesero</string>
     <string name="waiter_menu_offline">Entraste sin conexión</string>
+    <string name="waiter_menu_alerts">Avisos de platillos listos</string>
     <!-- Para llevar (etapa A2, §3.3): preparación y pago como los dice Go. -->
     <string name="takeaway_preparation_not_sent">Sin enviar a cocina</string>
     <string name="takeaway_preparation_pending">Pendiente</string>

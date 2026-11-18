@@ -4,4 +4,62 @@
     <!-- Navegación principal (etapa A2, §3.1). -->
     <string name="nav_tables">Mesas</string>
     <string name="nav_takeaway">Para llevar</string>
+
+    <!-- Aviso de platillos listos (etapa A2, Fase D, §4; textos de A2-D10). -->
+    <string name="ready_channel_connected_name">AD-EL POS conectado</string>
+    <string name="ready_channel_connected_description">Notificación permanente mientras este dispositivo recibe los avisos de platillos listos, aunque la pantalla esté apagada.</string>
+    <string name="ready_channel_ready_name">Platillos listos</string>
+    <string name="ready_channel_ready_description">Avisa cuando la cocina marca «Listo» los platillos de tus cuentas.</string>
+    <string name="ready_ongoing_title">AD-EL POS conectado</string>
+    <string name="ready_ongoing_connected">Recibiendo avisos de platillos listos</string>
+    <string name="ready_ongoing_waiting">Sin conexión con la computadora principal. Reintentando…</string>
+    <string name="ready_alert_dish_one">platillo listo</string>
+    <string name="ready_alert_dish_other">platillos listos</string>
+    <string name="ready_alert_takeaway">Para llevar #%1$d</string>
+    <string name="ready_alert_takeaway_named">Para llevar #%1$d (%2$s)</string>
+    <string name="ready_alert_account">Cuenta #%1$d</string>
+    <string name="ready_alert_title">%1$s · %2$s</string>
+    <string name="ready_alert_item">%1$d × %2$s</string>
+    <!-- Las comillas conservan el espacio final (Android quita los espacios de las orillas). -->
+    <string name="ready_alert_item_separator">", "</string>
+    <string name="ready_alert_summary_title">Platillos listos</string>
+    <string name="ready_alert_summary_separator">", "</string>
+
+    <!-- Permisos (§4.3): la explicación va antes del diálogo de Android. -->
+    <string name="ready_permission_title">Avisos de platillos listos</string>
+    <string name="ready_permission_notifications_text">Para avisarte cuando la cocina termine tus platillos, aunque la pantalla esté apagada, AD-EL POS necesita permiso para mostrar notificaciones. En el siguiente mensaje elige «Permitir».</string>
+    <string name="ready_permission_battery_text">Para que los avisos lleguen con la pantalla apagada, permite que AD-EL POS funcione sin la optimización de batería. Gasta muy poca: solo mantiene la conexión con la computadora principal del restaurante. En el siguiente mensaje elige «Permitir».</string>
+    <string name="ready_permission_continue">Continuar</string>
+    <string name="ready_permission_later">Ahora no</string>
+
+    <!-- Se tocó el aviso de una cuenta que ya no está abierta. -->
+    <string name="ready_open_closed_title">Esta cuenta ya no está abierta</string>
+    <string name="ready_open_closed_text">Ya se cobró, se canceló o se combinó con otra cuenta.</string>
+    <string name="ready_open_closed_ok">Entendido</string>
+
+    <!-- Aviso dentro de la aplicación (el mesero ya está viendo esa cuenta). -->
+    <string name="ready_in_app_close">Cerrar aviso</string>
+
+    <!-- Pantalla de ayuda «Avisos de platillos listos». -->
+    <string name="ready_help_title">Avisos de platillos listos</string>
+    <string name="ready_help_close">Cerrar</string>
+    <string name="ready_help_intro">Cuando la cocina marca «Listo» un platillo en la pantalla de cocina, el mesero responsable de la cuenta recibe un aviso en este dispositivo, aunque la pantalla esté apagada o la aplicación cerrada.</string>
+    <string name="ready_help_status_title">En este dispositivo</string>
+    <string name="ready_help_running">Los avisos están activos.</string>
+    <string name="ready_help_stopped">Los avisos no están activos ahora: se activan cuando un mesero entra con su PIN con conexión.</string>
+    <string name="ready_help_disabled">«Avisar platillos listos» está apagado para este dispositivo en Administración › Sistema › Terminales.</string>
+    <string name="ready_help_notifications_ok">Notificaciones: permitidas.</string>
+    <string name="ready_help_notifications_off">Notificaciones: desactivadas. Sin ellas los avisos no se ven.</string>
+    <string name="ready_help_notifications_settings">Abrir ajustes de notificaciones</string>
+    <string name="ready_help_battery_ok">Batería: sin restricciones para AD-EL POS.</string>
+    <string name="ready_help_battery_off">Batería: Android puede retrasar los avisos con la pantalla apagada.</string>
+    <string name="ready_help_battery_settings">Quitar la restricción de batería</string>
+    <string name="ready_help_ongoing_title">«AD-EL POS conectado»</string>
+    <string name="ready_help_ongoing_text">Es la notificación permanente que Android exige mientras la aplicación mantiene la conexión con la computadora principal para recibir los avisos. Aparece solo mientras hay meseros que entraron hoy en este dispositivo y desaparece al terminar el día comercial.</string>
+    <string name="ready_help_stop_title">Si se detiene la aplicación</string>
+    <string name="ready_help_stop_text">«Forzar detención» en los Ajustes de Android o «Detener» en el Administrador de tareas paran los avisos hasta que se vuelve a abrir AD-EL POS.</string>
+    <string name="ready_help_stop_detected">La última vez, AD-EL POS se detuvo así: los avisos no llegaron hasta que se abrió de nuevo.</string>
+    <string name="ready_help_sound_title">Sonido y vibración</string>
+    <string name="ready_help_sound_text">Se eligen en Administración › Sistema › Terminales › Editar de este dispositivo. También puedes ajustarlos en el canal «Platillos listos» de los Ajustes de Android.</string>
+    <string name="ready_help_kitchen_text">Solo hay avisos si la cocina marca «Listo» en la pantalla de cocina. Un mesero que entró sin conexión recibe avisos aquí desde su primera entrada con conexión.</string>
 </resources>
