@@ -48,7 +48,10 @@ Guía para el propietario: [docs/INSTALAR_EN_RED.md](docs/INSTALAR_EN_RED.md).
 - **Respaldos automáticos diarios** en la computadora principal (a la hora de inicio del día, últimos 30, carpeta
   configurable, revisados al crearse y con aviso en la pantalla de inicio si fallan), en Sistema › Mantenimiento ›
   Respaldos, con «Respaldar ahora». Restaurar sigue siendo una acción de soporte por línea de comandos.
-- **API v1 para Android** (la aplicación no se hace aquí): contrato OpenAPI y guía en [docs/API_V1.md](docs/API_V1.md).
+- **API v1 para Android**: contrato OpenAPI y guía en [docs/API_V1.md](docs/API_V1.md). Desde las etapas A1 y A2 la
+  aplicación de meseros vive en `android/` (0.2.0, `com.adelpos.meseros`: modo Mesero sin conexión, Para llevar,
+  precuenta desde el dispositivo y aviso de platillos listos; guía en [docs/ANDROID_INSTALAR.md](docs/ANDROID_INSTALAR.md)
+  y reglas de desarrollo en [android/CLAUDE.md](android/CLAUDE.md)).
 
 Windows (servicio, instalador para todo el equipo y pruebas cruzadas) es la Fase W de la etapa
 ([docs/NOTAS_WINDOWS.md](docs/NOTAS_WINDOWS.md)).
@@ -287,7 +290,8 @@ Las pruebas de integración crean y eliminan únicamente bases aleatorias `adel_
 - [docs/NOTAS_WINDOWS.md](docs/NOTAS_WINDOWS.md): qué depende de cada sistema, qué se hizo en Windows en la etapa 9E, qué falta verificar allí de la 9F y qué hacer en la Fase W de la 9G.
 - [docs/TERMINAL_DE_COCINA.md](docs/TERMINAL_DE_COCINA.md): cómo configurar una terminal de cocina por estaciones (etapa 9F).
 - [docs/INSTALAR_EN_RED.md](docs/INSTALAR_EN_RED.md): guía corta para instalar la computadora principal y las terminales, emparejarlas, revocar una terminal y cuidar los respaldos (etapa 9G).
-- [docs/API_V1.md](docs/API_V1.md): contrato de la API v1 para clientes y la futura aplicación Android (etapa 9G).
+- [docs/API_V1.md](docs/API_V1.md): contrato de la API v1 para clientes y la aplicación Android (etapa 9G; al día con las etapas A1 y A2).
+- [docs/ANDROID_INSTALAR.md](docs/ANDROID_INSTALAR.md): guía corta de la aplicación Android de meseros: instalar el APK de prueba, pasar de la 0.1.0 a la 0.2.0, emparejar, permisos y PIN de los meseros, sin conexión, Para llevar, precuenta y avisos de platillos listos (etapas A1 y A2).
 - [docs/MIGRAR_SISTEMA_ANTERIOR.md](docs/MIGRAR_SISTEMA_ANTERIOR.md): guía corta para migrar el sistema anterior: instalar Docker Desktop, preparar el paquete, importarlo, repetirlo al pasar a producción y qué hacer si la validación no cuadra (etapa 9H).
 - [docs/MIGRACION_ANALISIS.md](docs/MIGRACION_ANALISIS.md) y [docs/MIGRACION_FORMATO.md](docs/MIGRACION_FORMATO.md): análisis del sistema anterior (estructura, conteos y correspondencia) y formato del paquete de migración y del lector (etapa 9H).
 - [docs/CODING_CONVENTIONS.md](docs/CODING_CONVENTIONS.md): reglas permanentes de legibilidad.
