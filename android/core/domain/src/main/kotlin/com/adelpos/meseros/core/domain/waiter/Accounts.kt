@@ -43,6 +43,10 @@ data class Totals(val subtotal: Money, val discount: Money, val total: Money) {
  * @param revision revisión vigente: toda escritura la lleva y Go responde `ACCOUNT_CONFLICT` si
  *   otra terminal la cambió.
  * @param mergedIntoId la cuenta en que se combinó (solo si [state] es `merged`).
+ * @param mode de salón o para llevar (etapa A2).
+ * @param customer nombre y teléfono del cliente (vacíos en salón).
+ * @param paymentState y [deliveryState]: como los da Go (`payment_state`, `delivery_state`); la
+ *   aplicación nunca los calcula ([TakeawayStates]).
  */
 data class AccountSummary(
     val id: String,
@@ -60,6 +64,10 @@ data class AccountSummary(
     val elapsedSeconds: Long?,
     val longOpen: Boolean,
     val mergedIntoId: String? = null,
+    val mode: OrderMode = OrderMode.DINE_IN,
+    val customer: TakeawayCustomer = TakeawayCustomer.NONE,
+    val paymentState: String? = null,
+    val deliveryState: String? = null,
 ) {
     val isOpen: Boolean
         get() = state == STATE_OPEN

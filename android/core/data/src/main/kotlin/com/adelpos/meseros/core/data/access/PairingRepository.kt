@@ -47,8 +47,8 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
  *    version`; si el servidor vino de la búsqueda, su huella debe empezar como la anunciada (`fp`)
  *    y su `server_id` ser el anunciado. Con la versión se comprueba, antes de pedir el código
  *    (también con la dirección escrita), que el servidor sirva para esta aplicación
- *    ([ServerCompatibility.check]): uno anterior a 0.12.0 o sin `waiter-pin-v1` lleva a «Actualiza
- *    el servidor del restaurante» ([PairingProblem.UpdateServer]).
+ *    ([ServerCompatibility.check]): uno anterior a 0.13.0 o sin `waiter-pin-v1` o `takeaway-v1`
+ *    lleva a «Actualiza el servidor del restaurante» ([PairingProblem.UpdateServer]).
  * 2. Solicitud con el compromiso SHA-256(nT), número del servidor nS y revelación de nT.
  * 3. Código de 6 dígitos con la huella fijada; el administrador lo escribe en la computadora
  *    principal.

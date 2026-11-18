@@ -1,17 +1,18 @@
 # Teléfonos y tabletas de meseros
 
-Guía corta para usar la aplicación **AD-EL POS para Android** en los teléfonos y tabletas de los meseros (etapa A1).
-Con ella cada mesero:
+Guía corta para usar la aplicación **AD-EL POS para Android** en los teléfonos y tabletas de los meseros (etapas A1 y
+A2). Con ella cada mesero:
 
 - Entra con **su nombre y su PIN** en un teléfono o una tableta que comparten varios meseros.
 - Ve las mesas y sus cuentas, captura los pedidos y los manda a cocina con **«Enviar a cocina»**.
+- Toma pedidos **Para llevar** con el mismo catálogo y ve si ya están listos y pagados (sección 6).
 - Sigue capturando **sin conexión**: los pedidos se mandan solos cuando vuelve la red.
 
 La **computadora principal** sigue mandando en todo: precios, impuestos, permisos y estados los decide ella al recibir
 cada pedido. Los precios que muestra el teléfono son de referencia. **El teléfono o la tableta no cobra**: se cobra en
 la caja, como siempre.
 
-> **Versión de prueba.** Esta es la versión **0.1.0** de la aplicación. No viene de la tienda de Google (Play Store):
+> **Versión de prueba.** Esta es la versión **0.2.0** de la aplicación. No viene de la tienda de Google (Play Store):
 > se instala con un archivo y está firmada con una llave de desarrollo, por eso Android avisa al instalarla. Todavía no
 > se ha probado en un teléfono ni en una tableta reales (solo en los emuladores de la Mac de pruebas).
 
@@ -48,7 +49,7 @@ pedidos sin enviar) y avisa a soporte. **De la 0.1.0 a la 0.2.0 es distinto**: n
 
 **Si desinstalas la aplicación** (o borras sus datos en los Ajustes de Android), el dispositivo olvida el
 emparejamiento y se pierden los pedidos que no se hayan enviado. Al volver a instalarla hay que emparejarlo de nuevo
-(sección 3). En la computadora principal, revoca el registro anterior de ese dispositivo (sección 7).
+(sección 3). En la computadora principal, revoca el registro anterior de ese dispositivo (sección 8).
 
 ### Pasar de la 0.1.0 a la 0.2.0
 
@@ -68,7 +69,7 @@ En cada teléfono o tableta que tenga la 0.1.0, en este orden:
 2. **Desinstala la 0.1.0**: en los **Ajustes** del dispositivo, **Aplicaciones › AD-EL POS › Desinstalar** (o
    mantén presionado su ícono y elige «Desinstalar»). Los nombres cambian un poco según la marca.
 3. **Retira el dispositivo en la computadora principal**: en **Administración › Sistema › Terminales**, busca ese
-   teléfono o esa tableta, toca **«Revocar»** y **«Confirmar revocación»** (sección 7). Así su autorización anterior
+   teléfono o esa tableta, toca **«Revocar»** y **«Confirmar revocación»** (sección 8). Así su autorización anterior
    ya no sirve.
 4. **Instala la 0.2.0** con los pasos del principio de esta sección y **empareja** el dispositivo con su código
    (sección 3). Puedes ponerle el mismo nombre de antes. Cada mesero entra con su PIN de siempre; la primera vez en
@@ -82,11 +83,11 @@ versión de cada una): envía lo pendiente desde ella y sigue desde el paso 2.
 
 ## 2. Antes de emparejar
 
-- **La computadora principal debe tener AD-EL POS 0.12.0 o posterior.** Lo ves en la computadora principal, en
+- **La computadora principal debe tener AD-EL POS 0.13.0 o posterior.** Lo ves en la computadora principal, en
   **Administración › Sistema › Configuración › «Ver estado del sistema»**, en «Versión de AD-EL POS». Si tiene una
   versión anterior, el teléfono lo dice antes de pedir el código (y también si ya estaba emparejado):
   **«Actualiza el servidor del restaurante»**, con «Volver a comprobar» y «Elegir otra computadora principal». Lo que
-  hay que actualizar es la computadora principal: soporte o el administrador instala la 0.12.0 con su instalador (pide
+  hay que actualizar es la computadora principal: soporte o el administrador instala la 0.13.0 con su instalador (pide
   la contraseña de administrador de la Mac). Cómo se instala la computadora principal:
   [INSTALAR_EN_RED.md](INSTALAR_EN_RED.md).
 - **El teléfono o la tableta debe estar en la misma red wifi del restaurante** que la computadora principal (la red
@@ -145,7 +146,21 @@ revisa que tenga marcados estos y toca **«Guardar rol»**:
 | Modificar lo ya enviado (opcional)         | «Modificar partidas confirmadas sin aprobación adicional»                             |
 | Cancelar unidades ya enviadas (opcional)   | «Cancelar partidas o cantidades confirmadas»                                          |
 
-Para bajar la cantidad de algo ya enviado hacen falta los dos últimos. Si a un mesero le falta un permiso, el
+Para bajar la cantidad de algo ya enviado hacen falta los dos últimos.
+
+Para **Para llevar** (sección 6), marca además:
+
+| Para que el mesero pueda…                                          | Marca                                                   |
+| ------------------------------------------------------------------ | ------------------------------------------------------- |
+| Ver los pedidos para llevar y sus estados (y la opción en el menú) | «Consultar tablero de pedidos para llevar y ventanilla» |
+| Tomar pedidos para llevar y anotar el nombre y el teléfono         | «Administrar datos de pedidos para llevar»              |
+| Marcar «Entregado» un pedido ya pagado (opcional)                  | «Registrar entrega de pedidos para llevar»              |
+
+Las dos primeras van juntas (sin la segunda solo ve la lista). Para capturar hacen falta además los de arriba («Abrir
+cuentas», «Capturar y editar borradores de pedidos», «Confirmar pedidos», catálogo y precios). Sin la tercera, el
+mesero ve si el pedido está pagado y entregado, pero la entrega se marca en la caja. El mesero **nunca cobra** y no se
+entrega un pedido sin pagar: si no está pagado, el teléfono dice «Cobrar en caja antes de entregar». Para llevar
+necesita la computadora principal en la versión **0.13.0**. Si a un mesero le falta un permiso, el
 dispositivo lo dice («No tienes permiso para ver las mesas…», «Sin permiso para enviar a cocina.») y la computadora
 principal rechaza lo que no tenga permitido. El permiso de marcar productos como agotados no hace falta: desde el
 teléfono no se marcan.
@@ -212,14 +227,54 @@ Cada pedido tiene uno de estos estados:
 - **No se puede cambiar de mesero** con pedidos sin enviar (sección 4).
 - **El dispositivo no cobra.** Las cuentas se cobran en la caja.
 
-## 6. Si no encuentra la computadora principal
+## 6. Para llevar
+
+Abajo de la pantalla están **«Mesas»** y **«Para llevar»** (en el teléfono y en la tableta). «Para llevar» solo
+aparece si el rol del mesero tiene el permiso de ver los pedidos para llevar (sección 4).
+
+**Tomar un pedido.**
+
+1. En «Para llevar», toca **«Nuevo pedido»**: entra directo al catálogo, sin formularios. Se captura igual que en una
+   mesa (búsqueda, personalizar, cambiar o quitar lo que no se ha enviado).
+2. Si quieres, anota el **nombre del cliente** y su **teléfono** con **«Nombre y teléfono»** (en la cuenta del pedido;
+   en el teléfono, en «Ver la cuenta»). Los dos son opcionales y se pueden escribir o cambiar **en cualquier momento**:
+   antes del primer producto, mientras capturas o después, desde la lista.
+3. Toca **«Enviar a cocina»**, como en una mesa. Vuelves a la lista de Para llevar.
+
+- **Con conexión**, el pedido aparece en la computadora principal en cuanto guardas el primer producto (con su folio).
+  **Sin conexión**, aparece cuando se envía: mientras tanto se ve en la lista como «Por enviar» y se manda solo al
+  volver la red, con la misma cola y los mismos estados que los pedidos de las mesas (sección 5), incluido «Requiere tu
+  revisión».
+- Si sales de un «Nuevo pedido» **sin agregar productos**, no queda nada: ni en la computadora principal ni en el
+  dispositivo (aunque hayas escrito el nombre).
+- El nombre y el teléfono que cambies **sin conexión** se guardan en el dispositivo y se mandan solos en cuanto el
+  mesero que los cambió entra con su PIN con conexión. Mientras tanto, la lista dice que se guardarán al volver la
+  conexión. Si se cambian dos veces, queda el último.
+
+**La lista.** Muestra los pedidos para llevar abiertos, del más antiguo al más reciente, con su **folio**, el nombre
+(si lo anotaron), cuánto tiempo llevan, cómo va la **cocina** («Pendiente», «En preparación», «Listo», o «Sin enviar a
+cocina») y el **pago** («Sin pagar», «Pago parcial», «Pagado»), como los dice la computadora principal. Arriba
+aparecen los de este dispositivo que todavía no llegan a la computadora principal («Por enviar», o una captura sin
+enviar a cocina). Se actualiza sola con conexión; **sin conexión** muestra lo último que se vio y a qué hora («Sin
+conexión: es lo último que se vio, a las 14:35.»). Toca un pedido para seguir capturando en él. El estado de la cocina
+solo cambia si la cocina marca los platillos en la pantalla de cocina.
+
+**Entregar.**
+
+- **«Entregado»** aparece solo cuando el pedido **ya está pagado** y el mesero tiene el permiso de registrar entregas
+  (sección 4). Necesita conexión. Un pedido pagado y entregado sale de la lista.
+- Si no está pagado, dice **«Cobrar en caja antes de entregar»**: el teléfono **no cobra**; se cobra en la caja, como
+  siempre, y después se entrega.
+- Sin el permiso de registrar entregas, el mesero ve si está pagado y entregado, y la entrega se marca en la caja.
+
+## 7. Si no encuentra la computadora principal
 
 Revisa en este orden:
 
 1. **La misma wifi.** El dispositivo debe estar en la red principal del restaurante, no en la de invitados. Una red
    que aísla a los equipos entre sí tampoco deja que se vean. Si la wifi se cae, el teléfono puede pasarse a sus datos
    móviles y ahí no ve la computadora principal.
-2. **La computadora principal está encendida** y tiene AD-EL POS **0.12.0 o posterior** (sección 2). No hace falta
+2. **La computadora principal está encendida** y tiene AD-EL POS **0.13.0 o posterior** (sección 2). No hace falta
    abrir AD-EL POS en ella: el servidor arranca solo.
 3. **Escribe la dirección a mano** en «Escribir la dirección» (sección 3, paso 3). Sirve en redes que no dejan buscar.
 4. **Permisos de la aplicación.** Esta versión no pide permisos de Android para conectarse. Si alguna vez Android
@@ -244,7 +299,7 @@ Otros avisos que puede mostrar el dispositivo:
   encima de la actual (sección 1) y **no la desinstales**, porque se perderían los pedidos sin enviar. De la 0.1.0 a
   la 0.2.0, en cambio, sigue «Pasar de la 0.1.0 a la 0.2.0» (sección 1).
 
-## 7. Retirar un teléfono o una tableta
+## 8. Retirar un teléfono o una tableta
 
 1. En **Administración › Sistema › Terminales**, busca el dispositivo, toca **«Revocar»** y **«Confirmar
    revocación»**. Desde ese momento ya no puede hacer nada en el restaurante, y queda en el Registro de movimientos.
@@ -257,10 +312,10 @@ Otros avisos que puede mostrar el dispositivo:
    el restaurante. Por precaución, cambia el PIN de los meseros que lo usaban.
 5. Para volver a usarlo, toca **«Emparejar de nuevo»** en el dispositivo y apruébalo otra vez con su código (sección 3).
 
-## 8. Lo que todavía no hace esta versión de prueba
+## 9. Lo que todavía no hace esta versión de prueba
 
-- **Para llevar**, **imprimir la precuenta** desde el dispositivo y el **aviso de platillos listos**: llegan en la
-  siguiente etapa (A2).
+- **Imprimir la precuenta** desde el dispositivo y el **aviso de platillos listos**: llegan más adelante en esta misma
+  etapa (A2).
 - **No cobra**, ni mesas ni Para llevar: se cobra en la caja.
 - No marca productos como agotados (se hace en la caja).
 - **No se ha probado en un teléfono ni en una tableta reales**, solo en emuladores.

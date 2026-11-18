@@ -8,9 +8,9 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 
 /*
- * Interfaces del modo Mesero (Fase E) para las pantallas de `feature:waiter` (y, en la A2, Para
- * llevar). Las implementa `core:data` sobre la API v1, Room y WorkManager; las pantallas solo
- * conocen estas.
+ * Interfaces del modo Mesero (Fase E) para las pantallas de `feature:waiter`, la captura
+ * compartida de `core:capture` y, desde la A2, Para llevar (`feature:takeaway`). Las implementa
+ * `core:data` sobre la API v1, Room y WorkManager; las pantallas solo conocen estas.
  */
 
 /** Cómo va la lectura de mesas y cuentas desde Go. */
@@ -100,6 +100,21 @@ interface CaptureService {
         account: AccountSummary?,
         seenAccountIds: List<String>,
     ): Capture
+
+    /**
+     * Para llevar (A2, §3.2): retoma la captura del mesero en ese pedido para llevar o, con
+     * [account] null («Nuevo pedido»), empieza una nueva que entra directo al catálogo. El pedido
+     * nace en Go con el primer producto (o, sin conexión, al enviarse); salir sin productos no deja
+     * nada ni en Go ni en el dispositivo.
+     */
+    suspend fun openTakeaway(userId: String, account: AccountSummary?): Capture
+
+    /**
+     * Cambia el nombre y el teléfono del cliente de un pedido para llevar desde la captura (A2-D1).
+     * Mientras el pedido no ha salido a Go se guardan en la captura (viajan al crearlo); después,
+     * como una edición aparte que se envía en cuanto se pueda (la última gana).
+     */
+    suspend fun setCustomer(captureId: String, customer: TakeawayCustomer)
 
     /** Un toque sobre el borrador; [seenPrice] es el precio de referencia que vio el mesero. */
     suspend fun stage(captureId: String, operation: DraftOperation, seenPrice: Money?)

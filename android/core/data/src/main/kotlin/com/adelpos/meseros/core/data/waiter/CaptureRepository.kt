@@ -4,6 +4,7 @@ import com.adelpos.meseros.core.data.api.ApiErrors
 import com.adelpos.meseros.core.data.api.ApiJson
 import com.adelpos.meseros.core.data.api.ApiOutcome
 import com.adelpos.meseros.core.data.api.ApiProblem
+import com.adelpos.meseros.core.data.waiter.db.CustomerEditEntity
 import com.adelpos.meseros.core.data.waiter.db.WaiterDao
 import com.adelpos.meseros.core.data.waiter.db.WaiterStorage
 import com.adelpos.meseros.core.domain.error.AppError
@@ -20,12 +21,14 @@ import com.adelpos.meseros.core.domain.waiter.DraftSync
 import com.adelpos.meseros.core.domain.waiter.OfflineOrderPlan
 import com.adelpos.meseros.core.domain.waiter.OnlineConfirm
 import com.adelpos.meseros.core.domain.waiter.OrderFactory
+import com.adelpos.meseros.core.domain.waiter.OrderMode
 import com.adelpos.meseros.core.domain.waiter.OrderSendRules
 import com.adelpos.meseros.core.domain.waiter.OrderState
 import com.adelpos.meseros.core.domain.waiter.PendingOrder
 import com.adelpos.meseros.core.domain.waiter.SendOutcome
 import com.adelpos.meseros.core.domain.waiter.SendRequest
 import com.adelpos.meseros.core.domain.waiter.TableAccountRef
+import com.adelpos.meseros.core.domain.waiter.TakeawayCustomer
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CompletableDeferred
@@ -59,7 +62,12 @@ import kotlinx.serialization.SerializationException
  *   respuesta (lo espera o lo repite con su clave) y la confirmación en línea usa **la clave del
  *   pedido** (revisión R6, C1 y A1);
  * - «Descartar la captura» también quita de Go lo suyo guardado (y la cuenta vacía que nació con la
- *   captura); sin conexión el descarte queda pendiente (revisión R6, A2).
+ *   captura); sin conexión el descarte queda pendiente (revisión R6, A2);
+ * - **Para llevar** (etapa A2): la misma captura sin mesa; el pedido nace con el primer producto
+ *   (`openAccount` con `mode: takeaway`, el origen «Para llevar» y el nombre y el teléfono) o, sin
+ *   conexión, al enviarse (`destination.takeaway`). Mientras el pedido no sale a Go, el nombre y el
+ *   teléfono se guardan en la captura; después, como una edición aparte (A2-D1), para que todo
+ *   reintento con la misma clave lleve el mismo contenido.
  *
  * Todo sale con las cabeceras del **mesero que capturó** (revisión R3, M5).
  */
@@ -166,6 +174,108 @@ class CaptureRepository(
             refreshFromGo(created.id)
         }
         return created
+    }
+
+    override suspend fun openTakeaway(userId: String, account: AccountSummary?): Capture {
+        val existing = edits.withLock {
+            val mine =
+                dao.capturesOf(userId).map(WaiterStorage::toCapture).filter { capture ->
+                    capture.takeaway && capture.sync != DraftSync.DISCARDING
+                }
+            if (account != null) {
+                mine.firstOrNull { it.accountId == account.id }
+            } else {
+                // «Nuevo pedido» siempre empieza vacío; se reutiliza una captura nueva que quedó
+                // vacía (por ejemplo, si Android cerró la aplicación con ella abierta).
+                mine
+                    .firstOrNull { capture ->
+                        capture.accountId == null &&
+                            !capture.inProgress &&
+                            capture.pendingOperationId == null
+                    }
+                    ?.let { idle ->
+                        val fresh = idle.copy(customer = TakeawayCustomer.NONE)
+                        save(fresh)
+                        dao.deleteCustomerEdit(fresh.id)
+                        fresh
+                    }
+            }
+        }
+        if (existing != null) {
+            requestSync(existing.id)
+            return existing
+        }
+        val created =
+            Capture(
+                id = newId(),
+                waiterUserId = userId,
+                tableId = null,
+                tableName = "",
+                accountId = account?.id,
+                accountName = account?.name,
+                seenAccountIds = emptyList(),
+                base = emptyList(),
+                baseRevision = 0,
+                operations = emptyList(),
+                ownItemIds = emptySet(),
+                seenPrices = emptyMap(),
+                sync = DraftSync.SAVED,
+                syncMessage = null,
+                tableAccounts = emptyList(),
+                pendingOperationId = null,
+                inFlightCount = 0,
+                createdAtMillis = clock(),
+                mode = OrderMode.TAKEAWAY,
+            )
+        edits.withLock { save(created) }
+        if (account != null) {
+            refreshFromGo(created.id)
+        }
+        return created
+    }
+
+    override suspend fun setCustomer(captureId: String, customer: TakeawayCustomer) {
+        val wanted = customer.trimmed()
+        var queued = false
+        edits.withLock {
+            val capture = load(captureId) ?: return
+            if (!capture.takeaway || capture.sync == DraftSync.DISCARDING) {
+                return
+            }
+            if (capture.customerEditable) {
+                // Todavía no sale nada a Go: viajan con el pedido al crearse. Una edición anterior
+                // (de cuando salía una apertura que Go no aceptó) queda vieja: esta es la última.
+                save(capture.copy(customer = wanted))
+                dao.deleteCustomerEdit(capture.id)
+                return
+            }
+            // El pedido ya salió (o está saliendo) a Go: la edición va aparte y se envía en cuanto
+            // se pueda, con su propia clave (A2-D1). Si ya había una igual, se conserva su clave.
+            val key = capture.accountId ?: capture.id
+            val previous = dao.customerEditFor(key, capture.accountId)
+            val same =
+                previous != null &&
+                    previous.customerName == wanted.name &&
+                    previous.phone == wanted.phone
+            if (same) {
+                return
+            }
+            dao.replaceCustomerEdit(
+                CustomerEditEntity(
+                    key = key,
+                    accountId = capture.accountId,
+                    waiterUserId = capture.waiterUserId,
+                    customerName = wanted.name,
+                    phone = wanted.phone,
+                    operationId = newId(),
+                    updatedAt = clock(),
+                ),
+            )
+            queued = true
+        }
+        if (queued) {
+            scheduler.requestSend()
+        }
     }
 
     override suspend fun stage(captureId: String, operation: DraftOperation, seenPrice: Money?) {
@@ -286,7 +396,20 @@ class CaptureRepository(
                     ),
                 )
             } else {
-                save(movedToNewAccount(capture))
+                var moved = movedToNewAccount(capture)
+                if (capture.takeaway) {
+                    // Un pedido para llevar nuevo lleva el último nombre y teléfono del mesero; la
+                    // edición pendiente era de un pedido que ya no está abierto.
+                    val pending = dao.customerEditFor(capture.id, capture.accountId)
+                    if (pending != null) {
+                        moved =
+                            moved.copy(
+                                customer = TakeawayCustomer(pending.customerName, pending.phone),
+                            )
+                        dao.deleteCustomerEdit(pending.key)
+                    }
+                }
+                save(moved)
             }
         }
         requestSync(captureId)
@@ -550,12 +673,13 @@ class CaptureRepository(
                 api.openAccount(
                     transport,
                     headers,
-                    OpenAccountBody(
+                    WaiterMapper.openBody(
                         operationId = operationId,
-                        mode = DINE_IN,
+                        mode = sending.mode,
                         tableId = sending.tableId,
                         seenAccountIds = sending.seenAccountIds,
-                        items = items.map(WaiterMapper::draftItem),
+                        customer = sending.customer,
+                        items = items,
                     ),
                 )
             } else {
@@ -634,7 +758,17 @@ class CaptureRepository(
                     syncMessage = null,
                 )
             save(next)
+            if (capture.accountId == null && capture.takeaway) {
+                // El pedido para llevar nació en Go: una edición del cliente hecha mientras salía
+                // ya sabe a qué cuenta va (A2-D1).
+                dao.bindCustomerEdit(captureId, bill.account.id)
+            }
             next
+        }
+        if (
+            acknowledged.takeaway && dao.customerEditFor(captureId, acknowledged.accountId) != null
+        ) {
+            scheduler.requestSend()
         }
         if (acknowledged.operations.isNotEmpty()) {
             requestSync(captureId)
@@ -977,12 +1111,13 @@ class CaptureRepository(
                 api.openAccount(
                     transport,
                     headers,
-                    OpenAccountBody(
+                    WaiterMapper.openBody(
                         operationId = operationId,
-                        mode = DINE_IN,
+                        mode = capture.mode,
                         tableId = capture.tableId,
                         seenAccountIds = capture.seenAccountIds,
-                        items = capture.inFlightItems.map(WaiterMapper::draftItem),
+                        customer = capture.customer,
+                        items = capture.inFlightItems,
                     ),
                 )
             when (opened) {
@@ -1228,7 +1363,6 @@ class CaptureRepository(
         /** Un pedido sin conexión admite hasta 20 partidas (Go, `submitOfflineOrder`). */
         const val MAXIMUM_ORDER_LINES = 20
 
-        private const val DINE_IN = "dine_in"
         private const val TABLE_HAS_ACCOUNT = "TABLE_HAS_ACCOUNT"
         private const val ACCOUNT_CONFLICT = "ACCOUNT_CONFLICT"
         private const val ACCOUNT_NOT_EMPTY = "ACCOUNT_NOT_EMPTY"

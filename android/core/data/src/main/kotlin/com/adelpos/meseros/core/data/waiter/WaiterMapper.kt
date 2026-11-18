@@ -13,11 +13,14 @@ import com.adelpos.meseros.core.domain.waiter.DiningTable
 import com.adelpos.meseros.core.domain.waiter.DraftLine
 import com.adelpos.meseros.core.domain.waiter.DraftQuote
 import com.adelpos.meseros.core.domain.waiter.OrderChange
+import com.adelpos.meseros.core.domain.waiter.OrderMode
 import com.adelpos.meseros.core.domain.waiter.PreparationState
 import com.adelpos.meseros.core.domain.waiter.QuotedLine
 import com.adelpos.meseros.core.domain.waiter.RestaurantSettings
 import com.adelpos.meseros.core.domain.waiter.SentLine
 import com.adelpos.meseros.core.domain.waiter.TableShape
+import com.adelpos.meseros.core.domain.waiter.Takeaway
+import com.adelpos.meseros.core.domain.waiter.TakeawayCustomer
 import com.adelpos.meseros.core.domain.waiter.Totals
 
 /** Correspondencia entre las formas del contrato del modo Mesero y el dominio. */
@@ -79,6 +82,10 @@ object WaiterMapper {
             elapsedSeconds = dto.elapsedSeconds,
             longOpen = dto.longOpen,
             mergedIntoId = dto.mergedIntoId,
+            mode = OrderMode.fromWireName(dto.mode),
+            customer = TakeawayCustomer(dto.customerName, dto.phone),
+            paymentState = dto.paymentState,
+            deliveryState = dto.deliveryState,
         )
 
     fun draftLine(dto: DraftItemDto): DraftLine =
@@ -162,6 +169,43 @@ object WaiterMapper {
             acceptable = dto.acceptable,
             accountId = dto.accountId,
         )
+
+    /**
+     * El cuerpo de `openAccount` (creación diferida con el primer producto) de una captura o de un
+     * guardado sin respuesta que se repite **igual**: en una mesa, con `table_id` y las cuentas que
+     * se veían en ella; en un pedido para llevar (etapa A2), sin mesa, con el origen «Para llevar»
+     * y el nombre y el teléfono con que sale.
+     */
+    fun openBody(
+        operationId: String,
+        mode: OrderMode,
+        tableId: String?,
+        seenAccountIds: List<String>,
+        customer: TakeawayCustomer,
+        items: List<DraftLine>,
+    ): OpenAccountBody =
+        when (mode) {
+            OrderMode.DINE_IN ->
+                OpenAccountBody(
+                    operationId = operationId,
+                    mode = mode.wireName,
+                    tableId = requireNotNull(tableId) { "Una cuenta de salón nace en una mesa" },
+                    seenAccountIds = seenAccountIds,
+                    items = items.map(::draftItem),
+                )
+            OrderMode.TAKEAWAY -> {
+                val trimmed = customer.trimmed()
+                OpenAccountBody(
+                    operationId = operationId,
+                    mode = mode.wireName,
+                    tableId = null,
+                    items = items.map(::draftItem),
+                    origin = Takeaway.ORIGIN,
+                    customerName = trimmed.name,
+                    phone = trimmed.phone,
+                )
+            }
+        }
 
     /** El cambio tal como lo dio Go, para devolverlo en la confirmación. */
     fun changeDto(change: OrderChange): OfflineChangeDto =

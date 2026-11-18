@@ -310,7 +310,7 @@ class AccessRepositoryTest {
         go.serverVersion = "0.11.0"
         access.recheck()
         assertEquals(DeviceStatus.UpdateServer("0.11.0"), access.status.value)
-        go.serverVersion = "0.12.0"
+        go.serverVersion = "0.13.0"
         access.recheck()
         assertTrue(access.status.value is DeviceStatus.Ready)
     }

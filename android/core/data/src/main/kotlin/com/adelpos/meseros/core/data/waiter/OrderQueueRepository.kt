@@ -20,6 +20,7 @@ import com.adelpos.meseros.core.domain.waiter.OrderState
 import com.adelpos.meseros.core.domain.waiter.OrderTransitions
 import com.adelpos.meseros.core.domain.waiter.OthersPending
 import com.adelpos.meseros.core.domain.waiter.PendingOrder
+import com.adelpos.meseros.core.domain.waiter.TakeawayCustomer
 import com.adelpos.meseros.core.domain.waiter.WaiterWorkSummary
 import java.util.UUID
 import kotlinx.coroutines.flow.Flow
@@ -235,7 +236,19 @@ class OrderQueueRepository(
                     capturedAtEpochMillis = capture.createdAtMillis,
                 )
             }
-        return orders + drafts
+        // Para llevar (A2-D1): el nombre y el teléfono que todavía no llegaron a Go también se
+        // dicen antes de borrar.
+        val customers =
+            dao.customerEdits().map(WaiterStorage::toEdit).map { edit ->
+                UnsentOrder(
+                    waiterName = "",
+                    description =
+                        "$TAKEAWAY_PLACE: nombre y teléfono sin guardar " +
+                            "(«${edit.customer.name}», «${edit.customer.phone}»)",
+                    capturedAtEpochMillis = edit.updatedAtMillis,
+                )
+            }
+        return orders + drafts + customers
     }
 
     /**
@@ -328,6 +341,8 @@ class OrderQueueRepository(
             pendingOperationId = null,
             inFlightCount = 0,
             createdAtMillis = clock(),
+            mode = order.destination.mode,
+            customer = order.destination.customer,
         )
     }
 
@@ -374,6 +389,9 @@ class OrderQueueRepository(
             pendingOperationId = unresolved?.operationId?.takeIf { repeatOpening },
             inFlightCount = 0,
             createdAtMillis = clock(),
+            mode = order.destination.mode,
+            // La apertura se repite igual: con el cliente con que salió.
+            customer = unresolved?.customer ?: order.destination.customer,
         )
     }
 
@@ -382,8 +400,22 @@ class OrderQueueRepository(
             order.lines.joinToString(", ") { line ->
                 "${line.item.line.quantity} × ${line.productName}"
             }
-        return "${order.destination.tableName}: $lines"
+        val place =
+            if (order.destination.takeaway) {
+                takeawayPlace(order.destination.customer)
+            } else {
+                order.destination.tableName
+            }
+        return "$place: $lines"
     }
+
+    /** «Para llevar» y, si se capturó, el nombre del cliente (para la bitácora). */
+    private fun takeawayPlace(customer: TakeawayCustomer): String =
+        if (customer.name.isBlank()) {
+            TAKEAWAY_PLACE
+        } else {
+            "$TAKEAWAY_PLACE (${customer.name.trim()})"
+        }
 
     private fun describeCapture(capture: Capture): String {
         val lines =
@@ -392,10 +424,16 @@ class OrderQueueRepository(
                 .joinToString(", ") { item ->
                     "${item.line.quantity} × ${describe(item.line) ?: UNKNOWN_PRODUCT}"
                 }
+        val place =
+            if (capture.takeaway) {
+                takeawayPlace(capture.customer)
+            } else {
+                capture.tableName
+            }
         if (capture.sync == DraftSync.DISCARDING) {
-            return "${capture.tableName} (descartado, sin quitar todavía de la cuenta): $lines"
+            return "$place (descartado, sin quitar todavía de la cuenta): $lines"
         }
-        return "${capture.tableName} (sin enviar a cocina): $lines"
+        return "$place (sin enviar a cocina): $lines"
     }
 
     companion object {
@@ -407,5 +445,6 @@ class OrderQueueRepository(
         const val RECEIVED_KEPT_MILLIS: Long = 12L * 60 * 60 * 1000
 
         private const val UNKNOWN_PRODUCT = "Producto"
+        private const val TAKEAWAY_PLACE = "Para llevar"
     }
 }

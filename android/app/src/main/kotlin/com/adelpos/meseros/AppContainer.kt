@@ -3,6 +3,7 @@ package com.adelpos.meseros
 import android.content.Context
 import android.os.Build
 import android.os.SystemClock
+import com.adelpos.meseros.core.capture.CaptureDependencies
 import com.adelpos.meseros.core.data.access.AccessRepository
 import com.adelpos.meseros.core.data.access.PairingRepository
 import com.adelpos.meseros.core.data.api.ClientIdentity
@@ -34,6 +35,7 @@ import com.adelpos.meseros.core.domain.security.SecretSealer
 import com.adelpos.meseros.core.domain.server.ServerAnnouncements
 import com.adelpos.meseros.core.domain.server.ServerRelocator
 import com.adelpos.meseros.feature.access.AccessDependencies
+import com.adelpos.meseros.feature.takeaway.TakeawayDependencies
 import com.adelpos.meseros.feature.waiter.WaiterDependencies
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -149,7 +151,9 @@ class AppContainer(context: Context, private val settings: Settings = Settings()
         DeviceDataWipe().apply {
             register("catálogo e imágenes") { catalogRealtime.eraseDeviceData() }
             // Fase E: la cola, las capturas y lo guardado de Go (UnsentOrdersSource ya entregó lo
-            // no enviado a la bitácora). Revisión R6, M1 y B5: primero se cancela el envío y se
+            // no enviado a la bitácora); desde la A2, también las ediciones del cliente de Para
+            // llevar por enviar (WaiterDao.eraseAll). Revisión R6, M1 y B5: primero se cancela el
+            // envío y se
             // espera a que termine la vuelta en curso (nada vuelve a escribir un pedido borrado) y,
             // al final, se vuelve a programar el envío periódico.
             register("cola de pedidos y capturas") {
@@ -280,20 +284,43 @@ class AppContainer(context: Context, private val settings: Settings = Settings()
 
     /** Fábrica del trabajador de la cola para la configuración de WorkManager. */
     val orderWorkerFactory: OrderWorkerFactory by lazy {
-        OrderWorkerFactory(sender = { waiterMode.sender }, signals = orderSendSignals)
+        OrderWorkerFactory(
+            sender = { waiterMode.sender },
+            signals = orderSendSignals,
+            customers = { waiterMode.customerEdits },
+        )
     }
 
-    /** Lo que necesitan las pantallas del modo Mesero (`feature:waiter`). */
-    val waiterDependencies: WaiterDependencies by lazy {
-        WaiterDependencies(
+    /**
+     * Lo que necesita la captura compartida de Mesas y Para llevar (`core:capture`): catálogo,
+     * cuenta visible, «Enviar a cocina», pendientes y «Requiere tu revisión».
+     */
+    val captureDependencies: CaptureDependencies by lazy {
+        CaptureDependencies(
             restaurant = waiterMode.restaurant,
             captures = waiterMode.captures,
             orders = orderQueue,
             sentLines = waiterMode.sentLines,
             catalog = catalogRealtime.catalog,
             images = catalogRealtime.images,
-            tablesView = devicePreferences,
             activeWaiter = deviceAccess.activeWaiter,
+            takeaway = waiterMode.takeaway,
+        )
+    }
+
+    /** Lo que necesitan las pantallas del modo Mesero (`feature:waiter`). */
+    val waiterDependencies: WaiterDependencies by lazy {
+        WaiterDependencies(
+            capture = captureDependencies,
+            tablesView = devicePreferences,
+            elapsedClock = SystemClock::elapsedRealtime,
+        )
+    }
+
+    /** Lo que necesitan las pantallas de Para llevar (`feature:takeaway`, etapa A2). */
+    val takeawayDependencies: TakeawayDependencies by lazy {
+        TakeawayDependencies(
+            capture = captureDependencies,
             elapsedClock = SystemClock::elapsedRealtime,
         )
     }

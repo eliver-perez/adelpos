@@ -1,4 +1,4 @@
-package com.adelpos.meseros.feature.waiter.capture
+package com.adelpos.meseros.core.capture
 
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
@@ -9,6 +9,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -25,16 +26,15 @@ import com.adelpos.meseros.core.ui.components.LocalUserActivity
 import com.adelpos.meseros.core.ui.components.reportsUserActivity
 import com.adelpos.meseros.core.ui.layout.AdaptivePanes
 import com.adelpos.meseros.core.ui.layout.PaneLayout
-import com.adelpos.meseros.feature.waiter.R
-import com.adelpos.meseros.feature.waiter.WaiterDependencies
 
 /**
- * Captura de una cuenta con su ViewModel; [onDone] vuelve a Mesas (pedido enviado o descartado).
+ * Captura de una cuenta o de un pedido para llevar con su ViewModel; [onDone] vuelve a la lista de
+ * donde se entró (Mesas o Para llevar) con el pedido enviado o descartado.
  */
 @Composable
 fun CaptureRoute(
     layout: PaneLayout,
-    dependencies: WaiterDependencies,
+    dependencies: CaptureDependencies,
     onDone: () -> Unit,
     viewModel: CaptureViewModel = viewModel(factory = CaptureViewModel.factory(dependencies)),
 ) {
@@ -45,7 +45,9 @@ fun CaptureRoute(
     val catalog by viewModel.catalog.collectAsState()
     val products by viewModel.products.collectAsState()
     val category by viewModel.selectedCategoryId.collectAsState()
+    val customer by viewModel.customer.collectAsState()
     var confirmingDiscard by remember { mutableStateOf(false) }
+    var editingCustomer by rememberSaveable { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
     var discardPending by remember { mutableStateOf(false) }
     val tooMany = stringResource(R.string.capture_too_many)
@@ -131,7 +133,9 @@ fun CaptureRoute(
                         },
                         onDiscard = { confirmingDiscard = true },
                         onSentDialog = viewModel::onSentDialog,
+                        onEditCustomer = { editingCustomer = true },
                     ),
+                customer = customer,
             )
         },
         modifier = Modifier.testTag(TAG_CAPTURE),
@@ -158,6 +162,16 @@ fun CaptureRoute(
                 }
             },
             modifier = Modifier.reportsUserActivity(LocalUserActivity.current),
+        )
+    }
+    if (editingCustomer) {
+        CustomerDialog(
+            initial = customer.customer,
+            onSave = { changed ->
+                editingCustomer = false
+                viewModel.onCustomerChange(changed)
+            },
+            onDismiss = { editingCustomer = false },
         )
     }
     SentLineDialogs(

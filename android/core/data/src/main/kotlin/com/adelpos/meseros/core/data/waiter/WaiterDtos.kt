@@ -105,6 +105,13 @@ data class AccountDto(
     @SerialName("elapsed_seconds") val elapsedSeconds: Long? = null,
     @SerialName("long_open") val longOpen: Boolean = false,
     @SerialName("merged_into_id") val mergedIntoId: String? = null,
+    // Etapa A2 (Para llevar): Go siempre los entrega (vacíos en salón).
+    @SerialName("customer_name") val customerName: String = "",
+    val phone: String = "",
+    val origin: String = "",
+    @SerialName("payment_state") val paymentState: String? = null,
+    @SerialName("delivery_state") val deliveryState: String? = null,
+    @SerialName("created_at") val createdAt: String? = null,
 )
 
 /**
@@ -165,13 +172,22 @@ data class QuoteResultDto(
 
 // --- Escrituras de cuentas (con operation_id) ---
 
+/**
+ * `openAccount` con su primer producto (creación diferida). En una mesa lleva `table_id` y
+ * `seen_account_ids`; en un pedido para llevar (etapa A2), `table_id: null`, sin cuentas vistas y
+ * con `origin` («Para llevar»), `customer_name` y `phone` (lo que vale lo predeterminado no se
+ * escribe: el cuerpo de una mesa queda igual que en la A1).
+ */
 @Serializable
 data class OpenAccountBody(
     @SerialName("operation_id") val operationId: String,
     val mode: String,
-    @SerialName("table_id") val tableId: String,
-    @SerialName("seen_account_ids") val seenAccountIds: List<String>,
+    @SerialName("table_id") val tableId: String?,
+    @SerialName("seen_account_ids") val seenAccountIds: List<String>? = null,
     val items: List<DraftItemDto>,
+    val origin: String? = null,
+    @SerialName("customer_name") val customerName: String? = null,
+    val phone: String? = null,
 )
 
 @Serializable
@@ -228,6 +244,15 @@ data class OfflineDestinationDto(
     @SerialName("account_id") val accountId: String? = null,
     @SerialName("table_id") val tableId: String? = null,
     @SerialName("seen_account_ids") val seenAccountIds: List<String>? = null,
+    /** Un pedido para llevar nuevo (etapa A2): exclusivo con [accountId] y [tableId]. */
+    val takeaway: OfflineTakeawayDto? = null,
+)
+
+/** `destination.takeaway`: el nombre y el teléfono del cliente (opcionales; Go los recorta). */
+@Serializable
+data class OfflineTakeawayDto(
+    @SerialName("customer_name") val customerName: String,
+    val phone: String,
 )
 
 @Serializable
@@ -317,3 +342,26 @@ data class AccountNotOpenDetailsDto(
     @SerialName("account_state") val accountState: String? = null,
     @SerialName("merged_into_id") val mergedIntoId: String? = null,
 )
+
+// --- Para llevar (etapa A2): nombre y teléfono, y «Entregado» ---
+
+/**
+ * `updateTakeawayCustomer` (A2-D1): los dos campos siempre (vacío quita el dato); no lleva ni sube
+ * la revisión.
+ */
+@Serializable
+data class TakeawayCustomerBody(
+    @SerialName("operation_id") val operationId: String,
+    @SerialName("customer_name") val customerName: String,
+    val phone: String,
+)
+
+/** `deliverTakeaway` (A2-D2). */
+@Serializable data class DeliverBody(@SerialName("operation_id") val operationId: String)
+
+/**
+ * Respuesta de `deliverTakeaway`: al mesero `finance` siempre llega null (A2-D11) y esta versión no
+ * lo lee.
+ */
+@Serializable
+data class DeliveryResultDto(val delivered: Boolean = false, val closed: Boolean = false)

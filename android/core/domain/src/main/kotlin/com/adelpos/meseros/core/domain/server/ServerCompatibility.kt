@@ -47,14 +47,20 @@ data class SemanticVersion(
 
 /**
  * Si el servidor del restaurante sirve para esta aplicación (§4, «Versiones»). La aplicación exige
- * un servidor 0.12.0 o posterior con la capacidad `waiter-pin-v1` (A1-D4: la entrada con PIN y la
- * credencial de envío) y respeta la mínima de Android que anuncia el servidor
- * (`min_client_versions.android`). El servidor también responde 426 a una versión vieja en
- * cualquier ruta; esto solo lo dice antes, al comprobar `GET version`.
+ * un servidor 0.13.0 o posterior con las capacidades que usa: `waiter-pin-v1` (A1-D4: la entrada
+ * con PIN y la credencial de envío) y, desde la A2, `takeaway-v1` (Para llevar: el pedido para
+ * llevar sin conexión, el nombre y el teléfono y «Entregado»; A2-D6, cada fase agrega la suya). Y
+ * respeta la mínima de Android que anuncia el servidor (`min_client_versions.android`). El servidor
+ * también responde 426 a una versión vieja en cualquier ruta; esto solo lo dice antes, al comprobar
+ * `GET version`.
  */
 object ServerCompatibility {
     const val CAPABILITY_WAITER_PIN = "waiter-pin-v1"
-    val MIN_SERVER_VERSION = SemanticVersion(0, 12, 0)
+    const val CAPABILITY_TAKEAWAY = "takeaway-v1"
+    val MIN_SERVER_VERSION = SemanticVersion(0, 13, 0)
+
+    /** Capacidades que esta versión de la aplicación exige al servidor. */
+    val REQUIRED_CAPABILITIES: List<String> = listOf(CAPABILITY_WAITER_PIN, CAPABILITY_TAKEAWAY)
 
     /** Resultado de la comprobación. */
     sealed interface Verdict {
@@ -63,7 +69,10 @@ object ServerCompatibility {
         /** «Actualiza esta aplicación»: el servidor pide al menos [minClientVersion]. */
         data class UpdateApp(val minClientVersion: String?, val serverVersion: String?) : Verdict
 
-        /** «Actualiza el servidor del restaurante»: es anterior a 0.12.0 o le falta el PIN. */
+        /**
+         * «Actualiza el servidor del restaurante»: es anterior a 0.13.0 o le falta una capacidad
+         * que la aplicación usa.
+         */
         data class UpdateServer(val serverVersion: String) : Verdict
     }
 
@@ -74,9 +83,8 @@ object ServerCompatibility {
         minAndroidVersion: String?,
     ): Verdict {
         val server = SemanticVersion.parse(serverVersion)
-        if (
-            server == null || server < MIN_SERVER_VERSION || CAPABILITY_WAITER_PIN !in capabilities
-        ) {
+        val missing = REQUIRED_CAPABILITIES.any { it !in capabilities }
+        if (server == null || server < MIN_SERVER_VERSION || missing) {
             return Verdict.UpdateServer(serverVersion)
         }
         val app = SemanticVersion.parse(appVersion)

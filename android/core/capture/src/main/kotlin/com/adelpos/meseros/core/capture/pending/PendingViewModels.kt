@@ -1,4 +1,4 @@
-package com.adelpos.meseros.feature.waiter.pending
+package com.adelpos.meseros.core.capture.pending
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -10,13 +10,13 @@ import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.adelpos.meseros.core.capture.CaptureDependencies
 import com.adelpos.meseros.core.domain.error.AppResult
 import com.adelpos.meseros.core.domain.waiter.Capture
 import com.adelpos.meseros.core.domain.waiter.DiscardResult
 import com.adelpos.meseros.core.domain.waiter.OthersPending
 import com.adelpos.meseros.core.domain.waiter.PendingOrder
 import com.adelpos.meseros.core.domain.waiter.ReviewReason
-import com.adelpos.meseros.feature.waiter.WaiterDependencies
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -32,7 +32,7 @@ import kotlinx.coroutines.launch
  * dice cuántos pedidos tienen por enviar en este dispositivo y por qué no salen (credencial que ya
  * no vale, revisión pendiente; revisión R6, B3), nunca cuáles.
  */
-class PendingOrdersViewModel(private val dependencies: WaiterDependencies) : ViewModel() {
+class PendingOrdersViewModel(private val dependencies: CaptureDependencies) : ViewModel() {
     private val userId: String? = dependencies.activeWaiter.value?.userId
 
     val orders: StateFlow<List<PendingOrder>> = userFlow {
@@ -64,7 +64,7 @@ class PendingOrdersViewModel(private val dependencies: WaiterDependencies) : Vie
     companion object {
         private const val STOP_TIMEOUT_MILLIS = 5_000L
 
-        fun factory(dependencies: WaiterDependencies): ViewModelProvider.Factory =
+        fun factory(dependencies: CaptureDependencies): ViewModelProvider.Factory =
             viewModelFactory {
                 initializer { PendingOrdersViewModel(dependencies) }
             }
@@ -77,7 +77,7 @@ class PendingOrdersViewModel(private val dependencies: WaiterDependencies) : Vie
  * misma clave de operación.
  */
 class ReviewViewModel(
-    private val dependencies: WaiterDependencies,
+    private val dependencies: CaptureDependencies,
     savedState: SavedStateHandle,
 ) : ViewModel() {
     val operationId: String = requireNotNull(savedState[KEY_OPERATION_ID]) { "Falta el pedido" }
@@ -177,7 +177,7 @@ class ReviewViewModel(
 
         private const val STOP_TIMEOUT_MILLIS = 5_000L
 
-        fun factory(dependencies: WaiterDependencies): ViewModelProvider.Factory =
+        fun factory(dependencies: CaptureDependencies): ViewModelProvider.Factory =
             viewModelFactory {
                 initializer { ReviewViewModel(dependencies, createSavedStateHandle()) }
             }

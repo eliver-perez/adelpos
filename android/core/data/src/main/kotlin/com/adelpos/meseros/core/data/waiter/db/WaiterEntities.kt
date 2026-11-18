@@ -22,7 +22,8 @@ import kotlinx.coroutines.flow.Flow
 data class CaptureEntity(
     @PrimaryKey val id: String,
     @ColumnInfo(name = "waiter_user_id") val waiterUserId: String,
-    @ColumnInfo(name = "table_id") val tableId: String,
+    /** v6: null en un pedido para llevar (antes `NOT NULL`). */
+    @ColumnInfo(name = "table_id") val tableId: String?,
     @ColumnInfo(name = "table_name") val tableName: String,
     @ColumnInfo(name = "account_id") val accountId: String?,
     @ColumnInfo(name = "account_name") val accountName: String?,
@@ -41,6 +42,31 @@ data class CaptureEntity(
     @ColumnInfo(name = "updated_at") val updatedAt: Long,
     /** v5: la cuenta nació en Go con esta captura (revisión R6, A2). */
     @ColumnInfo(name = "created_account", defaultValue = "0") val createdAccount: Boolean = false,
+    /** v6 (etapa A2): `dine_in` (una mesa) o `takeaway` (para llevar). */
+    @ColumnInfo(name = "mode", defaultValue = "'dine_in'") val mode: String = "dine_in",
+    /** v6: el nombre del cliente de un pedido para llevar mientras no sale a Go (A2-D1). */
+    @ColumnInfo(name = "customer_name", defaultValue = "''") val customerName: String = "",
+    /** v6: el teléfono, igual que [customerName]. */
+    @ColumnInfo(name = "customer_phone", defaultValue = "''") val customerPhone: String = "",
+)
+
+/**
+ * Edición del nombre y el teléfono de un pedido para llevar que todavía no está en Go (v6, A2-D1):
+ * una fila por pedido, la última edición. Se envía con la sesión del mesero que la hizo y se borra
+ * solo cuando Go la confirma (con la misma [operationId]) o la rechaza para siempre.
+ *
+ * @param key el pedido: la cuenta de Go si se conoce; si no, la captura o el pedido de la cola.
+ * @param accountId la cuenta de Go en cuanto se sabe.
+ */
+@Entity(tableName = "takeaway_customer_edits", indices = [Index(value = ["account_id"])])
+data class CustomerEditEntity(
+    @PrimaryKey val key: String,
+    @ColumnInfo(name = "account_id") val accountId: String?,
+    @ColumnInfo(name = "waiter_user_id") val waiterUserId: String,
+    @ColumnInfo(name = "customer_name") val customerName: String,
+    val phone: String,
+    @ColumnInfo(name = "operation_id") val operationId: String,
+    @ColumnInfo(name = "updated_at") val updatedAt: Long,
 )
 
 /**
@@ -145,6 +171,50 @@ internal val WAITER_COLUMNS_V5: List<String> =
         "ALTER TABLE `captures` ADD COLUMN `created_account` INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE `pending_orders` ADD COLUMN `unresolved_save` TEXT",
         "ALTER TABLE `pending_orders` ADD COLUMN `clock_corrected` INTEGER NOT NULL DEFAULT 0",
+    )
+
+/**
+ * Cambios de la versión 6 (`MIGRATION_5_6`, etapa A2, Para llevar): `captures` pasa a admitir
+ * capturas sin mesa y guarda la modalidad y los datos del cliente. SQLite de Android 8 no cambia
+ * una columna a opcional: se crea la tabla nueva, se copian las filas (todas de salón) y se cambia
+ * el nombre, como indica Room. Después, la tabla de ediciones del cliente por enviar. El SQL es el
+ * que genera Room para `schemas/…AppDatabase/6.json`.
+ */
+internal val WAITER_CHANGES_V6: List<String> =
+    listOf(
+        "CREATE TABLE IF NOT EXISTS `captures_v6` (`id` TEXT NOT NULL, " +
+            "`waiter_user_id` TEXT NOT NULL, `table_id` TEXT, `table_name` TEXT NOT NULL, " +
+            "`account_id` TEXT, `account_name` TEXT, `seen_account_ids` TEXT NOT NULL, " +
+            "`base` TEXT NOT NULL, `base_revision` INTEGER NOT NULL, " +
+            "`operations` TEXT NOT NULL, `own_item_ids` TEXT NOT NULL, " +
+            "`seen_prices` TEXT NOT NULL, `sync` TEXT NOT NULL, `sync_message` TEXT, " +
+            "`table_accounts` TEXT NOT NULL, `pending_operation_id` TEXT, " +
+            "`in_flight_count` INTEGER NOT NULL, `created_at` INTEGER NOT NULL, " +
+            "`updated_at` INTEGER NOT NULL, " +
+            "`created_account` INTEGER NOT NULL DEFAULT 0, " +
+            "`mode` TEXT NOT NULL DEFAULT 'dine_in', " +
+            "`customer_name` TEXT NOT NULL DEFAULT '', " +
+            "`customer_phone` TEXT NOT NULL DEFAULT '', PRIMARY KEY(`id`))",
+        "INSERT INTO `captures_v6` (`id`, `waiter_user_id`, `table_id`, `table_name`, " +
+            "`account_id`, `account_name`, `seen_account_ids`, `base`, `base_revision`, " +
+            "`operations`, `own_item_ids`, `seen_prices`, `sync`, `sync_message`, " +
+            "`table_accounts`, `pending_operation_id`, `in_flight_count`, `created_at`, " +
+            "`updated_at`, `created_account`, `mode`, `customer_name`, `customer_phone`) " +
+            "SELECT `id`, `waiter_user_id`, `table_id`, `table_name`, `account_id`, " +
+            "`account_name`, `seen_account_ids`, `base`, `base_revision`, `operations`, " +
+            "`own_item_ids`, `seen_prices`, `sync`, `sync_message`, `table_accounts`, " +
+            "`pending_operation_id`, `in_flight_count`, `created_at`, `updated_at`, " +
+            "`created_account`, 'dine_in', '', '' FROM `captures`",
+        "DROP TABLE `captures`",
+        "ALTER TABLE `captures_v6` RENAME TO `captures`",
+        "CREATE INDEX IF NOT EXISTS `index_captures_waiter_user_id` ON `captures` (`waiter_user_id`)",
+        "CREATE TABLE IF NOT EXISTS `takeaway_customer_edits` (`key` TEXT NOT NULL, " +
+            "`account_id` TEXT, `waiter_user_id` TEXT NOT NULL, " +
+            "`customer_name` TEXT NOT NULL, `phone` TEXT NOT NULL, " +
+            "`operation_id` TEXT NOT NULL, `updated_at` INTEGER NOT NULL, " +
+            "PRIMARY KEY(`key`))",
+        "CREATE INDEX IF NOT EXISTS `index_takeaway_customer_edits_account_id` " +
+            "ON `takeaway_customer_edits` (`account_id`)",
     )
 
 @Dao
@@ -259,9 +329,60 @@ interface WaiterDao {
 
     @Upsert suspend fun savePermissions(permissions: WaiterPermissionsEntity)
 
+    // --- Ediciones del cliente de Para llevar (A2-D1) ---
+
+    @Query("SELECT * FROM takeaway_customer_edits ORDER BY updated_at")
+    fun observeCustomerEdits(): Flow<List<CustomerEditEntity>>
+
+    @Query("SELECT * FROM takeaway_customer_edits ORDER BY updated_at")
+    suspend fun customerEdits(): List<CustomerEditEntity>
+
+    @Query(
+        "SELECT * FROM takeaway_customer_edits WHERE `key` = :key " +
+            "OR (:accountId IS NOT NULL AND account_id = :accountId) LIMIT 1",
+    )
+    suspend fun customerEditFor(key: String, accountId: String?): CustomerEditEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertCustomerEdit(edit: CustomerEditEntity)
+
+    @Query("DELETE FROM takeaway_customer_edits WHERE `key` = :key")
+    suspend fun deleteCustomerEdit(key: String)
+
+    /**
+     * Guarda la última edición de un pedido (la última gana): reemplaza la que hubiera con la misma
+     * clave o la misma cuenta, en una transacción.
+     */
+    @Transaction
+    suspend fun replaceCustomerEdit(edit: CustomerEditEntity) {
+        val previous = customerEditFor(edit.key, edit.accountId)
+        if (previous != null && previous.key != edit.key) {
+            deleteCustomerEdit(previous.key)
+        }
+        insertCustomerEdit(edit)
+    }
+
+    /** Ya se sabe en qué cuenta de Go nació el pedido [key]. */
+    @Query(
+        "UPDATE takeaway_customer_edits SET account_id = :accountId " +
+            "WHERE `key` = :key AND account_id IS NULL",
+    )
+    suspend fun bindCustomerEdit(key: String, accountId: String)
+
+    /**
+     * Go confirmó (o rechazó para siempre) **esta** edición: se borra solo si sigue siendo la misma
+     * (una más reciente, con otra clave de operación, se queda para enviarse). Filas borradas.
+     */
+    @Query(
+        "DELETE FROM takeaway_customer_edits WHERE `key` = :key AND operation_id = :operationId",
+    )
+    suspend fun finishCustomerEdit(key: String, operationId: String): Int
+
     // --- Borrar los datos de este dispositivo (retiro o «Emparejar de nuevo») ---
 
     @Query("DELETE FROM captures") suspend fun deleteAllCaptures()
+
+    @Query("DELETE FROM takeaway_customer_edits") suspend fun deleteAllCustomerEdits()
 
     @Query("DELETE FROM pending_orders") suspend fun deleteAllOrders()
 
@@ -275,5 +396,6 @@ interface WaiterDao {
         deleteAllOrders()
         deleteAllSnapshots()
         deleteAllPermissions()
+        deleteAllCustomerEdits()
     }
 }

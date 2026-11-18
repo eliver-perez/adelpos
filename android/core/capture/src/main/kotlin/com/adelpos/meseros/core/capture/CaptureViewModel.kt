@@ -1,4 +1,4 @@
-package com.adelpos.meseros.feature.waiter.capture
+package com.adelpos.meseros.core.capture
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -29,8 +29,9 @@ import com.adelpos.meseros.core.domain.waiter.SendRequest
 import com.adelpos.meseros.core.domain.waiter.SentChangeResult
 import com.adelpos.meseros.core.domain.waiter.SentLine
 import com.adelpos.meseros.core.domain.waiter.TableAccountRef
+import com.adelpos.meseros.core.domain.waiter.TakeawayBoard
+import com.adelpos.meseros.core.domain.waiter.TakeawayCustomer
 import com.adelpos.meseros.core.domain.waiter.WaiterPermissions
-import com.adelpos.meseros.feature.waiter.WaiterDependencies
 import java.util.UUID
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -64,6 +65,16 @@ sealed interface CaptureNotice {
     data object DiscardPending : CaptureNotice
 }
 
+/**
+ * El nombre y el teléfono que se ven en un pedido para llevar; [pending]: hay una edición que
+ * todavía no está en Go.
+ */
+data class CustomerView(val customer: TakeawayCustomer, val pending: Boolean) {
+    companion object {
+        val NONE = CustomerView(TakeawayCustomer.NONE, pending = false)
+    }
+}
+
 /** El diálogo abierto sobre lo enviado (modificar o cancelar unidades). */
 sealed interface SentDialog {
     data class Cancel(val line: SentLine) : SentDialog
@@ -72,14 +83,15 @@ sealed interface SentDialog {
 }
 
 /**
- * Captura de una cuenta (§6.3): el catálogo con la búsqueda y el personalizador, la cuenta con lo
- * enviado (con su preparación) y lo por enviar, y «Enviar a cocina». Cada toque se guarda en Room
- * por mesero ([com.adelpos.meseros.core.domain.waiter.CaptureService]); la búsqueda, la categoría,
- * el producto que se personaliza y el panel abierto en el teléfono, en [SavedStateHandle]
- * (sobreviven a la rotación y al cierre del proceso).
+ * Captura de una cuenta (§6.3) o de un pedido para llevar (etapa A2, §3.2): el catálogo con la
+ * búsqueda y el personalizador, la cuenta con lo enviado (con su preparación) y lo por enviar, y
+ * «Enviar a cocina». Cada toque se guarda en Room por mesero
+ * ([com.adelpos.meseros.core.domain.waiter.CaptureService]); la búsqueda, la categoría, el producto
+ * que se personaliza y el panel abierto en el teléfono, en [SavedStateHandle] (sobreviven a la
+ * rotación y al cierre del proceso).
  */
 class CaptureViewModel(
-    private val dependencies: WaiterDependencies,
+    private val dependencies: CaptureDependencies,
     private val savedState: SavedStateHandle,
 ) : ViewModel() {
     val captureId: String = requireNotNull(savedState[KEY_CAPTURE_ID]) { "Falta la captura" }
@@ -102,6 +114,29 @@ class CaptureViewModel(
     val bill: StateFlow<AccountBill?> = mutableBill.asStateFlow()
 
     val permissions: StateFlow<WaiterPermissions> = dependencies.restaurant.permissions
+
+    /**
+     * Para llevar (A2-D1): el nombre y el teléfono que se ven en la captura: la última edición del
+     * mesero que todavía no está en Go o, si no hay, lo de la captura (antes de que el pedido
+     * salga) o lo de Go.
+     */
+    val customer: StateFlow<CustomerView> =
+        combine(capture, mutableBill, dependencies.takeaway.customerEdits()) { current, bill, edits
+                ->
+                if (current == null || !current.takeaway) {
+                    return@combine CustomerView.NONE
+                }
+                val edit =
+                    TakeawayBoard.editFor(edits, key = current.id, accountId = current.accountId)
+                val shown =
+                    when {
+                        edit != null -> edit.customer
+                        current.customerEditable -> current.customer
+                        else -> bill?.account?.customer ?: current.customer
+                    }
+                CustomerView(customer = shown, pending = edit != null)
+            }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, CustomerView.NONE)
 
     val catalog: StateFlow<Catalog> = dependencies.catalog.catalog
 
@@ -298,6 +333,11 @@ class CaptureViewModel(
         viewModelScope.launch { dependencies.captures.retrySave(captureId) }
     }
 
+    /** «Nombre y teléfono» de un pedido para llevar (A2-D1). */
+    fun onCustomerChange(customer: TakeawayCustomer) {
+        viewModelScope.launch { dependencies.captures.setCustomer(captureId, customer) }
+    }
+
     /** «Enviar a cocina», explícito (§0-B). */
     fun onSendToKitchen() {
         val waiter = dependencies.activeWaiter.value ?: return
@@ -492,7 +532,7 @@ class CaptureViewModel(
 
         private const val STOP_TIMEOUT_MILLIS = 5_000L
 
-        fun factory(dependencies: WaiterDependencies): ViewModelProvider.Factory =
+        fun factory(dependencies: CaptureDependencies): ViewModelProvider.Factory =
             viewModelFactory {
                 initializer { CaptureViewModel(dependencies, createSavedStateHandle()) }
             }

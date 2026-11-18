@@ -104,20 +104,31 @@ paquetes que se desinstalan antes de las instrumentadas, en «Pruebas») y en es
     `NetworkType.CONNECTED` espera una red validada con internet y la wifi del restaurante puede no tenerla
     (comprobado en `WorkNetworkOnDeviceTest`). El trabajador prueba el servidor él mismo y reintenta con espera
     creciente; nunca trabajo urgente (`setExpedited`), que en Android 8–11 exige `getForegroundInfo()`.
+20. **Lo que comparten Mesas y Para llevar vive en `core:capture`** (etapa A2): la captura, «Pedidos pendientes» y
+    «Requiere tu revisión». `feature:waiter` y `feature:takeaway` solo aportan su entrada (la mesa o «Nuevo pedido») y
+    su lista; ningún `feature` depende de otro y no se copia código de uno a otro.
+21. **Un dato que se edita después de que el pedido salió a Go nunca cambia el pedido de la cola** (A2-D1): el cuerpo
+    de un pedido o de un guardado sin respuesta es el mismo en cada reintento con su clave. El nombre y el teléfono de
+    un pedido para llevar se guardan en la captura solo mientras nada ha salido (`Capture.customerEditable`); después,
+    como una edición aparte (`takeaway_customer_edits`, con su propia `operation_id`, la última gana) que envía el
+    mismo trabajador de la cola con la sesión del mesero que la hizo.
 
 ## Estructura
 
-| Módulo           | Tipo                                     | Qué contiene                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| ---------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `app`            | aplicación (`com.adelpos.meseros`)       | `AdelPosApplication` + `AppContainer` (con el bloqueo por inactividad del proceso y el registro de borrado), `MainActivity` (de borde a borde), `ShellViewModel` (indicador), navegación (`navigation/AdelPosApp.kt`, rutas con tipo), `CatalogRealtimeContainer` (catálogo, imágenes y el único canal de tiempo real) y `AppForeground` (primer plano del proceso), manifiesto, ícono, `src/debug` con `network_security_config`.                                                                                                                                                                                                                                                   |
-| `core:domain`    | Kotlin/JVM puro (sin Android)            | `Money` y `MoneyFormat`, `LinkState`/`ConnectionSummary` y `DefaultNetworkTracker`, `PendingOrdersSource`, `AppError`/`AppResult`, `SecretSealer`, `TableState`, `TablesView`; `server/` (dirección escrita, anuncio NSD, cambio de IP, versiones), `pairing/` (código de 6 dígitos, `PairingFlow`), `access/` (`DeviceAccess`, verificador del PIN, límite local, bloqueo por inactividad, `WaiterWork`), `catalog/` (modelos del catálogo, búsqueda sin acentos, `Customization`/`LineSelection`, reglas del personalizador y revisión de lo que declara el catálogo), `realtime/` (`RealtimeFeed`, señales, interrupciones de acceso, espera creciente). Pruebas JVM en segundos. |
-| `core:data`      | biblioteca Android                       | `api/` (OkHttp con huella fijada, cabeceras del cliente, JSON, `MoneySerializer`, errores de Go → `AppError`, `ServerApi` con `ApiOutcome`), `access/` (`AccessRepository`, `PairingRepository`, `PairedConnection`), `discovery/` (NSD, sonda HTTPS), `security/` (huella fijada, primer certificado del emparejamiento, Keystore), `db/` (Room, esquemas en `core/data/schemas/`), `network/`, `pending/`, `preferences/`; `catalog/` (`catalog.db`, descarga completa y por cambios, caché de imágenes, actualizaciones), `realtime/` (cliente SSE), `session/` (`ServerAccess`, `DeviceServerAccess`).                                                                           |
-| `core:ui`        | biblioteca Android (Compose, Material 3) | Tema claro/oscuro (`theme/`), íconos propios (`icons/AdelIcons.kt`, los trazos de `desktop/src/components/Icon.tsx`), botones, barra superior e indicador, estado de mesa, toques de los diálogos para el bloqueo por inactividad (`LocalUserActivity`), andamio de uno o dos paneles (`layout/`), `catalog/` (búsqueda, categorías, cuadrícula con «Agotado», imagen con marcador y el personalizador táctil). Compartido con la A2.                                                                                                                                                                                                                                                |
-| `feature:access` | biblioteca Android                       | Entrada al dispositivo (fases B y C): «Buscar el servidor» y código de emparejamiento, entrada con PIN, «Vuelve a escribir tu PIN», cambio de mesero (`AccessViewModel`), emparejar de nuevo, actualizar la aplicación o el servidor, dispositivo retirado y su bitácora, permiso de red local. Solo usa interfaces de `core:domain`.                                                                                                                                                                                                                                                                                                                                                |
-| `feature:waiter` | biblioteca Android                       | Modo Mesero (Fase E): `tables/` (Mesas en lista o mapa con su tiempo, búsqueda y el panel de la mesa con sus cuentas y «Nueva cuenta»), `capture/` (catálogo y personalizador de `core:ui` con la cuenta al lado o a un toque: lo enviado con su preparación, modificar o cancelar unidades, lo por enviar y «Enviar a cocina»), `pending/` («Pedidos pendientes» con los cinco estados y «Requiere tu revisión»); `WaiterDependencies` (solo interfaces de `core:domain`). Queda la pantalla de muestra «Catálogo» de la Fase D (sin ruta en la navegación).                                                                                                                        |
+| Módulo             | Tipo                                     | Qué contiene                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ------------------ | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `app`              | aplicación (`com.adelpos.meseros`)       | `AdelPosApplication` + `AppContainer` (con el bloqueo por inactividad del proceso y el registro de borrado), `MainActivity` (de borde a borde), `ShellViewModel` (indicador), navegación (`navigation/AdelPosApp.kt`, rutas con tipo), `CatalogRealtimeContainer` (catálogo, imágenes y el único canal de tiempo real) y `AppForeground` (primer plano del proceso), manifiesto, ícono, `src/debug` con `network_security_config`.                                                                                                                                                                                                                                                    |
+| `core:domain`      | Kotlin/JVM puro (sin Android)            | `Money` y `MoneyFormat`, `LinkState`/`ConnectionSummary` y `DefaultNetworkTracker`, `PendingOrdersSource`, `AppError`/`AppResult`, `SecretSealer`, `TableState`, `TablesView`; `server/` (dirección escrita, anuncio NSD, cambio de IP, versiones), `pairing/` (código de 6 dígitos, `PairingFlow`), `access/` (`DeviceAccess`, verificador del PIN, límite local, bloqueo por inactividad, `WaiterWork`), `catalog/` (modelos del catálogo, búsqueda sin acentos, `Customization`/`LineSelection`, reglas del personalizador y revisión de lo que declara el catálogo), `realtime/` (`RealtimeFeed`, señales, interrupciones de acceso, espera creciente). Pruebas JVM en segundos.  |
+| `core:data`        | biblioteca Android                       | `api/` (OkHttp con huella fijada, cabeceras del cliente, JSON, `MoneySerializer`, errores de Go → `AppError`, `ServerApi` con `ApiOutcome`), `access/` (`AccessRepository`, `PairingRepository`, `PairedConnection`), `discovery/` (NSD, sonda HTTPS), `security/` (huella fijada, primer certificado del emparejamiento, Keystore), `db/` (Room, esquemas en `core/data/schemas/`), `network/`, `pending/`, `preferences/`; `catalog/` (`catalog.db`, descarga completa y por cambios, caché de imágenes, actualizaciones), `realtime/` (cliente SSE), `session/` (`ServerAccess`, `DeviceServerAccess`).                                                                            |
+| `core:ui`          | biblioteca Android (Compose, Material 3) | Tema claro/oscuro (`theme/`), íconos propios (`icons/AdelIcons.kt`, los trazos de `desktop/src/components/Icon.tsx`), botones, barra superior e indicador, estado de mesa, toques de los diálogos para el bloqueo por inactividad (`LocalUserActivity`), andamio de uno o dos paneles (`layout/`), `catalog/` (búsqueda, categorías, cuadrícula con «Agotado», imagen con marcador y el personalizador táctil). Compartido con la A2.                                                                                                                                                                                                                                                 |
+| `feature:access`   | biblioteca Android                       | Entrada al dispositivo (fases B y C): «Buscar el servidor» y código de emparejamiento, entrada con PIN, «Vuelve a escribir tu PIN», cambio de mesero (`AccessViewModel`), emparejar de nuevo, actualizar la aplicación o el servidor, dispositivo retirado y su bitácora, permiso de red local. Solo usa interfaces de `core:domain`.                                                                                                                                                                                                                                                                                                                                                 |
+| `core:capture`     | biblioteca Android (A2)                  | La captura compartida de Mesas y Para llevar (`com.adelpos.meseros.core.capture`, movida con `git mv` de `feature:waiter` en la Fase B de la A2): `CaptureScreen`/`CaptureViewModel` (catálogo y personalizador de `core:ui` con la cuenta al lado o a un toque: lo enviado con su preparación, modificar o cancelar unidades, lo por enviar y «Enviar a cocina»; en un pedido para llevar, su cliente y «Nombre y teléfono»), `OrderPanel`, `SentLineDialogs`, `Takeaway.kt` (`CustomerDialog` y cómo se nombra un pedido para llevar) y `pending/` («Pedidos pendientes» con los cinco estados y «Requiere tu revisión»); `CaptureDependencies` (solo interfaces de `core:domain`). |
+| `feature:waiter`   | biblioteca Android                       | Modo Mesero (Fase E): `tables/` (Mesas en lista o mapa con su tiempo, búsqueda y el panel de la mesa con sus cuentas y «Nueva cuenta»); `WaiterDependencies` (la `CaptureDependencies` de `core:capture` más la vista de Mesas y el reloj). Queda la pantalla de muestra «Catálogo» de la Fase D (sin ruta en la navegación).                                                                                                                                                                                                                                                                                                                                                         |
+| `feature:takeaway` | biblioteca Android (A2)                  | Para llevar (Fase B de la A2): `TakeawayScreen`/`TakeawayViewModel` (la lista de `TakeawayBoard` con folio, nombre, tiempo, preparación y pago de Go, lo que falta enviar y, sin conexión, lo último con su hora; «Nuevo pedido», «Nombre y teléfono» y «Entregado» o «Cobrar en caja antes de entregar»); `TakeawayDependencies`. La captura es la de `core:capture`.                                                                                                                                                                                                                                                                                                                |
 
-Dependencias entre módulos: `app` → todos; `feature:*` → `core:ui` (→ `core:domain`); `core:data` → `core:domain`. Un
-módulo `feature` nunca depende de otro `feature`; la A2 agrega `feature:takeaway` sobre `core:*`.
+Dependencias entre módulos: `app` → todos; `feature:*` → `core:ui` (→ `core:domain`) y, `feature:waiter` y
+`feature:takeaway`, `core:capture` (→ `core:ui`); `core:data` → `core:domain`. Un módulo `feature` nunca depende de otro
+`feature`.
 
 **Versión de la aplicación**: un solo lugar, `android/gradle.properties` (`adelpos.versionName`, `adelpos.versionCode`;
 desde la A2, 0.2.0 y 2). La usan el APK y la cabecera `X-Client-Version` (`BuildConfig.VERSION_NAME` →
@@ -211,8 +222,8 @@ mismo entorno. Los comentarios de línea (`//`) se escriben de 100 columnas como
   fallas por tiempo: mejor no compilar mientras corren); `emu-down` al terminar.
   En cada uno: `connectedDebugAndroidTest` con `ANDROID_SERIAL` (contar los XML de cada módulo) y **`ANDROID_SERIAL=…
 ADELPOS_E2E_NEW_SERVER=<orden> scripts/android-e2e.sh --suite all`**, que levanta un servidor temporal nuevo para
-  cada parte (access 1–5; access 6–7 con otra identidad sin reinstalar; catalog; waiter; field) con la orden de
-  `ADELPOS_E2E_NEW_SERVER` (detiene el anterior, levanta otro en las mismas direcciones e imprime líneas
+  cada parte (access 1–5; access 6–7 con otra identidad sin reinstalar; catalog; waiter; field; takeaway) con la orden
+  de `ADELPOS_E2E_NEW_SERVER` (detiene el anterior, levanta otro en las mismas direcciones e imprime líneas
   `ADELPOS_E2E_*=…`: provisioning y base temporal). Los agentes usan como orden `iso.sh - server-down` seguido de
   `iso.sh <árbol> server-up`. Resultados en `<salida>/<suite>/` y `<salida>/summary.txt`.
 - **Corte de red**: `cmd connectivity airplane-mode enable|disable` en Android 11+ (desde la prueba con
@@ -223,8 +234,9 @@ ADELPOS_E2E_NEW_SERVER=<orden> scripts/android-e2e.sh --suite all`**, que levant
   ese módulo. Comprobar siempre los resultados en `*/build/outputs/androidTest-results/connected/` (contar los XML
   de cada módulo) y desinstalar antes, con `adb -s <serie> uninstall`, la aplicación y sus pruebas
   (`com.adelpos.meseros`, `com.adelpos.meseros.test`, `com.adelpos.meseros.core.data.test`,
-  `com.adelpos.meseros.core.ui.test`) y las de la 0.1.0 (`local.adel.pos.android`, `local.adel.pos.android.test` y
-  sus bibliotecas `….core.data.test` y `….core.ui.test`): un APK de entrega firmado instalado a mano es «otra firma»
+  `com.adelpos.meseros.core.ui.test`; `core:capture` y `feature:takeaway` no tienen pruebas instrumentadas propias) y
+  las de la 0.1.0 (`local.adel.pos.android`, `local.adel.pos.android.test` y sus bibliotecas `….core.data.test` y
+  `….core.ui.test`): un APK de entrega firmado instalado a mano es «otra firma»
   de la misma aplicación para el `debug`.
 - **Ojo (emulador cargado)**: con dos emuladores y Gradle a la vez, el lanzador del emulador puede mostrar «Pixel
   Launcher isn't responding»; ese diálogo se queda con el foco, la tecla Atrás que inyecta la instrumentación ya no
@@ -257,9 +269,9 @@ emparejado, el mesero activo y sus credenciales. Otro módulo (catálogo, modo M
   olvidar el emparejamiento y destruir la llave del Keystore. Hoy registra el catálogo con sus imágenes; **la Fase E
   registra ahí** la cola de pedidos y sus borradores y cancela su trabajo (`WorkManager.cancelAllWork()`). Todo módulo
   nuevo que guarde datos del restaurante se registra ahí.
-- **Versiones** (`ServerCompatibility.check`: servidor 0.12.0 o posterior con `waiter-pin-v1` y la mínima de Android de
-  `min_client_versions`): se comprueba con `GET version` **antes de pedir el código de emparejamiento** (también con
-  la dirección escrita; `PairingRepository.request`) y en cada comprobación ya emparejado. Un servidor viejo da
+- **Versiones** (`ServerCompatibility.check`: servidor 0.13.0 o posterior con `waiter-pin-v1` y, desde la A2,
+  `takeaway-v1` —A2-D6: cada fase agrega la capacidad que usa—, y la mínima de Android de `min_client_versions`): se
+  comprueba con `GET version` **antes de pedir el código de emparejamiento** (también con la dirección escrita; `PairingRepository.request`) y en cada comprobación ya emparejado. Un servidor viejo da
   «Actualiza el servidor del restaurante» con «Volver a comprobar» (`PairingProblem.UpdateServer` al emparejar,
   `DeviceStatus.UpdateServer` después). Un 426 o un tipo de cliente desconocido durante el emparejamiento de un
   servidor que no informa la mínima de Android también es un servidor viejo, nunca «Actualiza esta aplicación».
@@ -367,6 +379,43 @@ listo y un mesero **con sesión de Go**; la dirección se pide en cada uso por e
   mientras el pedido espera). En la JVM, la cola de A1-D19: `OfflineNeverRepeatsTest`, `R6RulesTest` y
   `OrderSchedulerTest`.
 
+## Para llevar (etapa A2, Fase B, para los demás módulos)
+
+Un pedido para llevar es una cuenta de Go con `mode: "takeaway"` y sin mesa (no hay mesa ficticia). Es la misma
+captura y la misma cola de la A1, con la modalidad en la captura, el pedido y el guardado sin respuesta
+(`OrderMode`, `Capture.tableId` opcional) y el cliente (`TakeawayCustomer`, A2-D1).
+
+- **Acceso** (§3.1): la navegación principal (`navigation/AdelPosApp.kt`, `MainNavigationBar`) muestra «Mesas» y
+  «Para llevar» solo si `WaiterPermissions.grants(VIEW_TAKEAWAY)` (`takeaway.read` en los permisos de Go del mesero
+  activo; con permisos desconocidos no aparece). «Nuevo pedido» y capturar exigen `takeaway.manage` (`OPEN_TAKEAWAY`,
+  `MANAGE_TAKEAWAY`); sin él, solo la lista.
+- **Captura** (`CaptureService.openTakeaway`, `setCustomer`): «Nuevo pedido» entra directo al catálogo; el pedido nace
+  con el primer producto (`openAccount` con `mode: takeaway`, `origin` «Para llevar», `customer_name` y `phone`,
+  `WaiterMapper.openBody`) o, sin conexión, al enviarse (`submitOfflineOrder` con `destination.takeaway`). Salir sin
+  productos no deja nada (`closeIfIdle`; el cliente solo no es trabajo pendiente). `items_in_account` se reenvía con la
+  misma clave a `destination.account_id`, como en una mesa. Las capturas para llevar cuentan para `WaiterWork`.
+- **Nombre y teléfono** (A2-D1, regla 21): en la captura mientras `customerEditable`; después, `takeaway_customer_edits`
+  (`CustomerEditEntity`, una fila por pedido con la última edición), que el trabajador de la cola envía con
+  `updateTakeawayCustomer` y la sesión de ese mesero (`CustomerEditSender`, después de los pedidos). Una edición de un
+  pedido que todavía no nace en Go espera a que la captura o la cola sepan su cuenta (`bindCustomerEdit`). Se borra solo
+  si Go confirmó esa clave o la rechazó para siempre; nunca se pierde por falta de conexión. Límites de Go en bytes del
+  texto recortado (100 y 40, `TakeawayCustomer.fitsName`/`fitsPhone`).
+- **Lista** (`TakeawayService`, `TakeawayRepository`; `TakeawayBoard.entries`): los pedidos para llevar abiertos de
+  `restaurant/state` (la misma lectura de Mesas, guardada en `restaurant_snapshot`, con su hora en `TakeawayRead`), al
+  momento con los eventos del ámbito `takeaway` del único canal, y encima lo del mesero activo que todavía no nace en Go
+  (la cola y las capturas sin enviar; de los demás meseros nunca el detalle). Preparación, pago y entrega como los da
+  Go (`TakeawayStates`).
+- **Entregado** (A2-D2): `TakeawayStates.deliveryOffer`: solo con `takeaway.deliver` y `payment_state == "paid"`; sin
+  pagar, «Cobrar en caja antes de entregar»; sin el permiso, solo el estado. `deliverTakeaway` con conexión y la sesión
+  del mesero (nunca va a la cola; sin respuesta se repite una vez con la misma clave); `BALANCE_PENDING` → el mismo
+  texto, `ALREADY_DELIVERED` → volver a leer.
+- Pruebas: `TakeawayRulesTest` (dominio), `TakeawayQueueTest` (Robolectric + MockWebServer con las formas del
+  contrato), `TakeawayViewModelTest` (`feature:takeaway`), `WaiterViewModelsTest` (el cliente en la captura);
+  instrumentadas `TakeawayScreensTest`, `AppNavigationTest` (Mesas ↔ Para llevar) y el caso 5 → 6 de
+  `AppDatabaseMigrationTest`; contra el Go temporal, `TakeawayOnGoTest` con **`scripts/android-e2e.sh --suite
+takeaway`** (pasos `t1`–`t8`; el guion corta la red en `t4`; la prueba hace de cocina y de caja por la escucha
+  local).
+
 ## Dependencias
 
 - Versiones en `gradle/libs.versions.toml` (las de la Fase 0, avance §1.2; fuentes y para qué en
@@ -440,7 +489,7 @@ indicador **no exigen red validada** (la wifi del restaurante puede no tener int
 
 ## Base local (Room)
 
-`AppDatabase` versión 5: `device_preferences` (v1); `paired_server` (una fila: `server_id`, nombre, última dirección,
+`AppDatabase` versión 6: `device_preferences` (v1); `paired_server` (una fila: `server_id`, nombre, última dirección,
 huella fijada, `device_id`, **token del dispositivo cifrado**, `idle_lock_seconds`), `known_waiters` (meseros que ya
 entraron con conexión aquí: nombre, inicial, color, `pin_version`, **verificador del PIN y credencial de envío
 cifrados**, fallos sin conexión y si su entrada sin conexión está cerrada, sin ningún reloj) y `device_log` (bitácora: pedidos que no se enviaron, hasta que se borra).
@@ -451,7 +500,12 @@ Las llaves solo en el Android Keystore; lo cifrado lleva su propósito (`device-
 `restaurant_snapshot` y `waiter_permissions` (lo último de Go para trabajar sin conexión); migración 3 → 4 con el SQL
 de `schemas/…/4.json` (`WAITER_TABLES_V4`). Versión 5 (revisión R6): columnas nuevas `captures.created_account`,
 `pending_orders.unresolved_save` y `pending_orders.clock_corrected` (migración 4 → 5 con `ALTER TABLE`,
-`WAITER_COLUMNS_V5`).
+`WAITER_COLUMNS_V5`). Versión 6 (etapa A2, **una sola para toda la etapa**: las fases C y D agregan sus tablas a esta
+misma versión antes de la entrega): `captures` admite capturas sin mesa (`table_id` opcional; Android 8 no cambia una
+columna a opcional, así que la migración 5 → 6 copia la tabla) con `mode`, `customer_name` y `customer_phone`, y la
+tabla nueva `takeaway_customer_edits` (ediciones del cliente por enviar); `WAITER_CHANGES_V6`. El destino guardado de
+un pedido (`pending_orders.destination`, JSON) lleva la modalidad y el cliente con valores por omisión para lo guardado
+antes. Todo registrado en `deviceDataWipe` (`WaiterDao.eraseAll`) y en la bitácora (`unsentOrders`).
 
 Cada cambio de esquema: subir `version`, agregar la `Migration` a `AppDatabase.MIGRATIONS`, versionar el nuevo
 `core/data/schemas/…/<versión>.json` y un caso en `AppDatabaseMigrationTest`. **Nunca**

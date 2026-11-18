@@ -1,4 +1,4 @@
-package com.adelpos.meseros.feature.waiter.capture
+package com.adelpos.meseros.core.capture
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -25,7 +25,6 @@ import com.adelpos.meseros.core.domain.waiter.SentLine
 import com.adelpos.meseros.core.ui.catalog.Stepper
 import com.adelpos.meseros.core.ui.components.LocalUserActivity
 import com.adelpos.meseros.core.ui.components.reportsUserActivity
-import com.adelpos.meseros.feature.waiter.R
 
 /**
  * Modificar o cancelar unidades enviadas (§6.3), siempre con motivo (de 5 a 500 caracteres, como

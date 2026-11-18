@@ -8,7 +8,11 @@ import androidx.compose.ui.test.junit4.v2.createEmptyComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ActivityScenario
+import androidx.test.espresso.Espresso
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.adelpos.meseros.core.capture.TAG_CAPTURE
+import com.adelpos.meseros.core.data.waiter.db.WaiterPermissionsEntity
+import com.adelpos.meseros.core.data.waiter.db.WaiterStorage
 import com.adelpos.meseros.core.domain.error.AppError
 import com.adelpos.meseros.core.ui.components.TAG_CONNECTION_INDICATOR
 import com.adelpos.meseros.core.ui.components.TAG_PIN_DELETE
@@ -22,7 +26,13 @@ import com.adelpos.meseros.feature.access.pin.TAG_ENTRY
 import com.adelpos.meseros.feature.access.pin.TAG_ENTRY_OFFLINE
 import com.adelpos.meseros.feature.access.pin.TAG_REENTER
 import com.adelpos.meseros.feature.access.pin.TAG_REENTER_MESSAGE
+import com.adelpos.meseros.feature.takeaway.TAG_TAKEAWAY_EMPTY
+import com.adelpos.meseros.feature.takeaway.TAG_TAKEAWAY_NEW
 import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_SEARCH
+import com.adelpos.meseros.navigation.TAG_MAIN_NAVIGATION
+import com.adelpos.meseros.navigation.TAG_NAV_TABLES
+import com.adelpos.meseros.navigation.TAG_NAV_TAKEAWAY
+import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -132,5 +142,74 @@ class AppNavigationTest {
         }
         assertFalse(container.deviceAccess.activeWaiter.value!!.mustReenterPin)
         assertTitle("Mesas")
+    }
+
+    /**
+     * Etapa A2, §3.1: con `takeaway.read` en los permisos de Go del mesero, la navegación principal
+     * muestra «Mesas» y «Para llevar» (en el teléfono y en la tableta); «Nuevo pedido» entra
+     * directo al catálogo y Atrás vuelve a Para llevar sin dejar nada. Sin el permiso, no aparece.
+     */
+    @Test
+    fun mesasYParaLlevarEnLaNavegacionPrincipal() {
+        TestDevice.seedOfflineWaiter()
+        val waiter = TestDevice.app.container.database.waiter()
+        runBlocking {
+            waiter.savePermissions(
+                WaiterPermissionsEntity(
+                    userId = TestDevice.WAITER_ID,
+                    permissions =
+                        WaiterStorage.encodeStrings(
+                            listOf(
+                                "restaurant.tables.read",
+                                "restaurant.areas.read",
+                                "accounts.read",
+                                "accounts.open",
+                                "orders.capture",
+                                "takeaway.read",
+                                "takeaway.manage",
+                            ),
+                        ),
+                    readAt = 1L,
+                ),
+            )
+        }
+        try {
+            scenario = ActivityScenario.launch(MainActivity::class.java)
+            TestDevice.enter(compose)
+            assertTitle("Mesas")
+            waitForTag(TAG_MAIN_NAVIGATION)
+            compose.onNodeWithTag(TAG_NAV_TAKEAWAY).performClick()
+            assertTitle("Para llevar")
+            waitForTag(TAG_TAKEAWAY_NEW)
+            compose.onNodeWithTag(TAG_TAKEAWAY_NEW).performClick()
+            assertTitle("Captura")
+            waitForTag(TAG_CAPTURE)
+            // La navegación principal sigue a la vista durante la captura.
+            compose.onNodeWithTag(TAG_MAIN_NAVIGATION).assertIsDisplayed()
+            Espresso.pressBack()
+            assertTitle("Para llevar")
+            // Un «Nuevo pedido» sin productos no deja nada en el dispositivo.
+            compose.waitUntil(timeoutMillis = 10_000) {
+                runBlocking { waiter.allCaptures().isEmpty() }
+            }
+            compose.onNodeWithTag(TAG_TAKEAWAY_EMPTY).assertIsDisplayed()
+            compose.onNodeWithTag(TAG_NAV_TABLES).performClick()
+            assertTitle("Mesas")
+            compose.onNodeWithTag(TAG_TABLES_SEARCH).assertIsDisplayed()
+
+            // Sin el permiso de ver los pedidos para llevar, no aparece.
+            compose.onNodeWithTag(TAG_WAITER_MENU).performClick()
+            compose.onNodeWithTag(TAG_WAITER_SWITCH).performClick()
+            assertTitle("Entrar")
+            runBlocking { waiter.deleteAllPermissions() }
+            TestDevice.enter(compose)
+            assertTitle("Mesas")
+            compose.waitForIdle()
+            assertTrue(
+                compose.onAllNodes(hasTestTag(TAG_MAIN_NAVIGATION)).fetchSemanticsNodes().isEmpty(),
+            )
+        } finally {
+            runBlocking { waiter.deleteAllPermissions() }
+        }
     }
 }

@@ -49,9 +49,9 @@ enum class DraftSync {
 }
 
 /**
- * Captura en curso de un mesero en una mesa (el «Borrador» de la cola, §7), guardada en Room **por
- * mesero**: sobrevive a la rotación, al cierre del proceso y a perder la conexión, y el siguiente
- * mesero no la ve.
+ * Captura en curso de un mesero en una mesa o en un pedido para llevar (el «Borrador» de la cola,
+ * §7), guardada en Room **por mesero**: sobrevive a la rotación, al cierre del proceso y a perder
+ * la conexión, y el siguiente mesero no la ve.
  *
  * El borrador visible es [base] (lo último que Go aceptó o mostró) con las [operations] locales
  * encima; con [baseRevision] 0 todavía no se leyó el borrador de Go (se lee antes del primer
@@ -71,11 +71,17 @@ enum class DraftSync {
  *   mandar nada más, también después de reiniciar el proceso.
  * @param createdAccount la cuenta nació en Go con esta captura (`openAccount`): si el mesero la
  *   descarta y queda vacía, se descarta también la cuenta (revisión R6, A2).
+ * @param tableId la mesa; null en un pedido para llevar ([mode], etapa A2: no hay mesa ficticia).
+ * @param mode en una mesa o para llevar.
+ * @param customer nombre y teléfono del cliente de un pedido para llevar **mientras el pedido no ha
+ *   salido a Go** (viajan en `openAccount` o en `destination.takeaway`). En cuanto sale (un
+ *   guardado en curso o la cuenta ya creada) ya no cambia aquí: las ediciones posteriores son una
+ *   [CustomerEdit] aparte, para que el reintento con la misma clave lleve el mismo contenido.
  */
 data class Capture(
     val id: String,
     val waiterUserId: String,
-    val tableId: String,
+    val tableId: String?,
     val tableName: String,
     val accountId: String?,
     val accountName: String?,
@@ -92,7 +98,19 @@ data class Capture(
     val inFlightCount: Int,
     val createdAtMillis: Long,
     val createdAccount: Boolean = false,
+    val mode: OrderMode = OrderMode.DINE_IN,
+    val customer: TakeawayCustomer = TakeawayCustomer.NONE,
 ) {
+    val takeaway: Boolean
+        get() = mode == OrderMode.TAKEAWAY
+
+    /**
+     * El nombre y el teléfono todavía se pueden cambiar en la captura misma: el pedido no ha salido
+     * a Go (sin cuenta y sin un guardado en curso o sin respuesta).
+     */
+    val customerEditable: Boolean
+        get() = accountId == null && pendingOperationId == null
+
     /** El borrador como se ve: lo de Go con los toques locales aplicados. */
     val visible: List<DraftLine>
         get() = DraftOperations.apply(base, operations)
@@ -139,6 +157,8 @@ data class Capture(
             seenAccountIds = seenAccountIds,
             revision = baseRevision,
             items = inFlightItems,
+            mode = mode,
+            customer = customer,
         )
     }
 

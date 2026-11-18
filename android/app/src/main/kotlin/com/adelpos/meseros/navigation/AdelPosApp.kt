@@ -7,34 +7,51 @@ import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.toRoute
 import com.adelpos.meseros.AdelPosApplication
+import com.adelpos.meseros.R
 import com.adelpos.meseros.ShellViewModel
+import com.adelpos.meseros.core.capture.CaptureRoute
+import com.adelpos.meseros.core.capture.captureTitle
+import com.adelpos.meseros.core.capture.pending.PendingOrdersRoute
+import com.adelpos.meseros.core.capture.pending.ReviewRoute
+import com.adelpos.meseros.core.capture.pending.pendingTitle
+import com.adelpos.meseros.core.capture.pending.reviewTitle
 import com.adelpos.meseros.core.domain.access.ActiveWaiter
 import com.adelpos.meseros.core.domain.access.DeviceStatus
 import com.adelpos.meseros.core.domain.connection.ConnectionSummary
 import com.adelpos.meseros.core.domain.waiter.OrderState
+import com.adelpos.meseros.core.domain.waiter.WaiterAction
 import com.adelpos.meseros.core.ui.components.ActiveWaiterMenu
 import com.adelpos.meseros.core.ui.components.AdelTopBar
 import com.adelpos.meseros.core.ui.components.LocalUserActivity
+import com.adelpos.meseros.core.ui.icons.AdelIcons
 import com.adelpos.meseros.core.ui.layout.PaneLayout
 import com.adelpos.meseros.core.ui.layout.currentPaneLayout
 import com.adelpos.meseros.core.ui.theme.AdelTheme
@@ -46,12 +63,8 @@ import com.adelpos.meseros.feature.access.SwitchBlockedDialog
 import com.adelpos.meseros.feature.access.accessTitle
 import com.adelpos.meseros.feature.access.asActions
 import com.adelpos.meseros.feature.access.pin.ReenterPinRoute
-import com.adelpos.meseros.feature.waiter.capture.CaptureRoute
-import com.adelpos.meseros.feature.waiter.capture.captureTitle
-import com.adelpos.meseros.feature.waiter.pending.PendingOrdersRoute
-import com.adelpos.meseros.feature.waiter.pending.ReviewRoute
-import com.adelpos.meseros.feature.waiter.pending.pendingTitle
-import com.adelpos.meseros.feature.waiter.pending.reviewTitle
+import com.adelpos.meseros.feature.takeaway.TakeawayRoute
+import com.adelpos.meseros.feature.takeaway.takeawayTitle
 import com.adelpos.meseros.feature.waiter.tables.TablesRoute
 import com.adelpos.meseros.feature.waiter.tables.tablesTitle
 import kotlinx.serialization.Serializable
@@ -59,14 +72,26 @@ import kotlinx.serialization.Serializable
 /** Destinos del modo Mesero (rutas con tipo de navigation-compose). */
 @Serializable data object TablesDestination
 
-/** Captura de una cuenta (o de una cuenta nueva de la mesa) del mesero. */
-@Serializable data class CaptureDestination(val captureId: String)
+/** «Para llevar» (etapa A2): la lista de pedidos para llevar. */
+@Serializable data object TakeawayDestination
+
+/**
+ * Captura de una cuenta (o de una cuenta nueva de la mesa) o, con [takeaway], de un pedido para
+ * llevar del mesero.
+ */
+@Serializable data class CaptureDestination(val captureId: String, val takeaway: Boolean = false)
 
 /** «Pedidos pendientes» del mesero. */
 @Serializable data object PendingDestination
 
-/** «Requiere tu revisión» de un pedido de la cola. */
-@Serializable data class ReviewDestination(val operationId: String)
+/** «Requiere tu revisión» de un pedido de la cola (desde Para llevar, con [takeaway]). */
+@Serializable data class ReviewDestination(val operationId: String, val takeaway: Boolean = false)
+
+/** Las dos secciones de la navegación principal (§3.1 de la A2). */
+enum class MainSection {
+    TABLES,
+    TAKEAWAY,
+}
 
 /**
  * Raíz de la interfaz: tema, barra superior con el indicador de conexión y, según el estado del
@@ -148,8 +173,19 @@ fun AdelPosNavigation(
             destination?.hasRoute<CaptureDestination>() == true -> captureTitle()
             destination?.hasRoute<PendingDestination>() == true -> pendingTitle()
             destination?.hasRoute<ReviewDestination>() == true -> reviewTitle()
+            destination?.hasRoute<TakeawayDestination>() == true -> takeawayTitle()
             else -> tablesTitle()
         }
+    // §3.1 de la A2: «Mesas» y «Para llevar» siempre a la vista, si Go le da al mesero activo
+    // permiso de ver los pedidos para llevar.
+    val takeawayVisible = waiter != null && takeawayVisible()
+    val section = backStackEntry?.let(::sectionOf) ?: MainSection.TABLES
+    if (waiter != null && !takeawayVisible && section == MainSection.TAKEAWAY) {
+        // Perdió el permiso: vuelve a Mesas (lo capturado sigue guardado).
+        LaunchedEffect(waiter.userId) {
+            navController.popBackStack(TablesDestination, inclusive = false)
+        }
+    }
     Scaffold(
         modifier = Modifier.fillMaxSize().testTag(TAG_APP_ROOT),
         topBar = {
@@ -169,6 +205,14 @@ fun AdelPosNavigation(
                 },
             )
         },
+        bottomBar = {
+            if (takeawayVisible) {
+                MainNavigationBar(
+                    selected = section,
+                    onSelect = { chosen -> selectSection(navController, chosen) },
+                )
+            }
+        },
         containerColor = MaterialTheme.colorScheme.background,
         contentWindowInsets = WindowInsets.safeDrawing,
     ) { padding ->
@@ -187,20 +231,98 @@ fun AdelPosNavigation(
     }
 }
 
+/** Si Go le da al mesero activo permiso de ver los pedidos para llevar (`takeaway.read`). */
+@Composable
+private fun takeawayVisible(): Boolean {
+    val application = LocalContext.current.applicationContext as AdelPosApplication
+    val permissions by
+        application.container.waiterDependencies.restaurant.permissions
+            .collectAsStateWithLifecycle()
+    return permissions.grants(WaiterAction.VIEW_TAKEAWAY)
+}
+
+/** La sección de la navegación principal a la que pertenece una pantalla. */
+private fun sectionOf(entry: NavBackStackEntry): MainSection {
+    val destination = entry.destination
+    val takeaway =
+        when {
+            destination.hasRoute<TakeawayDestination>() -> true
+            destination.hasRoute<CaptureDestination>() ->
+                entry.toRoute<CaptureDestination>().takeaway
+            destination.hasRoute<ReviewDestination>() -> entry.toRoute<ReviewDestination>().takeaway
+            else -> false
+        }
+    return if (takeaway) MainSection.TAKEAWAY else MainSection.TABLES
+}
+
+/**
+ * Cambiar de sección: Mesas es el inicio; Para llevar va encima de Mesas. Lo capturado no se pierde
+ * al cambiar (está en el dispositivo y se ve en su lista).
+ */
+private fun selectSection(navController: NavHostController, section: MainSection) {
+    when (section) {
+        MainSection.TABLES -> navController.popBackStack(TablesDestination, inclusive = false)
+        MainSection.TAKEAWAY ->
+            navController.navigate(TakeawayDestination) {
+                popUpTo<TablesDestination> { inclusive = false }
+                launchSingleTop = true
+            }
+    }
+}
+
+/** La navegación principal: «Mesas» y «Para llevar» (§3.1 de la A2). */
+@Composable
+private fun MainNavigationBar(selected: MainSection, onSelect: (MainSection) -> Unit) {
+    NavigationBar(modifier = Modifier.testTag(TAG_MAIN_NAVIGATION)) {
+        NavigationBarItem(
+            selected = selected == MainSection.TABLES,
+            onClick = { onSelect(MainSection.TABLES) },
+            icon = { Icon(AdelIcons.Table, contentDescription = null) },
+            label = { Text(stringResource(R.string.nav_tables)) },
+            modifier = Modifier.testTag(TAG_NAV_TABLES),
+        )
+        NavigationBarItem(
+            selected = selected == MainSection.TAKEAWAY,
+            onClick = { onSelect(MainSection.TAKEAWAY) },
+            icon = { Icon(AdelIcons.Bag, contentDescription = null) },
+            label = { Text(stringResource(R.string.nav_takeaway)) },
+            modifier = Modifier.testTag(TAG_NAV_TAKEAWAY),
+        )
+    }
+}
+
 /**
  * El modo Mesero (Fase E): Mesas → la captura de una cuenta; «Pedidos pendientes» y «Requiere tu
  * revisión». Después de «Enviar a cocina» se vuelve a Mesas (el pedido sigue en la cola con su
- * estado).
+ * estado). Desde la A2, «Para llevar» → la misma captura (compartida en `core:capture`), y al
+ * terminar se vuelve a Para llevar.
  */
 @Composable
 private fun WaiterNavigation(navController: NavHostController, paneLayout: PaneLayout) {
     val application = LocalContext.current.applicationContext as AdelPosApplication
     val waiter = application.container.waiterDependencies
+    val takeaway = application.container.takeawayDependencies
     val openCapture: (String) -> Unit = { captureId ->
         navController.navigate(CaptureDestination(captureId)) { launchSingleTop = true }
     }
+    val openTakeawayCapture: (String) -> Unit = { captureId ->
+        navController.navigate(CaptureDestination(captureId, takeaway = true)) {
+            launchSingleTop = true
+        }
+    }
     val openReview: (String) -> Unit = { operationId ->
         navController.navigate(ReviewDestination(operationId)) { launchSingleTop = true }
+    }
+    val openTakeawayReview: (String) -> Unit = { operationId ->
+        navController.navigate(ReviewDestination(operationId, takeaway = true)) {
+            launchSingleTop = true
+        }
+    }
+    val backToTakeaway: () -> Unit = {
+        if (!navController.popBackStack(TakeawayDestination, inclusive = false)) {
+            navController.popBackStack(TablesDestination, inclusive = false)
+            selectSection(navController, MainSection.TAKEAWAY)
+        }
     }
     NavHost(navController = navController, startDestination = TablesDestination) {
         composable<TablesDestination> {
@@ -220,27 +342,46 @@ private fun WaiterNavigation(navController: NavHostController, paneLayout: PaneL
                 },
             )
         }
-        composable<CaptureDestination> {
+        composable<TakeawayDestination> {
+            TakeawayRoute(
+                dependencies = takeaway,
+                onOpenCapture = openTakeawayCapture,
+                onOpenReview = openTakeawayReview,
+            )
+        }
+        composable<CaptureDestination> { entry ->
+            val fromTakeaway = entry.toRoute<CaptureDestination>().takeaway
             CaptureRoute(
                 layout = paneLayout,
-                dependencies = waiter,
-                onDone = { navController.popBackStack(TablesDestination, inclusive = false) },
+                dependencies = waiter.capture,
+                onDone = {
+                    if (fromTakeaway) {
+                        backToTakeaway()
+                    } else {
+                        navController.popBackStack(TablesDestination, inclusive = false)
+                    }
+                },
             )
         }
         composable<PendingDestination> {
             PendingOrdersRoute(
-                dependencies = waiter,
+                dependencies = waiter.capture,
                 onOpenCapture = openCapture,
                 onOpenReview = openReview,
             )
         }
-        composable<ReviewDestination> {
+        composable<ReviewDestination> { entry ->
+            val fromTakeaway = entry.toRoute<ReviewDestination>().takeaway
             ReviewRoute(
-                dependencies = waiter,
+                dependencies = waiter.capture,
                 onDone = { navController.popBackStack() },
                 onOpenCapture = { captureId ->
                     navController.popBackStack()
-                    openCapture(captureId)
+                    if (fromTakeaway) {
+                        openTakeawayCapture(captureId)
+                    } else {
+                        openCapture(captureId)
+                    }
                 },
             )
         }
@@ -248,3 +389,6 @@ private fun WaiterNavigation(navController: NavHostController, paneLayout: PaneL
 }
 
 const val TAG_APP_ROOT = "app-root"
+const val TAG_MAIN_NAVIGATION = "main-navigation"
+const val TAG_NAV_TABLES = "nav-tables"
+const val TAG_NAV_TAKEAWAY = "nav-takeaway"

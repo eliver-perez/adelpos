@@ -1,5 +1,6 @@
 package com.adelpos.meseros.feature.waiter
 
+import com.adelpos.meseros.core.capture.CaptureDependencies
 import com.adelpos.meseros.core.domain.access.ActiveWaiter
 import com.adelpos.meseros.core.domain.access.WaiterProfile
 import com.adelpos.meseros.core.domain.catalog.Catalog
@@ -16,6 +17,9 @@ import com.adelpos.meseros.core.domain.waiter.AccountBill
 import com.adelpos.meseros.core.domain.waiter.AccountSummary
 import com.adelpos.meseros.core.domain.waiter.Capture
 import com.adelpos.meseros.core.domain.waiter.CaptureService
+import com.adelpos.meseros.core.domain.waiter.CustomerEdit
+import com.adelpos.meseros.core.domain.waiter.CustomerTarget
+import com.adelpos.meseros.core.domain.waiter.DeliveryResult
 import com.adelpos.meseros.core.domain.waiter.DiscardResult
 import com.adelpos.meseros.core.domain.waiter.DraftOperation
 import com.adelpos.meseros.core.domain.waiter.DraftQuote
@@ -31,6 +35,9 @@ import com.adelpos.meseros.core.domain.waiter.SendRequest
 import com.adelpos.meseros.core.domain.waiter.SentChangeResult
 import com.adelpos.meseros.core.domain.waiter.SentLineService
 import com.adelpos.meseros.core.domain.waiter.TableAccountRef
+import com.adelpos.meseros.core.domain.waiter.TakeawayCustomer
+import com.adelpos.meseros.core.domain.waiter.TakeawayRead
+import com.adelpos.meseros.core.domain.waiter.TakeawayService
 import com.adelpos.meseros.core.domain.waiter.WaiterPermissions
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -49,6 +56,8 @@ class FakeWaiter(catalog: Catalog = Catalog.EMPTY) {
     val accounts = MutableStateFlow<List<AccountSummary>>(emptyList())
     val view = MutableStateFlow(RestaurantView.EMPTY)
     val storedView = MutableStateFlow(TablesView.DEFAULT)
+    val edits = MutableStateFlow<List<CustomerEdit>>(emptyList())
+    val customers = mutableListOf<Pair<String, TakeawayCustomer>>()
 
     val restaurant =
         object : RestaurantSource {
@@ -85,6 +94,13 @@ class FakeWaiter(catalog: Catalog = Catalog.EMPTY) {
                 val capture = emptyCapture("captura-${opened.size}", tableId)
                 captureFlow.value = capture
                 return capture
+            }
+
+            override suspend fun openTakeaway(userId: String, account: AccountSummary?): Capture =
+                error("El modo Mesero no abre pedidos para llevar")
+
+            override suspend fun setCustomer(captureId: String, customer: TakeawayCustomer) {
+                customers.add(captureId to customer)
             }
 
             override suspend fun stage(
@@ -175,6 +191,25 @@ class FakeWaiter(catalog: Catalog = Catalog.EMPTY) {
             ): SentChangeResult = SentChangeResult.Failed(AppError.Unreachable)
         }
 
+    val takeaway =
+        object : TakeawayService {
+            override val accounts: StateFlow<List<AccountSummary>> = this@FakeWaiter.accounts
+            override val readAt: StateFlow<TakeawayRead?> = MutableStateFlow(null)
+
+            override fun refresh() = Unit
+
+            override fun customerEdits(): Flow<List<CustomerEdit>> = edits
+
+            override suspend fun editCustomer(
+                userId: String,
+                target: CustomerTarget,
+                customer: TakeawayCustomer,
+            ) = Unit
+
+            override suspend fun deliver(userId: String, accountId: String): DeliveryResult =
+                DeliveryResult.NoConnection
+        }
+
     val catalogSource =
         object : CatalogSource {
             override val catalog: StateFlow<Catalog> = MutableStateFlow(catalog)
@@ -203,16 +238,22 @@ class FakeWaiter(catalog: Catalog = Catalog.EMPTY) {
             ),
         )
 
-    fun dependencies(): WaiterDependencies =
-        WaiterDependencies(
+    fun captureDependencies(): CaptureDependencies =
+        CaptureDependencies(
             restaurant = restaurant,
             captures = captures,
             orders = orders,
             sentLines = sentLines,
             catalog = catalogSource,
             images = null,
-            tablesView = tablesView,
             activeWaiter = active,
+            takeaway = takeaway,
+        )
+
+    fun dependencies(): WaiterDependencies =
+        WaiterDependencies(
+            capture = captureDependencies(),
+            tablesView = tablesView,
             elapsedClock = { 0L },
         )
 

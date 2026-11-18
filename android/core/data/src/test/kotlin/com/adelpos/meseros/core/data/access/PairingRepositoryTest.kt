@@ -230,10 +230,18 @@ class PairingRepositoryTest {
         )
         assertEquals("no se pidió ningún código", 0, codeRequests())
 
-        // 0.12.0 sin la capacidad del PIN tampoco sirve.
+        // 0.12.0 (la A1, sin Para llevar) tampoco sirve para la 0.2.0, ni un 0.13.0 sin la
+        // capacidad del PIN.
         go.serverVersion = "0.12.0"
+        go.capabilities = listOf("offline-orders-v1", "client-versions-by-kind", "waiter-pin-v1")
         assertEquals(
             PairingStep.Failed(PairingProblem.UpdateServer("0.12.0")),
+            flow.start(PairingTarget.Address("caja.local"), "Tableta 1"),
+        )
+        go.serverVersion = "0.13.0"
+        go.capabilities = listOf("offline-orders-v1", "client-versions-by-kind", "takeaway-v1")
+        assertEquals(
+            PairingStep.Failed(PairingProblem.UpdateServer("0.13.0")),
             flow.start(PairingTarget.Address("caja.local"), "Tableta 1"),
         )
         assertEquals(0, codeRequests())
@@ -270,18 +278,18 @@ class PairingRepositoryTest {
             PairingStep.Failed(PairingProblem.UpdateServer(null)),
             flow.start(PairingTarget.Address("caja.local"), "Tableta 1"),
         )
-        // La versión responde (0.12.0 con la capacidad) pero sin la mínima por tipo, y la solicitud
-        // responde 426 (o tipo de cliente desconocido): también es un servidor viejo.
+        // La versión responde (0.13.0 con las capacidades) pero sin la mínima por tipo, y la
+        // solicitud responde 426 (o tipo de cliente desconocido): también es un servidor viejo.
         go.versionRejection = null
         go.informsClientVersions = false
         go.createRejection = 426 to "CLIENT_UPDATE_REQUIRED"
         assertEquals(
-            PairingStep.Failed(PairingProblem.UpdateServer("0.12.0")),
+            PairingStep.Failed(PairingProblem.UpdateServer("0.13.0")),
             flow.start(PairingTarget.Address("caja.local"), "Tableta 1"),
         )
         go.createRejection = 400 to "CLIENT_KIND_INVALID"
         assertEquals(
-            PairingStep.Failed(PairingProblem.UpdateServer("0.12.0")),
+            PairingStep.Failed(PairingProblem.UpdateServer("0.13.0")),
             flow.start(PairingTarget.Address("caja.local"), "Tableta 1"),
         )
         // Con la mínima informada, un 426 sí es «Actualiza esta aplicación».
