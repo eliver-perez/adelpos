@@ -206,6 +206,60 @@ class WaiterApi(
             deserializer = DeliveryResultDto.serializer(),
         )
 
+    // --- Precuenta desde el dispositivo (etapa A2, Fase C; nunca en la cola) ---
+
+    /** `getIdentity`: el nombre visible de la precuenta y la impresora de este dispositivo. */
+    suspend fun identity(server: ServerTransport, headers: Headers) =
+        get(server, headers, "auth/me", IdentityDto.serializer())
+
+    /** `printPrecheck`: una precuenta nueva con el estado vigente de la cuenta. */
+    suspend fun printPrecheck(
+        server: ServerTransport,
+        headers: Headers,
+        accountId: String,
+        body: PrintPrecheckBody,
+    ) =
+        send(
+            server = server,
+            headers = headers,
+            method = "POST",
+            path = "payments/accounts/$accountId/precheck/print",
+            body = body,
+            serializer = PrintPrecheckBody.serializer(),
+            deserializer = PrintedDocumentDto.serializer(),
+        )
+
+    /** `getDocumentStatus`: el estado del último trabajo de esa precuenta (sin importes). */
+    suspend fun documentStatus(
+        server: ServerTransport,
+        headers: Headers,
+        accountId: String,
+        ticketId: String,
+    ) =
+        get(
+            server,
+            headers,
+            "payments/accounts/$accountId/documents/status?ticket_id=$ticketId",
+            DocumentStatusDto.serializer(),
+        )
+
+    /** `retryDocument`: reenvía sin motivo una precuenta que nunca salió en papel. */
+    suspend fun retryDocument(
+        server: ServerTransport,
+        headers: Headers,
+        accountId: String,
+        body: RetryDocumentBody,
+    ) =
+        send(
+            server = server,
+            headers = headers,
+            method = "POST",
+            path = "payments/accounts/$accountId/documents/retry",
+            body = body,
+            serializer = RetryDocumentBody.serializer(),
+            deserializer = PrintedDocumentDto.serializer(),
+        )
+
     /** `submitOfflineOrder`, con la sesión o con la credencial de envío del mesero. */
     suspend fun submitOfflineOrder(
         server: ServerTransport,

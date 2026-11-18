@@ -127,8 +127,8 @@ sealed interface DeviceStatus {
     data class UpdateApp(val appVersion: String, val minClientVersion: String?) : DeviceStatus
 
     /**
-     * «Actualiza el servidor del restaurante» (anterior a 0.13.0 o sin `waiter-pin-v1` o
-     * `takeaway-v1`).
+     * «Actualiza el servidor del restaurante» (anterior a 0.13.0 o sin una de las capacidades de
+     * `ServerCompatibility.REQUIRED_CAPABILITIES`).
      */
     data class UpdateServer(val serverVersion: String?) : DeviceStatus
 
