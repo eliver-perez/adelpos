@@ -98,8 +98,13 @@ test('Terminales: impresora de precuentas y avisos de platillos listos de un tel
   await chooseOption(select, 'Sin impresora');
   await page.getByRole('button', { name: 'Guardar cambios', exact: true }).click();
   await expect(notice(page, 'Terminal actualizada.')).toBeVisible();
-  const cleared = await driver.request('GET', `devices/${phoneID}/configuration`);
-  expect(cleared.body.precheck_printer).toBeNull();
+  // El aviso «Terminal actualizada.» del guardado anterior puede seguir en pantalla: se espera a que Go lo tenga.
+  await expect
+    .poll(async () => {
+      const cleared = await driver.request('GET', `devices/${phoneID}/configuration`);
+      return cleared.body.precheck_printer;
+    })
+    .toBeNull();
   await page.getByRole('button', { name: 'Cerrar editor', exact: true }).click();
   await device.getByRole('button', { name: 'Ver configuración', exact: true }).click();
   await expect(panel).toContainText('Sin impresora: este dispositivo no imprime precuentas');
@@ -115,22 +120,27 @@ test('Terminales: impresora de precuentas y avisos de platillos listos de un tel
   await expect(sound).toHaveAttribute('aria-pressed', 'false');
   await page.getByRole('button', { name: 'Guardar cambios', exact: true }).click();
   await expect(notice(page, 'Terminal actualizada.')).toBeVisible();
-  const readyAlerts = await fetch(`${serverURL}/api/v1/ready-alerts`, {
-    headers: {
-      'X-Device-ID': phoneID,
-      'X-Device-Token': phoneToken,
-      'X-Client-Version': '0.2.0',
-      'X-Client-Kind': 'android',
-    },
-  });
-  expect(readyAlerts.status).toBe(200);
-  const batch = (await readyAlerts.json()) as {
-    active: boolean;
-    settings: Record<string, boolean>;
+  const readBatch = async () => {
+    const readyAlerts = await fetch(`${serverURL}/api/v1/ready-alerts`, {
+      headers: {
+        'X-Device-ID': phoneID,
+        'X-Device-Token': phoneToken,
+        'X-Client-Version': '0.2.0',
+        'X-Client-Kind': 'android',
+      },
+    });
+    expect(readyAlerts.status).toBe(200);
+    return (await readyAlerts.json()) as {
+      active: boolean;
+      settings: Record<string, boolean>;
+    };
   };
+  // El aviso «Terminal actualizada.» del guardado anterior puede seguir en pantalla: se espera a que Go lo tenga.
+  await expect
+    .poll(async () => (await readBatch()).settings)
+    .toEqual({ enabled: true, sound: false, vibration: true });
   // Nadie entró con PIN en este teléfono: el servicio no corre, pero ve sus ajustes.
-  expect(batch.active).toBe(false);
-  expect(batch.settings).toEqual({ enabled: true, sound: false, vibration: true });
+  expect((await readBatch()).active).toBe(false);
   await page.getByRole('button', { name: 'Cerrar editor', exact: true }).click();
   await device.getByRole('button', { name: 'Ver configuración', exact: true }).click();
   await expect(panel).toContainText('Avisar platillos listosActivado · sin sonido, con vibración');
