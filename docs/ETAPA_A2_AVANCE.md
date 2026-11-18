@@ -979,3 +979,183 @@ de la cuenta (pagos con método, referencia, caja, turno y quién cobró), que l
 de `5f52e73` (`git archive`): `fmt-check`, `sync-check`, `go-unit`, `go-int ./internal/apicontract`,
 `TestStageA2Takeaway` (`operations`) y `TestStageA1WaiterPIN` (`administration`), todo aprobado. Fusión: la parte B
 (`5f52e73`) y la Fase A (`387441c`) en `f90fd83`, sin archivos en común.
+
+## Servidor · Parte C: impresora de precuentas por dispositivo (esquema 26)
+
+Rama `etapa-a2-srv`, mismo árbol `$SP/wt/srv`, encima de `5f52e73` (parte B), un agente, 18/11/2026, en paralelo con
+Android en su árbol (no se tocó `android/`, `scripts/android-e2e.sh` ni `docs/ANDROID_INSTALAR.md`). Pruebas aisladas
+(`ISO_TAG=S`): clúster temporal 55499 con bases `adel_pos_test_s_*` y Playwright con el Go temporal del arnés
+(`ISO_GO_PORT=8211`, `ISO_PREVIEW_PORT=1431`, detenido al terminar). Aplica §5 de la especificación con A2-D3.
+
+Commits: `cc9bf57` (0026 sección C, esquema 26 y `TestStageA2Upgrade`), `8d2ebfd` (servidor, contrato, documentación y
+pruebas) y `6c2fcdd` (escritorio, Vitest, Playwright y la firma de datos de prueba).
+
+### Qué cambió
+
+- **Migración `backend/migrations/0026_android_a2.sql`** (la única de la etapa; sección «Parte C»; la D se agregará
+  ahí): `devices.precheck_printer_id` (uuid, NULL por omisión, FK `devices_precheck_printer_id_fkey` a
+  `kitchen_printers`, índice parcial `devices_precheck_printer_idx` y `CHECK devices_precheck_printer_android_check`:
+  solo un `android` la tiene). No cambia ninguna fila. Esquema **26** (`config/product.json` + `sync`).
+  `TestStageA2Upgrade` (`internal/database/stagea2_upgrade_test.go`) sube 25 → 26 sobre datos existentes; las pruebas de
+  subida anteriores siguen migrando hasta la última.
+- **Terminales** (`internal/administration/devices.go` y `precheck_printer.go`, nuevo):
+  - `PATCH devices/{id}` acepta `precheck_printer_id` con `optionalID` (distingue «no enviado» de `null`): sin el campo
+    se conserva, `null` la quita, un id la asigna si el dispositivo es `android` y la impresora existe y puede imprimir
+    (`kitchen.PrinterProblem`). Audita `device.updated` con antes y después.
+  - `GET devices`, la respuesta del `PATCH` y la auditoría llevan `precheck_printer_id`, `precheck_printer_name` y
+    `precheck_printer_terminal_name`.
+  - `GET devices/{id}/configuration`: `precheck_printer` (la asignada con `problem`) y `precheck_printer_options` (todas
+    las impresoras con su `problem`; vacía si no es `android`). Así quien edita terminales elige sin
+    `kitchen.printers.manage` (`kitchen.DocumentPrinterOptions`/`DocumentPrinterChoice`, `internal/kitchen/commercial.go`).
+  - `auth/me` y `restaurant/state` comparten `terminalIdentityQuery` con `terminal.precheck_printer_id` y
+    `terminal.precheck_printer` (`{id, name, terminal_name}` o `null`).
+- **Resolución y respuestas** (`internal/payments/document_printing.go`, `documents.go`, `finance.go`,
+  `routes_extended.go`, `context.go`):
+  - `receiptPrinter`: un `android` usa **solo** `devices.precheck_printer_id` (A2-D3); sin ella, `missing`. Las demás
+    terminales, igual (caja → general). Lo usan precuenta, reintento, reimpresión, tickets y documentos de caja.
+  - `printerUnavailableError` agrega `details.scope: "device"` en un `android`; `missingPrinterMessage` dice «Este
+    dispositivo no tiene impresora asignada. Pide al administrador que la elija en Terminales.».
+  - `addJobFeedback`: `precheck/print`, `documents/retry`, `documents/reprint` (y el `printing` de un ticket de pago
+    encolado) agregan `problem` (`JobProblemSQL`, ya `agent_offline` al encolar), `printer_name` y `terminal_name`
+    (`JobTerminalSQL`).
+  - `GET payments/accounts/{id}/documents/status?ticket_id=…` (`documentStatus`, permiso `payments.tickets.print`, lock
+    compartido): el `DocumentRecord` del documento, sin importes. `readDocuments` y `readDocument` comparten
+    `documentRecordQuery`.
+- **Permisos de mesero**: `WaiterPermissions` + `payments.tickets.print` (y `waiter_scope_test.go` lo admite como
+  excepción de la etapa A2).
+- **Capacidad** `device-precheck-printer-v1` (`internal/httpapi/router.go`, comprobada en `clientversion_test.go`).
+- **«Quitar datos de prueba»** (`internal/maintenance/plan.go` y `apply.go`): la referencia `devices.precheck_printer_id`
+  se maneja como configuración que se desvincula («Impresora de precuentas de «…»»), no como registro que impide borrar.
+  Firma nueva `Precuentas A2 E2E` (`cups`, `ADEL_E2E_SIN_IMPRESORA`) en `signatures.go`, creada por
+  `desktop/e2e/workflow-stagea2-terminals.spec.ts`.
+- **Escritorio** (`desktop/src/pages/DevicesPage.tsx`, `services/models.ts`, `services/serverCapabilities.ts`):
+  Terminales › Editar de un `android` → «Impresora de precuentas» («Sin impresora» y las impresoras con «· en <terminal>»;
+  las que no sirven, deshabilitadas con el motivo, salvo la ya elegida), «Ver configuración» la informa («Sin impresora:
+  este dispositivo no imprime precuentas»). Solo con `device-precheck-printer-v1`; sin ella el `PATCH` no lleva el
+  campo. Sin operaciones nuevas en Rust (`device_configuration` y `update_device` ya existían).
+- **Contrato** (`openapi.json`): `Terminal` con `precheck_printer_id` y `precheck_printer` (obligatorios: Go siempre
+  los entrega); operaciones `printPrecheck`, `getDocumentStatus` y `retryDocument`; esquemas `PrintedDocument`,
+  `PrinterRejection` y `DocumentStatus`; `pinLogin` con la lista nueva; descripciones de `getIdentity`,
+  `getRecoveryState` y `Error`. `TestContractV1` agrega `contractPrecheck` (37 operaciones, antes 34; el cliente del
+  recorrido lleva el pool para dejar un trabajo como fallido, porque ahí no corre el trabajador de la cola).
+- **Documentación**: `docs/API_V1.md` («Imprimir la precuenta (etapa A2, parte C)», tabla, capacidad, permisos,
+  `terminal` de la recuperación, códigos de error) y `API_CONTRACTS.md` («Etapa A2 · impresora de precuentas por
+  dispositivo»).
+
+Sin locks consultivos nuevos: el `PATCH` es de administración (transacción de autenticación) y las rutas de
+`payments/*` toman 7820148305 como siempre (la de estado, compartido).
+
+### Decisiones (con su porqué)
+
+1. **Reimpresión (punto 5 del encargo): el dispositivo no necesita `reprintDocument` ni `payments.tickets.reprint`.**
+   Comprobado en el escritorio: «Imprimir precuenta» (`PrecheckPanel.tsx`, `payments_print_precheck`) **siempre** arma
+   una precuenta nueva con el estado vigente, sin motivo, aunque la cuenta no haya cambiado. La «copia idéntica con
+   motivo» (`payments_reprint`, `payments.tickets.reprint`) solo existe en la lista de documentos de Cobros
+   (`DocumentList.tsx`, que exige `payments.read`). La regla para el dispositivo es la misma del botón: volver a tocar
+   «Imprimir …» = otra precuenta; «Reintentar» sin motivo si nunca salió (9F). No se agregó nada a `WaiterPermissions`
+   por esto.
+2. **Decisión propuesta · Las opciones del selector llegan en `devices/{id}/configuration`** (con `devices.read`) y no
+   de `kitchen/printers` (que exige `kitchen.printers.manage`): quien administra terminales puede elegir sin permisos de
+   cocina, y Go dice el motivo de cada impresora que no sirve (no se repite la regla en TypeScript).
+3. **Decisión propuesta · `devices.precheck_printer_id` con `CHECK` de tipo `android`** además de la validación de Go,
+   para que ningún camino deje una impresora de precuentas a una terminal de escritorio (A2-D3 la define solo para el
+   dispositivo).
+4. **Decisión propuesta · La resolución por dispositivo aplica a todos los documentos que pida un `android`** (también
+   tickets de pago o de caja, si una sesión con contraseña en un teléfono llegara a pedirlos): «un android imprime solo
+   en su impresora» sin excepciones. Las terminales de escritorio y de cocina no cambian.
+5. **Decisión propuesta · `problem`, `printer_name` y `terminal_name` en todas las respuestas de impresión de
+   documentos** (también la reimpresión y el ticket de pago), con la misma función: cambio compatible, el escritorio
+   los ignora.
+6. **Decisión propuesta · «Quitar datos de prueba» desvincula la impresora de precuentas** de un dispositivo (como la
+   impresora propia de una caja): si no, la llave foránea nueva habría convertido una impresora de prueba asignada en
+   «registro relacionado» y la habría dejado desactivada en lugar de eliminarla.
+7. **«Atendió:»** sigue siendo quien pide la impresión (sin cambios, como dijo la Fase 0): impresa desde el teléfono
+   dice el mesero que la imprime.
+
+### Forma final para el agente de Android
+
+Exigir **`device-precheck-printer-v1`** (servidor 0.13.0). Con la sesión con PIN (no con la credencial de envío) y
+conexión; imprimir **nunca** entra en la cola sin conexión («Para imprimir necesitas conexión con la computadora
+principal»). Mostrar el botón con `payments.tickets.print` en `user.permissions`.
+
+- **Nombre del botón**: `establishment.precheck_name` de `getIdentity` → `precheck` «Imprimir precuenta»,
+  `sales_ticket` «Imprimir ticket de venta», `bill` «Imprimir cuenta». El impreso lo titula Go igual.
+- **A dónde va**: `terminal.precheck_printer` de `getIdentity`/`getRecoveryState`: `null` o
+  `{"id", "name", "terminal_name"}` (`terminal_name` solo si es la USB de una terminal). Con `null` se puede avisar antes
+  de tocar («Este dispositivo no tiene impresora asignada…»), pero la respuesta de Go manda.
+- **Imprimir**: `POST /api/v1/payments/accounts/{id}/precheck/print` `{"operation_id": "<uuid>"}` (misma clave en los
+  reintentos de red) → **200** `{"requested": true, "status": "pending", "job_id", "ticket_id", "message": "", "problem":
+null | "agent_offline", "printer_name": "<impresora>", "terminal_name": null | "<terminal>"}`:
+  - `problem == "agent_offline"` → «La <terminal_name> está desconectada» (el trabajo espera y saldrá cuando vuelva);
+  - si no → «Enviada a <terminal_name o printer_name>».
+  - **409 `PRINTER_NOT_CONFIGURED`**: `{"error": {"code": "PRINTER_NOT_CONFIGURED", "message": "Este dispositivo no
+tiene impresora asignada. Pide al administrador que la elija en Terminales.", "details": {"document": "precheck",
+"problem": "missing", "scope": "device"}}}` → «Este dispositivo no tiene impresora asignada» con el aviso de pedírsela
+    al administrador.
+  - **409 `PRINTER_UNAVAILABLE`**: `details: {"document": "precheck", "problem": "inactive" | "unsupported",
+"printer_name", "scope": "device"}`, mensaje «La impresora <nombre> está desactivada.» o «Esta impresora todavía no
+    puede usarse para imprimir.» → mostrar el mensaje de Go y pedir al administrador que la revise en Terminales.
+  - 403 `PERMISSION_DENIED` sin el permiso; 409 `IDEMPOTENCY_CONFLICT` con la misma clave y otro contenido.
+- **Seguir el trabajo** (unos 15 s, cada 2–3 s): `GET /api/v1/payments/accounts/{id}/documents/status?ticket_id=<ticket_id>`
+  → `{"ticket_id", "kind": "precheck", "payment_id": null, "created_at", "job_id", "job_state", "job_problem",
+"printer_name", "copies", "terminal_name"}`. `job_state` `submitted` = la impresora o su cola lo aceptó (fin: «Enviada a
+  …»); `job_problem` `unreachable` → «La impresora no responde» (con «Reintentar»); `agent_offline` → «La
+  <terminal_name> está desconectada»; `uncertain` → pedir revisar el papel (sin «Reintentar»); `not_found`, `setup`,
+  `inactive`, `unsupported` → «La impresora necesita revisión: avisa al administrador». 404 si el ticket no es de esa
+  cuenta; 400 si no es un uuid; 403 sin el permiso. Sin importes ni pagos.
+- **Reintentar** (solo con `job_state` `error` o `intervention`): `POST /api/v1/payments/accounts/{id}/documents/retry`
+  `{"operation_id": "<nueva>", "ticket_id": "<ticket_id>"}` → 200 `{"status", "job_id" (el mismo trabajo), "ticket_id",
+"problem", "printer_name", "terminal_name"}`, en la impresora del dispositivo **de ese momento** (sin ella, el mismo 409
+  `PRINTER_NOT_CONFIGURED` con `scope: "device"`). 409 `PRINT_NOT_FAILED` si ya no está fallido, `PRINT_UNCERTAIN` si no
+  se sabe si salió, `PRINT_JOB_SUPERSEDED` si ya hay una impresión más reciente: volver a leer el estado.
+- **Volver a imprimir** algo que ya salió: el mismo `precheck/print` con otra `operation_id` (precuenta nueva), como en
+  la caja; no hay copia con motivo en el dispositivo.
+
+### Para la guía (`docs/ANDROID_INSTALAR.md`)
+
+- **Permiso del rol Mesero** (Administración › Personal › Roles › Editar permisos): «**Imprimir tickets y
+  precuentas**» para que el mesero imprima la precuenta desde su teléfono. No hace falta «Reimprimir tickets»: volver a
+  imprimir arma otra precuenta, como en la caja.
+- **Impresora de precuentas por dispositivo**: Administración › Sistema › **Terminales** › **Editar** en la fila del
+  teléfono o tableta → «**Impresora de precuentas**» → elige una impresora de red o la impresora USB de una caja («…
+  · en Caja 1») → «Guardar cambios». «Ver configuración» la muestra. Sin impresora, ese dispositivo **no imprime**
+  precuentas (nunca manda la precuenta a otra impresora); el mesero ve «Este dispositivo no tiene impresora asignada».
+- La precuenta sale con el nombre visible elegido en Administración › Documentos (Precuenta, Ticket de venta o Cuenta) y
+  con «Atendió: <el mesero que la imprime>».
+- Si la impresora es la USB de una caja, esa caja debe tener AD-EL POS abierto: si no, el teléfono dice «La Caja 2
+  está desconectada» y la precuenta sale cuando vuelva a abrirse.
+- Requiere la computadora principal en la versión **0.13.0**.
+
+### Pruebas ejecutadas
+
+| Qué                                                                                                                                                                                                                                                       | Dónde                                 | Resultado                                  |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- | ------------------------------------------ |
+| `TestStageA2PrecheckPrinter` (5 subpruebas, `-v`: Terminales; sin impresora; USB de una terminal desconectada y bytes ESC/POS con PRECUENTA, TICKET DE VENTA y CUENTA, «Atendió:», folio y partidas; red que no responde y reintento; `documents/status`) | `./internal/operations`, base `_s_`   | **PASS** las 5 (18 s)                      |
+| `TestStageA2Upgrade` y `TestStageA1Upgrade` (`-v`)                                                                                                                                                                                                        | `./internal/database`                 | **PASS** las 2                             |
+| `TestStageTwoAcceptance` con «Quitar datos de prueba» y la impresora de precuentas de un teléfono (`-v`)                                                                                                                                                  | `./internal/administration`           | **PASS**                                   |
+| `TestContractV1` (`-v`) con `contractPrecheck`                                                                                                                                                                                                            | `./internal/apicontract`              | **PASS**; 37 operaciones (antes 34)        |
+| `go-unit` (vet normal e integración, `test -race`, `GOOS=windows` build y vet)                                                                                                                                                                            | `iso.sh go-unit`                      | **aprobado** (35 paquetes ok)              |
+| `go-int` completos: `database`, `administration`, `operations`, `apicontract`                                                                                                                                                                             | `iso.sh go-int`, una base por paquete | **ok** (13 s, 221 s, 414 s, 35 s)          |
+| Vitest completo (`tsc --noEmit` + `npm test`), con `stageA2Terminals.test.tsx` (5 casos)                                                                                                                                                                  | `iso.sh vitest`                       | **97 archivos, 921 pruebas aprobadas**     |
+| `build` y `cargo test`                                                                                                                                                                                                                                    | `iso.sh build`, `iso.sh cargo`        | **ok** (cargo: 107 aprobadas, 3 ignoradas) |
+| Playwright Chromium: `workflow-stagea2-terminals` sola                                                                                                                                                                                                    | `iso.sh browser chromium` (8211/1431) | **1 aprobada**                             |
+| Playwright Chromium: `workflow-stage9g-terminals`, `workflow-stage9g-print-agent`, `workflow-stagea1-pin`, `workflow-stagea2-terminals` y `workflow-zz-test-data` en una corrida                                                                          | idem                                  | **6 aprobadas**                            |
+| Playwright WebKit: `workflow-stage9g-terminals`, `workflow-stagea1-pin` y `workflow-stagea2-terminals`                                                                                                                                                    | `iso.sh browser webkit` (8211/1431)   | **4 aprobadas**                            |
+| `format`, `fmt-check`, `sync-check`; md5 de `docs/etapas/*.md`                                                                                                                                                                                            | árbol `srv`                           | Correctos; idénticos                       |
+
+### No verificado
+
+- La aplicación Android contra estas rutas (agente de Android, fase C del dispositivo y Fase E con los bytes ESC/POS en
+  el emulador).
+- Papel real: las pruebas usan el agente simulado (`print-agent/jobs/claim`) y un adaptador controlado para «no
+  responde»; ninguna impresora física.
+
+### Decisiones del coordinador sobre la parte C
+
+Se aceptan las siete decisiones de la parte. En particular, la reimpresión: «Imprimir precuenta» siempre arma una
+precuenta nueva sin motivo (también en el escritorio), y la copia idéntica con motivo solo existe en la lista de
+documentos de Cobros (`payments.read`); el dispositivo sigue esa misma regla, sin `payments.tickets.reprint`. La parte C
+se verificó sobre una copia exacta de `6c2fcdd` (`git archive`): `fmt-check`, `sync-check`, `go-unit`, `go-int` de
+`apicontract`, `database` (`TestStageA2Upgrade`) y `administration` completos, `TestStageA2PrecheckPrinter`
+(`operations`), Vitest (97 archivos, 921 pruebas), `npm run build` y Playwright Chromium `workflow-stagea2-terminals`
+(1 de 1, sola sobre una base nueva), todo aprobado.
