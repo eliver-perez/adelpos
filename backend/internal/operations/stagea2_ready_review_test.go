@@ -18,14 +18,15 @@ import (
 )
 
 // Revisión independiente del aviso de platillos listos (§4 de la etapa A2, parte D del servidor). Cada subprueba
-// reproduce un hallazgo de $SP/doc-rev.md y comprueba el comportamiento que pide la especificación, así que FALLA con
-// el código actual (el mensaje describe lo que pasó). No corrige nada: el coordinador decide si se conserva.
+// reproduce un hallazgo de $SP/doc-rev.md y comprueba el comportamiento corregido; se conserva como prueba de
+// regresión (con el código anterior a las correcciones fallaba a propósito, con un mensaje que describe lo que pasaba).
 //
-//   - R1: modificar una unidad quitándole la única estación que faltaba la deja «Listo» sin aviso.
-//   - R2: un mesero con sesión con PIN vigente abierta antes de la «Hora de inicio del día»: active es true, el aviso
-//     se fija a su dispositivo y ningún dispositivo lo recibe (el cursor lo deja atrás).
-//   - R3: base restaurada: un aviso nuevo reutiliza el id de otro que el dispositivo ya avisó ese día.
-//   - R4: el canal manda un mensaje cada 750 ms aunque no haya nada, e «interrupted» lleva id 0.
+//   - R1: modificar una unidad quitándole la única estación que faltaba la deja «Listo»: debe registrarse su aviso.
+//   - R2: un mesero con sesión con PIN vigente abierta antes de la «Hora de inicio del día»: el aviso fijado a su
+//     dispositivo debe llegarle (la regla de entrega es la misma de active).
+//   - R3: base restaurada: un aviso nuevo puede repetir el número de otro ya avisado, pero no su clave (key), que es la
+//     que usa el dispositivo para descartar repetidos.
+//   - R4: el canal no manda nada sin novedades (solo «: ping» cada 15 s) e «interrupted» llega sin id y con su código.
 //
 // Usa su propia base desde cero (como TestStageA2ReadyAlerts).
 
@@ -105,7 +106,7 @@ func TestStageA2ReadyReview(t *testing.T) {
 	fixture.anaOne = fixture.enter(t, fixture.tabletOne, fixture.ana, "4829")
 	fixture.betoTwo = fixture.enter(t, fixture.tabletTwo, fixture.beto, "6152")
 
-	t.Run("R1 modificar quita la estación pendiente: la unidad queda Lista sin aviso", func(t *testing.T) {
+	t.Run("R1 modificar quita la estación pendiente: la unidad queda Lista y se avisa", func(t *testing.T) {
 		before := fixture.head(t)
 		accountID := fixture.order(t, fixture.anaOne, 0, reviewComboLine(fixture, 1))
 		tasks := reviewTasks(t, fixture, accountID)
@@ -158,7 +159,7 @@ func TestStageA2ReadyReview(t *testing.T) {
 		}
 	})
 
-	t.Run("R2 sesión vigente de antes del inicio del día: active true y el aviso no llega a nadie", func(t *testing.T) {
+	t.Run("R2 sesión vigente de antes del inicio del día: el aviso le llega", func(t *testing.T) {
 		config, err := businessday.Load(fixture.ctx, fixture.pool)
 		if err != nil {
 			t.Fatal(err)
@@ -188,7 +189,7 @@ func TestStageA2ReadyReview(t *testing.T) {
 		fixture.betoTwo = fixture.enter(t, fixture.tabletTwo, fixture.beto, "6152")
 	})
 
-	t.Run("R3 base restaurada: un aviso nuevo repite el id de otro que el dispositivo ya avisó", func(t *testing.T) {
+	t.Run("R3 base restaurada: el aviso nuevo no repite la clave de otro ya avisado", func(t *testing.T) {
 		before := fixture.head(t)
 		first := fixture.order(t, fixture.anaOne, 2, draftLine(fixture.fries, 1))
 		fixture.ready(t, first, "")
@@ -215,14 +216,14 @@ func TestStageA2ReadyReview(t *testing.T) {
 		if len(fresh) != 1 {
 			t.Fatalf("aviso de la segunda cuenta: %+v", fresh)
 		}
-		if fresh[0].ID == seenID {
-			t.Errorf("tras restaurar, el aviso nuevo de la cuenta %s llega con id %d, el mismo que el dispositivo ya avisó "+
-				"hoy para la cuenta %s: con A2-D9 (descartar los id repetidos del día) el dispositivo lo descarta y se pierde",
-				second, fresh[0].ID, first)
+		// El número se repite tras restaurar (es solo el cursor), la clave no: el dispositivo no lo descarta.
+		if fresh[0].Key == "" || fresh[0].Key == delivered[0].Key {
+			t.Errorf("tras restaurar, el aviso nuevo de la cuenta %s llega con la clave %q, la misma que el dispositivo ya "+
+				"avisó hoy para la cuenta %s: lo descartaría y se perdería", second, fresh[0].Key, first)
 		}
 	})
 
-	t.Run("R4 canal: un mensaje cada 750 ms sin novedades e interrupted con id 0", func(t *testing.T) {
+	t.Run("R4 canal: nada sin novedades e interrupted sin id y con su código", func(t *testing.T) {
 		tablet := fixture.readyTablet(t, "Tableta revisión 3")
 		fixture.enter(t, tablet, fixture.beto, "6152")
 		server := httptest.NewServer(fixture.service)
@@ -233,22 +234,25 @@ func TestStageA2ReadyReview(t *testing.T) {
 		}
 		request.Header.Set("X-Device-ID", tablet.deviceID)
 		request.Header.Set("X-Device-Token", tablet.deviceToken)
-		response, err := (&http.Client{Timeout: 15 * time.Second}).Do(request)
+		response, err := (&http.Client{Timeout: 60 * time.Second}).Do(request)
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer response.Body.Close()
-		reader := bufio.NewReader(response.Body)
 		type message struct {
-			id, event string
-			bytes     int
+			id, event, data string
+			bytes           int
 		}
-		next := func() message {
+		// Los mensajes se leen aparte para medir el silencio sin quedarse esperando (el «: ping» llega a los 15 s).
+		messages := make(chan message, 16)
+		go func() {
+			defer close(messages)
+			reader := bufio.NewReader(response.Body)
 			current := message{}
 			for {
 				line, err := reader.ReadString('\n')
 				if err != nil {
-					t.Fatal("el canal se cerró", err)
+					return
 				}
 				current.bytes += len(line)
 				switch {
@@ -256,38 +260,61 @@ func TestStageA2ReadyReview(t *testing.T) {
 					current.id = strings.TrimSpace(strings.TrimPrefix(line, "id: "))
 				case strings.HasPrefix(line, "event: "):
 					current.event = strings.TrimSpace(strings.TrimPrefix(line, "event: "))
+				case strings.HasPrefix(line, "data: "):
+					current.data = strings.TrimSpace(strings.TrimPrefix(line, "data: "))
 				case line == "\n":
-					return current
+					messages <- current
+					current = message{}
 				}
 			}
+		}()
+		if first, ok := <-messages; !ok || first.event != "alerts" {
+			t.Fatalf("primer mensaje del canal: %+v", first)
 		}
-		next()
 		// Sin ningún «Listo», durante 6 s.
 		started := time.Now()
 		quiet, quietBytes := 0, 0
-		for time.Since(started) < 6*time.Second {
-			received := next()
-			quiet++
-			quietBytes += received.bytes
+		silence := time.After(6 * time.Second)
+	listen:
+		for {
+			select {
+			case received, ok := <-messages:
+				if !ok {
+					t.Fatal("el canal se cerró")
+				}
+				quiet++
+				quietBytes += received.bytes
+			case <-silence:
+				break listen
+			}
 		}
 		if quiet > 1 {
 			t.Errorf("sin novedades el canal mandó %d mensajes (%d bytes) en %.1f s; en una hora con la pantalla apagada "+
-				"serían unos %d mensajes y %d KB solo de datos, más una petición nueva cada 30 s",
+				"serían unos %d mensajes y %d KB solo de datos",
 				quiet, quietBytes, time.Since(started).Seconds(), quiet*600, quietBytes*600/1024)
 		}
-		// Retirar el dispositivo: la siguiente lectura manda «interrupted».
+		// Retirar el dispositivo: la siguiente lectura manda «interrupted», sin id y con el código.
 		fixture.mutate(t, "POST", "devices/"+tablet.deviceID+"/revoke", map[string]any{}, 200)
-		deadline := time.Now().Add(5 * time.Second)
-		for time.Now().Before(deadline) {
-			received := next()
-			if received.event == "interrupted" {
-				if received.id == "0" {
-					t.Errorf("«interrupted» llega con id: 0: el Last-Event-ID estándar del cliente vuelve a 0 y una " +
-						"reconexión con él relee todo el día")
+		deadline := time.After(5 * time.Second)
+		for {
+			select {
+			case received, ok := <-messages:
+				if !ok {
+					t.Fatal("el canal se cerró sin «interrupted»")
+				}
+				if received.event != "interrupted" {
+					continue
+				}
+				if received.id != "" {
+					t.Errorf("«interrupted» llega con id: %s: el Last-Event-ID del cliente cambiaría", received.id)
+				}
+				if received.data != `{"code":"DEVICE_REVOKED"}` {
+					t.Errorf("«interrupted» debe decir el código del retiro: %s", received.data)
 				}
 				return
+			case <-deadline:
+				t.Fatal("no llegó «interrupted» tras retirar el dispositivo")
 			}
 		}
-		t.Fatal("no llegó «interrupted» tras retirar el dispositivo")
 	})
 }

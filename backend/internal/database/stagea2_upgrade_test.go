@@ -88,14 +88,16 @@ func TestStageA2Upgrade(t *testing.T) {
 func checkStageA2ReadyNotices(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	var notices, disabled int
-	var identity, unique, recipient string
+	var identity, unique, recipient, created, open string
 	err := pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM app.ready_notices),
             (SELECT count(*) FROM app.devices WHERE NOT (ready_alerts_enabled AND ready_alerts_sound AND ready_alerts_vibration)),
             (SELECT identity_generation FROM information_schema.columns WHERE table_schema='app' AND table_name='ready_notices'
                 AND column_name='sequence'),
             coalesce((SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname='ready_notices_unit_version_key'),''),
-            coalesce((SELECT indexdef FROM pg_indexes WHERE schemaname='app' AND indexname='ready_notices_recipient_idx'),'')`).
-		Scan(&notices, &disabled, &identity, &unique, &recipient)
+            coalesce((SELECT indexdef FROM pg_indexes WHERE schemaname='app' AND indexname='ready_notices_recipient_idx'),''),
+            coalesce((SELECT indexdef FROM pg_indexes WHERE schemaname='app' AND indexname='sessions_pin_device_created_idx'),''),
+            coalesce((SELECT indexdef FROM pg_indexes WHERE schemaname='app' AND indexname='sessions_pin_device_open_idx'),'')`).
+		Scan(&notices, &disabled, &identity, &unique, &recipient, &created, &open)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,9 +106,20 @@ func checkStageA2ReadyNotices(ctx context.Context, t *testing.T, pool *pgxpool.P
 		t.Fatalf("ready_notices: %d avisos, %d terminales con avisos apagados, identidad %q, %q, %q", notices, disabled,
 			identity, unique, recipient)
 	}
-	// Un aviso de una unidad que no existe (23503: llave foránea).
+	// Revisión R5: las sesiones con PIN de un dispositivo, por fecha de creación y las vigentes, con índices parciales.
+	if !strings.Contains(created, "(device_id, created_at) WHERE opened_with_pin") ||
+		!strings.Contains(open, "(device_id) WHERE (opened_with_pin AND (revoked_at IS NULL))") {
+		t.Fatalf("índices de sesiones con PIN: %q, %q", created, open)
+	}
+	// Un aviso sin clave (23502: la clave es obligatoria) o de una unidad que no existe (23503: llave foránea).
 	_, err = pool.Exec(ctx, `INSERT INTO app.ready_notices(unit_id,version_id,account_id,recipient_user_id)
         VALUES (gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),'00000000-0000-4000-8000-0000000000a1')`)
+	var missing *pgconn.PgError
+	if !errors.As(err, &missing) || missing.Code != "23502" {
+		t.Fatalf("aviso sin clave: %v", err)
+	}
+	_, err = pool.Exec(ctx, `INSERT INTO app.ready_notices(unit_id,version_id,account_id,recipient_user_id,alert_key)
+        VALUES (gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),'00000000-0000-4000-8000-0000000000a1',gen_random_uuid())`)
 	var problem *pgconn.PgError
 	if !errors.As(err, &problem) || problem.Code != "23503" {
 		t.Fatalf("aviso de una unidad que no existe: %v", err)

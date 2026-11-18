@@ -122,37 +122,54 @@ func (handler *service) publishPreparation() error {
 	return nil
 }
 
-// recordReadyNotices registra cada unidad activa de las cuentas que pasó a «Listo» en esta transacción: todas sus
-// tareas vivas (no canceladas, de su versión vigente) están listas y la última se marcó ahora (ready_at es now(), el
-// instante de la transacción; states.go conserva el ready_at de una tarea que ya estaba lista). Así cuenta cualquier
-// camino que marque «Listo» (una unidad, el pedido de una estación o la cuenta entera desde el KDS) y nunca una
-// unidad que ya estaba lista: una modificación que no cambia la receta conserva sus tareas listas y no se vuelve a
-// avisar; una que la cambia las reinicia y su nueva versión se avisa al estar lista otra vez. El destinatario es el
-// responsable actual de la cuenta en que está la unidad. UNIQUE (unit_id, version_id) impide repetir la misma
-// preparación. Al registrar algo se podan los avisos de más de 2 días (dato derivado, no de operación).
+// recordReadyNotices registra cada unidad activa de las cuentas que quedó en «Listo» en esta transacción: todas sus
+// tareas vivas (no canceladas, de su versión vigente) están listas y, o bien la última se marcó ahora (ready_at es
+// now(), el instante de la transacción; states.go conserva el ready_at de una tarea que ya estaba lista), o bien ahora
+// se canceló la que faltaba sin haber estado lista (revisión R1: una modificación quita la parte pendiente de un combo
+// y lo que queda ya estaba listo; la cancelación conserva ready_at, así que quitar una parte que ya estaba lista no
+// vuelve a avisar). Los caminos que escriben tareas son tres y todos pasan por aquí: el avance del KDS (states.go: una
+// unidad, el pedido de una estación o la cuenta completa), las modificaciones y cancelaciones con sus reintentos
+// (changes.go) y la liberación (releases.go, que solo crea tareas pendientes). Nunca se avisa una unidad que ya estaba
+// lista: una modificación que no cambia la receta conserva sus tareas listas; una que la cambia las reinicia y su nueva
+// versión se avisa al estar lista otra vez. UNIQUE (unit_id, version_id) impide repetir la misma preparación.
 //
-// El dispositivo destinatario (A2-D4) se fija aquí: el dispositivo android, no revocado, donde el responsable tiene la
-// sesión con PIN vigente de last_seen_at más reciente, o ninguno si no tiene una vigente (entonces el aviso va a todos
-// los dispositivos donde entró con PIN en el día comercial; lo decide la lectura, administration/ready_alerts.go).
-// Fijarlo al «Listo» y no al leer hace que cada dispositivo lo reciba o no sin importar cuándo consulte: si el mesero
-// cambia de dispositivo justo entonces o uno se reconecta tarde con su cursor, el aviso no se pierde ni se duplica.
+// Las unidades de una misma cuenta comparten alert_key, un uuid aleatorio que nunca se reutiliza (revisión R3): es la
+// clave con que el dispositivo descarta avisos repetidos, aunque se restaure un respaldo y sequence repita números. El
+// destinatario es el responsable actual de la cuenta en que está la unidad.
+//
+// El dispositivo destinatario (A2-D4) se fija aquí: entre los dispositivos android que pueden recibir el aviso (no
+// revocados, con «Avisar platillos listos» activado y con la aplicación 0.2.0 o posterior si Go conoce su versión, la
+// primera que lee avisos; revisión R7), el de la sesión con PIN vigente del responsable con last_seen_at más reciente;
+// si ninguno sirve, ninguno (entonces el aviso va a todos los dispositivos donde entró; lo decide la lectura,
+// administration/ready_alerts.go). Fijarlo al «Listo» y no al leer hace que cada dispositivo lo reciba o no sin
+// importar cuándo consulte: si el mesero cambia de dispositivo justo entonces o uno se reconecta tarde con su cursor,
+// el aviso no se pierde ni se duplica. Al registrar algo se podan los avisos de más de 2 días (dato derivado).
 func (handler *service) recordReadyNotices(accountIDs []string) error {
-	recorded, err := handler.tx.Exec(handler.ctx, `INSERT INTO app.ready_notices
-            (unit_id,version_id,account_id,recipient_user_id,recipient_device_id,ready_at)
-        SELECT u.id,u.version_id,u.account_id,a.assigned_user_id,
+	recorded, err := handler.tx.Exec(handler.ctx, `WITH ready AS (
+            SELECT u.id AS unit_id,u.version_id,u.account_id,a.assigned_user_id,u.item_id,u.ordinal
+            FROM app.restaurant_item_units u JOIN app.restaurant_accounts a ON a.id=u.account_id
+            CROSS JOIN LATERAL (SELECT
+                count(*) FILTER (WHERE t.version_id=u.version_id AND t.state<>'cancelled') AS live,
+                count(*) FILTER (WHERE t.version_id=u.version_id AND t.state='ready') AS ready,
+                max(t.ready_at) FILTER (WHERE t.version_id=u.version_id AND t.state='ready') AS last_ready,
+                count(*) FILTER (WHERE t.state='cancelled' AND t.ready_at IS NULL AND t.updated_at=now()) AS cancelled_now
+                FROM app.kitchen_tasks t WHERE t.unit_id=u.id) tasks
+            WHERE u.account_id=ANY($1::uuid[]) AND u.state='active' AND tasks.live>0 AND tasks.ready=tasks.live
+                AND (tasks.last_ready=now() OR tasks.cancelled_now>0)
+        ), keys AS (
+            SELECT account_id,gen_random_uuid() AS alert_key FROM (SELECT DISTINCT account_id FROM ready) accounts
+        )
+        INSERT INTO app.ready_notices(unit_id,version_id,account_id,recipient_user_id,recipient_device_id,alert_key,ready_at)
+        SELECT r.unit_id,r.version_id,r.account_id,r.assigned_user_id,
             (SELECT s.device_id FROM app.sessions s JOIN app.devices d ON d.id=s.device_id
-                WHERE s.user_id=a.assigned_user_id AND s.opened_with_pin AND s.revoked_at IS NULL AND s.expires_at>now()
-                    AND d.kind='android' AND d.revoked_at IS NULL
+                WHERE s.user_id=r.assigned_user_id AND s.opened_with_pin AND s.revoked_at IS NULL AND s.expires_at>now()
+                    AND d.kind='android' AND d.revoked_at IS NULL AND d.ready_alerts_enabled
+                    AND (coalesce(d.app_version,'') !~ '^\d{1,6}\.\d{1,6}\.\d{1,6}'
+                        OR (regexp_match(d.app_version,'^(\d{1,6})\.(\d{1,6})\.(\d{1,6})'))::int[] >= ARRAY[0,2,0])
                 ORDER BY s.last_seen_at DESC,s.created_at DESC,s.id LIMIT 1),
-            now()
-        FROM app.restaurant_item_units u JOIN app.restaurant_accounts a ON a.id=u.account_id
-        CROSS JOIN LATERAL (SELECT count(*) FILTER (WHERE t.state<>'cancelled') AS live,
-            count(*) FILTER (WHERE t.state='ready') AS ready,
-            max(t.ready_at) FILTER (WHERE t.state='ready') AS last_ready
-            FROM app.kitchen_tasks t WHERE t.unit_id=u.id AND t.version_id=u.version_id) tasks
-        WHERE u.account_id=ANY($1::uuid[]) AND u.state='active' AND tasks.live>0 AND tasks.ready=tasks.live
-            AND tasks.last_ready=now()
-        ORDER BY u.account_id,u.item_id,u.ordinal,u.id
+            k.alert_key,now()
+        FROM ready r JOIN keys k ON k.account_id=r.account_id
+        ORDER BY r.account_id,r.item_id,r.ordinal,r.unit_id
         ON CONFLICT (unit_id,version_id) DO NOTHING`, accountIDs)
 	if err != nil {
 		return err
