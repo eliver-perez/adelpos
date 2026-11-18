@@ -6,6 +6,7 @@ import { useResource } from '../hooks/useResource';
 import { terminalHomes } from '../navigation/sections';
 import type { TerminalHome } from '../navigation/sections';
 import { api } from '../services/api';
+import { printerLabel } from '../services/kitchen';
 import { notifyError, notifySuccess } from '../services/notify';
 import { countLabel } from '../services/plural';
 import type {
@@ -14,11 +15,17 @@ import type {
   DeviceKind,
   PairingRequest,
   PairingRequests,
+  PrecheckPrinterOption,
   Register,
   SessionsSummary,
 } from '../services/models';
 import { Select } from '../components/Select';
-import { serverHas, waiterPINCapability } from '../services/serverCapabilities';
+import type { SelectOption } from '../components/Select';
+import {
+  devicePrecheckPrinterCapability,
+  serverHas,
+  waiterPINCapability,
+} from '../services/serverCapabilities';
 
 // Etapa 9G (fase B, §3.2–§3.4): Sistema › Terminales también recibe las terminales nuevas que piden su
 // código (se aprueban escribiendo el código que muestra la terminal, solo en la computadora principal),
@@ -66,6 +73,54 @@ function idleLockOptions(current: number) {
         ? `${idleLockLabel(seconds)} (recomendado)`
         : idleLockLabel(seconds),
   }));
+}
+
+// Impresora de precuentas de un teléfono o tableta (etapa A2, parte C, A2-D3): el mesero imprime solo en ella. Si una
+// impresora no sirve lo decide Go (problem); aquí solo se dice en lenguaje sencillo.
+const precheckPrinterProblems: Record<string, string> = {
+  inactive: 'desactivada',
+  unsupported: 'todavía no puede usarse para imprimir',
+};
+
+// precheckPrinterOptions son las opciones del selector: «Sin impresora» y todas las impresoras (de red y USB de una
+// terminal, con el nombre de su terminal). Las que no sirven se muestran deshabilitadas con el motivo, salvo la ya
+// elegida, que se conserva visible y elegible aunque haya dejado de servir (como en Cobros › Políticas).
+export function precheckPrinterOptions(
+  printers: PrecheckPrinterOption[],
+  chosen: string,
+  device: Device,
+): SelectOption[] {
+  const options: SelectOption[] = [{ value: '', label: 'Sin impresora' }];
+  for (const printer of printers) {
+    const reason = printer.problem ? (precheckPrinterProblems[printer.problem] ?? 'no sirve') : '';
+    options.push({
+      value: printer.id,
+      label: printerLabel(printer),
+      description: reason || undefined,
+      disabled: reason !== '' && printer.id !== chosen,
+    });
+  }
+  // Mientras llega la configuración, la impresora guardada se muestra con el nombre que trae la terminal.
+  if (chosen && !printers.some((printer) => printer.id === chosen)) {
+    options.push({
+      value: chosen,
+      label: printerLabel({
+        name: device.precheck_printer_name ?? 'Impresora guardada',
+        terminal_name: device.precheck_printer_terminal_name,
+      }),
+    });
+  }
+  return options;
+}
+
+// precheckPrinterText es lo que «Ver configuración» dice de la impresora de precuentas.
+export function precheckPrinterText(printer: PrecheckPrinterOption | null | undefined): string {
+  if (!printer) {
+    return 'Sin impresora: este dispositivo no imprime precuentas';
+  }
+  const label = printerLabel(printer);
+  const reason = printer.problem ? precheckPrinterProblems[printer.problem] : '';
+  return reason ? `${label} (${reason})` : label;
 }
 
 const keyboardLabels: Record<Device['keyboard_mode'], string> = {
@@ -374,6 +429,12 @@ function DeviceConfigurationPanel({ device, onClose }: { device: Device; onClose
               </dd>
             </div>
           )}
+          {shown.kind === 'android' && serverHas(devicePrecheckPrinterCapability) && (
+            <div>
+              <dt>Impresora de precuentas</dt>
+              <dd>{precheckPrinterText(value.precheck_printer)}</dd>
+            </div>
+          )}
           <div>
             <dt>Estaciones que muestra en Cocina</dt>
             <dd>
@@ -484,6 +545,14 @@ function DeviceEditor({
   // Solo los teléfonos y tabletas de meseros tienen bloqueo por inactividad, y solo si el servidor lo acepta (un
   // servidor 0.11.0 rechazaría el campo).
   const waiterDevice = device.kind === 'android' && serverHas(waiterPINCapability);
+  // Etapa A2 (parte C): su impresora de precuentas, solo si el servidor la admite (uno anterior rechazaría el campo).
+  // Las impresoras que se pueden elegir llegan con la configuración de la terminal (devices.read).
+  const precheckDevice = device.kind === 'android' && serverHas(devicePrecheckPrinterCapability);
+  const configuration = useResource<DeviceConfiguration>('device_configuration', {
+    id: device.id,
+    enabled: precheckDevice,
+  });
+  const [precheckPrinter, setPrecheckPrinter] = useState(device.precheck_printer_id ?? '');
   return (
     <section className="surface panel">
       <h2 className="mb-5">Editar {device.name}</h2>
@@ -498,6 +567,7 @@ function DeviceEditor({
               keyboard_mode: keyboard,
               home_screen: home,
               ...(waiterDevice ? { idle_lock_seconds: Number(idleLock) } : {}),
+              ...(precheckDevice ? { precheck_printer_id: precheckPrinter || null } : {}),
             },
           });
           await reload();
@@ -546,6 +616,22 @@ function DeviceEditor({
                 value={idleLock}
                 options={idleLockOptions(Number(idleLock))}
                 onChange={setIdleLock}
+              />
+            </Field>
+          )}
+          {precheckDevice && (
+            <Field
+              label="Impresora de precuentas"
+              hint="El mesero imprime la precuenta de sus mesas y pedidos para llevar solo en esta impresora. Sin impresora, este dispositivo no imprime precuentas."
+            >
+              <Select
+                value={precheckPrinter}
+                options={precheckPrinterOptions(
+                  configuration.data?.precheck_printer_options ?? [],
+                  precheckPrinter,
+                  device,
+                )}
+                onChange={setPrecheckPrinter}
               />
             </Field>
           )}

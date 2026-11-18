@@ -96,6 +96,14 @@ var TestPrinters = []PrinterSignature{
 		Destination: acceptanceQueue,
 		Source:      "desktop/e2e/workflow-stage9g-print-agent.spec.ts",
 	},
+	// desktop/e2e/workflow-stagea2-terminals.spec.ts (etapa A2, parte C): la impresora de precuentas que se asigna al
+	// teléfono de meseros de prueba, con la cola que no existe. «Quitar datos de prueba» la desvincula del teléfono.
+	{
+		Name:        "Precuentas A2 E2E",
+		Transport:   "cups",
+		Destination: acceptanceQueue,
+		Source:      "desktop/e2e/workflow-stagea2-terminals.spec.ts",
+	},
 }
 
 var TestStations = []StationSignature{
