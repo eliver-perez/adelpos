@@ -2,6 +2,7 @@ package com.adelpos.meseros.navigation
 
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -69,6 +70,7 @@ import com.adelpos.meseros.feature.waiter.tables.TablesRoute
 import com.adelpos.meseros.feature.waiter.tables.tablesTitle
 import com.adelpos.meseros.ready.ReadyAlertsController
 import com.adelpos.meseros.ready.ReadyAlertsNavigationEffects
+import com.adelpos.meseros.ready.ReadyAlertsOffNotice
 import com.adelpos.meseros.ready.ReadyAlertsOverlay
 import kotlinx.serialization.Serializable
 
@@ -227,7 +229,15 @@ fun AdelPosNavigation(
     ) { padding ->
         Box(modifier = Modifier.padding(padding).consumeWindowInsets(padding)) {
             if (waiter != null) {
-                key(waiter.userId) { WaiterNavigation(navController, paneLayout) }
+                Column {
+                    // Etapa A2, Fase D: sin notificaciones, un aviso discreto arriba de Mesas.
+                    if (destination?.hasRoute<TablesDestination>() == true) {
+                        ReadyAlertsOffNotice(readyAlerts)
+                    }
+                    Box(modifier = Modifier.weight(1f)) {
+                        key(waiter.userId) { WaiterNavigation(navController, paneLayout) }
+                    }
+                }
             } else {
                 AccessContent(
                     status = status,

@@ -354,7 +354,9 @@ una **notificación permanente** mientras mantiene la conexión con la computado
 PIN **con conexión** y se queda mientras haya meseros que entraron ese día en el dispositivo (o que siguen con su sesión
 abierta); desaparece sola cuando ya no hay a quién avisar (al terminar el día comercial, a la «Hora de inicio del día»
 de la computadora principal, si nadie sigue con su sesión), si se apaga «Avisar platillos listos», al retirar el
-dispositivo o al emparejarlo de nuevo. Se ve discreta, sin sonido. Al tocarla se abre la ayuda
+dispositivo o al emparejarlo de nuevo. Si al terminar el día comercial la computadora principal está apagada, también
+desaparece unos 10 minutos después (salvo que un mesero esté usando la aplicación); vuelve cuando un mesero entra con
+su PIN con conexión. Mientras se conecta dice «Conectando con la computadora principal…». Se ve discreta, sin sonido. Al tocarla se abre la ayuda
 «Avisos de platillos listos». Después de reiniciar el teléfono vuelve sola (desde el primer desbloqueo) si el día
 comercial no ha terminado.
 
@@ -369,7 +371,9 @@ AD-EL POS › Notificaciones › «Platillos listos»** (siempre hay un solo can
 Ajustes de Android.
 
 - **Notificaciones desactivadas**: toca **«Abrir ajustes de notificaciones»** y actívalas (y el canal «Platillos
-  listos»). Sin ellas los avisos no se ven.
+  listos»). Sin ellas los avisos no se ven. Mientras estén desactivadas, Mesas muestra arriba «Las notificaciones de
+  AD-EL POS están desactivadas…» con **«Cómo activarlas»**, y en Android 13 o más reciente la aplicación vuelve a
+  pedir el permiso cada vez que un mesero entra con su PIN con conexión.
 - **Optimización de batería**: toca **«Quitar la restricción de batería»** y **«Permitir»**. Sin esto, algunos
   teléfonos retrasan o cortan los avisos con la pantalla apagada. La aplicación gasta muy poca batería: solo mantiene
   la conexión.

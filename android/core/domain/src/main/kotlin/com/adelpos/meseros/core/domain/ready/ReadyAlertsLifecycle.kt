@@ -11,8 +11,10 @@ import com.adelpos.meseros.core.domain.realtime.ReconnectBackoff
  *   reiniciar el equipo o actualizar la aplicación con esa misma condición guardada.
  * - **Se detiene** con `active: false` (también el que llega al cambiar el día comercial), al
  *   retirar el dispositivo o con «Emparejar de nuevo». Mientras Go diga `active: true` sigue aunque
- *   pase `day_ends_at` (a esa hora vuelve a preguntar). Sin destinatarios en el día no arranca: no
- *   hay notificación permanente.
+ *   pase `day_ends_at` (a esa hora vuelve a preguntar). **A2-D12**: si pasó `day_ends_at` y su
+ *   margen ([DAY_END_STOP_MILLIS]), Go no responde y nadie está usando el dispositivo, también se
+ *   detiene, sin mover el cursor. Sin destinatarios en el día no arranca: no hay notificación
+ *   permanente.
  */
 object ReadyAlertsLifecycle {
     /**
@@ -27,6 +29,12 @@ object ReadyAlertsLifecycle {
      * que se cierra antes, sin nada, cuenta como falla (para no reconectar sin parar).
      */
     const val HEALTHY_CONNECTION_MILLIS: Long = 10_000L
+
+    /**
+     * A2-D12: margen después de `day_ends_at` tras el cual, sin respuesta de Go y sin nadie usando
+     * el dispositivo, el servicio se detiene.
+     */
+    const val DAY_END_STOP_MILLIS: Long = 10 * 60_000L
 
     /** Fallas seguidas tras las que se pide buscar el servidor en otra dirección (cambio de IP). */
     const val RELOCATE_AFTER_FAILURES: Int = 3
@@ -108,6 +116,26 @@ object ReadyAlertsLifecycle {
         }
         val wait = dayEndsAtMillis + DAY_CHECK_AFTER_MILLIS - nowMillis
         return if (wait > 0) wait else null
+    }
+
+    /**
+     * A2-D12 (RD1 de la revisión): el día comercial terminó hace más de [DAY_END_STOP_MILLIS], Go
+     * no se ha alcanzado desde entonces ([lastReachedMillis] anterior al fin del día, o nunca) y
+     * ningún mesero está usando el dispositivo ([inUse]: uno con sesión y la aplicación a la
+     * vista). La misma regla vale tras el reinicio pegajoso (el canal la aplica en su primera
+     * falla).
+     */
+    fun dayOverWithoutGo(
+        dayEndsAtMillis: Long?,
+        lastReachedMillis: Long?,
+        nowMillis: Long,
+        inUse: Boolean,
+    ): Boolean {
+        if (dayEndsAtMillis == null || inUse) {
+            return false
+        }
+        val reachedSince = lastReachedMillis != null && lastReachedMillis >= dayEndsAtMillis
+        return nowMillis >= dayEndsAtMillis + DAY_END_STOP_MILLIS && !reachedSince
     }
 
     /** Qué hacer ante un rechazo o una falla del canal de avisos. */

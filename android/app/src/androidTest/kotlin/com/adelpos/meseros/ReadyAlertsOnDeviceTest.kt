@@ -34,6 +34,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -88,6 +89,11 @@ class ReadyAlertsOnDeviceTest {
         assertEquals("AD-EL POS conectado", ongoing.notification.extras.getString("android.title"))
         assertTrue(ongoing.isOngoing)
         assertTrue(controller.running.value)
+        // RD5: sin el canal abierto no dice «Recibiendo avisos».
+        assertNotEquals(
+            "Recibiendo avisos de platillos listos",
+            ongoing.notification.extras.getCharSequence("android.text")?.toString(),
+        )
         // Sin servidor que responda, sigue en primer plano reintentando y lo dice.
         waitUntil("el texto de sin conexión") {
             ongoing()?.notification?.extras?.getCharSequence("android.text")?.toString() ==

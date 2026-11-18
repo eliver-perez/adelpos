@@ -212,7 +212,14 @@ class ReadyAlertsClient(
                     is StreamItem.Message ->
                         when (item.type) {
                             ALERTS -> {
-                                val batch = decode(item.data) ?: continue
+                                // RD7: un lote que no se entiende no se salta (Go ya avanzó su
+                                // cursor): se reconecta desde el último procesado.
+                                val batch =
+                                    decode(item.data)
+                                        ?: return ReadyStreamEnd.Failed(
+                                            received,
+                                            AppError.InvalidResponse(200),
+                                        )
                                 received += 1
                                 if (!onBatch(batch)) {
                                     return ReadyStreamEnd.Stopped

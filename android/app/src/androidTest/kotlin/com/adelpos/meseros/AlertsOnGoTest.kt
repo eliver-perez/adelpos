@@ -42,6 +42,8 @@ import com.adelpos.meseros.core.ui.catalog.productTag
 import com.adelpos.meseros.core.ui.components.TAG_PIN_KEY_PREFIX
 import com.adelpos.meseros.core.ui.components.TAG_PIN_PAD
 import com.adelpos.meseros.core.ui.components.TAG_PIN_SUBMIT
+import com.adelpos.meseros.core.ui.components.TAG_WAITER_MENU
+import com.adelpos.meseros.core.ui.components.TAG_WAITER_SWITCH
 import com.adelpos.meseros.core.ui.layout.TAG_PANE_BACK
 import com.adelpos.meseros.core.ui.layout.TAG_PANE_OPEN_SECONDARY
 import com.adelpos.meseros.feature.access.findserver.TAG_ADDRESS
@@ -57,6 +59,7 @@ import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_SEARCH
 import com.adelpos.meseros.feature.waiter.tables.TAG_TABLE_PREFIX
 import com.adelpos.meseros.ready.ReadyAlertNotifications
 import com.adelpos.meseros.ready.ReadyAlertsService
+import com.adelpos.meseros.ready.TAG_ALERTS_OFF
 import com.adelpos.meseros.ready.TAG_IN_APP
 import com.adelpos.meseros.ready.TAG_PERMISSION
 import com.adelpos.meseros.ready.TAG_PERMISSION_LATER
@@ -187,6 +190,19 @@ class AlertsOnGoTest {
                 Thread.sleep(SETTLE_MILLIS)
             }
             assertFalse("no se vuelve a preguntar", present(TAG_PERMISSION))
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                // RD6: sin notificaciones, un aviso discreto arriba de Mesas; en la siguiente
+                // entrada con conexión se vuelve a ofrecer el permiso (solo ese, una vez).
+                waitFor(TAG_ALERTS_OFF)
+                compose.onNodeWithTag(TAG_WAITER_MENU).performClick()
+                compose.onNodeWithTag(TAG_WAITER_SWITCH).performClick()
+                enter(ids.getValue("ana"), ANA_PIN)
+                waitFor(TAG_PERMISSION, timeout = 30_000)
+                compose.onNodeWithTag(TAG_PERMISSION_LATER).performClick()
+                compose.waitForIdle()
+                Thread.sleep(SETTLE_MILLIS)
+                assertFalse("una sola vez por entrada", present(TAG_PERMISSION))
+            }
         }
         // El permiso se concede aquí (no con el diálogo de Android): como lo haría la respuesta
         // del diálogo, se vuelve a publicar la notificación permanente.

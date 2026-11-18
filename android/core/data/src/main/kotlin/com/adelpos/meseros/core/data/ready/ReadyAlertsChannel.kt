@@ -8,6 +8,7 @@ import com.adelpos.meseros.core.domain.ready.ReadyAlertsLifecycle.ErrorAction
 import com.adelpos.meseros.core.domain.ready.ReadyAlertsProcessor
 import com.adelpos.meseros.core.domain.ready.ReadyBatchOutcome
 import com.adelpos.meseros.core.domain.realtime.ReconnectBackoff
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -26,6 +27,31 @@ sealed interface ReadyChannelState {
     data class Waiting(val failures: Int, val delayMillis: Long) : ReadyChannelState
 }
 
+/** Qué dice la notificación permanente del servicio. */
+enum class ReadyOngoing {
+    /** Todavía no abre el canal: no dice «Recibiendo avisos» (RD5). */
+    CONNECTING,
+
+    /** El canal está abierto: «Recibiendo avisos de platillos listos». */
+    CONNECTED,
+
+    /** Sin conexión con la computadora principal: «Reintentando…». */
+    WAITING;
+
+    companion object {
+        /**
+         * El texto tras [state], viniendo de [shown]: mientras reintenta (abrir después de una
+         * falla), se queda el de sin conexión; así no se vuelve a publicar en cada intento.
+         */
+        fun after(shown: ReadyOngoing, state: ReadyChannelState): ReadyOngoing =
+            when (state) {
+                ReadyChannelState.Connected -> CONNECTED
+                is ReadyChannelState.Waiting -> WAITING
+                ReadyChannelState.Connecting -> if (shown == WAITING) WAITING else CONNECTING
+            }
+    }
+}
+
 /** Por qué terminó el canal (y con él, el servicio en primer plano). */
 enum class ReadyStopReason {
     /** Go dijo `active: false`: nadie a quien avisar hoy, o el aviso se apagó en Terminales. */
@@ -39,6 +65,12 @@ enum class ReadyStopReason {
 
     /** Un rechazo que reintentar no arregla (no es un dispositivo `android`, 400). */
     REJECTED,
+
+    /**
+     * A2-D12: pasó el fin del día comercial (y su margen), Go no responde y nadie está usando el
+     * dispositivo: se detiene sin mover el cursor (lo de mientras llega al volver a arrancar).
+     */
+    DAY_ENDED,
 }
 
 /**
@@ -60,10 +92,17 @@ enum class ReadyStopReason {
  * - Tras [ReadyAlertsLifecycle.RELOCATE_AFTER_FAILURES] fallas seguidas pide buscar el servidor en
  *   otra dirección (cambio de IP), como mucho una vez por minuto.
  * - Termina con `active: false`, si el dispositivo deja de estar listo o si Go lo da por retirado
- *   (`DEVICE_REVOKED`, que avisa a la entrada).
+ *   (`DEVICE_REVOKED`, que avisa a la entrada). **A2-D12**: también pasados 10 minutos del fin del
+ *   día comercial sin alcanzar a Go y sin nadie usando el dispositivo ([inUse]), sin mover el
+ *   cursor ([ReadyStopReason.DAY_ENDED]).
+ * - Un lote que no se entiende o algo inesperado al procesarlo cuenta como una falla: se reintenta
+ *   desde el último cursor guardado ([onUnexpectedError] lo deja en el registro), sin tumbar el
+ *   proceso ni la captura del mesero.
  *
  * @param onReconnected se llama cuando el canal vuelve a recibir después de fallar: ahí se pide un
  *   envío de la cola (como los demás disparadores de la A1); el canal nunca envía pedidos.
+ * @param inUse un mesero con sesión tiene la aplicación a la vista: el canal no se detiene por el
+ *   fin del día aunque Go no responda.
  */
 class ReadyAlertsChannel(
     private val server: ReadyAlertsServer,
@@ -74,6 +113,8 @@ class ReadyAlertsChannel(
     private val backoff: ReconnectBackoff = ReadyAlertsLifecycle.backoff(),
     private val onReconnected: () -> Unit = {},
     private val healthyConnectionMillis: Long = ReadyAlertsLifecycle.HEALTHY_CONNECTION_MILLIS,
+    private val inUse: () -> Boolean = { false },
+    private val onUnexpectedError: (Exception) -> Unit = {},
 ) {
     private val mutableState = MutableStateFlow<ReadyChannelState>(ReadyChannelState.Connecting)
     private val wakeUps = Channel<Unit>(Channel.CONFLATED)
@@ -99,7 +140,7 @@ class ReadyAlertsChannel(
             val connection = server.connection() ?: return ReadyStopReason.DEVICE_NOT_READY
             mutableState.value = ReadyChannelState.Connecting
             var stop: ReadyStopReason? = null
-            // Pasado el fin del día comercial (y un margen) se cierra el flujo para preguntar.
+            // Al llegar el fin del día comercial (y un margen) se cierra el flujo para preguntar.
             val dayCheck = ReadyAlertsLifecycle.dayCheckIn(loop.dayEndsAt, clock())
             val streamed: suspend () -> ReadyStreamEnd = {
                 client.stream(connection, loop.cursor, onOpened = { loop.onOpened() }) { batch ->
@@ -107,43 +148,51 @@ class ReadyAlertsChannel(
                     stop == null
                 }
             }
-            val end =
-                if (dayCheck == null) {
-                    streamed()
-                } else {
-                    withTimeoutOrNull(dayCheck) { streamed() }
+            var dayCheckDue = false
+            val end: ReadyStreamEnd? =
+                try {
+                    if (dayCheck == null) {
+                        streamed()
+                    } else {
+                        withTimeoutOrNull(dayCheck) { streamed() }.also { dayCheckDue = it == null }
+                    }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (unexpected: Exception) {
+                    // RD4: algo inesperado al procesar un lote (Room lleno, el sistema de
+                    // notificaciones): cuenta como una falla y se reintenta desde el último cursor
+                    // procesado, sin tumbar el proceso.
+                    onUnexpectedError(unexpected)
+                    null
                 }
             stop?.let {
                 return it
             }
-            when (end) {
-                null -> {
+            val reason =
+                when {
                     // Cambió el día: Go dice si sigue activo (un mesero con su sesión vigente).
-                    val reason = readMeanwhile(loop)
-                    if (reason != null) {
-                        return reason
+                    dayCheckDue -> readMeanwhile(loop)
+                    end == null -> {
+                        loop.failures += 1
+                        null
                     }
+                    else -> afterStream(loop, end)
                 }
-                ReadyStreamEnd.Stopped -> Unit
-                is ReadyStreamEnd.Closed ->
-                    loop.failures =
-                        if (
-                            end.opened &&
-                                (end.received > 0 || end.lastedMillis >= healthyConnectionMillis)
-                        ) {
-                            0
-                        } else {
-                            loop.failures + 1
-                        }
-                is ReadyStreamEnd.Failed -> {
-                    val reason = onFailure(loop, end)
-                    if (reason != null) {
-                        return reason
-                    }
-                }
+            if (reason != null) {
+                return reason
             }
             if (loop.failures > 0) {
                 loop.interrupted = true
+                if (
+                    ReadyAlertsLifecycle.dayOverWithoutGo(
+                        dayEndsAtMillis = loop.dayEndsAt,
+                        lastReachedMillis = loop.lastReached,
+                        nowMillis = clock(),
+                        inUse = inUse(),
+                    )
+                ) {
+                    return ReadyStopReason.DAY_ENDED
+                }
             }
             relocateIfStuck(loop)
             if (loop.failures > 0) {
@@ -154,19 +203,41 @@ class ReadyAlertsChannel(
         }
     }
 
+    /** Cómo terminó una conexión: actualiza las fallas y dice si hay que detenerse. */
+    private suspend fun afterStream(loop: Loop, end: ReadyStreamEnd): ReadyStopReason? {
+        when (end) {
+            ReadyStreamEnd.Stopped -> Unit
+            is ReadyStreamEnd.Closed ->
+                loop.failures =
+                    if (
+                        end.opened &&
+                            (end.received > 0 || end.lastedMillis >= healthyConnectionMillis)
+                    ) {
+                        0
+                    } else {
+                        loop.failures + 1
+                    }
+            is ReadyStreamEnd.Failed -> return onFailure(loop, end)
+        }
+        return null
+    }
+
     /** Lo que se recuerda entre conexiones mientras corre [run]. */
     private inner class Loop(var cursor: Long, var dayEndsAt: Long?) {
         var failures = 0
         var lastRelocate = 0L
 
+        /** Cuándo se alcanzó a Go por última vez (el canal abrió o llegó una lectura), o null. */
+        var lastReached: Long? = null
+
         /** El canal falló desde la última vez que recibió (para pedir el envío de la cola). */
         var interrupted = false
 
-        /** Procesa un lote; devuelve por qué detenerse, o null para seguir. */
         /**
          * El canal abrió (con el protocolo nuevo, Go puede quedarse callado hasta que haya algo).
          */
         fun onOpened() {
+            lastReached = clock()
             mutableState.value = ReadyChannelState.Connected
             if (interrupted) {
                 interrupted = false
@@ -174,6 +245,7 @@ class ReadyAlertsChannel(
             }
         }
 
+        /** Procesa un lote; devuelve por qué detenerse, o null para seguir. */
         suspend fun onBatch(batch: ReadyAlertsBatch): ReadyStopReason? {
             dayEndsAt = batch.dayEndsAtMillis
             failures = 0
@@ -218,14 +290,17 @@ class ReadyAlertsChannel(
         }
 
     /**
-     * Con el canal ocupado (429), los avisos se leen con `GET ready-alerts?after=`: no se espera a
-     * que Go suelte el canal anterior para mostrarlos.
+     * Lee con `GET ready-alerts?after=`: con el canal ocupado (429, no se espera a que Go suelte el
+     * anterior para mostrar los avisos) y al cambiar el día. Si no se pudo leer, cuenta como falla.
      */
     private suspend fun readMeanwhile(loop: Loop): ReadyStopReason? {
         val connection = server.connection() ?: return ReadyStopReason.DEVICE_NOT_READY
         return when (val read = client.read(connection, loop.cursor)) {
             is ReadyRead.Success -> loop.onBatch(read.batch)
-            is ReadyRead.Failed -> stopFor(read.error)
+            is ReadyRead.Failed -> {
+                loop.failures += 1
+                stopFor(read.error)
+            }
         }
     }
 

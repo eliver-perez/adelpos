@@ -2,8 +2,10 @@ package com.adelpos.meseros.ready
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
@@ -13,6 +15,7 @@ import android.provider.Settings
 import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.RequiresApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -50,6 +53,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
 import androidx.lifecycle.compose.LifecycleResumeEffect
@@ -124,7 +128,9 @@ private enum class PermissionStep {
 /**
  * §4.3: la primera vez que el servicio va a arrancar (corre), una explicación en español y después
  * el diálogo de Android: notificaciones (Android 13+) y la exclusión de la optimización de batería.
- * Cada una se pide **una sola vez**; si se niegan, la aplicación sigue y la ayuda dice qué falta.
+ * Si se niegan, la aplicación sigue y la ayuda dice qué falta. La batería se pide una sola vez; las
+ * notificaciones (RD6) se vuelven a ofrecer en cada entrada con conexión mientras falten, y si
+ * Android ya no muestra su diálogo (se negó dos veces), «Continuar» abre sus Ajustes.
  */
 @Composable
 private fun ReadyAlertsPermissionGate(controller: ReadyAlertsController) {
@@ -136,10 +142,11 @@ private fun ReadyAlertsPermissionGate(controller: ReadyAlertsController) {
     val scope = rememberCoroutineScope()
     var step by remember { mutableStateOf<PermissionStep?>(null) }
     var round by remember { mutableIntStateOf(0) }
-    LaunchedEffect(running, round) {
+    val offerAgain by controller.offerPermissionsAgain.collectAsStateWithLifecycle()
+    LaunchedEffect(running, round, offerAgain) {
         step =
             if (running) {
-                nextPermissionStep(context, controller)
+                nextPermissionStep(context, controller, offerAgain)
             } else {
                 null
             }
@@ -161,19 +168,34 @@ private fun ReadyAlertsPermissionGate(controller: ReadyAlertsController) {
                 text = stringResource(R.string.ready_permission_notifications_text),
                 onContinue = {
                     step = null
+                    controller.offerPermissionsAgain.value = false
                     scope.launch {
+                        val systemAsked =
+                            controller.permissionAsked(
+                                ReadyAlertsController.PERMISSION_NOTIFICATIONS_SYSTEM,
+                            )
                         controller.markPermissionAsked(
                             ReadyAlertsController.PERMISSION_NOTIFICATIONS,
                         )
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                            notificationsLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                        } else {
-                            round++
+                        when {
+                            Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU -> round++
+                            systemAsked && !systemDialogAvailable(context) -> {
+                                // Android ya no muestra su diálogo: se activan en sus Ajustes.
+                                openSafely(context, notificationSettings(context))
+                                round++
+                            }
+                            else -> {
+                                controller.markPermissionAsked(
+                                    ReadyAlertsController.PERMISSION_NOTIFICATIONS_SYSTEM,
+                                )
+                                notificationsLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                            }
                         }
                     }
                 },
                 onLater = {
                     step = null
+                    controller.offerPermissionsAgain.value = false
                     scope.launch {
                         controller.markPermissionAsked(
                             ReadyAlertsController.PERMISSION_NOTIFICATIONS,
@@ -208,15 +230,18 @@ private fun ReadyAlertsPermissionGate(controller: ReadyAlertsController) {
     }
 }
 
+/** [offerAgain]: un mesero acaba de entrar con conexión (RD6: se vuelven a ofrecer). */
 private suspend fun nextPermissionStep(
     context: Context,
     controller: ReadyAlertsController,
+    offerAgain: Boolean,
 ): PermissionStep? {
     if (
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
                 PackageManager.PERMISSION_GRANTED &&
-            !controller.permissionAsked(ReadyAlertsController.PERMISSION_NOTIFICATIONS)
+            (offerAgain ||
+                !controller.permissionAsked(ReadyAlertsController.PERMISSION_NOTIFICATIONS))
     ) {
         return PermissionStep.NOTIFICATIONS
     }
@@ -257,6 +282,76 @@ private fun PermissionDialog(text: String, onContinue: () -> Unit, onLater: () -
             }
         },
     )
+}
+
+/**
+ * Si Android todavía muestra su diálogo de notificaciones: tras negarlo dos veces ya no
+ * (`shouldShowRequestPermissionRationale` vuelve a false después de haberlo pedido).
+ */
+@RequiresApi(Build.VERSION_CODES.TIRAMISU)
+private fun systemDialogAvailable(context: Context): Boolean {
+    val activity = context.findActivity() ?: return false
+    return ActivityCompat.shouldShowRequestPermissionRationale(
+        activity,
+        Manifest.permission.POST_NOTIFICATIONS,
+    )
+}
+
+private tailrec fun Context.findActivity(): Activity? =
+    when (this) {
+        is Activity -> this
+        is ContextWrapper -> baseContext.findActivity()
+        else -> null
+    }
+
+/**
+ * RD6: con los avisos activos y las notificaciones apagadas (sin el permiso de Android 13+, o
+ * desactivadas en Ajustes), un aviso discreto arriba de Mesas que lleva a la ayuda. Se vuelve a
+ * comprobar al regresar a la aplicación (pudo activarlas en Ajustes).
+ */
+@Composable
+fun ReadyAlertsOffNotice(controller: ReadyAlertsController) {
+    val running by controller.running.collectAsStateWithLifecycle()
+    var visible by remember { mutableStateOf(true) }
+    var checks by remember { mutableIntStateOf(0) }
+    LifecycleResumeEffect(Unit) {
+        checks++
+        onPauseOrDispose {}
+    }
+    LaunchedEffect(running, checks) {
+        val now = controller.notifications.alertsVisible()
+        if (now && !visible) {
+            // Se activaron en Ajustes: la notificación permanente publicada sin permiso no
+            // aparece sola.
+            controller.refreshOngoing()
+        }
+        visible = now
+    }
+    if (!running || visible) {
+        return
+    }
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.fillMaxWidth().testTag(TAG_ALERTS_OFF),
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 16.dp, end = 4.dp, top = 2.dp, bottom = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = stringResource(R.string.ready_alerts_off_notice),
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(
+                onClick = { controller.helpRequested.value = true },
+                modifier = Modifier.heightIn(min = AdelDimens.MinTouchTarget),
+            ) {
+                Text(stringResource(R.string.ready_alerts_off_help))
+            }
+        }
+    }
 }
 
 /** Si AD-EL POS ya está fuera de la optimización de batería. */
@@ -692,6 +787,7 @@ private const val NOT_FOUND = 404
 private const val FIND_POLL_MILLIS = 250L
 
 const val TAG_PERMISSION = "ready-permission"
+const val TAG_ALERTS_OFF = "ready-alerts-off"
 const val TAG_PERMISSION_CONTINUE = "ready-permission-continue"
 const val TAG_PERMISSION_LATER = "ready-permission-later"
 const val TAG_HELP = "ready-help"

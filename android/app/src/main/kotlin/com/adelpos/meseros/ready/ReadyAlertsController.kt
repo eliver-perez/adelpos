@@ -15,6 +15,7 @@ import com.adelpos.meseros.core.data.ready.DeviceReadyAlertsServer
 import com.adelpos.meseros.core.data.ready.ReadyAlertsChannel
 import com.adelpos.meseros.core.data.ready.ReadyAlertsClient
 import com.adelpos.meseros.core.data.ready.ReadyChannelState
+import com.adelpos.meseros.core.data.ready.ReadyOngoing
 import com.adelpos.meseros.core.data.ready.ReadyRead
 import com.adelpos.meseros.core.data.ready.ReadyStopReason
 import com.adelpos.meseros.core.data.ready.RoomReadyAlertsLedger
@@ -28,11 +29,14 @@ import com.adelpos.meseros.core.domain.ready.ReadyAlertsProcessor
 import com.adelpos.meseros.core.domain.ready.ReadyAlertsStatus
 import com.adelpos.meseros.core.domain.ready.ReadyNotice
 import com.adelpos.meseros.core.domain.waiter.OrderMode
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -40,6 +44,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
@@ -101,7 +106,16 @@ class ReadyAlertsController(
     val askPermissions: Boolean,
 ) : InAppAlerts {
     private val appContext: Context = context.applicationContext
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    // RD4: una falla inesperada en el aviso queda en el registro y no tumba el proceso (ni la
+    // captura del mesero); el canal se reintenta solo ([runGuarded]).
+    private val scope =
+        CoroutineScope(
+            SupervisorJob() +
+                Dispatchers.Default +
+                CoroutineExceptionHandler { _, error ->
+                    Log.e(TAG, "falla inesperada en los avisos de platillos listos", error)
+                },
+        )
     private val startMutex = Mutex()
     private var started = false
 
@@ -123,7 +137,25 @@ class ReadyAlertsController(
             processor = processor,
             client = client,
             onReconnected = retryOrders,
+            inUse = ::inUse,
+            onUnexpectedError = { error ->
+                Log.e(TAG, "falla al procesar un aviso; se reintenta desde el último", error)
+            },
         )
+
+    private val ongoingState = MutableStateFlow(ReadyOngoing.CONNECTING)
+
+    /**
+     * El texto de la notificación permanente: «Recibiendo avisos» solo con el canal abierto (RD5);
+     * cambia solo cuando cambia el texto, no en cada intento.
+     */
+    val ongoing: StateFlow<ReadyOngoing> = ongoingState.asStateFlow()
+
+    /**
+     * RD6: un mesero entró con conexión y Android 13+ sigue sin permiso de notificaciones: se
+     * vuelve a ofrecer (una vez por entrada) aunque antes se eligiera «Ahora no».
+     */
+    val offerPermissionsAgain = MutableStateFlow(false)
 
     private val runningState = MutableStateFlow(false)
     private val inAppFlow = MutableSharedFlow<ReadyNotice>(extraBufferCapacity = 8)
@@ -185,7 +217,23 @@ class ReadyAlertsController(
                 }
                 .distinctUntilChanged()
                 .filter { it != null }
-                .collect { request(Trigger.ONLINE_ENTRY) }
+                .collect {
+                    offerPermissionsAgain.value = true
+                    request(Trigger.ONLINE_ENTRY)
+                }
+        }
+        scope.launch {
+            // Reabrir el canal (Go lo cierra cada 5 minutos) tarda un instante: «Conectando» solo
+            // si tarda; tras una falla, el texto de sin conexión se queda hasta volver a recibir.
+            channel.state.collectLatest { state ->
+                val next = ReadyOngoing.after(ongoingState.value, state)
+                if (
+                    next == ReadyOngoing.CONNECTING && ongoingState.value == ReadyOngoing.CONNECTED
+                ) {
+                    delay(ONGOING_GRACE_MILLIS)
+                }
+                ongoingState.value = next
+            }
         }
         scope.launch {
             combine(foreground, access.status) { visible, status ->
@@ -241,9 +289,18 @@ class ReadyAlertsController(
                 }
                 return
             }
-            server.prepare()
-            if (server.ready != true) {
-                return
+            if (trigger == Trigger.BOOT) {
+                // RD3: tras reiniciar se decide solo con lo guardado (Room), sin preguntar a Go: el
+                // receptor tiene unos segundos y la red puede no estar lista. El servicio comprueba
+                // el dispositivo al arrancar el canal.
+                if (server.ready == false) {
+                    return
+                }
+            } else {
+                server.prepare()
+                if (server.ready != true) {
+                    return
+                }
             }
             when (
                 ReadyAlertsLifecycle.decide(trigger, ledger.status(), System.currentTimeMillis())
@@ -306,16 +363,46 @@ class ReadyAlertsController(
         }
         stopping = false
         loop = scope.launch {
-            val reason = channel.run()
+            val reason = runGuarded()
             Log.i(TAG, "el canal de avisos terminó: $reason")
             onChannelEnded(reason)
         }
     }
 
+    /**
+     * RD4: [ReadyAlertsChannel.run] con red de seguridad: si algo inesperado lo interrumpe (fuera
+     * de un lote, que el canal ya reintenta), queda en el registro y se vuelve a correr desde el
+     * cursor guardado, con espera creciente.
+     */
+    private suspend fun runGuarded(): ReadyStopReason {
+        val waits = ReadyAlertsLifecycle.backoff()
+        var failures = 0
+        while (true) {
+            try {
+                return channel.run()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (unexpected: Exception) {
+                failures += 1
+                Log.e(TAG, "el canal de avisos falló sin esperarse; se reintenta", unexpected)
+                delay(waits.delayFor(failures))
+            }
+        }
+    }
+
+    /**
+     * Un mesero está usando el dispositivo: la aplicación a la vista con un mesero que entró (con o
+     * sin conexión). Mientras tanto el fin del día sin Go no detiene el canal (A2-D12).
+     */
+    private fun inUse(): Boolean = foreground.value && access.activeWaiter.value != null
+
     private fun onChannelEnded(reason: ReadyStopReason) {
         stopping = true
-        if (reason == ReadyStopReason.INACTIVE) {
-            Log.i(TAG, "sin a quién avisar: se detiene el servicio")
+        when (reason) {
+            ReadyStopReason.INACTIVE -> Log.i(TAG, "sin a quién avisar: se detiene el servicio")
+            ReadyStopReason.DAY_ENDED ->
+                Log.i(TAG, "terminó el día sin la computadora principal: se detiene el servicio")
+            else -> Unit
         }
         stopService()
     }
@@ -325,6 +412,7 @@ class ReadyAlertsController(
         loop?.cancel()
         loop = null
         runningState.value = false
+        ongoingState.value = ReadyOngoing.CONNECTING
         stopping = false
         val pending = restartAfterStop
         restartAfterStop = null
@@ -341,10 +429,8 @@ class ReadyAlertsController(
         if (!runningState.value || loop?.isActive != true) {
             return
         }
-        val state = channel.state.value
-        val connected = state !is ReadyChannelState.Waiting
         val manager = appContext.getSystemService(NotificationManager::class.java) ?: return
-        manager.notify(ReadyAlertNotifications.ONGOING_ID, notifications.ongoing(connected))
+        manager.notify(ReadyAlertNotifications.ONGOING_ID, notifications.ongoing(ongoing.value))
     }
 
     /** Detiene el servicio (si corre); su notificación permanente se va con él. */
@@ -441,9 +527,13 @@ class ReadyAlertsController(
     companion object {
         private const val TAG = "AdelAvisos"
         private const val ERASE_WAIT_MILLIS = 5_000L
+        private const val ONGOING_GRACE_MILLIS = 3_000L
 
         /** Las «preguntas» de permisos que se hacen una sola vez. */
         const val PERMISSION_NOTIFICATIONS = "notifications"
         const val PERMISSION_BATTERY = "battery"
+
+        /** Ya se mostró el diálogo de Android de notificaciones (no solo la explicación). */
+        const val PERMISSION_NOTIFICATIONS_SYSTEM = "notifications_system"
     }
 }

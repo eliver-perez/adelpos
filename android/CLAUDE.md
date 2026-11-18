@@ -487,7 +487,10 @@ aplicación (A2-D10) con las plantillas de `app/src/main/res/values/strings.xml`
   `MY_PACKAGE_REPLACED` (`ReadyAlertsBootReceiver`, solo con esa condición guardada). Sin destinatarios en el día no
   arranca: no hay notificación permanente.
 - **Se detiene** cuando el canal termina: `active: false` (nadie entró hoy o «Avisar platillos listos» apagado; al
-  pasar `day_ends_at` vuelve a preguntar con `GET` y, mientras Go diga `active: true`, sigue), el dispositivo retirado
+  pasar `day_ends_at` vuelve a preguntar con `GET` y, mientras Go diga `active: true`, sigue); **A2-D12**: pasados
+  10 minutos de `day_ends_at` (`DAY_END_STOP_MILLIS`) sin alcanzar a Go desde entonces y sin nadie usando el
+  dispositivo (aplicación a la vista con un mesero), sin mover el cursor (`ReadyStopReason.DAY_ENDED`; también tras el
+  reinicio pegajoso; lo vuelve a arrancar la siguiente entrada con conexión o abrir la aplicación); el dispositivo retirado
   (solo `DEVICE_REVOKED`, por `interrupted` o un 401), otra huella o 426 (se avisa a `deviceAccess.report`) o un
   rechazo permanente al abrir (403/400); un 401 con otro `DEVICE_*` al abrir se avisa como en las demás rutas
   (emparejar de nuevo); cualquier otro código de `interrupted` (`TEMPORARY`) o un 5xx es temporal (espera creciente). También cuando el
@@ -503,7 +506,13 @@ aplicación (A2-D10) con las plantillas de `app/src/main/res/values/strings.xml`
   (duró o trajo mensajes) se reabre **enseguida** desde el último cursor (`after` y `Last-Event-ID`); sin red, 5xx,
   `interrupted` temporal o conexión muerta (45 s sin un byte), espera creciente; 429 (no debería pasar: un canal nuevo
   reemplaza al anterior) lee con `GET` mientras espera; tras tres fallas pide buscar el servidor en otra dirección
-  (`deviceAccess.recheck`, cambio de IP); al volver la red, reconecta enseguida.
+  (`deviceAccess.recheck`, cambio de IP); al volver la red, reconecta enseguida. Un lote `alerts` que no se entiende
+  o algo inesperado al procesarlo (Room, el sistema de notificaciones) es una falla: se reconecta desde el último
+  cursor guardado, sin saltarlo; el controlador corre el canal con `CoroutineExceptionHandler` y lo reintenta con
+  espera creciente (nunca tumba el proceso ni la captura). La notificación permanente dice «Conectando…» hasta abrir
+  el canal, «Recibiendo avisos…» solo con el canal abierto y el texto de sin conexión mientras reintenta
+  (`ReadyOngoing`: se vuelve a publicar solo cuando cambia el texto). `ReadyAlertsBootReceiver` decide solo con lo
+  guardado en Room, sin preguntar a Go (el servicio comprueba el dispositivo al arrancar).
 - **Notificaciones**: un solo canal visible «Platillos listos» cuyo id depende del sonido y la vibración de Terminales
   (A2-D7); una notificación por cuenta (etiqueta = la cuenta) con el acumulado, y el resumen del grupo con dos o más.
   Al tocarla, `MainActivity` recibe la cuenta (`ReadyAlertsController.pendingOpen`): en «¿Quién eres?» la entrada con
@@ -512,8 +521,10 @@ aplicación (A2-D10) con las plantillas de `app/src/main/res/values/strings.xml`
   cobrada o cancelada, «Esta cuenta ya no está abierta». Con esa cuenta a la vista, el aviso va dentro de la
   aplicación (`inAppNotices`).
 - **Permisos** (`ReadyAlertsOverlay`): la primera vez que el servicio corre, una explicación antes del diálogo de
-  Android, una sola vez cada uno: notificaciones (API 33+) y la exclusión de la optimización de batería
-  (`tools:ignore="BatteryLife"`, con su porqué en el manifiesto). Si se niegan, la ayuda «Avisos de platillos listos»
+  Android: notificaciones (API 33+) y la exclusión de la optimización de batería (`tools:ignore="BatteryLife"`, con su
+  porqué en el manifiesto; esta, una sola vez). Mientras falten las notificaciones, se vuelven a ofrecer en cada
+  entrada con conexión (`offerPermissionsAgain`; si Android ya no muestra su diálogo, «Continuar» abre sus Ajustes) y
+  Mesas muestra un aviso discreto que lleva a la ayuda (`ReadyAlertsOffNotice`). Si se niegan, la ayuda «Avisos de platillos listos»
   (menú del mesero o la notificación permanente) dice qué falta, con los botones a Ajustes, y si la salida anterior
   fue «Forzar detención» o «Detener» (`ApplicationExitInfo.REASON_USER_REQUESTED`, API 30+).
 - **Pruebas**: `ReadyAlertsRulesTest` (dominio), `ReadyAlertsChannelTest` (MockWebServer como Go),

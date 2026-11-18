@@ -14,6 +14,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.adelpos.meseros.MainActivity
 import com.adelpos.meseros.R
+import com.adelpos.meseros.core.data.ready.ReadyOngoing
 import com.adelpos.meseros.core.domain.ready.ReadyAlert
 import com.adelpos.meseros.core.domain.ready.ReadyAlertPresenter
 import com.adelpos.meseros.core.domain.ready.ReadyAlertSettings
@@ -169,17 +170,17 @@ class ReadyAlertNotifications(
         }
     }
 
-    /** La notificación permanente del servicio, según si el canal está conectado. */
-    fun ongoing(connected: Boolean): Notification =
+    /** La notificación permanente del servicio, según cómo va el canal. */
+    fun ongoing(text: ReadyOngoing): Notification =
         NotificationCompat.Builder(appContext, ReadyChannels.CONNECTED)
             .setSmallIcon(R.drawable.ic_stat_connected)
             .setContentTitle(appContext.getString(R.string.ready_ongoing_title))
             .setContentText(
                 appContext.getString(
-                    if (connected) {
-                        R.string.ready_ongoing_connected
-                    } else {
-                        R.string.ready_ongoing_waiting
+                    when (text) {
+                        ReadyOngoing.CONNECTING -> R.string.ready_ongoing_connecting
+                        ReadyOngoing.CONNECTED -> R.string.ready_ongoing_connected
+                        ReadyOngoing.WAITING -> R.string.ready_ongoing_waiting
                     },
                 ),
             )

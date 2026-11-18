@@ -14,7 +14,11 @@ import com.adelpos.meseros.core.domain.ready.ReadyAlertsStatus
 import com.adelpos.meseros.core.domain.realtime.ReconnectBackoff
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import mockwebserver3.Dispatcher
@@ -46,6 +50,7 @@ class ReadyAlertsChannelTest {
     private val ledger = MemoryLedger()
     private val presenter = RecordingPresenter()
     private val reconnections = AtomicInteger(0)
+    private val unexpected = CopyOnWriteArrayList<Exception>()
 
     @Before
     fun setUp() {
@@ -58,7 +63,10 @@ class ReadyAlertsChannelTest {
         mock.close()
     }
 
-    private fun channel(clock: () -> Long = System::currentTimeMillis) =
+    private fun channel(
+        clock: () -> Long = System::currentTimeMillis,
+        inUse: () -> Boolean = { false },
+    ) =
         ReadyAlertsChannel(
             server = server,
             ledger = ledger,
@@ -68,6 +76,8 @@ class ReadyAlertsChannelTest {
             backoff = ReconnectBackoff(initialMillis = 50, maximumMillis = 400),
             onReconnected = { reconnections.incrementAndGet() },
             healthyConnectionMillis = 100,
+            inUse = inUse,
+            onUnexpectedError = { unexpected.add(it) },
         )
 
     private fun stream(
@@ -326,6 +336,96 @@ class ReadyAlertsChannelTest {
     }
 
     @Test
+    fun unLoteQueNoSeEntiendeEsUnaFallaYSeReconectaDesdeElUltimoCursor() = runBlocking {
+        ledger.stored = ReadyAlertsStatus(20, true, FUTURE, ReadyAlertSettings.DEFAULT)
+        // RD7: Go ya avanzó su cursor con el lote 22; saltarlo perdería su aviso.
+        mock.enqueue(
+            stream(
+                alerts(21, alert(1)),
+                "id: 22\nevent: alerts\ndata: {\"cursor\":22,\"alerts\":[{\n\n",
+                alerts(23, alert(3)),
+                stall = true,
+            ),
+        )
+        mock.enqueue(stream(alerts(23, alert(2), alert(3)), alerts(23, active = false)))
+
+        withTimeout(5_000) { channel().run() }
+
+        takeRequest()
+        assertEquals("desde el último procesado", "21", takeRequest().url.queryParameter("after"))
+        assertEquals(listOf(1L, 2L, 3L), presenter.shown.map { it.id })
+        assertEquals("fue una falla: se pide el envío de la cola al volver", 1, reconnections.get())
+    }
+
+    @Test
+    fun unaFallaInesperadaAlMostrarSeReintentaDesdeElCursorSinTumbarElCanal() = runBlocking {
+        ledger.stored = ReadyAlertsStatus(30, true, FUTURE, ReadyAlertSettings.DEFAULT)
+        // RD4: el sistema de notificaciones (o Room) falla una vez al mostrar el aviso 31.
+        presenter.failures.set(1)
+        mock.enqueue(stream(alerts(31, alert(1)), stall = true))
+        mock.enqueue(stream(alerts(31, alert(1)), alerts(31, active = false)))
+
+        val reason = withTimeout(5_000) { channel().run() }
+
+        assertEquals(ReadyStopReason.INACTIVE, reason)
+        assertEquals(1, unexpected.size)
+        takeRequest()
+        assertEquals("el cursor no avanzó", "30", takeRequest().url.queryParameter("after"))
+        assertEquals("llega en el reintento", listOf(1L), presenter.shown.map { it.id })
+    }
+
+    @Test
+    fun pasadoElFinDelDiaSinGoSeDetieneSoloSiNadieLoUsa() = runBlocking {
+        val dayEnds = 1_763_550_000_000L
+        ledger.stored = ReadyAlertsStatus(60, true, dayEnds, ReadyAlertSettings.DEFAULT)
+        mock.dispatcher =
+            object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse =
+                    CatalogTestSupport.error(503, "SERVER_BUSY")
+            }
+        val now = dayEnds + ReadyAlertsLifecycle.DAY_END_STOP_MILLIS + 60_000
+        val inUse = AtomicBoolean(true)
+        val channel = channel(clock = { now }, inUse = { inUse.get() })
+
+        val reason = coroutineScope {
+            val running = async { channel.run() }
+            // A2-D12: con un mesero a la vista sigue reintentando aunque Go no responda.
+            delay(800)
+            assertTrue("con un mesero usándolo sigue", running.isActive)
+            inUse.set(false)
+            withTimeout(3_000) { running.await() }
+        }
+
+        assertEquals(ReadyStopReason.DAY_ENDED, reason)
+        assertEquals("sin mover el cursor", 60L, ledger.stored?.cursor)
+        assertTrue(server.reported.isEmpty())
+    }
+
+    @Test
+    fun elTextoPermanenteSoloDiceRecibiendoConElCanalAbierto() {
+        // RD5: al abrir, «Conectando…»; tras una falla, el de sin conexión se queda mientras
+        // reintenta (no se vuelve a publicar en cada intento).
+        val waiting = ReadyChannelState.Waiting(1, 2_000)
+        assertEquals(
+            ReadyOngoing.CONNECTING,
+            ReadyOngoing.after(ReadyOngoing.CONNECTING, ReadyChannelState.Connecting),
+        )
+        assertEquals(
+            ReadyOngoing.CONNECTED,
+            ReadyOngoing.after(ReadyOngoing.CONNECTING, ReadyChannelState.Connected),
+        )
+        assertEquals(ReadyOngoing.WAITING, ReadyOngoing.after(ReadyOngoing.CONNECTED, waiting))
+        assertEquals(
+            ReadyOngoing.WAITING,
+            ReadyOngoing.after(ReadyOngoing.WAITING, ReadyChannelState.Connecting),
+        )
+        assertEquals(
+            ReadyOngoing.CONNECTING,
+            ReadyOngoing.after(ReadyOngoing.CONNECTED, ReadyChannelState.Connecting),
+        )
+    }
+
+    @Test
     fun unCierreNormalConSoloPingsReconectaEnseguidaSinContarComoFalla() = runBlocking {
         // Go cierra el canal (a los 5 minutos) sin haber mandado ningún aviso: solo `: ping`.
         mock.enqueue(stream(": ping\n\n", bodyDelayMillis = 250))
@@ -441,9 +541,15 @@ class ReadyAlertsChannelTest {
         val shown = CopyOnWriteArrayList<ReadyAlert>()
         private val visible = mutableSetOf<String>()
 
+        /** Cuántas veces fallar al mostrar antes de funcionar. */
+        val failures = AtomicInteger(0)
+
         override suspend fun apply(settings: ReadyAlertSettings) = Unit
 
         override suspend fun present(alerts: List<ReadyAlert>) {
+            if (failures.getAndUpdate { if (it > 0) it - 1 else 0 } > 0) {
+                throw IllegalStateException("el sistema de notificaciones no respondió")
+            }
             for (alert in alerts) {
                 if (visible.add(alert.key)) {
                     shown.add(alert)

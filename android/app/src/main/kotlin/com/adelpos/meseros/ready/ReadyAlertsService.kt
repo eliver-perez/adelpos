@@ -8,13 +8,11 @@ import android.os.IBinder
 import android.util.Log
 import androidx.core.app.ServiceCompat
 import com.adelpos.meseros.AdelPosApplication
-import com.adelpos.meseros.core.data.ready.ReadyChannelState
+import com.adelpos.meseros.core.data.ready.ReadyOngoing
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /**
@@ -45,16 +43,14 @@ class ReadyAlertsService : Service() {
         super.onCreate()
         controller.notifications.ensureConnectedChannel()
         scope.launch {
-            // La notificación permanente dice si hay conexión con la computadora principal.
-            controller.connection
-                .map { it == ReadyChannelState.Connected || it == ReadyChannelState.Connecting }
-                .distinctUntilChanged()
-                .collect { connected -> if (foreground) promote(connected) }
+            // La notificación permanente dice si hay conexión con la computadora principal; se
+            // vuelve a publicar solo cuando cambia su texto.
+            controller.ongoing.collect { text -> if (foreground) promote(text) }
         }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (!promote(connected = true)) {
+        if (!promote(controller.ongoing.value)) {
             // Android no lo dejó pasar a primer plano: sin la notificación no se sigue.
             stopSelf()
             return START_NOT_STICKY
@@ -67,8 +63,8 @@ class ReadyAlertsService : Service() {
     }
 
     /** Pasa (o sigue) en primer plano con la notificación permanente. */
-    private fun promote(connected: Boolean): Boolean {
-        val notification = controller.notifications.ongoing(connected)
+    private fun promote(text: ReadyOngoing): Boolean {
+        val notification = controller.notifications.ongoing(text)
         val type =
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
