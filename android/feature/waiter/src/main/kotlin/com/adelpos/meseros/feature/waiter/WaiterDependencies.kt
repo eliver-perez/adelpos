@@ -1,29 +1,34 @@
 package com.adelpos.meseros.feature.waiter
 
+import com.adelpos.meseros.core.capture.CaptureDependencies
 import com.adelpos.meseros.core.domain.access.ActiveWaiter
-import com.adelpos.meseros.core.domain.catalog.CatalogImages
-import com.adelpos.meseros.core.domain.catalog.CatalogSource
 import com.adelpos.meseros.core.domain.preferences.TablesViewPreference
 import com.adelpos.meseros.core.domain.waiter.CaptureService
 import com.adelpos.meseros.core.domain.waiter.OrderQueueService
 import com.adelpos.meseros.core.domain.waiter.RestaurantSource
-import com.adelpos.meseros.core.domain.waiter.SentLineService
 import kotlinx.coroutines.flow.StateFlow
 
 /**
- * Lo que necesitan las pantallas del modo Mesero (inyección manual desde `AppContainer`): solo
- * interfaces de `core:domain`, para que la A2 (Para llevar) las reutilice.
+ * Lo que necesitan las pantallas del modo Mesero (inyección manual desde `AppContainer`): la
+ * captura compartida de `core:capture` ([capture]) y lo propio de Mesas (la vista guardada y el
+ * reloj monótono del tiempo de las mesas). Solo interfaces de `core:domain`.
  *
  * @param elapsedClock reloj monótono para el tiempo de las mesas.
  */
 class WaiterDependencies(
-    val restaurant: RestaurantSource,
-    val captures: CaptureService,
-    val orders: OrderQueueService,
-    val sentLines: SentLineService,
-    val catalog: CatalogSource,
-    val images: CatalogImages?,
+    val capture: CaptureDependencies,
     val tablesView: TablesViewPreference,
-    val activeWaiter: StateFlow<ActiveWaiter?>,
     val elapsedClock: () -> Long,
-)
+) {
+    val restaurant: RestaurantSource
+        get() = capture.restaurant
+
+    val captures: CaptureService
+        get() = capture.captures
+
+    val orders: OrderQueueService
+        get() = capture.orders
+
+    val activeWaiter: StateFlow<ActiveWaiter?>
+        get() = capture.activeWaiter
+}

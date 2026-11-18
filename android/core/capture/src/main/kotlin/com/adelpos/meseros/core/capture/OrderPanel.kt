@@ -1,4 +1,4 @@
-package com.adelpos.meseros.feature.waiter.capture
+package com.adelpos.meseros.core.capture
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
@@ -44,7 +44,6 @@ import com.adelpos.meseros.core.ui.theme.AdelDimens
 import com.adelpos.meseros.core.ui.theme.AdelTheme
 import com.adelpos.meseros.core.ui.waiter.OrderStateBadge
 import com.adelpos.meseros.core.ui.waiter.PreparationBadge
-import com.adelpos.meseros.feature.waiter.R
 
 /** Lo que el mesero puede tocar en la cuenta. */
 class OrderPanelActions(

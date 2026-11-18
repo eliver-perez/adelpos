@@ -33,6 +33,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.adelpos.meseros.core.capture.R as CaptureR
 import com.adelpos.meseros.core.domain.preferences.TablesView
 import com.adelpos.meseros.core.domain.table.TableState
 import com.adelpos.meseros.core.domain.waiter.AccountSummary
@@ -453,7 +454,7 @@ private fun TablePanel(
                     title = stringResource(R.string.table_panel_capture, label),
                     detail =
                         if (discarding) {
-                            stringResource(R.string.pending_discarding)
+                            stringResource(CaptureR.string.pending_discarding)
                         } else {
                             pluralStringResource(R.plurals.table_panel_products, count, count)
                         },

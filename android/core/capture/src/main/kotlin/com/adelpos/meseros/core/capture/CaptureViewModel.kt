@@ -1,4 +1,4 @@
-package com.adelpos.meseros.feature.waiter.capture
+package com.adelpos.meseros.core.capture
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -30,7 +30,6 @@ import com.adelpos.meseros.core.domain.waiter.SentChangeResult
 import com.adelpos.meseros.core.domain.waiter.SentLine
 import com.adelpos.meseros.core.domain.waiter.TableAccountRef
 import com.adelpos.meseros.core.domain.waiter.WaiterPermissions
-import com.adelpos.meseros.feature.waiter.WaiterDependencies
 import java.util.UUID
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -79,7 +78,7 @@ sealed interface SentDialog {
  * (sobreviven a la rotación y al cierre del proceso).
  */
 class CaptureViewModel(
-    private val dependencies: WaiterDependencies,
+    private val dependencies: CaptureDependencies,
     private val savedState: SavedStateHandle,
 ) : ViewModel() {
     val captureId: String = requireNotNull(savedState[KEY_CAPTURE_ID]) { "Falta la captura" }
@@ -492,7 +491,7 @@ class CaptureViewModel(
 
         private const val STOP_TIMEOUT_MILLIS = 5_000L
 
-        fun factory(dependencies: WaiterDependencies): ViewModelProvider.Factory =
+        fun factory(dependencies: CaptureDependencies): ViewModelProvider.Factory =
             viewModelFactory {
                 initializer { CaptureViewModel(dependencies, createSavedStateHandle()) }
             }

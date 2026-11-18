@@ -28,6 +28,12 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.adelpos.meseros.AdelPosApplication
 import com.adelpos.meseros.ShellViewModel
+import com.adelpos.meseros.core.capture.CaptureRoute
+import com.adelpos.meseros.core.capture.captureTitle
+import com.adelpos.meseros.core.capture.pending.PendingOrdersRoute
+import com.adelpos.meseros.core.capture.pending.ReviewRoute
+import com.adelpos.meseros.core.capture.pending.pendingTitle
+import com.adelpos.meseros.core.capture.pending.reviewTitle
 import com.adelpos.meseros.core.domain.access.ActiveWaiter
 import com.adelpos.meseros.core.domain.access.DeviceStatus
 import com.adelpos.meseros.core.domain.connection.ConnectionSummary
@@ -46,12 +52,6 @@ import com.adelpos.meseros.feature.access.SwitchBlockedDialog
 import com.adelpos.meseros.feature.access.accessTitle
 import com.adelpos.meseros.feature.access.asActions
 import com.adelpos.meseros.feature.access.pin.ReenterPinRoute
-import com.adelpos.meseros.feature.waiter.capture.CaptureRoute
-import com.adelpos.meseros.feature.waiter.capture.captureTitle
-import com.adelpos.meseros.feature.waiter.pending.PendingOrdersRoute
-import com.adelpos.meseros.feature.waiter.pending.ReviewRoute
-import com.adelpos.meseros.feature.waiter.pending.pendingTitle
-import com.adelpos.meseros.feature.waiter.pending.reviewTitle
 import com.adelpos.meseros.feature.waiter.tables.TablesRoute
 import com.adelpos.meseros.feature.waiter.tables.tablesTitle
 import kotlinx.serialization.Serializable
@@ -223,20 +223,20 @@ private fun WaiterNavigation(navController: NavHostController, paneLayout: PaneL
         composable<CaptureDestination> {
             CaptureRoute(
                 layout = paneLayout,
-                dependencies = waiter,
+                dependencies = waiter.capture,
                 onDone = { navController.popBackStack(TablesDestination, inclusive = false) },
             )
         }
         composable<PendingDestination> {
             PendingOrdersRoute(
-                dependencies = waiter,
+                dependencies = waiter.capture,
                 onOpenCapture = openCapture,
                 onOpenReview = openReview,
             )
         }
         composable<ReviewDestination> {
             ReviewRoute(
-                dependencies = waiter,
+                dependencies = waiter.capture,
                 onDone = { navController.popBackStack() },
                 onOpenCapture = { captureId ->
                     navController.popBackStack()

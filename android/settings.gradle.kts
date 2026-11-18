@@ -1,4 +1,4 @@
-// Aplicación Android de meseros de AD-EL POS (etapa A1). Estructura, comandos y reglas:
+// Aplicación Android de meseros de AD-EL POS (etapas A1 y A2). Estructura, comandos y reglas:
 // android/CLAUDE.md.
 pluginManagement {
     repositories {
@@ -39,6 +39,8 @@ include(":core:domain")
 include(":core:data")
 
 include(":core:ui")
+
+include(":core:capture")
 
 include(":feature:access")
 

@@ -128,6 +128,7 @@ dependencies {
     implementation(project(":core:domain"))
     implementation(project(":core:data"))
     implementation(project(":core:ui"))
+    implementation(project(":core:capture"))
     implementation(project(":feature:access"))
     implementation(project(":feature:waiter"))
     implementation(libs.androidx.core.ktx)

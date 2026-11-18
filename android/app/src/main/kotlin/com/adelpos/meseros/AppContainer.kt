@@ -3,6 +3,7 @@ package com.adelpos.meseros
 import android.content.Context
 import android.os.Build
 import android.os.SystemClock
+import com.adelpos.meseros.core.capture.CaptureDependencies
 import com.adelpos.meseros.core.data.access.AccessRepository
 import com.adelpos.meseros.core.data.access.PairingRepository
 import com.adelpos.meseros.core.data.api.ClientIdentity
@@ -283,17 +284,27 @@ class AppContainer(context: Context, private val settings: Settings = Settings()
         OrderWorkerFactory(sender = { waiterMode.sender }, signals = orderSendSignals)
     }
 
-    /** Lo que necesitan las pantallas del modo Mesero (`feature:waiter`). */
-    val waiterDependencies: WaiterDependencies by lazy {
-        WaiterDependencies(
+    /**
+     * Lo que necesita la captura compartida de Mesas y Para llevar (`core:capture`): catálogo,
+     * cuenta visible, «Enviar a cocina», pendientes y «Requiere tu revisión».
+     */
+    val captureDependencies: CaptureDependencies by lazy {
+        CaptureDependencies(
             restaurant = waiterMode.restaurant,
             captures = waiterMode.captures,
             orders = orderQueue,
             sentLines = waiterMode.sentLines,
             catalog = catalogRealtime.catalog,
             images = catalogRealtime.images,
-            tablesView = devicePreferences,
             activeWaiter = deviceAccess.activeWaiter,
+        )
+    }
+
+    /** Lo que necesitan las pantallas del modo Mesero (`feature:waiter`). */
+    val waiterDependencies: WaiterDependencies by lazy {
+        WaiterDependencies(
+            capture = captureDependencies,
+            tablesView = devicePreferences,
             elapsedClock = SystemClock::elapsedRealtime,
         )
     }

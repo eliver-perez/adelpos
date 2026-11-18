@@ -1,4 +1,4 @@
-package com.adelpos.meseros.feature.waiter.capture
+package com.adelpos.meseros.core.capture
 
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
@@ -25,8 +25,6 @@ import com.adelpos.meseros.core.ui.components.LocalUserActivity
 import com.adelpos.meseros.core.ui.components.reportsUserActivity
 import com.adelpos.meseros.core.ui.layout.AdaptivePanes
 import com.adelpos.meseros.core.ui.layout.PaneLayout
-import com.adelpos.meseros.feature.waiter.R
-import com.adelpos.meseros.feature.waiter.WaiterDependencies
 
 /**
  * Captura de una cuenta con su ViewModel; [onDone] vuelve a Mesas (pedido enviado o descartado).
@@ -34,7 +32,7 @@ import com.adelpos.meseros.feature.waiter.WaiterDependencies
 @Composable
 fun CaptureRoute(
     layout: PaneLayout,
-    dependencies: WaiterDependencies,
+    dependencies: CaptureDependencies,
     onDone: () -> Unit,
     viewModel: CaptureViewModel = viewModel(factory = CaptureViewModel.factory(dependencies)),
 ) {

@@ -1,4 +1,4 @@
-package com.adelpos.meseros.feature.waiter.pending
+package com.adelpos.meseros.core.capture.pending
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
@@ -29,6 +29,8 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.adelpos.meseros.core.capture.CaptureDependencies
+import com.adelpos.meseros.core.capture.R
 import com.adelpos.meseros.core.domain.waiter.Capture
 import com.adelpos.meseros.core.domain.waiter.ChangeKind
 import com.adelpos.meseros.core.domain.waiter.DiscardResult
@@ -45,8 +47,6 @@ import com.adelpos.meseros.core.ui.components.SecondaryButton
 import com.adelpos.meseros.core.ui.components.reportsUserActivity
 import com.adelpos.meseros.core.ui.theme.AdelDimens
 import com.adelpos.meseros.core.ui.waiter.OrderStateBadge
-import com.adelpos.meseros.feature.waiter.R
-import com.adelpos.meseros.feature.waiter.WaiterDependencies
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -54,7 +54,7 @@ import java.time.format.DateTimeFormatter
 /** «Pedidos pendientes» con su ViewModel. */
 @Composable
 fun PendingOrdersRoute(
-    dependencies: WaiterDependencies,
+    dependencies: CaptureDependencies,
     onOpenCapture: (String) -> Unit,
     onOpenReview: (String) -> Unit,
     viewModel: PendingOrdersViewModel =
@@ -273,7 +273,7 @@ private fun CaptureRow(capture: Capture, onOpenCapture: (String) -> Unit) {
                     if (discarding) {
                         stringResource(R.string.pending_discarding)
                     } else {
-                        pluralStringResource(R.plurals.table_panel_products, count, count)
+                        pluralStringResource(R.plurals.capture_products, count, count)
                     },
                     style = MaterialTheme.typography.bodyMedium,
                 )
@@ -286,7 +286,7 @@ private fun CaptureRow(capture: Capture, onOpenCapture: (String) -> Unit) {
 /** «Requiere tu revisión» con su ViewModel. */
 @Composable
 fun ReviewRoute(
-    dependencies: WaiterDependencies,
+    dependencies: CaptureDependencies,
     onDone: () -> Unit,
     onOpenCapture: (String) -> Unit,
     viewModel: ReviewViewModel = viewModel(factory = ReviewViewModel.factory(dependencies)),

@@ -1,5 +1,6 @@
 package com.adelpos.meseros.feature.waiter
 
+import com.adelpos.meseros.core.capture.CaptureDependencies
 import com.adelpos.meseros.core.domain.access.ActiveWaiter
 import com.adelpos.meseros.core.domain.access.WaiterProfile
 import com.adelpos.meseros.core.domain.catalog.Catalog
@@ -203,16 +204,21 @@ class FakeWaiter(catalog: Catalog = Catalog.EMPTY) {
             ),
         )
 
-    fun dependencies(): WaiterDependencies =
-        WaiterDependencies(
+    fun captureDependencies(): CaptureDependencies =
+        CaptureDependencies(
             restaurant = restaurant,
             captures = captures,
             orders = orders,
             sentLines = sentLines,
             catalog = catalogSource,
             images = null,
-            tablesView = tablesView,
             activeWaiter = active,
+        )
+
+    fun dependencies(): WaiterDependencies =
+        WaiterDependencies(
+            capture = captureDependencies(),
+            tablesView = tablesView,
             elapsedClock = { 0L },
         )
 

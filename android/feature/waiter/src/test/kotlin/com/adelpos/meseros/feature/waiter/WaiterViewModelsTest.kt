@@ -1,6 +1,8 @@
 package com.adelpos.meseros.feature.waiter
 
 import androidx.lifecycle.SavedStateHandle
+import com.adelpos.meseros.core.capture.CaptureNotice
+import com.adelpos.meseros.core.capture.CaptureViewModel
 import com.adelpos.meseros.core.domain.catalog.Catalog
 import com.adelpos.meseros.core.domain.catalog.CatalogCategory
 import com.adelpos.meseros.core.domain.catalog.CatalogProduct
@@ -18,8 +20,6 @@ import com.adelpos.meseros.core.domain.waiter.DraftOperation
 import com.adelpos.meseros.core.domain.waiter.TableShape
 import com.adelpos.meseros.core.domain.waiter.Totals
 import com.adelpos.meseros.core.domain.waiter.WaiterPermissions
-import com.adelpos.meseros.feature.waiter.capture.CaptureNotice
-import com.adelpos.meseros.feature.waiter.capture.CaptureViewModel
 import com.adelpos.meseros.feature.waiter.tables.TablesViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -151,7 +151,7 @@ class WaiterViewModelsTest {
             val fake = FakeWaiter(catalog)
             fake.captureFlow.value = FakeWaiter.emptyCapture("captura-1", "t1")
             val saved = SavedStateHandle(mapOf(CaptureViewModel.KEY_CAPTURE_ID to "captura-1"))
-            val model = CaptureViewModel(fake.dependencies(), saved)
+            val model = CaptureViewModel(fake.captureDependencies(), saved)
             advanceUntilIdle()
             model.onProductSelect(product)
             assertEquals("p1", model.editing?.productId)
@@ -186,7 +186,7 @@ class WaiterViewModelsTest {
                         CaptureViewModel.KEY_EDITING_ITEM to "renglon-1",
                     ),
                 )
-            val model = CaptureViewModel(fake.dependencies(), saved)
+            val model = CaptureViewModel(fake.captureDependencies(), saved)
             advanceUntilIdle()
             assertEquals(line, model.editing)
             assertEquals("renglon-1", model.editingItemId)
@@ -200,7 +200,7 @@ class WaiterViewModelsTest {
                         CaptureViewModel.KEY_EDITING_ITEM to "renglon-quitado",
                     ),
                 )
-            val closed = CaptureViewModel(fake.dependencies(), gone)
+            val closed = CaptureViewModel(fake.captureDependencies(), gone)
             advanceUntilIdle()
             assertNull(closed.editing)
             assertNull(closed.editingItemId)
