@@ -617,6 +617,17 @@ alerts_sticky_restart() {
         pid="$("$ADB" -s "$ANDROID_SERIAL" shell pidof "$APP_ID" | tr -d '\r' || true)"
         echo "r8b: proceso $pid; kill -9" >>"$log"
         "$ADB" -s "$ANDROID_SERIAL" shell run-as "$APP_ID" kill -9 "$pid" >>"$log" 2>&1 || true
+        sleep 1
+        if [ "$("$ADB" -s "$ANDROID_SERIAL" shell pidof "$APP_ID" | tr -d '\r' || true)" = "$pid" ]; then
+            # Algunas imágenes no dejan a run-as matar el proceso (Android 13: «unknown pid»): con root
+            # (imágenes google_apis), fuera de la instrumentación.
+            echo "r8b: run-as no pudo; kill -9 con root" >>"$log"
+            "$ADB" -s "$ANDROID_SERIAL" root >>"$log" 2>&1 || true
+            "$ADB" -s "$ANDROID_SERIAL" wait-for-device
+            "$ADB" -s "$ANDROID_SERIAL" shell kill -9 "$pid" >>"$log" 2>&1 || true
+            "$ADB" -s "$ANDROID_SERIAL" unroot >>"$log" 2>&1 || true
+            "$ADB" -s "$ANDROID_SERIAL" wait-for-device
+        fi
         deadline=$((SECONDS + 90))
         while :; do
             newpid="$("$ADB" -s "$ANDROID_SERIAL" shell pidof "$APP_ID" | tr -d '\r' || true)"
