@@ -22,6 +22,8 @@ import androidx.compose.ui.unit.dp
 import com.adelpos.meseros.core.domain.waiter.ElapsedTime
 import com.adelpos.meseros.core.domain.waiter.OrderState
 import com.adelpos.meseros.core.domain.waiter.PreparationState
+import com.adelpos.meseros.core.domain.waiter.TakeawayPayment
+import com.adelpos.meseros.core.domain.waiter.TakeawayPreparation
 import com.adelpos.meseros.core.ui.R
 import com.adelpos.meseros.core.ui.icons.AdelIcons
 import com.adelpos.meseros.core.ui.icons.CatalogIcons
@@ -134,6 +136,113 @@ fun preparationLabel(state: PreparationState?): String =
     )
 
 /**
+ * Preparación de un pedido para llevar en la lista (§3.3: pendiente, en preparación, listo), con la
+ * correspondencia de [com.adelpos.meseros.core.domain.waiter.TakeawayStates].
+ */
+@Composable
+fun TakeawayPreparationBadge(state: TakeawayPreparation, modifier: Modifier = Modifier) {
+    val colors = AdelTheme.colors
+    val (tone, icon, text) =
+        when (state) {
+            TakeawayPreparation.NOT_SENT ->
+                Triple(
+                    BadgeTone(colors.graySoft, colors.gray, colors.gray),
+                    AdelIcons.Edit,
+                    R.string.takeaway_preparation_not_sent,
+                )
+            TakeawayPreparation.PENDING ->
+                Triple(
+                    BadgeTone(colors.amberSoft, colors.amber, colors.amber),
+                    AdelIcons.Clock,
+                    R.string.takeaway_preparation_pending,
+                )
+            TakeawayPreparation.PREPARING ->
+                Triple(
+                    BadgeTone(colors.blueSoft, colors.blue, colors.blue),
+                    AdelIcons.Clock,
+                    R.string.takeaway_preparation_preparing,
+                )
+            TakeawayPreparation.READY ->
+                Triple(
+                    BadgeTone(colors.tealSoft, colors.teal, colors.teal),
+                    AdelIcons.Check,
+                    R.string.takeaway_preparation_ready,
+                )
+            TakeawayPreparation.CANCELLED ->
+                Triple(
+                    BadgeTone(colors.graySoft, colors.gray, colors.gray),
+                    CatalogIcons.Close,
+                    R.string.takeaway_preparation_cancelled,
+                )
+            TakeawayPreparation.UNKNOWN ->
+                Triple(
+                    BadgeTone(colors.graySoft, colors.gray, colors.gray),
+                    AdelIcons.Clock,
+                    R.string.takeaway_preparation_unknown,
+                )
+        }
+    StateBadge(
+        text = stringResource(text),
+        icon = icon,
+        tone = tone,
+        modifier = modifier.testTag("$TAG_TAKEAWAY_PREPARATION_PREFIX${state.name.lowercase()}"),
+    )
+}
+
+/**
+ * Pago de un pedido para llevar como lo dice Go (sin pagar, pago parcial, pagado) o, ya entregado,
+ * «Entregado». La aplicación nunca cobra.
+ */
+@Composable
+fun TakeawayPaymentBadge(
+    payment: TakeawayPayment,
+    delivered: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val colors = AdelTheme.colors
+    val (tone, icon, text) =
+        when {
+            delivered ->
+                Triple(
+                    BadgeTone(colors.tealSoft, colors.teal, colors.teal),
+                    AdelIcons.Check,
+                    R.string.takeaway_delivered,
+                )
+            payment == TakeawayPayment.PAID ->
+                Triple(
+                    BadgeTone(colors.tealSoft, colors.teal, colors.teal),
+                    AdelIcons.Cash,
+                    R.string.takeaway_payment_paid,
+                )
+            payment == TakeawayPayment.PARTIAL ->
+                Triple(
+                    BadgeTone(colors.amberSoft, colors.amber, colors.amber),
+                    AdelIcons.Cash,
+                    R.string.takeaway_payment_partial,
+                )
+            payment == TakeawayPayment.UNPAID ->
+                Triple(
+                    BadgeTone(colors.amberSoft, colors.amber, colors.amber),
+                    AdelIcons.Receipt,
+                    R.string.takeaway_payment_unpaid,
+                )
+            else ->
+                Triple(
+                    BadgeTone(colors.graySoft, colors.gray, colors.gray),
+                    AdelIcons.Receipt,
+                    R.string.takeaway_payment_unknown,
+                )
+        }
+    val tag = if (delivered) "delivered" else payment.name.lowercase()
+    StateBadge(
+        text = stringResource(text),
+        icon = icon,
+        tone = tone,
+        modifier = modifier.testTag("$TAG_TAKEAWAY_PAYMENT_PREFIX$tag"),
+    )
+}
+
+/**
  * Tiempo de una mesa con el formato del escritorio («45 min»); si Go la marcó como abierta mucho
  * tiempo (`long_open`), en una etiqueta ámbar con el triángulo de advertencia, distinta de los
  * colores de estado.
@@ -214,3 +323,5 @@ private fun StateBadge(text: String, icon: ImageVector, tone: BadgeTone, modifie
 const val TAG_ORDER_STATE_PREFIX = "order-state-"
 const val TAG_PREPARATION_PREFIX = "preparation-"
 const val TAG_LONG_OPEN = "long-open"
+const val TAG_TAKEAWAY_PREPARATION_PREFIX = "takeaway-preparation-"
+const val TAG_TAKEAWAY_PAYMENT_PREFIX = "takeaway-payment-"

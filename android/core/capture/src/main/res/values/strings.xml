@@ -116,4 +116,19 @@
         <item quantity="many">%d productos</item>
         <item quantity="other">%d productos</item>
     </plurals>
+    <!-- Para llevar en la captura y en la cola (etapa A2). -->
+    <string name="takeaway_label">Para llevar</string>
+    <string name="takeaway_label_named">Para llevar · %1$s</string>
+    <string name="capture_takeaway_new">Pedido nuevo: nace al guardar el primer producto.</string>
+    <string name="sync_takeaway_closed">Este pedido ya no está abierto: se entregó o se canceló en otra terminal.</string>
+    <string name="sync_takeaway_closed_action">Hacer un pedido nuevo para llevar</string>
+    <string name="review_new_takeaway">Enviar como pedido nuevo para llevar</string>
+    <string name="customer_title">Nombre y teléfono</string>
+    <string name="customer_edit">Nombre y teléfono</string>
+    <string name="customer_name">Nombre del cliente</string>
+    <string name="customer_phone">Teléfono</string>
+    <string name="customer_optional">Opcional</string>
+    <string name="customer_save">Guardar</string>
+    <string name="customer_none">Sin nombre ni teléfono</string>
+    <string name="customer_pending">Se guardará en la computadora principal en cuanto haya conexión.</string>
 </resources>

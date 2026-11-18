@@ -58,14 +58,16 @@ class OrderPanelActions(
     val onSend: () -> Unit,
     val onDiscard: () -> Unit,
     val onSentDialog: (SentDialog?) -> Unit,
+    /** Para llevar: abrir «Nombre y teléfono». */
+    val onEditCustomer: () -> Unit = {},
 )
 
 /**
- * La cuenta, siempre a la vista en la tableta y a un toque en el teléfono (§6.3): lo enviado a
- * cocina con su preparación (del mismo modelo del escritorio y de cocina) y lo por enviar (el
- * borrador, «Borrador» de §7) con −/+, «Cambiar» y «Quitar»; el estado del guardado y, al final,
- * «Enviar a cocina». Los importes son los de Go; sin su cotización, los precios del catálogo son
- * solo de referencia.
+ * La cuenta (o el pedido para llevar, con el nombre y el teléfono del cliente; etapa A2), siempre a
+ * la vista en la tableta y a un toque en el teléfono (§6.3): lo enviado a cocina con su preparación
+ * (del mismo modelo del escritorio y de cocina) y lo por enviar (el borrador, «Borrador» de §7) con
+ * −/+, «Cambiar» y «Quitar»; el estado del guardado y, al final, «Enviar a cocina». Los importes
+ * son los de Go; sin su cotización, los precios del catálogo son solo de referencia.
  */
 @Composable
 internal fun OrderPanel(
@@ -78,6 +80,7 @@ internal fun OrderPanel(
     sending: Boolean,
     message: String?,
     actions: OrderPanelActions,
+    customer: CustomerView = CustomerView.NONE,
 ) {
     val visible = capture.visible
     val plan = OfflineOrderPlan.of(capture)
@@ -97,7 +100,14 @@ internal fun OrderPanel(
     ) {
         item {
             Column(modifier = Modifier.padding(top = AdelDimens.ScreenPadding)) {
-                Text(capture.tableName, style = MaterialTheme.typography.headlineSmall)
+                Text(
+                    if (capture.takeaway) {
+                        stringResource(R.string.takeaway_label)
+                    } else {
+                        capture.tableName
+                    },
+                    style = MaterialTheme.typography.headlineSmall,
+                )
                 val account = bill?.account
                 Text(
                     text =
@@ -109,11 +119,21 @@ internal fun OrderPanel(
                                     account.folio,
                                 )
                             capture.accountName != null -> capture.accountName!!
+                            capture.takeaway -> stringResource(R.string.capture_takeaway_new)
                             else -> stringResource(R.string.capture_new_account)
                         },
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.testTag(TAG_ORDER_ACCOUNT),
+                )
+            }
+        }
+        if (capture.takeaway) {
+            item {
+                CustomerRow(
+                    customer = customer,
+                    canEdit = permissions.allows(WaiterAction.MANAGE_TAKEAWAY),
+                    onEdit = actions.onEditCustomer,
                 )
             }
         }
@@ -240,8 +260,14 @@ private fun SyncBanner(capture: Capture, actions: OrderPanelActions) {
             // El mensaje de Go si lo hubo («La cuenta «Mesa 4» ya se cobró…»); si se supo por el
             // canal de tiempo real, el texto general.
             DraftSync.ACCOUNT_CLOSED ->
-                (capture.syncMessage ?: stringResource(R.string.sync_account_closed)) to
-                    colors.redSoft
+                (capture.syncMessage
+                    ?: stringResource(
+                        if (capture.takeaway) {
+                            R.string.sync_takeaway_closed
+                        } else {
+                            R.string.sync_account_closed
+                        },
+                    )) to colors.redSoft
             DraftSync.DISCARDING -> stringResource(R.string.sync_discarding) to colors.amberSoft
         }
     Surface(
@@ -297,7 +323,14 @@ private fun SyncBanner(capture: Capture, actions: OrderPanelActions) {
                         }
                         if (!capture.accountMerged) {
                             SecondaryButton(
-                                text = stringResource(R.string.sync_account_closed_action),
+                                text =
+                                    stringResource(
+                                        if (capture.takeaway) {
+                                            R.string.sync_takeaway_closed_action
+                                        } else {
+                                            R.string.sync_account_closed_action
+                                        },
+                                    ),
                                 onClick = actions.onOpenAnotherAccount,
                                 modifier = Modifier.testTag(TAG_OPEN_ANOTHER),
                             )
@@ -312,6 +345,45 @@ private fun SyncBanner(capture: Capture, actions: OrderPanelActions) {
                         )
                     else -> Unit
                 }
+            }
+        }
+    }
+}
+
+/** Para llevar: el nombre y el teléfono del cliente (opcionales) con «Nombre y teléfono». */
+@Composable
+private fun CustomerRow(customer: CustomerView, canEdit: Boolean, onEdit: () -> Unit) {
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        modifier = Modifier.fillMaxWidth().testTag(TAG_ORDER_CUSTOMER),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    customerSummary(customer.customer),
+                    style = MaterialTheme.typography.bodyLarge,
+                    modifier = Modifier.testTag(TAG_ORDER_CUSTOMER_TEXT),
+                )
+                if (customer.pending) {
+                    Text(
+                        stringResource(R.string.customer_pending),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            TextButton(
+                onClick = onEdit,
+                enabled = canEdit,
+                modifier =
+                    Modifier.heightIn(min = AdelDimens.MinTouchTarget)
+                        .testTag(TAG_ORDER_CUSTOMER_EDIT),
+            ) {
+                Text(stringResource(R.string.customer_edit))
             }
         }
     }
@@ -482,6 +554,9 @@ private fun SentRow(
 
 const val TAG_ORDER_PANEL = "order-panel"
 const val TAG_ORDER_ACCOUNT = "order-account"
+const val TAG_ORDER_CUSTOMER = "order-customer"
+const val TAG_ORDER_CUSTOMER_TEXT = "order-customer-text"
+const val TAG_ORDER_CUSTOMER_EDIT = "order-customer-edit"
 const val TAG_ORDER_TOTAL = "order-total"
 const val TAG_ORDER_MESSAGE = "order-message"
 const val TAG_FOLLOW_MERGED = "follow-merged"

@@ -45,3 +45,5 @@ include(":core:capture")
 include(":feature:access")
 
 include(":feature:waiter")
+
+include(":feature:takeaway")

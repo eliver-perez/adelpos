@@ -131,6 +131,7 @@ dependencies {
     implementation(project(":core:capture"))
     implementation(project(":feature:access"))
     implementation(project(":feature:waiter"))
+    implementation(project(":feature:takeaway"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)

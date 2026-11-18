@@ -85,6 +85,14 @@ object AdelIcons {
     /** Cambiar el nombre. */
     val Edit: ImageVector by lazy { icon("edit", "M4 20h4L19 9l-4-4L4 16v4Z", "m13.5 6.5 4 4") }
 
+    /** Mesas (navegación principal, etapa A2). */
+    val Table: ImageVector by lazy {
+        icon("table", "M3 9h18M5 9l-1 11M19 9l1 11M8 9v6h8V9", "M7 5h10")
+    }
+
+    /** Para llevar (navegación principal, etapa A2). */
+    val Bag: ImageVector by lazy { icon("bag", "M5 8h14l-1 13H6L5 8Z", "M9 8V6a3 3 0 0 1 6 0v2") }
+
     internal fun icon(name: String, vararg paths: String): ImageVector {
         val builder =
             ImageVector.Builder(

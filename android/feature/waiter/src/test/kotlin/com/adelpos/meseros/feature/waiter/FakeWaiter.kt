@@ -56,6 +56,8 @@ class FakeWaiter(catalog: Catalog = Catalog.EMPTY) {
     val accounts = MutableStateFlow<List<AccountSummary>>(emptyList())
     val view = MutableStateFlow(RestaurantView.EMPTY)
     val storedView = MutableStateFlow(TablesView.DEFAULT)
+    val edits = MutableStateFlow<List<CustomerEdit>>(emptyList())
+    val customers = mutableListOf<Pair<String, TakeawayCustomer>>()
 
     val restaurant =
         object : RestaurantSource {
@@ -97,7 +99,9 @@ class FakeWaiter(catalog: Catalog = Catalog.EMPTY) {
             override suspend fun openTakeaway(userId: String, account: AccountSummary?): Capture =
                 error("El modo Mesero no abre pedidos para llevar")
 
-            override suspend fun setCustomer(captureId: String, customer: TakeawayCustomer) = Unit
+            override suspend fun setCustomer(captureId: String, customer: TakeawayCustomer) {
+                customers.add(captureId to customer)
+            }
 
             override suspend fun stage(
                 captureId: String,
@@ -194,7 +198,7 @@ class FakeWaiter(catalog: Catalog = Catalog.EMPTY) {
 
             override fun refresh() = Unit
 
-            override fun customerEdits(): Flow<List<CustomerEdit>> = flowOf(emptyList())
+            override fun customerEdits(): Flow<List<CustomerEdit>> = edits
 
             override suspend fun editCustomer(
                 userId: String,

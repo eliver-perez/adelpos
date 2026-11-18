@@ -31,6 +31,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.adelpos.meseros.core.capture.CaptureDependencies
 import com.adelpos.meseros.core.capture.R
+import com.adelpos.meseros.core.capture.destinationLabel
+import com.adelpos.meseros.core.capture.takeawayLabel
 import com.adelpos.meseros.core.domain.waiter.Capture
 import com.adelpos.meseros.core.domain.waiter.ChangeKind
 import com.adelpos.meseros.core.domain.waiter.DiscardResult
@@ -169,7 +171,7 @@ private fun OrderRow(order: PendingOrder, onOpenReview: (String) -> Unit) {
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    order.destination.tableName,
+                    destinationLabel(order.destination),
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.weight(1f),
                 )
@@ -268,7 +270,14 @@ private fun CaptureRow(capture: Capture, onOpenCapture: (String) -> Unit) {
     ) {
         Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(capture.tableName, style = MaterialTheme.typography.titleMedium)
+                Text(
+                    if (capture.takeaway) {
+                        takeawayLabel(capture.customer)
+                    } else {
+                        capture.tableName
+                    },
+                    style = MaterialTheme.typography.titleMedium,
+                )
                 Text(
                     if (discarding) {
                         stringResource(R.string.pending_discarding)
@@ -406,7 +415,7 @@ fun ReviewScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    order.destination.tableName,
+                    destinationLabel(order.destination),
                     style = MaterialTheme.typography.headlineSmall,
                     modifier = Modifier.weight(1f),
                 )
@@ -518,7 +527,14 @@ fun ReviewScreen(
                 }
                 if (OrderReviewRules.offersNewAccount(review)) {
                     SecondaryButton(
-                        text = stringResource(R.string.review_new_account),
+                        text =
+                            stringResource(
+                                if (order.destination.takeaway) {
+                                    R.string.review_new_takeaway
+                                } else {
+                                    R.string.review_new_account
+                                },
+                            ),
                         onClick = onNewAccount,
                         enabled = !working,
                         modifier = Modifier.fillMaxWidth().testTag(TAG_REVIEW_NEW_ACCOUNT),

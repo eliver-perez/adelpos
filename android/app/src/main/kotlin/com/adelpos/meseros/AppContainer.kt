@@ -35,6 +35,7 @@ import com.adelpos.meseros.core.domain.security.SecretSealer
 import com.adelpos.meseros.core.domain.server.ServerAnnouncements
 import com.adelpos.meseros.core.domain.server.ServerRelocator
 import com.adelpos.meseros.feature.access.AccessDependencies
+import com.adelpos.meseros.feature.takeaway.TakeawayDependencies
 import com.adelpos.meseros.feature.waiter.WaiterDependencies
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -312,6 +313,14 @@ class AppContainer(context: Context, private val settings: Settings = Settings()
         WaiterDependencies(
             capture = captureDependencies,
             tablesView = devicePreferences,
+            elapsedClock = SystemClock::elapsedRealtime,
+        )
+    }
+
+    /** Lo que necesitan las pantallas de Para llevar (`feature:takeaway`, etapa A2). */
+    val takeawayDependencies: TakeawayDependencies by lazy {
+        TakeawayDependencies(
+            capture = captureDependencies,
             elapsedClock = SystemClock::elapsedRealtime,
         )
     }
