@@ -8,7 +8,8 @@ import org.junit.Test
 
 /** «Actualiza esta aplicación» y «Actualiza el servidor del restaurante» (§4, «Versiones»). */
 class ServerCompatibilityTest {
-    private val withPin = listOf("offline-orders-v1", "waiter-pin-v1", "takeaway-v1")
+    private val withPin =
+        listOf("offline-orders-v1", "waiter-pin-v1", "takeaway-v1", "ready-alerts-v1")
 
     @Test
     fun ordenDeLasVersiones() {
@@ -77,6 +78,24 @@ class ServerCompatibilityTest {
         assertTrue(
             ServerCompatibility.check("0.1.0", "raro", withPin, null) is Verdict.UpdateServer,
         )
+    }
+
+    /**
+     * La Fase D de la A2 exige además el aviso de platillos listos (`ready-alerts-v1`, A2-D6): un
+     * 0.13.0 sin el registro de «listos» no sirve.
+     */
+    @Test
+    fun servidorSinAvisoDePlatillosListos() {
+        assertEquals(
+            Verdict.UpdateServer("0.13.0"),
+            ServerCompatibility.check(
+                "0.2.0",
+                "0.13.0",
+                listOf("offline-orders-v1", "waiter-pin-v1", "takeaway-v1"),
+                "0.1.0",
+            ),
+        )
+        assertTrue(ServerCompatibility.REQUIRED_CAPABILITIES.contains("ready-alerts-v1"))
     }
 
     @Test

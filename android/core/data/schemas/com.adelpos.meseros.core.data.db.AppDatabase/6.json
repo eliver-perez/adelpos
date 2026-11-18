@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 6,
-    "identityHash": "1e4b80277651335481798b5691e5a25a",
+    "identityHash": "f61bdd0d41f5731a7ae529d37e1b770a",
     "entities": [
       {
         "tableName": "device_preferences",
@@ -672,11 +672,124 @@
             "createSql": "CREATE INDEX IF NOT EXISTS `index_takeaway_customer_edits_account_id` ON `${TABLE_NAME}` (`account_id`)"
           }
         ]
+      },
+      {
+        "tableName": "ready_alerts_state",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`slot` INTEGER NOT NULL, `cursor` INTEGER NOT NULL, `active` INTEGER NOT NULL, `day_ends_at` INTEGER NOT NULL, `enabled` INTEGER NOT NULL, `sound` INTEGER NOT NULL, `vibration` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, PRIMARY KEY(`slot`))",
+        "fields": [
+          {
+            "fieldPath": "slot",
+            "columnName": "slot",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "cursor",
+            "columnName": "cursor",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "active",
+            "columnName": "active",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dayEndsAt",
+            "columnName": "day_ends_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "enabled",
+            "columnName": "enabled",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sound",
+            "columnName": "sound",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "vibration",
+            "columnName": "vibration",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updated_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "slot"
+          ]
+        }
+      },
+      {
+        "tableName": "ready_alerts_seen",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`alert_id` INTEGER NOT NULL, `ready_at` TEXT NOT NULL, `account_id` TEXT NOT NULL, `day_ends_at` INTEGER NOT NULL, `seen_at` INTEGER NOT NULL, PRIMARY KEY(`alert_id`))",
+        "fields": [
+          {
+            "fieldPath": "alertId",
+            "columnName": "alert_id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "readyAt",
+            "columnName": "ready_at",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "accountId",
+            "columnName": "account_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dayEndsAt",
+            "columnName": "day_ends_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "seenAt",
+            "columnName": "seen_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "alert_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_ready_alerts_seen_day_ends_at",
+            "unique": false,
+            "columnNames": [
+              "day_ends_at"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_ready_alerts_seen_day_ends_at` ON `${TABLE_NAME}` (`day_ends_at`)"
+          }
+        ]
       }
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '1e4b80277651335481798b5691e5a25a')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'f61bdd0d41f5731a7ae529d37e1b770a')"
     ]
   }
 }

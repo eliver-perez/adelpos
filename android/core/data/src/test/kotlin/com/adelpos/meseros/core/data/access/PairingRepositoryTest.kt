@@ -239,7 +239,8 @@ class PairingRepositoryTest {
             flow.start(PairingTarget.Address("caja.local"), "Tableta 1"),
         )
         go.serverVersion = "0.13.0"
-        go.capabilities = listOf("offline-orders-v1", "client-versions-by-kind", "takeaway-v1")
+        go.capabilities =
+            listOf("offline-orders-v1", "client-versions-by-kind", "takeaway-v1", "ready-alerts-v1")
         assertEquals(
             PairingStep.Failed(PairingProblem.UpdateServer("0.13.0")),
             flow.start(PairingTarget.Address("caja.local"), "Tableta 1"),
