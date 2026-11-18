@@ -59,6 +59,9 @@ type contractClient struct {
 	covered map[string][]int
 	// fingerprint es la huella SPKI del certificado del servidor (etapa 9G, fase C: emparejamiento).
 	fingerprint [32]byte
+	// pool prepara estados que la API no produce sola en el recorrido (etapa A2: un trabajo de impresión que falló,
+	// porque aquí no corre el trabajador de la cola).
+	pool *pgxpool.Pool
 }
 
 func contractID() string {
@@ -208,7 +211,7 @@ func TestContractV1(t *testing.T) {
 		t.Fatal(err)
 	}
 	client := &contractClient{t: t, contract: contract, handler: handler, version: product.Read().Version, kind: "desktop", covered: map[string][]int{},
-		fingerprint: serverIdentity.Fingerprint}
+		fingerprint: serverIdentity.Fingerprint, pool: pool}
 	// Asistente inicial: la terminal principal y el administrador.
 	setup := httptest.NewRequest("POST", "/api/v1/setup", strings.NewReader(`{"name":"Contrato v1","timezone":"America/Monterrey",
         "currency":"MXN","theme":"light","terminal_name":"Terminal de contrato"}`))
@@ -400,6 +403,8 @@ func contractScenario(t *testing.T, client *contractClient) {
 	contractWaiterPIN(t, client, phone, order)
 	// Etapa A2 (parte B): Para llevar desde el teléfono.
 	contractTakeaway(t, client, phone, waiterData)
+	// Etapa A2 (parte C): la precuenta desde el teléfono, en su impresora.
+	contractPrecheck(t, client, phone, waiterData)
 	client.call("POST", "/auth/logout", nil, nil, 200)
 }
 
@@ -727,5 +732,63 @@ func contractTakeaway(t *testing.T, client *contractClient, phone *contractClien
 	delivered := decodeContract[map[string]any](t, waiterPhone.call("POST", deliver, map[string]any{"operation_id": contractID()}, nil, 200).Body.Bytes())
 	if delivered["delivered"] != true || delivered["closed"] != true || delivered["finance"] != nil {
 		t.Fatalf("entrega desde el teléfono: %v", delivered)
+	}
+}
+
+// contractPrecheck es la precuenta impresa desde el teléfono (etapa A2, parte C): un mesero con payments.tickets.print
+// entra con PIN; sin impresora del dispositivo printPrecheck es PRINTER_NOT_CONFIGURED con details.scope «device»; con
+// la impresora asignada en Terminales (preparación, fuera del contrato) se encola, getIdentity la informa,
+// getDocumentStatus sigue el trabajo y retryDocument lo reintenta cuando falló (409 PRINT_NOT_FAILED antes).
+func contractPrecheck(t *testing.T, client *contractClient, phone *contractClient, data contractWaiterData) {
+	role := decodeContract[map[string]any](t, client.setup("POST", "/roles", map[string]any{"name": "Meseros que imprimen contrato",
+		"permissions": []string{"waiter_devices.use", "orders.confirm", "orders.capture", "accounts.read", "accounts.open",
+			"catalog.read", "catalog.prices.read", "payments.tickets.print"}}, 200))
+	waiter := decodeContract[map[string]any](t, client.setup("POST", "/users", map[string]any{"username": "dora.contrato",
+		"display_name": "Dora del contrato", "role_id": role["id"], "active": true, "password": "clave-del-contrato-4"}, 200))
+	waiterID := fmt.Sprint(waiter["id"])
+	client.setup("PUT", "/users/"+waiterID+"/pin", map[string]any{"pin": "8316", "short_name": "Dora", "badge_color": ""}, 200)
+	login := decodeContract[map[string]any](t, phone.call("POST", "/auth/pin-login",
+		map[string]string{"user_id": waiterID, "pin": "8316"}, nil, 200).Body.Bytes())
+	waiterPhone := *phone
+	waiterPhone.session = fmt.Sprint(login["session_token"])
+	printRoute := "/payments/accounts/" + data.accountID + "/precheck/print"
+	rejected := waiterPhone.call("POST", printRoute, map[string]any{"operation_id": contractID()}, nil, 409).Body.Bytes()
+	if err := client.contract.ValidateJSON(map[string]any{"$ref": "#/components/schemas/PrinterRejection"}, rejected); err != nil ||
+		!strings.Contains(string(rejected), `"scope":"device"`) {
+		t.Fatalf("precuenta sin impresora del dispositivo: %v %s", err, rejected)
+	}
+	// El administrador le asigna una impresora de red en Terminales (preparación, fuera del contrato).
+	printer := decodeContract[map[string]any](t, client.setup("POST", "/kitchen/printers", map[string]any{"operation_id": contractID(),
+		"name": "Precuentas contrato", "transport": "escpos_tcp", "destination": "127.0.0.1", "port": 9109, "paper_width": 80,
+		"copies": 1, "active": true}, 200))
+	client.setup("PATCH", "/devices/"+phone.device, map[string]any{"name": "Mesero Ana contrato", "register_id": nil,
+		"keyboard_mode": "auto", "precheck_printer_id": printer["id"]}, 200)
+	identity := decodeContract[map[string]any](t, waiterPhone.call("GET", "/auth/me", nil, nil, 200).Body.Bytes())
+	if assigned, _ := identity["terminal"].(map[string]any)["precheck_printer"].(map[string]any); assigned == nil ||
+		assigned["name"] != "Precuentas contrato" {
+		t.Fatalf("impresora de precuentas del teléfono: %v", identity["terminal"])
+	}
+	printed := decodeContract[map[string]any](t, waiterPhone.call("POST", printRoute, map[string]any{"operation_id": contractID()}, nil, 200).Body.Bytes())
+	if printed["printer_name"] != "Precuentas contrato" || printed["terminal_name"] != nil {
+		t.Fatalf("precuenta encolada: %v", printed)
+	}
+	ticketID := fmt.Sprint(printed["ticket_id"])
+	route := "/payments/accounts/" + data.accountID + "/documents/"
+	waiterPhone.call("GET", route+"status?ticket_id="+ticketID, nil, nil, 200)
+	retry := map[string]any{"operation_id": contractID(), "ticket_id": ticketID}
+	waiterPhone.call("POST", route+"retry", retry, nil, 409)
+	// La impresora no respondió (aquí no corre el trabajador de la cola: se deja el trabajo como lo dejaría).
+	if _, err := client.pool.Exec(context.Background(), `UPDATE app.kitchen_print_jobs SET state='error',attempts=1,
+        result='{"code":"unreachable"}' WHERE id=$1`, printed["job_id"]); err != nil {
+		t.Fatal(err)
+	}
+	failed := decodeContract[map[string]any](t, waiterPhone.call("GET", route+"status?ticket_id="+ticketID, nil, nil, 200).Body.Bytes())
+	if failed["job_state"] != "error" || failed["job_problem"] != "unreachable" {
+		t.Fatalf("estado de la precuenta que no salió: %v", failed)
+	}
+	retry["operation_id"] = contractID()
+	retried := decodeContract[map[string]any](t, waiterPhone.call("POST", route+"retry", retry, nil, 200).Body.Bytes())
+	if retried["ticket_id"] != ticketID || retried["printer_name"] != "Precuentas contrato" {
+		t.Fatalf("reintento: %v", retried)
 	}
 }

@@ -85,6 +85,22 @@ export interface Device {
   current_user?: string | null;
   // Etapa A1 (fase B): segundos sin uso tras los que un teléfono o tableta de meseros vuelve a la pantalla de entrada.
   idle_lock_seconds?: number;
+  // Etapa A2 (parte C): impresora de precuentas de un teléfono o tableta de meseros, con su nombre y el de la terminal
+  // que la tiene conectada si es la USB de una terminal. Un servidor anterior no los informa.
+  precheck_printer_id?: string | null;
+  precheck_printer_name?: string | null;
+  precheck_printer_terminal_name?: string | null;
+}
+
+// Impresora que se puede elegir para precuentas (etapa A2, parte C): Go dice por qué no sirve (problem: inactive o
+// unsupported; vacío si sirve).
+export interface PrecheckPrinterOption {
+  id: string;
+  name: string;
+  transport: string;
+  terminal_name: string;
+  active: boolean;
+  problem: string;
 }
 
 // Tipos de dispositivo (etapa 9G, decisión D9): lista cerrada de Go.
@@ -152,6 +168,10 @@ export interface DeviceConfiguration {
       reason?: string;
     }[];
   } | null;
+  // Etapa A2 (parte C): la impresora de precuentas de un teléfono o tableta y las que se le pueden elegir (vacía en
+  // las demás terminales). Un servidor anterior no las informa.
+  precheck_printer?: PrecheckPrinterOption | null;
+  precheck_printer_options?: PrecheckPrinterOption[];
 }
 
 export interface Session {

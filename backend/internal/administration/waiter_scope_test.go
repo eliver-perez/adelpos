@@ -15,9 +15,9 @@ import (
 // A1-D17: la lista de permisos de mesero está en un solo lugar (WaiterPermissions), solo tiene permisos registrados,
 // nada administrativo, y el contrato (pinLogin), docs/API_V1.md y API_CONTRACTS.md la repiten completa (si la lista
 // cambia, la documentación debe cambiar con ella). Etapa A2: las únicas excepciones a los prefijos prohibidos son las
-// de las funciones nuevas de la aplicación de meseros, una por una (Para llevar, A2-D2).
+// de las funciones nuevas de la aplicación de meseros, una por una (Para llevar, A2-D2; imprimir la precuenta, A2-D3).
 func TestWaiterPermissionsAreClosedAndDocumented(t *testing.T) {
-	stageA2 := []string{"takeaway.read", "takeaway.manage", "takeaway.deliver"}
+	stageA2 := []string{"takeaway.read", "takeaway.manage", "takeaway.deliver", "payments.tickets.print"}
 	seen := map[string]bool{}
 	for _, key := range WaiterPermissions {
 		if !knownPermission(key) || seen[key] {

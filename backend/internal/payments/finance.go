@@ -452,29 +452,47 @@ func loadFinance(ctx context.Context, tx pgx.Tx, accountID string) (*Finance, er
 	return finance, nil
 }
 
-// readDocuments lista precuentas y tickets con el estado de su último trabajo de impresión.
-func readDocuments(ctx context.Context, tx pgx.Tx, accountID string) ([]DocumentRecord, error) {
-	rows, err := tx.Query(ctx, `SELECT d.ticket_id,d.kind,d.payment_id,d.created_at,j.id,j.state,`+kitchen.JobProblemSQL("j")+`,p.name,
-        (SELECT count(*) FROM app.kitchen_print_jobs c WHERE c.ticket_id=d.ticket_id)::integer,`+kitchen.JobTerminalSQL("j")+`
+// documentRecordQuery es una precuenta o un ticket con el estado de su último trabajo de impresión (alias d de
+// payment_documents).
+var documentRecordQuery = `SELECT d.ticket_id,d.kind,d.payment_id,d.created_at,j.id,j.state,` + kitchen.JobProblemSQL("j") + `,p.name,
+        (SELECT count(*) FROM app.kitchen_print_jobs c WHERE c.ticket_id=d.ticket_id)::integer,` + kitchen.JobTerminalSQL("j") + `
         FROM app.payment_documents d
         LEFT JOIN LATERAL (SELECT id,state,result,printer_id,attempts,printer_snapshot FROM app.kitchen_print_jobs WHERE ticket_id=d.ticket_id
             ORDER BY created_at DESC,id DESC LIMIT 1) j ON true
-        LEFT JOIN app.kitchen_printers p ON p.id=j.printer_id
-        WHERE d.account_id=$1 ORDER BY d.created_at,d.ticket_id`, accountID)
+        LEFT JOIN app.kitchen_printers p ON p.id=j.printer_id`
+
+func scanDocumentRecord(row pgx.Row) (DocumentRecord, error) {
+	var item DocumentRecord
+	err := row.Scan(&item.TicketID, &item.Kind, &item.PaymentID, &item.CreatedAt, &item.JobID, &item.JobState,
+		&item.JobProblem, &item.PrinterName, &item.Copies, &item.TerminalName)
+	return item, err
+}
+
+// readDocuments lista precuentas y tickets con el estado de su último trabajo de impresión.
+func readDocuments(ctx context.Context, tx pgx.Tx, accountID string) ([]DocumentRecord, error) {
+	rows, err := tx.Query(ctx, documentRecordQuery+` WHERE d.account_id=$1 ORDER BY d.created_at,d.ticket_id`, accountID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	result := []DocumentRecord{}
 	for rows.Next() {
-		var item DocumentRecord
-		if err := rows.Scan(&item.TicketID, &item.Kind, &item.PaymentID, &item.CreatedAt, &item.JobID, &item.JobState,
-			&item.JobProblem, &item.PrinterName, &item.Copies, &item.TerminalName); err != nil {
+		item, err := scanDocumentRecord(rows)
+		if err != nil {
 			return nil, err
 		}
 		result = append(result, item)
 	}
 	return result, rows.Err()
+}
+
+// readDocument es un documento de la cuenta con el estado de su último trabajo (pgx.ErrNoRows si no es de la cuenta).
+func readDocument(ctx context.Context, tx pgx.Tx, accountID, ticketID string) (*DocumentRecord, error) {
+	item, err := scanDocumentRecord(tx.QueryRow(ctx, documentRecordQuery+` WHERE d.account_id=$1 AND d.ticket_id=$2`, accountID, ticketID))
+	if err != nil {
+		return nil, err
+	}
+	return &item, nil
 }
 
 // paymentState distingue cuentas sin pago, con abonos y liquidadas. Una cuenta con productos y

@@ -49,6 +49,11 @@ var capabilities = []string{
 	// conexión, el nombre del cliente y el teléfono (POST restaurant/accounts/{id}/customer), «Entregado» de un pedido
 	// pagado (deliverTakeaway) y takeaway.read, takeaway.manage y takeaway.deliver en los permisos de mesero.
 	"takeaway-v1",
+	// Etapa A2 (parte C, esquema 26): impresora de precuentas por dispositivo (precheck_printer_id en PATCH devices/{id},
+	// la configuración y la terminal de auth/me y restaurant/state), un android imprime solo en ella (A2-D3), la
+	// respuesta de la impresión con problem, printer_name y terminal_name, GET payments/accounts/{id}/documents/status y
+	// payments.tickets.print en los permisos de mesero. El escritorio muestra «Impresora de precuentas» solo con ella.
+	"device-precheck-printer-v1",
 }
 
 type ErrorBody struct {

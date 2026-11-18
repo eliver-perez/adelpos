@@ -42,6 +42,10 @@ var WaiterPermissions = []string{
 	"takeaway.read",
 	"takeaway.manage",
 	"takeaway.deliver",
+	// Imprimir la precuenta desde el dispositivo (etapa A2, §5 y decisión A2-D3): printPrecheck, retryDocument y
+	// getDocumentStatus, siempre en la impresora de precuentas del dispositivo. No incluye payments.read (el cobro) ni
+	// payments.tickets.reprint: volver a tocar «Imprimir precuenta» arma una precuenta nueva, como en la caja.
+	"payments.tickets.print",
 }
 
 // waiterScope deja de los permisos efectivos del usuario solo los de mesero, en el mismo orden.

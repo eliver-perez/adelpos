@@ -36,8 +36,9 @@ func recoveryState(ctx context.Context, tx pgx.Tx, principal Principal) (any, er
 	if err != nil {
 		return nil, err
 	}
-	// Etapa A1 (fase B): con el bloqueo por inactividad del dispositivo (idle_lock_seconds).
-	terminal, err := object(ctx, tx, "SELECT id,name,register_id,keyboard_mode,home_screen,idle_lock_seconds FROM app.devices WHERE id=$1", principal.DeviceID)
+	// Etapa A1 (fase B): con el bloqueo por inactividad del dispositivo (idle_lock_seconds); etapa A2 (parte C), con su
+	// impresora de precuentas (la misma terminal que informa auth/me).
+	terminal, err := object(ctx, tx, terminalIdentityQuery, principal.DeviceID)
 	if err != nil {
 		return nil, err
 	}
