@@ -40,6 +40,13 @@ esperar su autorización**. Esto incluye:
 administrador del propietario, así que instalarlo es una parada (§0 de [docs/etapas/ETAPA_9H.md](docs/etapas/ETAPA_9H.md)):
 prepararlo todo y avisarle.
 
+### Commits sin líneas de atribución (regla permanente del propietario)
+
+Ningún commit, fusión ni descripción lleva `Co-Authored-By` ni otra línea de atribución (regla de la etapa A1, repetida
+por el propietario el 18/11/2026). El 17/11/2026 el propietario reescribió la historia del remoto para quitarlas de
+todos los commits anteriores y actualizó `main` en GitHub (`be6115a`, los mismos árboles que la historia anterior):
+toda rama nueva sale de `origin/main`.
+
 ### Datos reales del restaurante (regla permanente desde la etapa 9H)
 
 Reglas del propietario (`docs/etapas/ETAPA_9H.md` §0, «Datos reales del restaurante: reglas obligatorias») y cómo se
