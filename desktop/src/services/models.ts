@@ -90,6 +90,10 @@ export interface Device {
   precheck_printer_id?: string | null;
   precheck_printer_name?: string | null;
   precheck_printer_terminal_name?: string | null;
+  // Etapa A2 (parte D): avisos de platillos listos del teléfono o tableta (activados por omisión).
+  ready_alerts_enabled?: boolean;
+  ready_alerts_sound?: boolean;
+  ready_alerts_vibration?: boolean;
 }
 
 // Impresora que se puede elegir para precuentas (etapa A2, parte C): Go dice por qué no sirve (problem: inactive o
