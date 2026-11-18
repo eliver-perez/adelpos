@@ -2241,6 +2241,15 @@ emuladores apagados. Ninguna corrida usó la red real ni la instalación de la M
 
 ### Decisiones del coordinador sobre la Fase D
 
+**A2-D10, texto del aviso** (tomada al encargar la fase): Go solo concuerda contadores con palabras fijas
+(`internal/plural`: «1 cuenta», «2 cuentas») y no puede pluralizar ni dar género a un nombre de producto cualquiera
+(«Filete de res», «Agua de horchata»), así que el aviso no dice «2 filetes listos» como el ejemplo de §0-B: el título es
+«Mesa 4 · 2 platillos listos» o «Para llevar #12 (Juan) · 1 platillo listo» (con «platillo/platillos» y «listo/listos»
+según el número) y el texto «2 × Filete de res», o varias partidas separadas por comas, sin precios. Go entrega
+`product_name` (con la presentación, como la comanda) y `quantity`; la app arma el texto y la agrupación. Es una
+decisión de presentación: el contenido es el que pide §0-B (mesa o pedido y platillo, sin precios ni datos de la
+cuenta).
+
 Se aceptan las decisiones de la fase. **A2-D4, «Cerrar sesión»**: la app no tiene un «Cerrar sesión» explícito
 (cambiar de mesero no cierra sesiones, regla 15 de la A1) y la especificación no lo pide, así que no se agrega; el
 destinatario lo resuelve el servidor con la sesión de actividad más reciente. La fusión con la Fase C la hizo el agente
