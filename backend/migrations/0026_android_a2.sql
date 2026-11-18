@@ -46,12 +46,13 @@ COMMENT ON COLUMN app.devices.precheck_printer_id IS
 --      · recipient_user_id es el responsable de la cuenta en el momento del «Listo» (transferir la cuenta cambia el
 --        destinatario de lo que aún no estaba listo; lo ya avisado no se repite).
 --      · recipient_device_id es, en ese mismo momento, el dispositivo android donde el responsable tiene la sesión con
---        PIN vigente de actividad más reciente (A2-D4) entre los que pueden recibir el aviso (no revocados, con «Avisar
---        platillos listos» activado y con la aplicación 0.2.0 o posterior si Go conoce su versión; revisión R7), o
---        vacío si no hay ninguno (entonces el aviso va a todos los dispositivos donde el mesero entró). Se fija al
---        registrar el aviso para que cada dispositivo lo reciba o no sin importar cuándo lea, aunque el mesero cambie de
---        dispositivo o un dispositivo se reconecte tarde: ni se pierde ni llega a dos dispositivos por un cambio de
---        sesión a destiempo.
+--        PIN vigente de actividad más reciente (A2-D4; si es de antes del inicio del día comercial, solo usada en los
+--        últimos 30 minutos, A2-D12) entre los que pueden recibir el aviso (no revocados, con «Avisar platillos
+--        listos» activado y con la aplicación 0.2.0 o posterior si Go conoce su versión; revisión R7), o vacío si no
+--        hay ninguno (entonces el aviso va a todos los dispositivos donde el mesero entró). Se fija al registrar el
+--        aviso para que cada dispositivo lo reciba o no sin importar cuándo lea, aunque el mesero cambie de dispositivo
+--        o un dispositivo se reconecte tarde: ni se pierde ni llega a dos dispositivos por un cambio de sesión a
+--        destiempo.
 --      · alert_key es la clave del aviso que ve el dispositivo: la comparten las unidades que cocina marcó «Listo» en
 --        la misma operación y en la misma cuenta, y nunca se reutiliza (un uuid aleatorio), ni siquiera si se restaura
 --        un respaldo anterior y sequence vuelve a dar números ya vistos (revisión R3). El dispositivo descarta los

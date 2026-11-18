@@ -238,7 +238,7 @@ func TestStageA2ReadyAlerts(t *testing.T) {
 	t.Run("correcciones de la revisión: entrada en el dispositivo, destinatario, cancelaciones y combinaciones", func(t *testing.T) {
 		testStageA2ReadyCorrections(t, fixture)
 	})
-	t.Run("día comercial, poda y dispositivo revocado", func(t *testing.T) {
+	t.Run("día comercial, sesiones de antes del inicio del día (A2-D12), poda y dispositivo revocado", func(t *testing.T) {
 		testStageA2ReadyDayAndRevocation(t, fixture)
 	})
 }
@@ -574,6 +574,28 @@ func testStageA2ReadyDayAndRevocation(t *testing.T, fixture *readyFixture) {
 	}
 	if yesterday := ofAccount(fixture.alerts(t, fixture.tabletOne, 0), accountID); len(yesterday) != 0 {
 		t.Fatalf("aviso de otro día comercial: %+v", yesterday)
+	}
+	// A2-D12 (revisión RD2): una sesión con PIN de antes del inicio del día comercial, aún vigente (la última entrada de
+	// la noche dura 12 h), solo cuenta si se usó en los últimos 30 minutos; si no, el servicio se detiene de noche.
+	config, err := businessday.Load(fixture.ctx, fixture.pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dayStart := config.Start(config.DayOf(time.Now()).Date)
+	if _, err := fixture.pool.Exec(fixture.ctx, `UPDATE app.sessions SET created_at=$2,
+        last_seen_at=now()-interval '31 minutes',expires_at=now()+interval '6 hours' WHERE device_id=$1`,
+		fixture.tabletOne.deviceID, dayStart.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if night := fixture.alerts(t, fixture.tabletOne, 0); night.Active || len(night.Alerts) != 0 {
+		t.Fatalf("sesión de antes del inicio del día sin usar desde hace 31 minutos: %+v", night)
+	}
+	if _, err := fixture.pool.Exec(fixture.ctx, `UPDATE app.sessions SET last_seen_at=now()-interval '5 minutes'
+        WHERE device_id=$1 AND revoked_at IS NULL`, fixture.tabletOne.deviceID); err != nil {
+		t.Fatal(err)
+	}
+	if working := fixture.alerts(t, fixture.tabletOne, 0); !working.Active {
+		t.Fatalf("sesión de antes del inicio del día usada hace 5 minutos: %+v", working)
 	}
 	// Los meseros que entraron en días anteriores ya no cuentan: sin nadie de hoy, el servicio se detiene.
 	if _, err := fixture.pool.Exec(fixture.ctx, `UPDATE app.sessions SET created_at=now()-interval '2 days',
