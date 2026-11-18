@@ -1333,3 +1333,215 @@ vuelve a entrar con conexión; nunca se pierde. Fusión: `etapa-a2-b` (`8264d46`
 con las partes B y C del servidor; `android/`, `scripts/android-e2e.sh` y `docs/ANDROID_INSTALAR.md` quedaron
 idénticos a los de la rama de la fase, así que sus pruebas valen para la fusión. Las fases C y D agregan sus tablas a
 la misma `AppDatabase` v6 (aún no entregada) en lugar de abrir una v7.
+
+## Servidor · Parte D: registro y canal de platillos listos (esquema 26)
+
+Rama `etapa-a2-srv`, mismo árbol `$SP/wt/srv`, encima de `6c2fcdd` (parte C), un agente, 18/11/2026, en paralelo con
+Android en su árbol (no se tocó `android/`, `scripts/android-e2e.sh` ni `docs/ANDROID_INSTALAR.md`). Pruebas aisladas
+(`ISO_TAG=S`): clúster temporal 55499 con bases `adel_pos_test_s_*` y Playwright con el Go temporal del arnés
+(`ISO_GO_PORT=8211`, `ISO_PREVIEW_PORT=1431`, detenido al terminar). Aplica §4 de la especificación con A2-D4, A2-D9 y,
+para el contenido, A2-D10 (el texto lo arma la app; Go entrega `product_name` y `quantity`).
+
+Commits: `b17f56f` (0026 sección D y su comprobación en `TestStageA2Upgrade`; `TestStage9HUpgrade` excluye la tabla
+nueva de su conteo, como ya excluía las de la 0025), `c988d16` (servidor, contrato, documentación y pruebas) y
+`a2c2812` (escritorio, Vitest y Playwright).
+
+### Qué cambió
+
+- **Migración `0026_android_a2.sql`, sección «Parte D»**: `app.ready_notices` (`sequence` identidad como clave y
+  cursor, `unit_id`, `version_id`, `account_id`, `recipient_user_id`, `recipient_device_id` opcional, `ready_at`;
+  `UNIQUE (unit_id, version_id)`; índices `(recipient_user_id, sequence)` y `(ready_at)`), vacía al actualizar, y
+  `devices.ready_alerts_enabled`, `ready_alerts_sound`, `ready_alerts_vibration` (`boolean NOT NULL DEFAULT true`).
+  Ninguna fila cambia; `TestStageA2Upgrade` lo comprueba (también la sección C).
+- **Escritura** (`internal/kitchen/preparation.go`, `recordReadyNotices` dentro de `publishPreparation`): en la misma
+  transacción que publica `restaurant.account.preparation_changed`, cada unidad activa de las cuentas anotadas cuyas
+  tareas vivas de su versión están todas en «Listo» y la última se marcó en esta transacción (`ready_at = now()`).
+  Revisé los caminos: el único `UPDATE … state='ready'` es `kitchen.saveStates` (unidad, pedido de una estación con
+  `release_id` y cuenta completa desde el KDS); los reintentos de avisos y las modificaciones no marcan «Listo» (una
+  modificación de receta reinicia las tareas y su versión nueva se avisa al estar lista; una económica conserva las
+  tareas listas y no se vuelve a avisar). Destinatario: el responsable de la cuenta en ese momento; dispositivo
+  destinatario: el android no revocado de su sesión con PIN vigente con `last_seen_at` más reciente, o ninguno. Al
+  registrar algo se poda lo de más de 2 días. Las instalaciones existentes empiezan sin avisos (nada viejo se avisa).
+- **Lectura** (`internal/administration/ready_alerts.go`, nuevo; `service.go`, `http.go`):
+  - `GET ready-alerts?after=` en `dispatch` después de `authenticateDevice` y `matchClientKind`, antes de la sesión
+    (solo la credencial del dispositivo); solo `android` (si no, 403 `READY_ALERTS_DEVICE_NOT_ALLOWED`).
+  - `GET ready-alerts/stream` (`serveReadyAlerts`): el patrón de `serveEvents` (750 ms, 30 s, `Last-Event-ID`,
+    `interrupted`), con su contador `readyStreams`, **uno por dispositivo** (429 `READY_ALERTS_CONNECTION_LIMIT`).
+  - Lock 7820148305 **compartido** al leer (cocina escribe con él en exclusiva): ningún aviso queda detrás del cursor.
+  - Filtro (A2-D4, A2-D9): para el dispositivo D, avisos cuyo mesero entró con PIN en D desde el inicio del día
+    comercial (`businessday`, «Hora de inicio del día») y con `recipient_device_id` = D o vacío; agrupados por la
+    operación de cocina (cuenta, destinatario e instante de la transacción), hasta 50 por respuesta.
+  - Contenido: `id`, `account_id`, `mode`, `table_name`, `folio`, `customer_name`, `waiter_user_id`,
+    `waiter_short_name`, `items: [{product_name, quantity}]` (`product_name` = el nombre del producto y, si tiene
+    presentación, «· Presentación», como en la comanda), `ready_at`. Nunca precios ni importes.
+- **Terminales** (`internal/administration/devices.go`, `precheck_printer.go`): `PATCH devices/{id}` con
+  `ready_alerts_enabled`, `ready_alerts_sound` y `ready_alerts_vibration` opcionales (sin ellos se conserva; en un
+  dispositivo que no es `android`, 400); `GET devices`, la respuesta del `PATCH`, la configuración (`device`) y la
+  terminal de `auth/me` y `restaurant/state` los informan (`waiterDeviceColumns`, que ya llevaba la impresora de
+  precuentas; `requireAndroidDevice` compartido con la parte C).
+- **Capacidad** `ready-alerts-v1` (`internal/httpapi/router.go`, `clientversion_test.go`).
+- **Escritorio** (`desktop/src/pages/DevicesPage.tsx`, `services/models.ts`, `services/serverCapabilities.ts`):
+  Terminales › Editar de un `android` → «Avisos de platillos listos» con los interruptores «Avisar platillos listos»
+  (activado por omisión), «Sonido» y «Vibración» (`ToggleButton`; sonido y vibración deshabilitados con el aviso
+  apagado); «Ver configuración» lo dice («Activado · con sonido y vibración», «Desactivado»…). Solo con
+  `ready-alerts-v1`. Sin operaciones nuevas en Rust.
+- **Contrato** (`openapi.json`): `getReadyAlerts` y `streamReadyAlerts` (seguridad: solo `deviceId` + `deviceToken`),
+  esquemas `ReadyAlertsBatch` y `ReadyAlert`, `Terminal` con los tres booleanos (obligatorios), descripciones de
+  `getIdentity`, `getRecoveryState` y `Error`. `TestContractV1` agrega `contractReadyAlerts` (39 operaciones).
+- **Documentación**: `docs/API_V1.md` («Avisos de platillos listos (etapa A2, parte D)», tabla, capacidad, `terminal`,
+  códigos de error) y `API_CONTRACTS.md` («Etapa A2 · registro y canal de platillos listos»).
+
+Sin locks consultivos nuevos (para la tabla de `CLAUDE.md` §3: la lectura de `ready-alerts` toma 7820148305 compartido,
+como `restaurant/state`; la escritura va dentro de las operaciones de cocina, que ya lo tienen en exclusiva).
+
+### Decisiones (con su porqué)
+
+1. **Decisión propuesta · El dispositivo destinatario se fija al «Listo» (`recipient_device_id`)**, una columna más de
+   las que pedía el encargo. Si se decidiera al leer, un mesero que cambia de tableta justo cuando cocina marca «Listo»,
+   o una tableta que se reconecta tarde con su cursor, podría hacer que el aviso no llegara a ninguna (la nueva ya pasó
+   ese cursor y la vieja ya no es la «más reciente») o llegara a dos. Fijado al registrar, cada dispositivo lo recibe o
+   no sin importar cuándo consulte: «ningún aviso se pierde ni se repite» (§4.1). «Entró en D durante el día comercial»
+   sí se revisa al leer (solo crece durante el día).
+2. **Decisión propuesta · Un aviso = una operación de cocina en una cuenta**, agrupado por platillo (`items` con
+   `quantity`); su `id` es el último número del grupo y el cursor avanza por grupos completos. Es lo que la app
+   necesita para «Mesa 4 · 2 platillos listos» (A2-D10) sin contar ella; varios avisos de la misma mesa los agrupa la
+   app en su notificación (§4.4).
+3. **Decisión propuesta · Se escribe en `publishPreparation` con la regla `ready_at = now()`** y no en cada camino:
+   cubre cualquier forma de marcar «Listo» (también una futura) y nunca avisa algo que ya estaba listo.
+4. **Decisión propuesta · `active`** = aviso activado **y** (algún mesero entró con PIN en D desde el inicio del día
+   comercial **o** hay una sesión con PIN vigente en D). Es §4.3: «activo mientras haya un mesero con sesión en el
+   dispositivo o un mesero que entró en él durante el día comercial en curso».
+5. **Decisión propuesta · Apagado o inactivo, el cursor avanza** hasta el último aviso: al volver a activarse (o al
+   entrar un mesero) no llegan avisos viejos de ese tiempo.
+6. **Decisión propuesta · Un cursor mayor que el último aviso** (solo si la base volvió atrás, un respaldo restaurado)
+   se trata como 0: se lee desde el inicio del día y el dispositivo descarta los `id` ya avisados.
+7. **Decisión propuesta · Un canal por dispositivo** (429 `READY_ALERTS_CONNECTION_LIMIT`), como pide el encargo; la
+   lectura `GET ready-alerts` no tiene límite y sirve mientras tanto.
+8. **Decisión propuesta · `product_name` con la presentación** («Filete · Grande», el mismo formato de la comanda);
+   `quote_line.name` de la cuenta solo trae el producto.
+9. **Decisión propuesta · 403 `READY_ALERTS_DEVICE_NOT_ALLOWED`** a un dispositivo que no es `android` y 400 al
+   configurar los avisos de una terminal de escritorio.
+
+### Forma final para el agente de Android
+
+Exigir **`ready-alerts-v1`** (servidor 0.13.0). Todas las peticiones con `X-Device-ID`, `X-Device-Token`,
+`X-Client-Version` y `X-Client-Kind: android`, **sin `Authorization`** ni credencial de envío.
+
+- **Lectura**: `GET /api/v1/ready-alerts?after=<cursor>` → 200
+
+  ```json
+  {
+    "cursor": 812,
+    "active": true,
+    "day_ends_at": "2026-11-19T11:00:00Z",
+    "settings": { "enabled": true, "sound": true, "vibration": false },
+    "alerts": [
+      {
+        "id": 812,
+        "account_id": "…",
+        "mode": "dine_in",
+        "table_name": "Mesa 4",
+        "folio": 31,
+        "customer_name": "",
+        "waiter_user_id": "…",
+        "waiter_short_name": "Ana",
+        "items": [{ "product_name": "Filete · Grande", "quantity": 2 }],
+        "ready_at": "2026-11-18T20:41:07.12Z"
+      }
+    ]
+  }
+  ```
+
+  En un pedido para llevar: `"mode": "takeaway"`, `"table_name": null` y `customer_name` el capturado (o vacío).
+
+- **Canal**: `GET /api/v1/ready-alerts/stream?after=<cursor>` (o `Last-Event-ID: <cursor>`): `text/event-stream` con
+  mensajes `id: <cursor>`, `event: alerts`, `data: <el mismo JSON>` cada 750 ms; el primero llega enseguida. A los 30 s
+  el servidor cierra: reconectar enseguida desde el último `id`. `event: interrupted` (con `id: 0` y
+  `{"error": "<código>", "status": <http>}`) = el dispositivo dejó de valer: tratarlo como ese error.
+- **Cursor**: guardarlo en Room al recibir cada mensaje (después de mostrar sus avisos). Sin cursor guardado (primera
+  vez), `after=0`: llega lo del día comercial en curso que le corresponde. Es el último aviso que Go revisó para el
+  dispositivo, le correspondan o no: siempre crece. No calcularlo con los `id` de los avisos.
+- **`id` repetido**: descartarlo. Puede volver a llegar (relectura desde un cursor anterior, dos procesos, reintento):
+  guardar en Room los `id` avisados del día y no notificar dos veces.
+- **`active: false`**: no hay avisos (no es un error). Detener el servicio en primer plano; volver a preguntar al
+  entrar un mesero con PIN con conexión o al abrir la app (A2-D8). Pasa con el aviso apagado en Terminales o si nadie
+  entró en el dispositivo hoy.
+- **`day_ends_at`**: programar ahí una nueva lectura (no detener a ciegas): si sigue `active` (un mesero con sesión
+  vigente), continuar; si no, detener. Al cambiar de día, borrar los `id` avisados del día anterior (Go ya no los
+  entrega). Conservar el cursor.
+- **`settings`**: `sound`/`vibration` eligen el canal «Platillos listos» (A2-D7); `enabled: false` llega con
+  `active: false`. Pueden cambiar en cualquier mensaje. También están en `terminal.ready_alerts_enabled`,
+  `ready_alerts_sound` y `ready_alerts_vibration` de `getIdentity`/`getRecoveryState`.
+- **Texto** (A2-D10, lo arma la app): «Mesa 4 · 2 platillos listos» / «2 × Filete · Grande»; para llevar, con el folio
+  y `customer_name`. Un aviso es lo que cocina marcó «Listo» en esa cuenta de una vez; varios de la misma cuenta se
+  agrupan en la notificación. Al tocarlo: abrir `account_id` y, si el dispositivo está en «¿Quién eres?», pedir el PIN
+  (`waiter_user_id` es el mesero del aviso).
+- **Errores**:
+  - **401 `DEVICE_REVOKED`** o `DEVICE_REQUIRED`: detener el servicio y hacer lo de siempre (credencial inválida).
+  - **429 `READY_ALERTS_CONNECTION_LIMIT`** (solo el canal): el dispositivo ya tiene uno abierto (casi siempre el
+    anterior, que el servidor cierra en unos segundos, o un segundo proceso). No abrir otro en paralelo: esperar con
+    espera creciente (1, 2, 4… hasta 30 s) y reintentar; mientras tanto `GET ready-alerts?after=` funciona.
+  - 403 `READY_ALERTS_DEVICE_NOT_ALLOWED`: no es un dispositivo `android` (no debería pasar).
+  - 400: cursor inválido o un parámetro de más. 426: actualizar la app.
+  - Sin red o 5xx: espera creciente y reconectar desde el cursor; lo de mientras llega al volver, una sola vez.
+- **Cerrar sesión**: llamar `POST /api/v1/auth/logout` con la sesión del mesero al cerrar su sesión en la app (A2-D4):
+  así ese dispositivo deja de ser «su sesión más reciente» y los avisos van a su otra sesión vigente o, si no tiene
+  ninguna, a todos los dispositivos donde entró hoy.
+- **Entrada sin conexión**: no crea sesión en Go; ese mesero no cuenta en el dispositivo hasta su primera entrada con
+  conexión.
+
+### Para la guía (`docs/ANDROID_INSTALAR.md`)
+
+- **Terminales › Editar** del teléfono o tableta → «**Avisos de platillos listos**»: «Avisar platillos listos»
+  (activado por omisión), «Sonido» y «Vibración» → «Guardar cambios». «Ver configuración» los muestra. Android también
+  deja ajustar el canal «Platillos listos» en sus Ajustes.
+- **Solo funciona si la cocina marca «Listo» en la pantalla de cocina (KDS)**. Si la cocina solo imprime comandas, no
+  hay avisos.
+- **A quién llega**: al mesero responsable de la cuenta (el que la abrió o a quien se transfirió), en el dispositivo
+  donde tiene la sesión abierta más reciente; si no tiene ninguna abierta, en todos los dispositivos donde entró con su
+  PIN durante el día (desde la «Hora de inicio del día»). Transferir la cuenta cambia a quién llegan los platillos que
+  aún no estaban listos.
+- **Entrar sin conexión** no cuenta: el mesero recibe avisos en ese dispositivo desde su primera entrada con conexión.
+- **Al terminar el día comercial** (la hora de inicio del día siguiente) dejan de contar los meseros que entraron ese
+  día; el aviso se detiene si nadie tiene la sesión abierta.
+- No hace falta ningún permiso nuevo para el rol Mesero.
+- Requiere la computadora principal en la versión **0.13.0**.
+
+### Pruebas ejecutadas
+
+| Qué                                                                                                                                                                                                                                                                                                                                                                         | Dónde                                 | Resultado                                                                                                                                                                     |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TestStageA2ReadyAlerts` (8 subpruebas, `-v`: credencial y tipo; destinatario, agrupación y sin precios; transferir; varias sesiones, ninguna vigente y `auth/logout`; `after` recupera y nada se repite, con «Listo» por unidad y del pedido completo; canal SSE con `Last-Event-ID` y 429 del segundo canal; apagado, sonido y vibración; día comercial, poda y revocado) | `./internal/operations`, base `_s_`   | **PASS** las 8 (34 s)                                                                                                                                                         |
+| `TestStageA2Upgrade` (`-v`), con las secciones C y D                                                                                                                                                                                                                                                                                                                        | `./internal/database`                 | **PASS**                                                                                                                                                                      |
+| `TestContractV1` (`-v`) con `contractReadyAlerts`                                                                                                                                                                                                                                                                                                                           | `./internal/apicontract`              | **PASS**; 39 operaciones (antes 37)                                                                                                                                           |
+| `go-unit` (vet normal e integración, `test -race`, `GOOS=windows` build y vet)                                                                                                                                                                                                                                                                                              | `iso.sh go-unit`                      | **aprobado**                                                                                                                                                                  |
+| `go-int` completos: `administration`, `operations`, `apicontract`                                                                                                                                                                                                                                                                                                           | `iso.sh go-int`                       | **ok** (230 s, 465 s, 39 s)                                                                                                                                                   |
+| `go-int ./internal/database`                                                                                                                                                                                                                                                                                                                                                | idem                                  | 1.ª corrida: **falló `TestStage9HUpgrade`** (su conteo de filas por tabla no excluía la tabla nueva `ready_notices`); corregido como la A1 con las suyas; 2.ª corrida: **ok** |
+| Vitest completo, con `stageA2Terminals.test.tsx` (9 casos: 5 de la parte C y 4 de la D)                                                                                                                                                                                                                                                                                     | `iso.sh vitest`                       | **97 archivos, 925 pruebas aprobadas**                                                                                                                                        |
+| `build` y `cargo test`                                                                                                                                                                                                                                                                                                                                                      | `iso.sh build`, `iso.sh cargo`        | **ok** (cargo: 107 aprobadas, 3 ignoradas)                                                                                                                                    |
+| Playwright Chromium: `workflow-stagea2-terminals` (con los avisos), `workflow-stagea1-pin`, `workflow-stage9g-terminals` y `workflow-zz-test-data`                                                                                                                                                                                                                          | `iso.sh browser chromium` (8211/1431) | **5 aprobadas**                                                                                                                                                               |
+| Playwright WebKit: `workflow-stagea2-terminals` y `workflow-stagea1-pin`                                                                                                                                                                                                                                                                                                    | `iso.sh browser webkit` (8211/1431)   | **2 aprobadas**                                                                                                                                                               |
+| `format`, `fmt-check`, `sync-check`; md5 de `docs/etapas/*.md`                                                                                                                                                                                                                                                                                                              | árbol `srv`                           | Correctos; idénticos                                                                                                                                                          |
+
+### No verificado
+
+- La aplicación Android contra estas rutas (servicio en primer plano, notificación, dedup en Room) y la Fase E en los
+  emuladores (pantalla apagada, app cerrada, corte de red).
+- El canal con muchos dispositivos a la vez: cada uno lee cada 750 ms con el lock 7820148305 compartido (igual que el
+  canal de eventos); no se midió con carga.
+
+### Decisiones del coordinador sobre la parte D
+
+Se aceptan las nueve decisiones de la parte; la 1 (guardar `recipient_device_id` en el momento del «Listo») precisa
+A2-D4: el dispositivo se elige cuando el platillo queda listo, para que un mesero que cambia de tableta en ese momento o
+una tableta que se reconecta tarde no pierda ni repita el aviso; que el mesero entró en ese dispositivo en el día se
+revisa al leer. La 8 aplica A2-D10: `product_name` lleva la presentación con el formato de la comanda.
+
+**Verificación sobre una copia exacta de `a2c2812`**: `fmt-check`, `sync-check`, `go-unit`, `go-int` de `apicontract`,
+`database`, `administration` y `kitchen` completos, `TestStageA2ReadyAlerts` (`operations`), Vitest (97 archivos, 925
+pruebas) y `npm run build` aprobados; **Playwright Chromium `workflow-stagea2-terminals` sola falló**: tras apagar
+«Sonido», `ready-alerts` todavía decía `sound: true`. La causa era de la prueba: esperaba el aviso «Terminal
+actualizada.» y el del guardado anterior seguía en pantalla, así que consultaba Go antes de que terminara el guardado
+nuevo (con otras especificaciones antes, el tiempo cambiaba y pasaba). Corrección del coordinador en `084f46a`: los
+pasos 3 y 4 esperan a que Go tenga el cambio (`expect.poll`). Repetida sola sobre una copia exacta de `084f46a`:
+Chromium 3 de 3 y WebKit 1 de 1.
