@@ -854,7 +854,7 @@ func contractReadyAlerts(t *testing.T, client *contractClient, phone *contractCl
 	}
 	alert := alerts[0].(map[string]any)
 	items, _ := alert["items"].([]any)
-	if alert["account_id"] != accountID || alert["waiter_short_name"] != "Eva" || len(items) != 1 ||
+	if alert["account_id"] != accountID || alert["waiter_short_name"] != "Eva" || alert["key"] == "" || len(items) != 1 ||
 		items[0].(map[string]any)["quantity"] != float64(2) || items[0].(map[string]any)["product_name"] != "Papas contrato" {
 		t.Fatalf("aviso: %v", alert)
 	}

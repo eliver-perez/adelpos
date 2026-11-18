@@ -27,9 +27,12 @@ import (
 //     (UNIQUE y cursor) y after recupera lo perdido;
 //   - transferir la cuenta (assign) cambia el destinatario de lo que aún no estaba listo;
 //   - con varias sesiones vigentes, el dispositivo de actividad más reciente; sin ninguna, todos donde entró hoy;
-//     auth/logout deja de contar;
+//     tras auth/logout los avisos ya no se fijan a ese dispositivo;
 //   - el día comercial (active, day_ends_at y los meseros de días anteriores), el aviso apagado, sonido y vibración,
-//     la poda de lo de más de 2 días, el dispositivo revocado y el canal SSE (Last-Event-ID y un canal por dispositivo).
+//     la poda de lo de más de 2 días, el dispositivo revocado y el canal SSE (Last-Event-ID; un canal nuevo del
+//     dispositivo reemplaza al anterior);
+//   - las correcciones de la revisión: entrada en el dispositivo, destinatario que puede recibir el aviso, unidades
+//     canceladas, cuentas combinadas y last_seen_at sin escribir en cada lectura.
 //
 // Usa su propia base desde cero.
 
@@ -43,13 +46,19 @@ type readyFixture struct {
 	variantFilete string
 }
 
-// readyTablet registra un teléfono o tableta de meseros como si se hubiera emparejado.
+// readyTablet registra un teléfono o tableta de meseros con la aplicación 0.2.0 como si se hubiera emparejado.
 func (fixture *readyFixture) readyTablet(t *testing.T, name string) testTerminal {
+	t.Helper()
+	return fixture.tabletWithVersion(t, name, "0.2.0")
+}
+
+// tabletWithVersion registra un teléfono o tableta de meseros con la versión de la aplicación que informó al emparejarse.
+func (fixture *readyFixture) tabletWithVersion(t *testing.T, name, version string) testTerminal {
 	t.Helper()
 	secret := administration.NewToken()
 	var id string
 	if err := fixture.pool.QueryRow(fixture.ctx, `INSERT INTO app.devices(name,secret_hash,kind,os,app_version,paired_at)
-        VALUES ($1,$2,'android','Android 15','0.2.0',now()) RETURNING id`, name, administration.TokenHash(secret)).Scan(&id); err != nil {
+        VALUES ($1,$2,'android','Android 15',$3,now()) RETURNING id`, name, administration.TokenHash(secret), version).Scan(&id); err != nil {
 		t.Fatal(err)
 	}
 	return testTerminal{deviceID: id, deviceToken: secret}
@@ -220,11 +229,14 @@ func TestStageA2ReadyAlerts(t *testing.T) {
 	t.Run("after recupera lo perdido y nada se repite", func(t *testing.T) {
 		testStageA2ReadyRecovery(t, fixture)
 	})
-	t.Run("canal SSE con Last-Event-ID y un canal por dispositivo", func(t *testing.T) {
+	t.Run("canal SSE con Last-Event-ID; un canal nuevo reemplaza al anterior", func(t *testing.T) {
 		testStageA2ReadyStream(t, fixture)
 	})
 	t.Run("Terminales: apagado, sonido y vibración", func(t *testing.T) {
 		testStageA2ReadySettings(t, fixture)
+	})
+	t.Run("correcciones de la revisión: entrada en el dispositivo, destinatario, cancelaciones y combinaciones", func(t *testing.T) {
+		testStageA2ReadyCorrections(t, fixture)
 	})
 	t.Run("día comercial, poda y dispositivo revocado", func(t *testing.T) {
 		testStageA2ReadyDayAndRevocation(t, fixture)
@@ -386,9 +398,18 @@ func testStageA2ReadyRecovery(t *testing.T, fixture *readyFixture) {
 	if len(repeated.Alerts) != 3 || repeated.Alerts[2].ID != recovered.Alerts[2].ID {
 		t.Fatalf("relectura desde el cursor anterior: %+v", repeated)
 	}
+	// Cada aviso tiene su clave (la que el dispositivo usa para descartar repetidos): distinta entre avisos e igual al
+	// releerlo.
+	keys := map[string]bool{}
+	for index, alert := range recovered.Alerts {
+		if alert.Key == "" || keys[alert.Key] || repeated.Alerts[index].Key != alert.Key {
+			t.Fatalf("claves de los avisos: %+v / %+v", recovered.Alerts, repeated.Alerts)
+		}
+		keys[alert.Key] = true
+	}
 	// UNIQUE (unit_id, version_id): la misma preparación no se registra dos veces.
-	if _, err := fixture.pool.Exec(fixture.ctx, `INSERT INTO app.ready_notices(unit_id,version_id,account_id,recipient_user_id)
-        SELECT unit_id,version_id,account_id,recipient_user_id FROM app.ready_notices LIMIT 1`); err == nil {
+	if _, err := fixture.pool.Exec(fixture.ctx, `INSERT INTO app.ready_notices(unit_id,version_id,account_id,recipient_user_id,alert_key)
+        SELECT unit_id,version_id,account_id,recipient_user_id,gen_random_uuid() FROM app.ready_notices LIMIT 1`); err == nil {
 		t.Fatal("se registró dos veces la misma preparación")
 	}
 }
@@ -448,45 +469,40 @@ func testStageA2ReadyStream(t *testing.T, fixture *readyFixture) {
 	if first.event != "alerts" || first.id != fmt.Sprint(head) || !first.batch.Active || len(first.batch.Alerts) != 0 {
 		t.Fatalf("primer mensaje: %+v", first)
 	}
-	// Un segundo canal del mismo dispositivo: 429 (uno por dispositivo).
-	second := open("", "")
-	if second.StatusCode != 429 {
-		t.Fatalf("segundo canal del dispositivo: %d", second.StatusCode)
-	}
-	second.Body.Close()
-	// Cocina marca «Listo»: llega por el canal con su id.
+	// Cocina marca «Listo»: llega por el canal con su id (sin novedades el canal no manda mensajes).
 	accountID := fixture.order(t, fixture.anaOne, 6, draftLine(fixture.fries, 1))
 	fixture.ready(t, accountID, "")
-	var received message
-	deadline := time.Now().Add(6 * time.Second)
-	for time.Now().Before(deadline) {
-		received = next(reader)
-		if len(ofAccount(received.batch, accountID)) == 1 {
-			break
-		}
-	}
-	if len(ofAccount(received.batch, accountID)) != 1 || received.id != fmt.Sprint(fixture.head(t)) {
+	received := next(reader)
+	alerts := ofAccount(received.batch, accountID)
+	if received.event != "alerts" || len(alerts) != 1 || alerts[0].Key == "" || received.id != fmt.Sprint(fixture.head(t)) {
 		t.Fatalf("aviso por el canal: %+v", received)
 	}
-	stream.Body.Close()
-	// Al reconectarse con Last-Event-ID anterior, el aviso vuelve a llegar (el dispositivo descarta el repetido).
-	deadline = time.Now().Add(5 * time.Second)
-	var resumed *http.Response
-	for time.Now().Before(deadline) {
-		resumed = open("", first.id)
-		if resumed.StatusCode != 429 {
-			break
-		}
-		resumed.Body.Close()
-		time.Sleep(200 * time.Millisecond)
-	}
+	// Un segundo canal del mismo dispositivo (tras un cambio de red) reemplaza al primero, que se cierra (revisión R12);
+	// con Last-Event-ID anterior, el aviso vuelve a llegar con la misma clave (el dispositivo descarta el repetido).
+	resumed := open("", first.id)
 	defer resumed.Body.Close()
 	if resumed.StatusCode != 200 {
-		t.Fatalf("reconexión: %d", resumed.StatusCode)
+		t.Fatalf("segundo canal del dispositivo: %d", resumed.StatusCode)
 	}
-	if again := next(bufio.NewReader(resumed.Body)); len(ofAccount(again.batch, accountID)) != 1 {
+	again := next(bufio.NewReader(resumed.Body))
+	if repeated := ofAccount(again.batch, accountID); len(repeated) != 1 || repeated[0].Key != alerts[0].Key {
 		t.Fatalf("reconexión con Last-Event-ID: %+v", again)
 	}
+	closed := make(chan error, 1)
+	go func() {
+		for {
+			if _, err := reader.ReadString('\n'); err != nil {
+				closed <- err
+				return
+			}
+		}
+	}()
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("el canal anterior debía cerrarse al abrir otro del mismo dispositivo")
+	}
+	stream.Body.Close()
 }
 
 func testStageA2ReadySettings(t *testing.T, fixture *readyFixture) {
@@ -572,5 +588,110 @@ func testStageA2ReadyDayAndRevocation(t *testing.T, fixture *readyFixture) {
 	device := testTerminal{deviceID: fixture.tabletTwo.deviceID, deviceToken: fixture.tabletTwo.deviceToken}
 	if code, response := fixture.raw(device, "", "GET", "ready-alerts", nil); code != 401 || errorCode(t, response) != "DEVICE_REVOKED" {
 		t.Fatalf("dispositivo revocado: %d %s", code, response)
+	}
+}
+
+// testStageA2ReadyCorrections cubre las correcciones de la revisión independiente que no reproduce
+// TestStageA2ReadyReview: R11 (un dispositivo no recibe los avisos de antes de que el mesero entrara en él), R7 (el
+// dispositivo destinatario se elige solo entre los que pueden recibir el aviso), R10 (la cuenta vigente si se combinó y
+// sin unidades canceladas después) y R4 (la lectura no escribe «última conexión» cada vez).
+func testStageA2ReadyCorrections(t *testing.T, fixture *readyFixture) {
+	// R11: Beto no tiene ninguna sesión vigente; su aviso va a todos donde entró hoy, pero no a la tableta en la que
+	// entra después.
+	before := fixture.head(t)
+	fixture.call(t, fixture.betoTwo, "POST", "auth/logout", nil, 200)
+	noticeFor := fixture.orderFor(t, fixture.beto, 3, draftLine(fixture.fries, 1))
+	fixture.ready(t, noticeFor, "")
+	tabletThree := fixture.readyTablet(t, "Tableta A2-D 3")
+	fixture.enter(t, tabletThree, fixture.beto, "6152")
+	if late := ofAccount(fixture.alerts(t, tabletThree, 0), noticeFor); len(late) != 0 {
+		t.Fatalf("la tableta en la que Beto entró después recibió el aviso de antes: %+v", late)
+	}
+	if earlier := ofAccount(fixture.alerts(t, fixture.tabletTwo, before), noticeFor); len(earlier) != 1 {
+		t.Fatalf("la tableta donde Beto ya había entrado hoy debía recibirlo: %+v", earlier)
+	}
+	fixture.betoTwo = fixture.enter(t, fixture.tabletTwo, fixture.beto, "6152")
+
+	// R7: la sesión más reciente de Ana está en una tableta con la aplicación 0.1.0 (no lee avisos): el aviso se fija a
+	// la tableta 1; con los avisos de la tableta 1 apagados, no queda ninguna que pueda recibirlo y va a todas.
+	old := fixture.tabletWithVersion(t, "Tableta A2-D 0.1.0", "0.1.0")
+	fixture.enter(t, old, fixture.ana, "4829")
+	pinned := fixture.orderFor(t, fixture.ana, 4, draftLine(fixture.fries, 1))
+	fixture.ready(t, pinned, "")
+	if fixture.count(t, "SELECT count(*)::int FROM app.ready_notices WHERE account_id=$1 AND recipient_device_id=$2",
+		pinned, fixture.tabletOne.deviceID) != 1 {
+		t.Fatal("el aviso debía fijarse a la tableta 1, la más reciente que puede recibirlo")
+	}
+	route := "devices/" + fixture.tabletOne.deviceID
+	fixture.adminCall(t, "PATCH", route, map[string]any{"name": "Tableta A2-D 1", "register_id": nil, "keyboard_mode": "auto",
+		"ready_alerts_enabled": false}, 200)
+	unpinned := fixture.orderFor(t, fixture.ana, 5, draftLine(fixture.fries, 1))
+	fixture.ready(t, unpinned, "")
+	if fixture.count(t, "SELECT count(*)::int FROM app.ready_notices WHERE account_id=$1 AND recipient_device_id IS NULL",
+		unpinned) != 1 {
+		t.Fatal("sin un dispositivo que pueda recibirlo, el aviso debía quedar para todos")
+	}
+	fixture.adminCall(t, "PATCH", route, map[string]any{"name": "Tableta A2-D 1", "register_id": nil, "keyboard_mode": "auto",
+		"ready_alerts_enabled": true}, 200)
+	fixture.mutate(t, "POST", "devices/"+old.deviceID+"/revoke", map[string]any{}, 200)
+	fixture.call(t, fixture.anaOne, "GET", "auth/me", nil, 200)
+
+	// R10: una unidad cancelada después del «Listo» no se avisa; si se cancelan todas, no hay aviso (el cursor avanza);
+	// una cuenta combinada después se avisa con la cuenta en que se combinó.
+	before = fixture.head(t)
+	partly := fixture.order(t, fixture.anaOne, 6, draftLine(fixture.fries, 2), draftLine(fixture.product, 1))
+	whole := fixture.order(t, fixture.anaOne, 7, draftLine(fixture.fries, 1))
+	merged := fixture.order(t, fixture.anaOne, 0, draftLine(fixture.fries, 1))
+	target := fixture.order(t, fixture.anaOne, 1, draftLine(fixture.product, 1))
+	for _, accountID := range []string{partly, whole, merged} {
+		fixture.ready(t, accountID, "")
+	}
+	cancel := func(accountID, productID string) {
+		t.Helper()
+		bill := fixture.refresh(t, accountID)
+		for _, line := range bill.Lines {
+			if line.Request.ProductID == productID && line.State == "active" {
+				fixture.mutate(t, "POST", "restaurant/accounts/"+accountID+"/cancel", map[string]any{
+					"revision": bill.Account.Revision, "version_id": line.VersionID, "quantity": line.Quantity,
+					"reason": "El cliente ya no lo quiso",
+				}, 200)
+				return
+			}
+		}
+		t.Fatalf("la cuenta no tiene %s activo", productID)
+	}
+	cancel(partly, fixture.product.ID)
+	cancel(whole, fixture.fries.ID)
+	source := fixture.refresh(t, merged)
+	destination := fixture.refresh(t, target)
+	fixture.mutate(t, "POST", "restaurant/accounts/"+merged+"/merge", map[string]any{
+		"revision": source.Account.Revision, "target_account_id": target, "target_revision": destination.Account.Revision,
+	}, 200)
+	batch := fixture.alerts(t, fixture.tabletOne, before)
+	if alerts := ofAccount(batch, partly); len(alerts) != 1 || itemsText(alerts[0]) != "2 × Papas producto" {
+		t.Fatalf("aviso con una unidad cancelada después: %+v", alerts)
+	}
+	if alerts := ofAccount(batch, whole); len(alerts) != 0 {
+		t.Fatalf("aviso con todas sus unidades canceladas: %+v", alerts)
+	}
+	if alerts := ofAccount(batch, target); len(alerts) != 1 || len(ofAccount(batch, merged)) != 0 || itemsText(alerts[0]) != "1 × Papas producto" {
+		t.Fatalf("aviso de una cuenta combinada después: %+v", batch.Alerts)
+	}
+	if batch.Cursor != fixture.head(t) {
+		t.Fatalf("el cursor debía avanzar hasta el último aviso: %d de %d", batch.Cursor, fixture.head(t))
+	}
+
+	// R4: leer seguido no vuelve a escribir «última conexión» del dispositivo (como mucho una vez por minuto).
+	fixture.alerts(t, fixture.tabletOne, fixture.head(t))
+	var seen time.Time
+	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT last_seen_at FROM app.devices WHERE id=$1", fixture.tabletOne.deviceID).
+		Scan(&seen); err != nil {
+		t.Fatal(err)
+	}
+	fixture.alerts(t, fixture.tabletOne, fixture.head(t))
+	var again time.Time
+	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT last_seen_at FROM app.devices WHERE id=$1", fixture.tabletOne.deviceID).
+		Scan(&again); err != nil || !again.Equal(seen) {
+		t.Fatalf("la lectura de avisos volvió a escribir la última conexión: %v → %v (%v)", seen, again, err)
 	}
 }

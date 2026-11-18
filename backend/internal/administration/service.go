@@ -67,9 +67,9 @@ type Service struct {
 	reportsOnce sync.Once
 	streamMutex sync.Mutex
 	streams     map[string]int
-	// readyStreams cuenta los canales de avisos de platillos listos abiertos por dispositivo (etapa A2, parte D):
-	// uno por dispositivo, aparte de los dos del canal de eventos.
-	readyStreams map[string]int
+	// readyStreams es el canal de avisos de platillos listos abierto de cada dispositivo (etapa A2, parte D): uno por
+	// dispositivo, aparte de los dos del canal de eventos; uno nuevo reemplaza al anterior (ready_alerts.go).
+	readyStreams map[string]*readyStream
 	// removalTurn deja una sola eliminación de datos de prueba a la vez en este servidor (etapa 9F,
 	// maintenance.go); se crea al primer uso.
 	removalOnce sync.Once
@@ -323,6 +323,15 @@ func (service *Service) dispatch(ctx context.Context, tx pgx.Tx, request Request
 	if strings.HasPrefix(route, "pairing/") {
 		return service.pairingPublic(ctx, tx, request, route)
 	}
+	// Avisos de platillos listos (etapa A2, parte D): el lock de la operación compartido se toma antes de tocar la fila
+	// del dispositivo (revisión R8): quien tiene ese lock en exclusiva y después bloquea la fila de un dispositivo (por
+	// ejemplo, al guardar sus estaciones de cocina) no forma un interbloqueo con la lectura de cada 750 ms.
+	readyRoute := route == "ready-alerts" && request.Method == "GET"
+	if readyRoute {
+		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock_shared(7820148305)"); err != nil {
+			return nil, err
+		}
+	}
 	if err := authenticateDevice(ctx, tx, request); err != nil {
 		return nil, err
 	}
@@ -360,7 +369,7 @@ func (service *Service) dispatch(ctx context.Context, tx pgx.Tx, request Request
 	}
 	// Avisos de platillos listos (etapa A2, parte D; ready_alerts.go): solo con la credencial del teléfono o la
 	// tableta, porque llegan aunque nadie tenga la sesión abierta (en «¿Quién eres?» o con la aplicación cerrada).
-	if route == "ready-alerts" && request.Method == "GET" {
+	if readyRoute {
 		return readyAlerts(ctx, tx, request)
 	}
 	principal, err := authenticateSession(ctx, tx, request)
@@ -392,7 +401,14 @@ func authenticateDevice(ctx context.Context, tx pgx.Tx, request Request) error {
 	if revoked {
 		return unauthorized("DEVICE_REVOKED", "La autorización de esta terminal fue revocada.")
 	}
-	_, err = tx.Exec(ctx, "UPDATE app.devices SET last_seen_at=now() WHERE id=$1", request.DeviceID)
+	touch := "UPDATE app.devices SET last_seen_at=now() WHERE id=$1"
+	// La lectura de avisos de platillos listos llega cada 750 ms desde el canal de cada teléfono (etapa A2, revisión
+	// R4): «última conexión» se anota como mucho una vez por minuto (Terminales considera en línea lo de los últimos 2),
+	// para no escribir en la base en cada lectura.
+	if request.Method == "GET" && request.Path == "/api/v1/ready-alerts" {
+		touch += " AND last_seen_at < now() - interval '1 minute'"
+	}
+	_, err = tx.Exec(ctx, touch, request.DeviceID)
 	return err
 }
 

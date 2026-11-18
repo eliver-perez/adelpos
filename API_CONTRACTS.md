@@ -4057,22 +4057,32 @@ Especificación: [docs/etapas/ETAPA_A2_ANDROID.md](docs/etapas/ETAPA_A2_ANDROID.
 `internal/apicontract/openapi.json` (capacidad `ready-alerts-v1`).
 
 - **Base** (0026, parte D): `app.ready_notices` (`sequence` identidad como clave y cursor, `unit_id`, `version_id`,
-  `account_id`, `recipient_user_id`, `recipient_device_id` opcional, `ready_at`; `UNIQUE (unit_id, version_id)`; índices
-  `(recipient_user_id, sequence)` y `(ready_at)`), vacía al actualizar; `devices.ready_alerts_enabled`,
-  `ready_alerts_sound` y `ready_alerts_vibration` (`boolean NOT NULL DEFAULT true`). Ninguna fila cambia
-  (`TestStageA2Upgrade`).
+  `account_id`, `recipient_user_id`, `recipient_device_id` opcional, `alert_key` (`uuid` del grupo, nunca se reutiliza),
+  `ready_at`; `UNIQUE (unit_id, version_id)`; índices `(recipient_user_id, sequence)` y `(ready_at)`), vacía al
+  actualizar; `devices.ready_alerts_enabled`, `ready_alerts_sound` y `ready_alerts_vibration`
+  (`boolean NOT NULL DEFAULT true`); índices parciales de `sessions` `(device_id, created_at) WHERE opened_with_pin` y
+  `(device_id) WHERE opened_with_pin AND revoked_at IS NULL` para las lecturas de cada 750 ms (revisión R5). Ninguna
+  fila cambia (`TestStageA2Upgrade`).
 - **Escritura** (`kitchen.recordReadyNotices`, `kitchen/preparation.go`): en `publishPreparation`, la misma transacción
   que publica `restaurant.account.preparation_changed`, cada unidad activa de las cuentas anotadas cuyas tareas vivas
-  de su versión están todas listas y la última se marcó en esta transacción (`ready_at = now()`). Así cuentan todos los
-  caminos del KDS (unidad, pedido de una estación, cuenta completa) y nunca una unidad que ya estaba lista (una
-  modificación económica no reinicia sus tareas; una de receta crea otra versión). Destinatario: el responsable de la
-  cuenta; dispositivo: el android no revocado de su sesión con PIN vigente con `last_seen_at` más reciente, o ninguno si
-  no tiene una vigente. Al registrar algo, se poda lo de más de 2 días. Ningún lock nuevo: cocina escribe con
-  7820148305 exclusivo.
-- **Lectura** (`administration/ready_alerts.go`): `GET ready-alerts` (en `dispatch`, después de `authenticateDevice` y
-  antes de la sesión: solo la credencial del dispositivo) y `GET ready-alerts/stream` (`serveReadyAlerts`, con el
-  patrón de `serveEvents` y su contador `readyStreams`, uno por dispositivo); lock 7820148305 **compartido**.
-  `active` y `day_ends_at` con `businessday` (hora de inicio del día de inventario).
+  de su versión están todas listas y, en esta transacción, se marcó la última (`ready_at = now()`) o se canceló la que
+  faltaba (revisión R1). Así cuentan todos los caminos que escriben tareas (KDS: unidad, pedido de una estación, cuenta
+  completa; modificaciones y cancelaciones de `operations` con `kitchen.Integrate`; la liberación de
+  `Worker.ReleaseDue`, que solo crea tareas pendientes) y nunca una unidad que ya
+  estaba lista (una modificación económica no reinicia sus tareas; una de receta crea otra versión). Destinatario: el
+  responsable de la cuenta; dispositivo: el de su sesión con PIN vigente con `last_seen_at` más reciente, solo entre
+  `android` no revocados con `ready_alerts_enabled` y, si se conoce `app_version`, 0.2.0 o posterior (revisión R7), o
+  ninguno. Las filas de una cuenta en la misma operación comparten un `alert_key` nuevo (`gen_random_uuid()`, R3). Al
+  registrar algo, se poda lo de más de 2 días. Ningún lock nuevo: cocina escribe con 7820148305 exclusivo.
+- **Lectura** (`administration/ready_alerts.go`): `GET ready-alerts` (en `dispatch`, que toma 7820148305
+  **compartido** antes de `authenticateDevice`, el mismo orden que los escritores: lock y después la fila del
+  dispositivo, revisión R8; solo la credencial del dispositivo, sin sesión) y `GET ready-alerts/stream`
+  (`serveReadyAlerts`: revisa cada 750 ms y solo escribe con novedades, `: ping` cada 15 s, 5 minutos; `readyStreams`
+  guarda el canal abierto de cada dispositivo y uno nuevo cierra el anterior, R12). `authenticateDevice` actualiza
+  `devices.last_seen_at` de estas lecturas como mucho una vez por minuto. Presencia del mesero (`active` y los avisos):
+  sesión con PIN en el dispositivo vigente o creada desde el inicio del día comercial, y solo avisos desde su primera
+  sesión que cuente (R2, R11); la cuenta sigue `merged_into_id` y no se avisan unidades canceladas (R10). `active` y
+  `day_ends_at` con `businessday` (hora de inicio del día de inventario).
 - **`PATCH devices/{id}`** (`devices.manage`): campos opcionales `ready_alerts_enabled`, `ready_alerts_sound` y
   `ready_alerts_vibration` (sin ellos se conserva lo guardado); en una terminal que no es `android`, `400`. `GET
 devices`, la configuración (`device`), `auth/me` y `restaurant/state` (`terminal`) los informan.

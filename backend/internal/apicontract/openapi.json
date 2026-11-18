@@ -437,7 +437,7 @@
       "get": {
         "operationId": "getReadyAlerts",
         "summary": "Avisos de platillos listos",
-        "description": "Etapa A2 (parte D): la lectura de recuperación de los avisos desde el cursor (hasta 50 por respuesta; con más, cursor es el del último entregado). Solo con la credencial del dispositivo (X-Device-ID y X-Device-Token), sin sesión: llega aunque el dispositivo esté en «¿Quién eres?». Solo dispositivos android (otro tipo: 403 READY_ALERTS_DEVICE_NOT_ALLOWED); revocado: 401 DEVICE_REVOKED. Go decide a quién llega: un aviso es para el dispositivo D si su mesero (el responsable de la cuenta al «Listo») entró con PIN en D durante el día comercial en curso y además, al «Listo», tenía en D su sesión con PIN vigente de actividad más reciente o no tenía ninguna vigente en un android (entonces llega a todos los dispositivos donde entró hoy). Cada unidad se avisa una sola vez (UNIQUE por unidad y versión) y la relectura desde un cursor anterior devuelve los mismos id. Con «Avisar platillos listos» apagado: active false y sin avisos.",
+        "description": "Etapa A2 (parte D): la lectura de recuperación de los avisos desde el cursor (hasta 50 por respuesta; con más, cursor es el del último entregado). Solo con la credencial del dispositivo (X-Device-ID y X-Device-Token), sin sesión: llega aunque el dispositivo esté en «¿Quién eres?». Solo dispositivos android (otro tipo: 403 READY_ALERTS_DEVICE_NOT_ALLOWED); revocado: 401 DEVICE_REVOKED. Go decide a quién llega: un aviso es para el dispositivo D si su mesero (el responsable de la cuenta al «Listo») tiene en D una sesión con PIN vigente o creada desde el inicio del día comercial (la misma regla que active), el aviso es posterior a su primera sesión con PIN en D que cuente, y además, al «Listo», D era el dispositivo de su sesión con PIN vigente más reciente entre los que pueden recibirlo (no revocados, con «Avisar platillos listos» activado y la aplicación 0.2.0 o posterior) o no había ninguno (entonces llega a todos los dispositivos donde está). Cada unidad se avisa una sola vez (UNIQUE por unidad y versión); la relectura desde un cursor anterior devuelve los mismos avisos con la misma key. Con «Avisar platillos listos» apagado: active false y sin avisos.",
         "parameters": [
           {
             "$ref": "#/components/parameters/ClientVersion"
@@ -484,7 +484,7 @@
       "get": {
         "operationId": "streamReadyAlerts",
         "summary": "Canal de avisos de platillos listos (SSE)",
-        "description": "Etapa A2 (parte D): flujo text/event-stream de mensajes «alerts» (ReadyAlertsBatch) cada 750 ms, con id: <cursor>; dura 30 s y el dispositivo se vuelve a conectar con ?after=<cursor> o Last-Event-ID. Un solo canal por dispositivo (aparte de los dos del canal de eventos): otro mientras está abierto, 429 READY_ALERTS_CONNECTION_LIMIT. Cada lectura revalida el dispositivo; si ya no vale, manda «interrupted» con id 0 y el código, y termina. Solo con la credencial del dispositivo (X-Device-ID y X-Device-Token), sin sesión: llega aunque el dispositivo esté en «¿Quién eres?». Solo dispositivos android (otro tipo: 403 READY_ALERTS_DEVICE_NOT_ALLOWED); revocado: 401 DEVICE_REVOKED. Go decide a quién llega: un aviso es para el dispositivo D si su mesero (el responsable de la cuenta al «Listo») entró con PIN en D durante el día comercial en curso y además, al «Listo», tenía en D su sesión con PIN vigente de actividad más reciente o no tenía ninguna vigente en un android (entonces llega a todos los dispositivos donde entró hoy). Cada unidad se avisa una sola vez (UNIQUE por unidad y versión) y la relectura desde un cursor anterior devuelve los mismos id. Con «Avisar platillos listos» apagado: active false y sin avisos.",
+        "description": "Etapa A2 (parte D): flujo text/event-stream. Go revisa la base cada 750 ms pero solo manda un mensaje «alerts» (id: <cursor>, data: ReadyAlertsBatch) cuando hay avisos nuevos o cambian active, settings o day_ends_at (el primero llega enseguida); sin novedades, un comentario «: ping» cada 15 s. Dura 5 minutos y el dispositivo se vuelve a conectar enseguida con ?after=<cursor> o Last-Event-ID. Un canal nuevo del mismo dispositivo reemplaza al anterior, que se cierra (aparte de los dos del canal de eventos). Si una lectura falla, «interrupted» sin línea id (el cursor del dispositivo no cambia) con data {\"code\": …} y termina: solo DEVICE_REVOKED significa que el dispositivo fue retirado; cualquier otro código (TEMPORARY si la base no respondió) es para reconectar con espera creciente. Solo con la credencial del dispositivo (X-Device-ID y X-Device-Token), sin sesión: llega aunque el dispositivo esté en «¿Quién eres?». Solo dispositivos android (otro tipo: 403 READY_ALERTS_DEVICE_NOT_ALLOWED); revocado: 401 DEVICE_REVOKED. Go decide a quién llega: un aviso es para el dispositivo D si su mesero (el responsable de la cuenta al «Listo») tiene en D una sesión con PIN vigente o creada desde el inicio del día comercial (la misma regla que active), el aviso es posterior a su primera sesión con PIN en D que cuente, y además, al «Listo», D era el dispositivo de su sesión con PIN vigente más reciente entre los que pueden recibirlo (no revocados, con «Avisar platillos listos» activado y la aplicación 0.2.0 o posterior) o no había ninguno (entonces llega a todos los dispositivos donde está). Cada unidad se avisa una sola vez (UNIQUE por unidad y versión); la relectura desde un cursor anterior devuelve los mismos avisos con la misma key. Con «Avisar platillos listos» apagado: active false y sin avisos.",
         "parameters": [
           {
             "$ref": "#/components/parameters/ClientVersion"
@@ -2494,7 +2494,7 @@
     },
     "responses": {
       "Error": {
-        "description": "Error. 400 datos inválidos, 401 terminal o sesión (DEVICE_*, SESSION_*), 403 sin permiso, 404 no existe, 409 conflicto (ACCOUNT_CONFLICT, QUOTE_CHANGED, IDEMPOTENCY_CONFLICT, PRODUCT_SOLD_OUT…), 426 CLIENT_UPDATE_REQUIRED, 429 demasiados intentos (LOGIN_THROTTLED, PIN_LOCKED con details.locked_until y details.requires_unlock). Etapa A1: 400 CLIENT_KIND_MISMATCH; 401 PIN_INVALID, OFFLINE_CREDENTIAL_INVALID y OFFLINE_CREDENTIAL_NOT_ALLOWED; 403 PIN_DEVICE_NOT_ALLOWED; 503 PIN_LOGIN_BUSY. Desde la etapa A1, una cuenta que ya no está abierta responde 400 OPERATION_VALIDATION con details AccountNotOpenDetails (reason account_not_open). Etapa A2: 409 BALANCE_PENDING y ALREADY_DELIVERED en deliverTakeaway. Etapa A2 (parte C): 409 PRINTER_NOT_CONFIGURED y PRINTER_UNAVAILABLE (PrinterRejection, con details.scope «device» en un dispositivo android) y PRINT_NOT_FAILED en printPrecheck y retryDocument. Etapa A2 (parte D): 403 READY_ALERTS_DEVICE_NOT_ALLOWED y 429 READY_ALERTS_CONNECTION_LIMIT en los avisos de platillos listos.",
+        "description": "Error. 400 datos inválidos, 401 terminal o sesión (DEVICE_*, SESSION_*), 403 sin permiso, 404 no existe, 409 conflicto (ACCOUNT_CONFLICT, QUOTE_CHANGED, IDEMPOTENCY_CONFLICT, PRODUCT_SOLD_OUT…), 426 CLIENT_UPDATE_REQUIRED, 429 demasiados intentos (LOGIN_THROTTLED, PIN_LOCKED con details.locked_until y details.requires_unlock). Etapa A1: 400 CLIENT_KIND_MISMATCH; 401 PIN_INVALID, OFFLINE_CREDENTIAL_INVALID y OFFLINE_CREDENTIAL_NOT_ALLOWED; 403 PIN_DEVICE_NOT_ALLOWED; 503 PIN_LOGIN_BUSY. Desde la etapa A1, una cuenta que ya no está abierta responde 400 OPERATION_VALIDATION con details AccountNotOpenDetails (reason account_not_open). Etapa A2: 409 BALANCE_PENDING y ALREADY_DELIVERED en deliverTakeaway. Etapa A2 (parte C): 409 PRINTER_NOT_CONFIGURED y PRINTER_UNAVAILABLE (PrinterRejection, con details.scope «device» en un dispositivo android) y PRINT_NOT_FAILED en printPrecheck y retryDocument. Etapa A2 (parte D): 403 READY_ALERTS_DEVICE_NOT_ALLOWED en los avisos de platillos listos.",
         "content": {
           "application/json": {
             "schema": {
@@ -5606,11 +5606,16 @@
           "id": {
             "type": "integer",
             "minimum": 1,
-            "description": "Identificador del aviso (crece con el cursor). El mismo id puede volver a llegar (relectura desde un cursor anterior): el dispositivo lo descarta si ya lo avisó."
+            "description": "Número del último aviso del grupo: es solo el cursor (puede repetirse si se restaura un respaldo)."
+          },
+          "key": {
+            "type": "string",
+            "description": "Clave única del aviso, que nunca se reutiliza (también tras restaurar un respaldo): el dispositivo descarta los avisos repetidos por esta clave."
           },
           "account_id": {
             "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "description": "La cuenta vigente: si la del «Listo» se combinó después, la cuenta en que se combinó."
           },
           "mode": {
             "enum": ["dine_in", "takeaway"]
@@ -5659,6 +5664,7 @@
         },
         "required": [
           "id",
+          "key",
           "account_id",
           "mode",
           "table_name",
@@ -5669,7 +5675,7 @@
           "items",
           "ready_at"
         ],
-        "description": "Lo que cocina marcó «Listo» en una cuenta en una misma operación, agrupado por platillo. Nunca trae precios ni importes."
+        "description": "Lo que cocina marcó «Listo» en una cuenta en una misma operación, agrupado por platillo; sin las unidades que se cancelaron después (si se cancelaron todas, no hay aviso). Nunca trae precios ni importes."
       },
       "ReadyAlertsBatch": {
         "type": "object",
@@ -5681,7 +5687,7 @@
           },
           "active": {
             "type": "boolean",
-            "description": "El dispositivo debe mantener su servicio de avisos: «Avisar platillos listos» está activado y hay un mesero con sesión con PIN vigente en él o que entró en él con PIN durante el día comercial en curso. Con false, sin avisos (no es un error)."
+            "description": "El dispositivo debe mantener su servicio de avisos: «Avisar platillos listos» está activado y hay un mesero con sesión con PIN vigente en él o creada desde el inicio del día comercial en curso. Con false, sin avisos (no es un error)."
           },
           "day_ends_at": {
             "type": "string",
