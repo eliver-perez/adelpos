@@ -94,11 +94,14 @@ var stage9HLegacyTables = []string{"legacy_import_batches", "legacy_id_map", "le
 	"legacy_sales_recognitions"}
 
 // stage9HRowCounts cuenta las filas de todas las tablas del esquema app que existían en el esquema 23: la 0024 no debe
-// cambiar ninguna.
+// cambiar ninguna. La prueba migra hasta la última, así que excluye lo que agrega la 0025 (etapa A1: sus tablas
+// pin_attempts y offline_order_credentials, el permiso waiter_devices.use y sus concesiones), que se comprueba en
+// stagea1_upgrade_test.go.
 func stage9HRowCounts(ctx context.Context, t *testing.T, pool *pgxpool.Pool) string {
 	t.Helper()
 	rows, err := pool.Query(ctx, `SELECT table_name FROM information_schema.tables WHERE table_schema = 'app'
-        AND table_type = 'BASE TABLE' AND table_name NOT LIKE 'legacy\_%' ORDER BY table_name`)
+        AND table_type = 'BASE TABLE' AND table_name NOT LIKE 'legacy\_%'
+        AND table_name NOT IN ('pin_attempts', 'offline_order_credentials') ORDER BY table_name`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,8 +116,15 @@ func stage9HRowCounts(ctx context.Context, t *testing.T, pool *pgxpool.Pool) str
 	rows.Close()
 	parts := []string{}
 	for _, name := range names {
+		filter := ""
+		switch name {
+		case "permissions":
+			filter = " WHERE key<>'waiter_devices.use'"
+		case "role_permissions":
+			filter = " WHERE permission_key<>'waiter_devices.use'"
+		}
 		var count int
-		if err := pool.QueryRow(ctx, "SELECT count(*) FROM app."+name).Scan(&count); err != nil {
+		if err := pool.QueryRow(ctx, "SELECT count(*) FROM app."+name+filter).Scan(&count); err != nil {
 			t.Fatal(err)
 		}
 		parts = append(parts, fmt.Sprintf("%s=%d", name, count))

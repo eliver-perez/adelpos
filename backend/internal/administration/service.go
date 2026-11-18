@@ -92,6 +92,12 @@ type Request struct {
 	PairingSecret string
 	// IfNoneMatch es la cabecera del mismo nombre (etapa 9G): la imagen binaria del catálogo responde 304 si coincide.
 	IfNoneMatch string
+	// OfflineCredential es la credencial de envío del mesero (X-Offline-Credential, etapa A1, A1-D1): sustituye a la
+	// sesión solo en POST restaurant/offline-orders (pin_login.go).
+	OfflineCredential string
+	// ClientKind es X-Client-Kind (etapa A1, revisión R3, B2): con la credencial de un dispositivo debe coincidir con el
+	// tipo con que se registró (matchClientKind), para que nadie tome la versión mínima de otro tipo de cliente.
+	ClientKind string
 }
 
 type Fault struct {
@@ -142,6 +148,9 @@ type Principal struct {
 	SessionID       string   `json:"session_id"`
 	DeviceID        string   `json:"device_id"`
 	Permissions     []string `json:"permissions"`
+	// PINSession: la sesión se abrió con PIN en un dispositivo de meseros (etapa A1, A1-D17) y sus permisos ya están
+	// acotados a los de mesero (waiter_scope.go). Lo hereda la sesión nueva de «Cambiar contraseña».
+	PINSession bool `json:"-"`
 }
 
 func (principal Principal) require(key string) error {
@@ -202,6 +211,16 @@ func audit(ctx context.Context, tx pgx.Tx, principal Principal, action, entity s
 }
 
 func (service *Service) Execute(ctx context.Context, request Request) (any, error) {
+	// Etapa A1 (revisión R3, O4): pocas entradas con PIN a la vez (cada una verifica un Argon2id de 64 MiB). Se espera el
+	// turno antes de abrir la transacción, para que las que esperan no ocupen conexiones de la base ni bloqueen las
+	// demás operaciones del servidor.
+	if pinLoginRequest(request) {
+		release, err := reservePINCheck(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer release()
+	}
 	transaction, err := service.Pool.Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -274,6 +293,13 @@ func runProtected(ctx context.Context, tx pgx.Tx, principal Principal, request R
 
 func (service *Service) dispatch(ctx context.Context, tx pgx.Tx, request Request) (any, error) {
 	route := strings.TrimPrefix(request.Path, "/api/v1/")
+	// Credencial de envío del mesero (etapa A1, A1-D1; revisión R3, B1): solo sirve para entregar un pedido capturado
+	// sin conexión. En cualquier otra ruta, también las que no piden credencial (asistente, emparejamiento, entrada con
+	// contraseña o con PIN), se rechaza antes de atenderla, para que nunca abra ni pruebe nada más.
+	if request.OfflineCredential != "" && (route != offlineOrdersRoute || request.Method != "POST") {
+		return nil, unauthorized("OFFLINE_CREDENTIAL_NOT_ALLOWED",
+			"La autorización de envío solo sirve para entregar pedidos capturados sin conexión.")
+	}
 	if route == "setup/status" && request.Method == "GET" {
 		var configured bool
 		err := tx.QueryRow(ctx, "SELECT EXISTS(SELECT FROM app.establishment)").Scan(&configured)
@@ -297,8 +323,32 @@ func (service *Service) dispatch(ctx context.Context, tx pgx.Tx, request Request
 	if err := authenticateDevice(ctx, tx, request); err != nil {
 		return nil, err
 	}
+	if err := matchClientKind(ctx, tx, request); err != nil {
+		return nil, err
+	}
 	if route == "auth/login" && request.Method == "POST" {
 		return login(ctx, tx, request)
+	}
+	// Entrada con PIN en los teléfonos y tabletas de meseros (etapa A1, fase B; pin_login.go): con la credencial del
+	// dispositivo android y sin sesión.
+	if route == "auth/pin-users" && request.Method == "GET" {
+		return pinUsers(ctx, tx, request)
+	}
+	if route == "auth/pin-login" && request.Method == "POST" {
+		return pinLogin(ctx, tx, request)
+	}
+	// Credencial de envío del mesero (etapa A1, A1-D1): en lugar de una sesión. La ruta ya se comprobó al principio.
+	if request.OfflineCredential != "" {
+		if request.SessionToken != "" {
+			return nil, invalid("Envía la sesión o la autorización de envío del mesero, no las dos.")
+		}
+		principal, err := authenticateOfflineCredential(ctx, tx, request)
+		if err != nil {
+			return nil, err
+		}
+		return runProtected(ctx, tx, principal, request, route, func(work pgx.Tx) (any, error) {
+			return service.protected(ctx, work, request, principal, route)
+		})
 	}
 	// Agente de impresión de la terminal (etapa 9G, fase E; print_agent.go): solo con la credencial de la terminal,
 	// sin sesión de usuario, porque imprime aunque nadie haya iniciado sesión en esa caja.
@@ -338,6 +388,29 @@ func authenticateDevice(ctx context.Context, tx pgx.Tx, request Request) error {
 	return err
 }
 
+// matchClientKind compara X-Client-Kind con el tipo con que se registró el dispositivo (revisión R3, B2): la versión
+// mínima se elige por el tipo que declara el cliente (httpapi.checkClient), y un escritorio que dijera «android»
+// tomaría la mínima de Android. La aplicación Android solo corre en dispositivos android y la de escritorio en los de
+// escritorio o cocina. Sin la cabecera (herramientas locales y pruebas por la escucha local) no hay nada que comparar.
+func matchClientKind(ctx context.Context, tx pgx.Tx, request Request) error {
+	if request.ClientKind == "" {
+		return nil
+	}
+	var kind string
+	if err := tx.QueryRow(ctx, "SELECT kind FROM app.devices WHERE id=$1", request.DeviceID).Scan(&kind); err != nil {
+		return err
+	}
+	expected := "desktop"
+	if kind == "android" {
+		expected = "android"
+	}
+	if request.ClientKind != expected {
+		return &Fault{Status: 400, Code: "CLIENT_KIND_MISMATCH",
+			Message: "Esta aplicación no corresponde al tipo de equipo con que se emparejó esta terminal. Empareja de nuevo esta terminal."}
+	}
+	return nil
+}
+
 func authenticateSession(ctx context.Context, tx pgx.Tx, request Request) (Principal, error) {
 	var principal Principal
 	if len(request.SessionToken) != 43 {
@@ -347,11 +420,12 @@ func authenticateSession(ctx context.Context, tx pgx.Tx, request Request) (Princ
 	var reason string
 	var expires time.Time
 	err := tx.QueryRow(ctx, `SELECT u.id,u.username,u.display_name,u.role_id,r.name,u.initial_password,u.support,
-        s.id,s.device_id,s.revoked_at IS NOT NULL,coalesce(s.revoke_reason,''),s.expires_at,u.active
+        s.id,s.device_id,s.revoked_at IS NOT NULL,coalesce(s.revoke_reason,''),s.expires_at,u.active,s.opened_with_pin
         FROM app.sessions s JOIN app.users u ON u.id=s.user_id JOIN app.roles r ON r.id=u.role_id
         WHERE s.token_hash=$1 AND s.device_id=$2`, TokenHash(request.SessionToken), request.DeviceID).Scan(
 		&principal.UserID, &principal.Username, &principal.DisplayName, &principal.RoleID, &principal.RoleName,
 		&principal.InitialPassword, &principal.Support, &principal.SessionID, &principal.DeviceID, &revoked, &reason, &expires, &active,
+		&principal.PINSession,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return principal, unauthorized("SESSION_INVALID", "La sesión no es válida.")
@@ -379,6 +453,11 @@ func authenticateSession(ctx context.Context, tx pgx.Tx, request Request) (Princ
 	principal.Permissions, err = effectivePermissions(ctx, tx, principal.UserID, principal.Support)
 	if err != nil {
 		return principal, err
+	}
+	// Etapa A1 (A1-D17): una sesión abierta con PIN solo tiene los permisos de mesero del usuario, en toda ruta y en lo
+	// que informan auth/me y restaurant/state.
+	if principal.PINSession {
+		principal.Permissions = waiterScope(principal.Permissions)
 	}
 	_, err = tx.Exec(ctx, "UPDATE app.sessions SET last_seen_at=now() WHERE id=$1", principal.SessionID)
 	return principal, err

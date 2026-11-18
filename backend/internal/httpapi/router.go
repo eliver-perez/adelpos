@@ -35,6 +35,16 @@ var capabilities = []string{
 	"catalog-sold-out",
 	"offline-orders-v1",
 	"state-recovery-v1",
+	// Etapa A1 (fase B): versión mínima por tipo de cliente (min_client_versions), entrada con PIN en los teléfonos y
+	// tabletas de meseros con su credencial de envío de pedidos sin conexión, y su administración (PIN, nombre corto,
+	// color, desbloqueo y bloqueo por inactividad de cada dispositivo). El escritorio 0.12.0 muestra lo del PIN solo
+	// si el servidor anuncia waiter-pin-v1, así que sigue funcionando con un servidor 0.11.0 sin esas pantallas.
+	"client-versions-by-kind",
+	"waiter-pin-v1",
+	// Etapa A1 (fase E, servidor): lo que el modo Mesero usa de la API v1 además de lo anterior: el contrato de mesas,
+	// cancelar y modificar unidades, restaurant.account.preparation_changed, error.details.reason en una cuenta que ya
+	// no está abierta, replaces_draft_items en el pedido sin conexión y event_cursor en restaurant/state.
+	"waiter-mode-v1",
 }
 
 type ErrorBody struct {
@@ -89,6 +99,8 @@ func NewWithOptions(options Options, probe Probe, origins []string, logger *slog
 			"min_client_version": metadata.MinClientVersion,
 			"client_kinds":       ClientKinds,
 			"openapi_path":       "/api/v1/openapi.json",
+			// Etapa A1 (A1-D4): la mínima de cada tipo de cliente; min_client_version sigue siendo la del escritorio.
+			"min_client_versions": clientMinimums(metadata),
 		})
 	})
 	// Contrato OpenAPI 3.1 de la API v1 para los clientes (etapa 9G, §5.1): el mismo documento que comprueban las
@@ -147,6 +159,12 @@ func NewWithOptions(options Options, probe Probe, origins []string, logger *slog
 			tracked.WriteHeader(204)
 			return
 		}
+		// La credencial de envío del mesero solo vale en POST restaurant/offline-orders (etapa A1; revisión R3, B1):
+		// en cualquier otra ruta, también la versión, la salud y el contrato, se rechaza antes de atenderla.
+		if offlineCredentialMisplaced(r) {
+			fail(tracked, r, 401, "OFFLINE_CREDENTIAL_NOT_ALLOWED", "La autorización de envío solo sirve para entregar pedidos capturados sin conexión.")
+			return
+		}
 		technicalRoute := slices.Contains([]string{"/api/v1/health/live", "/api/v1/health/ready", "/api/v1/version", "/api/v1/events", "/api/v1/openapi.json"}, r.URL.Path)
 		if r.Method != http.MethodGet && (technicalRoute || len(application) == 0) {
 			w.Header().Set("Allow", "GET, OPTIONS")
@@ -155,12 +173,22 @@ func NewWithOptions(options Options, probe Probe, origins []string, logger *slog
 		}
 		// Un cliente que se identifica con una versión anterior a la mínima recibe «Actualiza esta terminal»
 		// antes de llegar a la aplicación (etapa 9G, §5.1; clientversion.go).
-		if problem := checkClient(r, metadata.MinClientVersion, metadata.Version); problem != nil {
+		if problem := checkClient(r, metadata.MinimumFor, metadata.Version); problem != nil {
 			failWithDetails(tracked, r, problem.status, problem.code, problem.message, problem.details)
 			return
 		}
 		mux.ServeHTTP(tracked, r)
 	})
+}
+
+// clientMinimums es la versión mínima de cada tipo de cliente que conoce la API v1 (todos presentes: un tipo sin
+// mínima propia en product.json usa la general).
+func clientMinimums(metadata product.Metadata) map[string]string {
+	minimums := map[string]string{}
+	for _, kind := range ClientKinds {
+		minimums[kind] = metadata.MinimumFor(kind)
+	}
+	return minimums
 }
 
 type responseWriter struct {

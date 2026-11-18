@@ -75,10 +75,13 @@ func (worker *Worker) ReleaseDue(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	handler := service{ctx: ctx, tx: tx}
+	handler := service{ctx: ctx, tx: tx, preparation: map[string]bool{}}
 	for index := range releases {
 		release := &releases[index]
 		if err := handler.prepareRelease(release); err != nil {
+			return err
+		}
+		if err := handler.notePreparationUnits(release.UnitIDs); err != nil {
 			return err
 		}
 		if err := systemHistory(ctx, tx, "release.automatic", release.ID, map[string]any{"scheduled_at": release.ScheduledAt}); err != nil {
@@ -87,6 +90,10 @@ func (worker *Worker) ReleaseDue(ctx context.Context) error {
 		if err := events.Append(ctx, tx, "kitchen.schedule.executed", "kitchen", &release.ID, nil); err != nil {
 			return err
 		}
+	}
+	// Etapa A1 (A1-D11): la liberación automática también avisa a los meseros de esas cuentas, una vez por cuenta.
+	if err := handler.publishPreparation(); err != nil {
+		return err
 	}
 	return tx.Commit(ctx)
 }

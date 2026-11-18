@@ -16,6 +16,14 @@ export interface User {
   // Etapa 9H: si tiene contraseña (los importados del sistema anterior llegan sin ella y sin acceso). Solo lo
   // entrega la lista de Usuarios; la sesión no lo lleva.
   has_password?: boolean;
+  // Etapa A1 (fase B): PIN para los teléfonos y tabletas de meseros (nunca el PIN), su nombre corto, el color de su
+  // distintivo (de la paleta de Go) y hasta cuándo está bloqueado por intentos fallidos. La sesión solo lleva has_pin.
+  has_pin?: boolean;
+  short_name?: string | null;
+  badge_color?: string | null;
+  pin_locked_until?: string | null;
+  // A1-D16: el PIN quedó bloqueado por tres bloqueos seguidos y espera a que un administrador lo desbloquee.
+  pin_requires_unlock?: boolean;
 }
 
 export interface Identity {
@@ -75,6 +83,8 @@ export interface Device {
   paired_at?: string | null;
   online?: boolean;
   current_user?: string | null;
+  // Etapa A1 (fase B): segundos sin uso tras los que un teléfono o tableta de meseros vuelve a la pantalla de entrada.
+  idle_lock_seconds?: number;
 }
 
 // Tipos de dispositivo (etapa 9G, decisión D9): lista cerrada de Go.

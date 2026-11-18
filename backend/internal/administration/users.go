@@ -10,8 +10,14 @@ import (
 
 // has_password (etapa 9H) dice si el usuario tiene contraseña: los importados del sistema anterior entran sin ella
 // (sin acceso) hasta «Asignar contraseña» (user_password.go). Nunca se expone la contraseña ni su hash.
+// Etapa A1 (fase B, pin.go): si tiene PIN para los dispositivos de meseros (nunca el PIN ni su hash), su nombre corto,
+// el color de su distintivo y, si el PIN está bloqueado por intentos fallidos, hasta cuándo o si espera a que un
+// administrador lo desbloquee (A1-D16, pin_requires_unlock).
 const publicUserColumns = "u.id,u.username,u.display_name,u.role_id,r.name AS role_name,u.active,u.initial_password," +
-	"(u.password_hash IS NOT NULL) AS has_password,u.created_at,u.updated_at"
+	"(u.password_hash IS NOT NULL) AS has_password,u.created_at,u.updated_at," +
+	"(u.pin_hash IS NOT NULL) AS has_pin,u.short_name,u.badge_color," +
+	"(SELECT a.locked_until FROM app.pin_attempts a WHERE a.user_id=u.id AND a.locked_until>now()) AS pin_locked_until," +
+	"coalesce((SELECT a.requires_unlock FROM app.pin_attempts a WHERE a.user_id=u.id),false) AS pin_requires_unlock"
 
 type UserInput struct {
 	Username    string `json:"username"`
@@ -31,6 +37,10 @@ func users(ctx context.Context, tx pgx.Tx, request Request, principal Principal,
 	// Etapa 9H: «Asignar contraseña» a un usuario sin contraseña (user_password.go).
 	if len(parts) == 3 && parts[2] == "password" {
 		return assignPassword(ctx, tx, request, principal, parts[1])
+	}
+	// Etapa A1 (fase B): PIN para los dispositivos de meseros, su nombre corto, su color y su desbloqueo (pin.go).
+	if len(parts) >= 3 && parts[2] == "pin" {
+		return userPIN(ctx, tx, request, principal, parts[1], parts)
 	}
 	// Etapa 9F: «Estaciones que puede atender» (user_stations.go).
 	if len(parts) == 3 && parts[2] == "kitchen-stations" {
@@ -142,6 +152,12 @@ func users(ctx context.Context, tx pgx.Tx, request Request, principal Principal,
 			}
 			if !input.Active {
 				_, err = tx.Exec(ctx, "UPDATE app.sessions SET revoked_at=now(),revoke_reason='user_disabled' WHERE user_id=$1 AND revoked_at IS NULL", userID)
+				if err != nil {
+					return err
+				}
+				// Etapa A1 (A1-D1): desactivar al usuario también revoca su credencial de envío de pedidos sin
+				// conexión en todos los dispositivos (al usarla, Go comprobaría además que el usuario está activo).
+				_, err = revokeOfflineCredentials(ctx, tx, "user_id", userID, "user_disabled")
 			}
 			return err
 		})

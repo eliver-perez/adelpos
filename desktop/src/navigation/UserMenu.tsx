@@ -4,13 +4,15 @@ import { useDismiss } from './useDismiss';
 
 // Menú del usuario de la barra superior (§1.1): nombre y rol, con Mis preferencias (sale de
 // Administración porque es de cada usuario), Cambiar contraseña y Cerrar sesión. En la barra
-// reducida de la captura se muestra compacto (solo el nombre).
+// reducida de la captura se muestra compacto (solo el nombre). Desde la etapa A1 (fase B), «Mi PIN»
+// para quien entra con PIN en los teléfonos y tabletas de meseros (onPin solo llega en ese caso).
 export function UserMenu({
   name,
   role,
   compact = false,
   onPreferences,
   onPassword,
+  onPin,
   onLogout,
 }: {
   name: string;
@@ -18,6 +20,7 @@ export function UserMenu({
   compact?: boolean;
   onPreferences: () => void;
   onPassword: () => void;
+  onPin?: () => void;
   onLogout: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -60,6 +63,11 @@ export function UserMenu({
           <button type="button" className="secondary-button" onClick={() => choose(onPassword)}>
             <IconLabel icon="key">Cambiar contraseña</IconLabel>
           </button>
+          {onPin && (
+            <button type="button" className="secondary-button" onClick={() => choose(onPin)}>
+              <IconLabel icon="lock">Mi PIN</IconLabel>
+            </button>
+          )}
           <button type="button" className="secondary-button" onClick={() => choose(onLogout)}>
             <IconLabel icon="logout">Cerrar sesión</IconLabel>
           </button>

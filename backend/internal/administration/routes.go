@@ -45,6 +45,10 @@ func (service *Service) protected(ctx context.Context, tx pgx.Tx, request Reques
 	if request.Method == "POST" && route == "auth/password" {
 		return changePassword(ctx, tx, principal, request.Body)
 	}
+	// «Mi PIN» (etapa A1, fase B; pin.go): el propio usuario define su PIN con su contraseña actual.
+	if route == "auth/pin" {
+		return ownPIN(ctx, tx, request, principal)
+	}
 	if route == "preferences" {
 		return preferences(ctx, tx, request, principal, principal.UserID, false)
 	}
@@ -184,6 +188,10 @@ func (service *Service) protected(ctx context.Context, tx pgx.Tx, request Reques
 	if route == "devices/sessions-summary" && request.Method == "GET" {
 		return sessionsSummary(ctx, tx, principal)
 	}
+	// Paleta del distintivo de los meseros (etapa A1, fase B; pin.go).
+	if route == "users/badge-colors" && request.Method == "GET" {
+		return badgeColors(principal)
+	}
 	parts := strings.Split(route, "/")
 	if len(parts) > 1 && parts[1] != "invitations" && !identifierPattern.MatchString(parts[1]) {
 		return nil, invalid("El identificador no es válido.")
@@ -285,8 +293,17 @@ func currentIdentity(ctx context.Context, tx pgx.Tx, principal Principal) (any, 
 	}
 	// La terminal informa su pantalla de inicio (etapa 9C, §1.5): la aplicación abre en ella al
 	// iniciar sesión y el logotipo vuelve a ella. La preferencia por usuario ya no decide el inicio.
-	terminal, err := object(ctx, tx, "SELECT id,name,register_id,keyboard_mode,home_screen FROM app.devices WHERE id=$1", principal.DeviceID)
+	// Etapa A1 (fase B): idle_lock_seconds es el bloqueo por inactividad del dispositivo (lo usa el de meseros).
+	terminal, err := object(ctx, tx, "SELECT id,name,register_id,keyboard_mode,home_screen,idle_lock_seconds FROM app.devices WHERE id=$1", principal.DeviceID)
 	if err != nil {
+		return nil, err
+	}
+	// Etapa A1 (fase B): «Mi PIN» dice si el usuario ya tiene PIN (nunca el PIN ni su hash).
+	user := struct {
+		Principal
+		HasPIN bool `json:"has_pin"`
+	}{Principal: principal}
+	if err := tx.QueryRow(ctx, "SELECT pin_hash IS NOT NULL FROM app.users WHERE id=$1", principal.UserID).Scan(&user.HasPIN); err != nil {
 		return nil, err
 	}
 	// Etapa 9F (§4.5): el nombre visible de la precuenta lo leen todos los usuarios con la sesión, porque
@@ -296,5 +313,5 @@ func currentIdentity(ctx context.Context, tx pgx.Tx, principal Principal) (any, 
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"user": principal, "preferences": preference, "terminal": terminal, "establishment": establishment}, nil
+	return map[string]any{"user": user, "preferences": preference, "terminal": terminal, "establishment": establishment}, nil
 }

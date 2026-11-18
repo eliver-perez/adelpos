@@ -53,7 +53,10 @@ type contractClient struct {
 	token    string
 	session  string
 	version  string
-	covered  map[string][]int
+	// kind es X-Client-Kind: el del dispositivo de la credencial (revisión R3, B2: desktop en la terminal del asistente,
+	// android en el teléfono emparejado).
+	kind    string
+	covered map[string][]int
 	// fingerprint es la huella SPKI del certificado del servidor (etapa 9G, fase C: emparejamiento).
 	fingerprint [32]byte
 }
@@ -81,7 +84,7 @@ func (client *contractClient) request(ctx context.Context, method, path string, 
 		request.Header.Set("Authorization", "Bearer "+client.session)
 	}
 	request.Header.Set(httpapi.ClientVersionHeader, client.version)
-	request.Header.Set(httpapi.ClientKindHeader, "android")
+	request.Header.Set(httpapi.ClientKindHeader, client.kind)
 	for key, value := range headers {
 		request.Header.Set(key, value)
 	}
@@ -204,7 +207,7 @@ func TestContractV1(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := &contractClient{t: t, contract: contract, handler: handler, version: product.Read().Version, covered: map[string][]int{},
+	client := &contractClient{t: t, contract: contract, handler: handler, version: product.Read().Version, kind: "desktop", covered: map[string][]int{},
 		fingerprint: serverIdentity.Fingerprint}
 	// Asistente inicial: la terminal principal y el administrador.
 	setup := httptest.NewRequest("POST", "/api/v1/setup", strings.NewReader(`{"name":"Contrato v1","timezone":"America/Monterrey",
@@ -347,6 +350,12 @@ func contractScenario(t *testing.T, client *contractClient) {
 		lateError["details"].(map[string]any)["result"].(map[string]any)["order_id"] != accepted["order_id"] {
 		t.Fatalf("envío tardío del pedido ya aceptado: %v", late)
 	}
+	// Etapa A1 (fase E): mesas, modificar y cancelar unidades, cuenta que ya no está abierta y el borrador en el pedido
+	// sin conexión.
+	contractWaiterMode(t, client, contractWaiterData{
+		accountID: accountID, tableID: fmt.Sprint(tables[0]["id"]), burger: fmt.Sprint(burger["id"]), fries: fmt.Sprint(fries["id"]),
+		version: version, customization: customization,
+	})
 
 	// Eventos en tiempo real: el primer mensaje del flujo cumple EventBatch.
 	streamContext, stop := context.WithTimeout(context.Background(), 400*time.Millisecond)
@@ -367,31 +376,240 @@ func contractScenario(t *testing.T, client *contractClient) {
 	if err := client.contract.ValidateJSON(map[string]any{"$ref": "#/components/schemas/EventBatch"}, []byte(batch)); err != nil {
 		t.Fatalf("el mensaje del canal de eventos no cumple el contrato: %v (%q)", err, batch)
 	}
+	// Etapa A1: confirmar la cuenta avisó en el ámbito restaurant que cambió su preparación.
+	if !strings.Contains(batch, `"kind":"restaurant.account.preparation_changed","scope":"restaurant","station_id":null,"aggregate_id":"`+accountID+`"`) {
+		t.Fatalf("el canal no trae el evento de preparación de la cuenta: %.2000s", batch)
+	}
 
 	// Recuperación del estado y cierre de sesión.
 	state := decodeContract[map[string]any](t, client.call("GET", "/restaurant/state", nil, nil, 200).Body.Bytes())
 	if accounts, _ := state["accounts"].([]any); len(accounts) < 2 {
 		t.Fatalf("el estado no trae las cuentas abiertas: %v", state["accounts"])
 	}
-	contractPairing(t, client)
+	// Etapa A1: el cursor del canal de eventos al leer el estado; desde él no queda nada pendiente.
+	cursor, _ := state["event_cursor"].(float64)
+	if cursor < 1 {
+		t.Fatalf("cursor de eventos del estado: %v", state["event_cursor"])
+	}
+	phone := contractPairing(t, client)
+	// Etapa A1 (fase B): el teléfono emparejado muestra a los meseros, uno entra con PIN y la cola entrega un pedido con
+	// la credencial de envío (sin sesión).
+	order := offline("40.00")
+	order["destination"] = map[string]any{"account_id": accountID}
+	contractWaiterPIN(t, client, phone, order)
 	client.call("POST", "/auth/logout", nil, nil, 200)
+}
+
+// contractWaiterData es lo que el recorrido del modo Mesero toma del recorrido principal.
+type contractWaiterData struct {
+	accountID     string
+	tableID       string
+	burger        string
+	fries         string
+	version       int64
+	customization map[string]any
+}
+
+// contractWaiterMode es lo que usa el modo Mesero de la etapa A1 (fase E): las mesas con su mapa, modificar y cancelar
+// unidades enviadas, el rechazo de una cuenta que ya no está abierta (con details.reason) y un pedido sin conexión que
+// sustituye un renglón del borrador (y otro que ya no está como lo vio el dispositivo).
+func contractWaiterMode(t *testing.T, client *contractClient, data contractWaiterData) {
+	overview := decodeContract[map[string]any](t, client.call("GET", "/restaurant/overview", nil, nil, 200).Body.Bytes())
+	if areas, _ := overview["areas"].([]any); len(areas) != 1 {
+		t.Fatalf("áreas: %v", overview["areas"])
+	}
+	if tables, _ := overview["tables"].([]any); len(tables) != 2 || tables[0].(map[string]any)["shape"] != "rectangle" {
+		t.Fatalf("mesas: %v", overview["tables"])
+	}
+	route := "/restaurant/accounts/" + data.accountID
+	bill := decodeContract[map[string]any](t, client.call("GET", route, nil, nil, 200).Body.Bytes())
+	line := func(product string) map[string]any {
+		for _, value := range bill["lines"].([]any) {
+			candidate := value.(map[string]any)
+			if candidate["state"] == "active" && candidate["request"].(map[string]any)["product_id"] == product {
+				return candidate
+			}
+		}
+		t.Fatalf("la cuenta no tiene una partida activa de %s: %v", product, bill["lines"])
+		return nil
+	}
+	burger := line(data.burger)
+	revision := bill["account"].(map[string]any)["revision"]
+	// Cambiar solo las observaciones conserva los importes; la vista previa da la huella que exige la modificación.
+	changed := map[string]any{"product_id": data.burger, "variant_id": nil, "quantity": burger["quantity"],
+		"customization": map[string]any{"ingredients": []any{}, "groups": []any{}, "components": []any{}, "notes": "Sin cebolla"}}
+	preview := decodeContract[map[string]any](t, client.call("POST", route+"/edit-preview", map[string]any{
+		"revision": revision, "version_id": burger["version_id"], "line": changed,
+	}, nil, 200).Body.Bytes())
+	bill = decodeContract[map[string]any](t, client.call("POST", route+"/edit", map[string]any{
+		"operation_id": contractID(), "revision": revision, "version_id": burger["version_id"], "line": changed,
+		"expected_fingerprint": preview["fingerprint"], "reason": "El cliente la pidió sin cebolla",
+	}, nil, 200).Body.Bytes())
+	fries := line(data.fries)
+	bill = decodeContract[map[string]any](t, client.call("POST", route+"/cancel", map[string]any{
+		"operation_id": contractID(), "revision": bill["account"].(map[string]any)["revision"], "version_id": fries["version_id"],
+		"quantity": 1, "reason": "El cliente ya no las quiso",
+	}, nil, 200).Body.Bytes())
+
+	// Una cuenta que se canceló mientras tanto: 400 OPERATION_VALIDATION con details.reason.
+	item := map[string]any{"id": contractID(), "product_id": data.fries, "variant_id": nil, "quantity": 1, "customization": data.customization}
+	discarded := decodeContract[map[string]any](t, client.call("POST", "/restaurant/accounts", map[string]any{
+		"operation_id": contractID(), "mode": "dine_in", "items": []map[string]any{item},
+	}, nil, 200).Body.Bytes())["account"].(map[string]any)
+	discardedID := fmt.Sprint(discarded["id"])
+	client.setup("POST", "/restaurant/accounts/"+discardedID+"/discard",
+		map[string]any{"operation_id": contractID(), "revision": discarded["revision"]}, 200)
+	rejected := decodeContract[map[string]any](t, client.call("PUT", "/restaurant/accounts/"+discardedID+"/draft", map[string]any{
+		"operation_id": contractID(), "revision": discarded["revision"], "items": []map[string]any{item},
+	}, nil, 400).Body.Bytes())
+	details, _ := json.Marshal(rejected["error"].(map[string]any)["details"])
+	if err := client.contract.ValidateJSON(map[string]any{"$ref": "#/components/schemas/AccountNotOpenDetails"}, details); err != nil ||
+		!strings.Contains(string(details), `"account_state":"voided"`) {
+		t.Fatalf("detalle de la cuenta que ya no está abierta: %v %s", err, details)
+	}
+
+	contractOfflineNeverRepeats(t, client, data, bill["account"].(map[string]any)["revision"])
+}
+
+// contractOfflineNeverRepeats es el pedido sin conexión frente al borrador y a lo ya enviado (A1-D6 y A1-D18): un
+// renglón guardado con el id de una partida se sustituye aunque el pedido no lo nombre; una partida ya enviada es
+// draft_item_sent y al confirmar se envía lo demás; la clave de un «Enviar a cocina» ya aplicado es
+// OFFLINE_ORDER_ALREADY_ACCEPTED (origin confirm_draft); y a una mesa cuyas partidas ya están en una cuenta suya,
+// items_in_account con la cuenta.
+func contractOfflineNeverRepeats(t *testing.T, client *contractClient, data contractWaiterData, revision any) {
+	route := "/restaurant/accounts/" + data.accountID
+	line := func(quantity int) map[string]any {
+		return map[string]any{"id": contractID(), "product_id": data.fries, "variant_id": nil, "quantity": quantity, "customization": data.customization}
+	}
+	item := func(saved map[string]any) map[string]any {
+		return map[string]any{"id": saved["id"], "product_id": data.fries, "variant_id": nil, "quantity": saved["quantity"],
+			"customization": data.customization, "seen_unit_price": "40.00"}
+	}
+	order := func(key string, destination map[string]any, items ...map[string]any) map[string]any {
+		return map[string]any{
+			"operation_id": key, "catalog_version": data.version,
+			"captured_at": time.Now().Add(-time.Minute).UTC().Format(time.RFC3339Nano),
+			"destination": destination, "items": items,
+		}
+	}
+	account := map[string]any{"account_id": data.accountID}
+	saved, other := line(2), line(1)
+	client.call("PUT", route+"/draft", map[string]any{
+		"operation_id": contractID(), "revision": revision, "items": []map[string]any{saved, other},
+	}, nil, 200)
+	// El renglón guardado con el id de la partida se quita aunque el pedido no lo nombre; el otro se queda.
+	accepted := decodeContract[map[string]any](t, client.call("POST", "/restaurant/offline-orders",
+		order(contractID(), account, item(saved)), nil, 200).Body.Bytes())
+	removed, _ := accepted["removed_draft_item_ids"].([]any)
+	remaining, _ := accepted["bill"].(map[string]any)["draft"].([]any)
+	if len(removed) != 1 || removed[0] != saved["id"] || len(remaining) != 1 || remaining[0].(map[string]any)["id"] != other["id"] {
+		t.Fatalf("pedido que sustituye el borrador: quitados %v, quedan %v", removed, remaining)
+	}
+	// La partida ya enviada: draft_item_sent; confirmado, entra solo lo demás.
+	extra := line(1)
+	resend := order(contractID(), account, item(saved), item(extra))
+	rejection := decodeContract[map[string]any](t, client.call("POST", "/restaurant/offline-orders", resend, nil, 409).Body.Bytes())
+	details := rejection["error"].(map[string]any)["details"].(map[string]any)
+	if list, _ := details["changes"].([]any); len(list) != 1 || list[0].(map[string]any)["kind"] != "draft_item_sent" {
+		t.Fatalf("partida ya enviada: %v", details)
+	}
+	resend["confirmation"] = map[string]any{"catalog_version": details["catalog_version"], "changes": details["changes"]}
+	accepted = decodeContract[map[string]any](t, client.call("POST", "/restaurant/offline-orders", resend, nil, 200).Body.Bytes())
+	if sent, _ := accepted["already_sent_item_ids"].([]any); len(sent) != 1 || sent[0] != saved["id"] {
+		t.Fatalf("ya enviadas: %v", accepted["already_sent_item_ids"])
+	}
+	// «Enviar a cocina» con la clave K que entró sin respuesta; la cola manda el pedido con K: ya aceptado.
+	key := contractID()
+	current := decodeContract[map[string]any](t, client.call("GET", route, nil, nil, 200).Body.Bytes())
+	preview := decodeContract[map[string]any](t, client.call("GET", route+"/preview", nil, nil, 200).Body.Bytes())
+	client.call("POST", route+"/confirm", map[string]any{
+		"operation_id": key, "revision": current["account"].(map[string]any)["revision"], "expected_fingerprint": preview["fingerprint"],
+	}, nil, 200)
+	repeated := client.call("POST", "/restaurant/offline-orders", order(key, account, item(other)), nil, 409).Body.Bytes()
+	if err := client.contract.ValidateJSON(map[string]any{"$ref": "#/components/schemas/OfflineOrderAlreadyAccepted"}, repeated); err != nil ||
+		!strings.Contains(string(repeated), `"origin":"confirm_draft"`) {
+		t.Fatalf("pedido con la clave de un Enviar a cocina aplicado: %v %s", err, repeated)
+	}
+	// A la mesa, con partidas que ya están en su cuenta abierta: items_in_account con la cuenta.
+	redirect := decodeContract[map[string]any](t, client.call("POST", "/restaurant/offline-orders",
+		order(contractID(), map[string]any{"table_id": data.tableID, "seen_account_ids": []string{}}, item(other)), nil, 409).Body.Bytes())
+	changes, _ := redirect["error"].(map[string]any)["details"].(map[string]any)["changes"].([]any)
+	if len(changes) != 1 || changes[0].(map[string]any)["kind"] != "items_in_account" || changes[0].(map[string]any)["account_id"] != data.accountID {
+		t.Fatalf("partidas ya en una cuenta de la mesa: %v", redirect)
+	}
+}
+
+// contractWaiterPIN es la entrada con PIN de la etapa A1 (fase B): el administrador da a un mesero su PIN (fuera del
+// contrato, en Personal › Usuarios); el teléfono emparejado pide la lista sin sesión, el PIN incorrecto se rechaza, el
+// correcto entrega la sesión y la credencial de envío, y con esa credencial (sin sesión) se entrega un pedido
+// capturado sin conexión.
+func contractWaiterPIN(t *testing.T, client *contractClient, phone *contractClient, order map[string]any) {
+	role := decodeContract[map[string]any](t, client.setup("POST", "/roles", map[string]any{"name": "Meseros contrato",
+		"permissions": []string{"waiter_devices.use", "orders.confirm", "orders.capture", "accounts.read", "accounts.open",
+			"catalog.read", "catalog.prices.read"}}, 200))
+	waiter := decodeContract[map[string]any](t, client.setup("POST", "/users", map[string]any{"username": "ana.contrato",
+		"display_name": "Ana del contrato", "role_id": role["id"], "active": true, "password": "clave-del-contrato"}, 200))
+	waiterID := fmt.Sprint(waiter["id"])
+	client.setup("PUT", "/users/"+waiterID+"/pin", map[string]any{"pin": "4829", "short_name": "Ana", "badge_color": "#3591d4"}, 200)
+	list := decodeContract[map[string]any](t, phone.call("GET", "/auth/pin-users", nil, nil, 200).Body.Bytes())
+	users, _ := list["users"].([]any)
+	if len(users) != 1 || users[0].(map[string]any)["id"] != waiterID || users[0].(map[string]any)["color"] != "#3591d4" {
+		t.Fatalf("meseros del teléfono: %v", list)
+	}
+	phone.call("POST", "/auth/pin-login", map[string]string{"user_id": waiterID, "pin": "4828"}, nil, 401)
+	login := decodeContract[map[string]any](t, phone.call("POST", "/auth/pin-login",
+		map[string]string{"user_id": waiterID, "pin": "4829"}, nil, 200).Body.Bytes())
+	waiterPhone := *phone
+	waiterPhone.session = fmt.Sprint(login["session_token"])
+	identity := decodeContract[map[string]any](t, waiterPhone.call("GET", "/auth/me", nil, nil, 200).Body.Bytes())
+	if identity["terminal"].(map[string]any)["idle_lock_seconds"] != float64(120) {
+		t.Fatalf("bloqueo por inactividad del teléfono: %v", identity["terminal"])
+	}
+	queue := *phone
+	accepted := decodeContract[map[string]any](t, queue.call("POST", "/restaurant/offline-orders", order,
+		map[string]string{"X-Offline-Credential": fmt.Sprint(login["offline_credential"])}, 200).Body.Bytes())
+	if accepted["status"] != "accepted" {
+		t.Fatalf("pedido con la credencial de envío: %v", accepted)
+	}
+	// Otro mesero falla 5 veces: 429 PIN_LOCKED con su bloqueo por tiempo (PinLockedError) y la lista lo informa.
+	other := decodeContract[map[string]any](t, client.setup("POST", "/users", map[string]any{"username": "beto.contrato",
+		"display_name": "Beto del contrato", "role_id": role["id"], "active": true, "password": "clave-del-contrato-2"}, 200))
+	otherID := fmt.Sprint(other["id"])
+	client.setup("PUT", "/users/"+otherID+"/pin", map[string]any{"pin": "6152", "short_name": "Beto", "badge_color": ""}, 200)
+	for range 4 {
+		phone.call("POST", "/auth/pin-login", map[string]string{"user_id": otherID, "pin": "6153"}, nil, 401)
+	}
+	locked := decodeContract[map[string]any](t, phone.call("POST", "/auth/pin-login",
+		map[string]string{"user_id": otherID, "pin": "6153"}, nil, 429).Body.Bytes())
+	details := locked["error"].(map[string]any)["details"].(map[string]any)
+	if details["requires_unlock"] != false || details["locked_until"] == nil {
+		t.Fatalf("bloqueo por tiempo: %v", locked)
+	}
+	for _, entry := range decodeContract[map[string]any](t, phone.call("GET", "/auth/pin-users", nil, nil, 200).Body.Bytes())["users"].([]any) {
+		if user := entry.(map[string]any); user["id"] == otherID && (user["locked_until"] == nil || user["requires_unlock"] != false) {
+			t.Fatalf("la lista no informa el bloqueo: %v", user)
+		}
+	}
 }
 
 // contractPairing es el emparejamiento de un teléfono Android (etapa 9G, fases B y C): pide el código con el
 // compromiso de su número, lo revela, cambia su nombre, espera la aprobación (que se hace en la computadora
 // principal, fuera del contrato) y reclama su credencial una sola vez; otra solicitud se cancela.
-func contractPairing(t *testing.T, client *contractClient) {
+func contractPairing(t *testing.T, client *contractClient) *contractClient {
+	// Las rutas pairing/* las llama el teléfono que se empareja (todavía sin credencial), como cliente android.
+	terminal := *client
+	terminal.kind = "android"
 	nonce := make([]byte, 32)
 	_, _ = rand.Read(nonce)
-	created := decodeContract[map[string]string](t, client.call("POST", "/pairing/requests", map[string]any{
+	created := decodeContract[map[string]string](t, terminal.call("POST", "/pairing/requests", map[string]any{
 		"name": "Mesero contrato", "device_kind": "android", "os": "Android 15", "app_version": client.version,
 		"commitment": administration.PairingCommitment(nonce),
 	}, nil, 200).Body.Bytes())
 	requestID := created["request_id"]
 	secret := map[string]string{"X-Pairing-Secret": created["pairing_secret"]}
-	client.call("POST", "/pairing/requests/"+requestID+"/reveal", map[string]string{"terminal_nonce": hex.EncodeToString(nonce)}, secret, 200)
-	client.call("POST", "/pairing/requests/"+requestID+"/name", map[string]string{"name": "Mesero Ana contrato"}, secret, 200)
-	state := decodeContract[map[string]string](t, client.call("GET", "/pairing/requests/"+requestID, nil, secret, 200).Body.Bytes())
+	terminal.call("POST", "/pairing/requests/"+requestID+"/reveal", map[string]string{"terminal_nonce": hex.EncodeToString(nonce)}, secret, 200)
+	terminal.call("POST", "/pairing/requests/"+requestID+"/name", map[string]string{"name": "Mesero Ana contrato"}, secret, 200)
+	state := decodeContract[map[string]string](t, terminal.call("GET", "/pairing/requests/"+requestID, nil, secret, 200).Body.Bytes())
 	if state["state"] != "pending" || state["name"] != "Mesero Ana contrato" {
 		t.Fatalf("solicitud pendiente: %v", state)
 	}
@@ -405,22 +623,26 @@ func contractPairing(t *testing.T, client *contractClient) {
 		t.Fatal(err)
 	}
 	client.setup("POST", "/devices/pairing-requests/"+requestID+"/approve", map[string]string{"code": code}, 200)
-	if approved := decodeContract[map[string]string](t, client.call("GET", "/pairing/requests/"+requestID, nil, secret, 200).Body.Bytes()); approved["state"] != "approved" {
+	if approved := decodeContract[map[string]string](t, terminal.call("GET", "/pairing/requests/"+requestID, nil, secret, 200).Body.Bytes()); approved["state"] != "approved" {
 		t.Fatalf("solicitud aprobada: %v", approved)
 	}
-	claimed := decodeContract[map[string]string](t, client.call("POST", "/pairing/requests/"+requestID+"/claim", map[string]any{}, secret, 200).Body.Bytes())
+	claimed := decodeContract[map[string]string](t, terminal.call("POST", "/pairing/requests/"+requestID+"/claim", map[string]any{}, secret, 200).Body.Bytes())
 	if claimed["name"] != "Mesero Ana contrato" || claimed["server_id"] != created["server_id"] {
 		t.Fatalf("credencial reclamada: %v", claimed)
 	}
 	again := httptest.NewRecorder()
-	client.handler.ServeHTTP(again, client.request(context.Background(), "POST", "/pairing/requests/"+requestID+"/claim", map[string]any{}, secret))
+	terminal.handler.ServeHTTP(again, terminal.request(context.Background(), "POST", "/pairing/requests/"+requestID+"/claim", map[string]any{}, secret))
 	if again.Code != 409 || strings.Contains(again.Body.String(), "device_token") {
 		t.Fatalf("la credencial se entrega una sola vez: %d %s", again.Code, again.Body.String())
 	}
-	other := decodeContract[map[string]string](t, client.call("POST", "/pairing/requests", map[string]any{
+	other := decodeContract[map[string]string](t, terminal.call("POST", "/pairing/requests", map[string]any{
 		"name": "Mesero que se arrepiente", "device_kind": "android", "os": "Android 15", "app_version": client.version,
 		"commitment": administration.PairingCommitment(serverNonce),
 	}, nil, 200).Body.Bytes())
-	client.call("POST", "/pairing/requests/"+other["request_id"]+"/cancel", map[string]any{},
+	terminal.call("POST", "/pairing/requests/"+other["request_id"]+"/cancel", map[string]any{},
 		map[string]string{"X-Pairing-Secret": other["pairing_secret"]}, 200)
+	// El teléfono ya emparejado (etapa A1): sus credenciales, sin sesión.
+	phone := *client
+	phone.device, phone.token, phone.session, phone.kind = claimed["device_id"], claimed["device_token"], "", "android"
+	return &phone
 }

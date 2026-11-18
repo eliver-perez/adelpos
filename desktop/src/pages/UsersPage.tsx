@@ -6,6 +6,8 @@ import type { Permission, Role, User } from '../services/models';
 import { OtherUserPreferences } from './PreferencesPage';
 import { UserKitchenStations } from './UserKitchenStations';
 import { Select } from '../components/Select';
+import { PinStatus, UserPinPanel, unlockUserPIN } from './UserPin';
+import { serverHas, waiterPINCapability } from '../services/serverCapabilities';
 
 function UserEditor({
   user,
@@ -249,9 +251,12 @@ function UserPermissionEditor({
 export function UsersPage({
   can,
   onChanged,
+  currentUserID,
 }: {
   can: (key: string) => boolean;
   onChanged: () => Promise<void>;
+  // Usuario de la sesión (etapa A1, revisión R3, B6): su PIN se define en «Mi PIN», con su contraseña, nunca aquí.
+  currentUserID?: string;
 }) {
   const users = useResource<User[]>('users');
   const roles = useResource<Role[]>('roles', { enabled: can('roles.read') });
@@ -260,6 +265,10 @@ export function UsersPage({
   const [tab, setTab] = useState('details');
   // Etapa 9H: usuario sin contraseña al que se le asigna una.
   const [assigning, setAssigning] = useState<User | null>(null);
+  // Etapa A1 (fase B): PIN de los teléfonos y tabletas de meseros, solo si el servidor lo ofrece.
+  const [pinFor, setPinFor] = useState<User | null>(null);
+  const [unlocking, setUnlocking] = useState('');
+  const pinAvailable = serverHas(waiterPINCapability);
   async function saved() {
     await users.reload();
     await onChanged();
@@ -267,7 +276,21 @@ export function UsersPage({
   function edit(user: User | null) {
     setTab('details');
     setAssigning(null);
+    setPinFor(null);
     setSelected(user);
+  }
+  function openPIN(user: User) {
+    setSelected(undefined);
+    setAssigning(null);
+    setPinFor(user);
+  }
+  async function unlock(user: User) {
+    setUnlocking(user.id);
+    try {
+      await unlockUserPIN(user, saved);
+    } finally {
+      setUnlocking('');
+    }
   }
   return (
     <>
@@ -299,6 +322,14 @@ export function UsersPage({
             }}
           />
         </section>
+      )}
+      {pinFor && (
+        <UserPinPanel
+          key={pinFor.id}
+          user={pinFor}
+          onChanged={saved}
+          onClose={() => setPinFor(null)}
+        />
       )}
       {selected !== undefined && (
         <section className="surface panel">
@@ -367,6 +398,7 @@ export function UsersPage({
               <th>Nombre</th>
               <th>Rol</th>
               <th>Estado</th>
+              {pinAvailable && <th>PIN</th>}
               <th>Acciones</th>
             </tr>
           </thead>
@@ -387,6 +419,11 @@ export function UsersPage({
                     )}
                   </span>
                 </td>
+                {pinAvailable && (
+                  <td>
+                    <PinStatus user={user} />
+                  </td>
+                )}
                 <td>
                   <span className="users-actions">
                     {can('users.manage') && user.has_password === false && (
@@ -394,12 +431,29 @@ export function UsersPage({
                         className="secondary-button"
                         onClick={() => {
                           setSelected(undefined);
+                          setPinFor(null);
                           setAssigning(user);
                         }}
                       >
                         Asignar contraseña
                       </button>
                     )}
+                    {pinAvailable && can('users.manage') && user.id !== currentUserID && (
+                      <button className="secondary-button" onClick={() => openPIN(user)}>
+                        {user.has_pin ? 'Cambiar PIN' : 'Asignar PIN'}
+                      </button>
+                    )}
+                    {pinAvailable &&
+                      can('users.manage') &&
+                      (user.pin_locked_until || user.pin_requires_unlock) && (
+                        <button
+                          className="secondary-button"
+                          disabled={unlocking === user.id}
+                          onClick={() => void unlock(user)}
+                        >
+                          Desbloquear
+                        </button>
+                      )}
                     {(can('users.manage') || can('permissions.read')) && (
                       <button
                         className="secondary-button"

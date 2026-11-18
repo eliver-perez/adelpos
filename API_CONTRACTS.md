@@ -3823,3 +3823,143 @@ Sin rutas nuevas: cambian el catálogo y los resultados de `reports/*` (detalle 
   en «Turnos de caja» solo para quien consulta en Caja todas las cajas y el historial, y su diferencia guardada exige
   `cash.expected.read`. El resumen ejecutivo (`reports/dashboard`) no incluye el historial. Sin locks consultivos, como
   todo reporte.
+
+## Etapa A1 · PIN de los meseros (fase B, esquema 25)
+
+Especificación: [docs/etapas/ETAPA_A1_ANDROID.md](docs/etapas/ETAPA_A1_ANDROID.md) §3 y decisiones A1-D1 a A1-D5 de
+[docs/ETAPA_A1_AVANCE.md](docs/ETAPA_A1_AVANCE.md). Las rutas del dispositivo (`auth/pin-users`, `auth/pin-login` y la
+credencial de envío en `restaurant/offline-orders`) son de la API para clientes: [docs/API_V1.md](docs/API_V1.md),
+«Entrada con PIN y credencial de envío», y `internal/apicontract/openapi.json`. Aquí, las de administración y «Mi PIN»,
+que usa el escritorio (no están en el contrato para clientes, como `devices/*`). Código en
+`administration/pin.go` (reglas y administración) y `administration/pin_login.go` (dispositivo y credencial).
+
+| Método | Ruta                     | Permiso                                  | Cuerpo / respuesta                                                                                                                                                                                                                                                                                                                     |
+| ------ | ------------------------ | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/users/badge-colors`    | `users.read`                             | La paleta cerrada del distintivo: `[{hex, name}]` (la misma de las categorías del catálogo, `catalog.Palette`).                                                                                                                                                                                                                        |
+| PUT    | `/users/{id}/pin`        | `users.manage`                           | `{pin?, short_name, badge_color}` → usuario. Con `pin`: asigna o cambia el PIN. Sin `pin` (y el usuario ya tiene uno): solo el nombre corto y el color. Un administrador no se asigna su propio PIN aquí (403: lo hace en «Mi PIN» con su contraseña; Personal › Usuarios no ofrece «Asignar PIN» en la fila propia, revisión R3, B6). |
+| POST   | `/users/{id}/pin/remove` | `users.manage`                           | Sin cuerpo → usuario. Quita el PIN (se puede volver a asignar). Sin PIN: `409 PIN_NOT_SET`.                                                                                                                                                                                                                                            |
+| POST   | `/users/{id}/pin/unlock` | `users.manage`                           | Sin cuerpo → usuario. Quita el bloqueo por tiempo o el que espera a un administrador (A1-D16) y borra la serie de bloqueos (sin bloqueo vigente responde igual y no registra nada).                                                                                                                                                    |
+| PUT    | `/auth/pin`              | `waiter_devices.use` (el propio usuario) | «Mi PIN»: `{current_password, pin}` → `{has_pin: true, pin_version}`. Contraseña incorrecta: `401 INVALID_CREDENTIALS`. La identidad reservada no tiene PIN (403).                                                                                                                                                                     |
+| PATCH  | `/devices/{id}`          | `devices.manage`                         | Campo opcional nuevo `idle_lock_seconds` (bloqueo por inactividad, de 30 a 3600; 400 fuera de ese rango). Sin él se conserva el guardado (clientes anteriores). `GET devices`, la configuración, `auth/me` y `restaurant/state` lo informan.                                                                                           |
+
+- **Reglas del PIN** (las mismas en todas las rutas): de 4 a 6 dígitos ASCII (si no, `400 VALIDATION_ERROR`) y nunca uno
+  trivial (`400 PIN_TOO_SIMPLE`): todos los dígitos iguales, una secuencia ascendente o descendente (también la que da la
+  vuelta, como 7890 o 0987), un bloque de 2 o 3 dígitos repetido completo (1212, 121212, 123123) o uno de la lista corta
+  de muy usados (`commonPINs` de `pin.go`: 2580, 1004, 2000, 112233, 147258…). Se guarda con Argon2id, como las
+  contraseñas.
+- **Nombre corto**: hasta 20 caracteres, sin espacios al principio ni al final; vacío = el nombre visible. **Color**: uno
+  de la paleta o ninguno (vacío); un hexadecimal fuera de la paleta es 400.
+- **`pin_version`** sube al asignar, cambiar o quitar el PIN (no al cambiar solo el nombre corto o el color). Asignar,
+  cambiar o quitar el PIN —también en «Mi PIN»— borra los intentos fallidos, **cierra las sesiones del usuario en
+  dispositivos `android`** (`revoke_reason` `pin_changed` o `pin_removed`; «Mi PIN» conserva la sesión desde la que se
+  hace) y **revoca su credencial de envío** en todos los dispositivos. Las sesiones de escritorio no se tocan.
+  **Desactivar al usuario** (`PATCH users/{id}` con `active: false`) también revoca su credencial (`user_disabled`) y
+  **revocar un dispositivo** (`POST devices/{id}/revoke`), las de ese dispositivo (`device_revoked`).
+- **Usuarios** (`GET users` y la respuesta de cada ruta de usuario): propiedades nuevas `has_pin`, `short_name`,
+  `badge_color`, `pin_locked_until` (`null` si no está bloqueado por tiempo) y `pin_requires_unlock` (A1-D16). Nunca el
+  PIN ni su hash. **`GET auth/me`**: `user.has_pin`.
+- **Bloqueo** (A1-D5 y A1-D16): 5 fallos en 15 minutos, desde cualquier dispositivo, bloquean el PIN del usuario 5
+  minutos; al bloquearse, la cuenta vuelve a empezar. Los bloqueos forman una serie de 24 horas desde el primero: **el
+  tercero seguido sin una entrada correcta deja el PIN bloqueado hasta que un administrador lo desbloquee**
+  (`pin_attempts.requires_unlock`; `429 PIN_LOCKED` con `details.locked_until: null` y `details.requires_unlock: true`;
+  en Personal › Usuarios, «PIN bloqueado: pide desbloqueo» con «Desbloquear»). Una entrada correcta borra la serie;
+  «Mi PIN» no quita el bloqueo largo (solo un administrador). Se acepta que alguien bloquee a propósito el PIN de otro
+  (decisión del propietario). La contraseña no se bloquea con el PIN (su límite sigue siendo por usuario y terminal).
+- **Permisos de mesero** (A1-D17): una sesión de `auth/pin-login` (`sessions.opened_with_pin`) y la credencial de envío
+  solo tienen los permisos efectivos del usuario que están en la lista cerrada `administration.WaiterPermissions`
+  (`waiter_scope.go`, el único lugar): `waiter_devices.use`, `restaurant.tables.read`, `restaurant.areas.read`,
+  `accounts.read`, `accounts.open`, `orders.capture`, `orders.confirm`, `orders.edit`, `orders.cancel`, `catalog.read`,
+  `catalog.prices.read` y `events.read`. Un administrador con PIN no puede usar por esa sesión ninguna ruta de
+  administración (`users.*`, `devices.*`, `settings.*`…; 403 con `access.denied`) ni Para llevar; `auth/me` y
+  `restaurant/state` informan los permisos acotados. «Cambiar contraseña» desde esa sesión abre otra igual de acotada.
+  Las sesiones con contraseña (también en un teléfono) no cambian. `waiter_scope_test.go` comprueba que el contrato,
+  `docs/API_V1.md` y este archivo repiten la lista.
+- **Credencial de envío fuera de su ruta** (revisión R3, B1): `X-Offline-Credential` en cualquier ruta o método que no
+  sea `POST restaurant/offline-orders` —también las técnicas de `httpapi` (versión, salud, contrato), el asistente, el
+  emparejamiento, `auth/login`, `auth/pin-users`, `auth/pin-login` y el canal de eventos— responde `401
+OFFLINE_CREDENTIAL_NOT_ALLOWED` antes de atenderla (`httpapi/router.go` y `administration/service.go`).
+- **Tipo de cliente** (revisión R3, B2): con la credencial de un dispositivo, `X-Client-Kind` debe coincidir con su
+  `devices.kind` (`android` ↔ `android`; `desktop` ↔ `desktop` o `kitchen`); si no, `400 CLIENT_KIND_MISMATCH`. Sin la
+  cabecera (herramientas y pruebas por la escucha local) no se compara.
+- **Entradas con PIN a la vez** (revisión R3, O4): como máximo 4 verificaciones Argon2id de `auth/pin-login` al mismo
+  tiempo; las demás esperan su turno (hasta 5 s) **antes** de abrir la transacción, así que no ocupan conexiones de la
+  base ni frenan el resto del servidor; sin turno, `503 PIN_LOGIN_BUSY`.
+- **Registro de movimientos** (sin el PIN, su hash ni la credencial): `user.pin_set` (`set_by`: `administrator` o
+  `self`, si reemplazó otro, `pin_version`, nombre corto, color y cuántas sesiones y credenciales cerró),
+  `user.pin_badge_changed` (antes y después), `user.pin_removed`, `user.pin_unlocked` (hasta cuándo estaba bloqueado),
+  `session.pin_login` (con el dispositivo y `pin_version`), `session.pin_login_failed` (`reason`: `PIN_INVALID`,
+  `PIN_LOCKED` o `PERMISSION_DENIED`), `user.pin_locked` (una vez por bloqueo de 5 minutos, con el dispositivo, hasta
+  cuándo, los 5 fallos y su número en la serie) y `user.pin_locked_until_unlock` (el bloqueo largo, A1-D16, una vez, con
+  el dispositivo). `user.pin_unlocked` dice si quitó un bloqueo por tiempo o el largo (`requires_unlock`).
+- **Base** (0025, sección B): `users.pin_hash`, `pin_set_at`, `pin_version` (0), `short_name`, `badge_color`;
+  `app.pin_attempts` (por usuario, con `locks`, `lock_series_started_at` y `requires_unlock`);
+  `sessions.opened_with_pin` (falsa en las existentes); `app.offline_order_credentials` (usuario, dispositivo, SHA-256, `pin_version` con que
+  se emitió, fechas, revocación y motivo; una vigente por usuario y dispositivo); `devices.idle_lock_seconds` (120);
+  permiso `waiter_devices.use` («Entrar con PIN en teléfonos y tabletas de meseros») para el administrador y el rol
+  Mesero (también en una instalación nueva, desde el asistente).
+- **Versiones**: `GET version` informa `min_client_versions` (`desktop` 0.10.0, `android` 0.1.0) y las capacidades
+  `client-versions-by-kind` y `waiter-pin-v1`; la comprobación de `X-Client-Version` usa la mínima del tipo de
+  `X-Client-Kind` (sin tipo, la general, que es la del escritorio). El escritorio 0.12.0 muestra lo del PIN y el bloqueo
+  por inactividad solo si el servidor anuncia `waiter-pin-v1` (`services/serverCapabilities.ts`): con un servidor 0.11.0
+  sigue funcionando sin esas pantallas (no envía `idle_lock_seconds`, que ese servidor rechazaría).
+
+### Puente nativo (`desktop/src-tauri/src/api.rs`)
+
+Operaciones nuevas de la lista cerrada: `user_badge_colors` (`GET users/badge-colors`), `set_user_pin`
+(`PUT users/{id}/pin`), `remove_user_pin` (`POST users/{id}/pin/remove`), `unlock_user_pin`
+(`POST users/{id}/pin/unlock`) y `set_own_pin` (`PUT auth/pin`). `update_device` ya existía (cuerpo con
+`idle_lock_seconds`). El PIN viaja solo en el cuerpo de esas peticiones; nunca se guarda en la terminal.
+
+## Etapa A1 · modo Mesero en el servidor (fase E, esquema 25)
+
+Especificación: [docs/etapas/ETAPA_A1_ANDROID.md](docs/etapas/ETAPA_A1_ANDROID.md) §6–§8 y decisiones A1-D6 y A1-D11 de
+[docs/ETAPA_A1_AVANCE.md](docs/ETAPA_A1_AVANCE.md). Todo es de la API para clientes y está en
+`internal/apicontract/openapi.json` y [docs/API_V1.md](docs/API_V1.md), «Modo Mesero» (capacidad `waiter-mode-v1`).
+Ninguna ruta del escritorio cambia de forma; el escritorio no cambió.
+
+- **En el contrato** (ya existían): `GET restaurant/overview` (`getRestaurantOverview`, con `Area`,
+  `RestaurantSettings` y `Table` con `shape`, `x`, `y`, `width`, `height`, `seats` y `occupied_seconds`),
+  `POST restaurant/accounts/{id}/cancel` (`cancelUnits`), `…/edit-preview` (`previewEdit`) y `…/edit` (`editUnits`).
+- **Evento `restaurant.account.preparation_changed`** (`kitchen/preparation.go`): en la misma transacción en que cambian
+  los registros de cocina de una cuenta (`kitchen/states`, `kitchen/releases/{id}/release|schedule`,
+  `kitchen/changes/{id}/retry`, la liberación automática del trabajador de cocina y `kitchen.Integrate` de
+  `order.confirmed`, `item.modified`, `item.cancelled`, `account.cancelled` y `account.updated` con reprogramación),
+  uno por cuenta y transacción, ámbito `restaurant` (o `takeaway`), agregado = cuenta, sin contenido. El escritorio lo
+  trata como cualquier evento (invalida las consultas visibles una vez por mensaje): no hace consultas de más.
+- **Cuenta que ya no está abierta** (`ensureOpen`, `operations/queries.go`): el mismo `400 OPERATION_VALIDATION`, con
+  un mensaje por estado y `details` `{reason: "account_not_open", account_id, account_state, merged_into_id}`. En el
+  pedido sin conexión, `account_closed` lleva el estado en `now`.
+- **`POST restaurant/offline-orders`**: `replaces_draft_items` opcional (solo con `account_id`, hasta 20 `DraftItem`
+  únicos); al aceptar quita del borrador los renglones que siguen exactamente así y publica `draft.saved` (historia,
+  evento `restaurant.draft.saved` y auditoría `restaurant.draft.saved`); cambios nuevos `draft_item_changed`,
+  `draft_item_removed` y `draft_item_sent` (aceptables). La respuesta y la auditoría
+  `restaurant.offline_order.accepted` llevan `removed_draft_item_ids`.
+- **`GET restaurant/state`**: `event_cursor` (máximo de `app.realtime_events` leído con el lock de la operación ya
+  tomado y antes que mesas y cuentas).
+- **Base** (0025, sección E): `restaurant_items.draft_item_id` (uuid opcional, con índice parcial): el id del renglón
+  del borrador o de la partida del pedido sin conexión con que se capturó cada partida confirmada (`confirmLines`).
+
+## Etapa A1 · el servidor nunca repite lo que ya entró (revisión R6, A1-D18, sin migración)
+
+Decisión A1-D18 de [docs/ETAPA_A1_AVANCE.md](docs/ETAPA_A1_AVANCE.md) («Decisiones sobre la revisión R6»). Solo cambia
+`POST restaurant/offline-orders` (`submitOfflineOrder`), de forma compatible; detalle y forma exacta en
+[docs/API_V1.md](docs/API_V1.md), «El servidor nunca repite lo que ya entró». Código en
+`operations/offline_orders.go` (`diagnoseDraftOverlap`, `tableAccountsWithItems`, `offlineAlreadyConfirmed`) y
+`operations/handler.go` (`replay`).
+
+- **Misma clave que un `confirmDraft` aplicado**: si la clave ya está en `restaurant_operations` con la ruta
+  `POST restaurant/accounts/{id}/confirm`, del mismo usuario y dispositivo, y el pedido va a esa cuenta: 409
+  `OFFLINE_ORDER_ALREADY_ACCEPTED` con `details.origin: "confirm_draft"` y `details.result` en la forma de
+  `OfflineOrderResult` (pedido de la confirmación, cuenta vigente, `already_sent_item_ids`), sin escribir nada. Con otra
+  cuenta, una mesa, otro usuario, otro dispositivo u otra ruta guardada: `IDEMPOTENCY_CONFLICT` como siempre. El 409 de
+  una clave que ya entró como pedido sin conexión lleva ahora `details.origin: "offline_order"`.
+- **Renglones del borrador con el id de una partida**: se sustituyen aunque no estén en `replaces_draft_items`. Se
+  quitan si siguen iguales a la partida (o al renglón nombrado) o si el último guardado del borrador fue del mismo
+  usuario y dispositivo (`restaurant_draft_items.author_id`/`device_id`); si no, `draft_item_changed`.
+- **Partidas ya enviadas** (`restaurant_items.draft_item_id`, en cualquier cuenta): `draft_item_sent`; al confirmar no
+  se cotizan ni se envían (`already_sent_item_ids`). Sin nada pendiente: 200 sin pedido nuevo (`order_id` = el último
+  pedido en que entraron), sin evento `order.confirmed` y sin subir la revisión; auditoría
+  `restaurant.offline_order.accepted` con `new_order: false` y `already_sent_item_ids`.
+- **Mesa con las partidas en una cuenta abierta suya** (borrador o enviadas): cambio bloqueante `items_in_account` con
+  `account_id` y `now` = folio, sin `table_has_account`. `OfflineChange` agrega `account_id` (opcional, solo en ese
+  cambio).

@@ -283,12 +283,14 @@ test('navegación 9C: barra superior, mosaicos, ruta, inicio por terminal y capt
     page.getByRole('button', { name: /^AD-EL POS · Ir al inicio \(Mesas\)/ }),
   ).toBeVisible();
 
-  // 8. Menú del usuario: Mis preferencias (sin «Pantalla inicial») y Cambiar contraseña.
+  // 8. Menú del usuario: Mis preferencias (sin «Pantalla inicial») y Cambiar contraseña; desde la
+  // etapa A1, «Mi PIN» (el administrador tiene `waiter_devices.use` y el servidor `waiter-pin-v1`).
   await page.getByRole('button', { name: /^Menú del usuario/ }).click();
   const userMenu = page.getByRole('group', { name: 'Menú del usuario' });
   await expect(userMenu.getByRole('button')).toHaveText([
     'Mis preferencias',
     'Cambiar contraseña',
+    'Mi PIN',
     'Cerrar sesión',
   ]);
   await userMenu.getByRole('button', { name: 'Mis preferencias', exact: true }).click();

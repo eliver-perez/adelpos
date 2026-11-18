@@ -83,14 +83,19 @@ function failure(reply: Reply) {
   return error?.message ?? `respuesta ${reply.status}`;
 }
 
-// Pide el código: solicitud con el compromiso, número del servidor y revelación del número propio.
-export async function requestPairingCode(name: string, os = 'Windows'): Promise<PairingSession> {
+// Pide el código: solicitud con el compromiso, número del servidor y revelación del número propio. Desde la etapa A1
+// también como teléfono o tableta de meseros (kind 'android', con la versión de su aplicación).
+export async function requestPairingCode(
+  name: string,
+  os = 'Windows',
+  kind: 'desktop' | 'android' = 'desktop',
+): Promise<PairingSession> {
   const nonce = randomBytes(32);
   const created = await pairingCall('POST', 'pairing/requests', undefined, {
     name,
-    device_kind: 'desktop',
+    device_kind: kind,
     os,
-    app_version: '0.10.0',
+    app_version: kind === 'android' ? '0.1.0' : '0.10.0',
     commitment: createHash('sha256').update(nonce).digest('hex'),
   });
   if (created.status !== 200) {

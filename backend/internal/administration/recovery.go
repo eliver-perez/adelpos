@@ -36,7 +36,8 @@ func recoveryState(ctx context.Context, tx pgx.Tx, principal Principal) (any, er
 	if err != nil {
 		return nil, err
 	}
-	terminal, err := object(ctx, tx, "SELECT id,name,register_id,keyboard_mode,home_screen FROM app.devices WHERE id=$1", principal.DeviceID)
+	// Etapa A1 (fase B): con el bloqueo por inactividad del dispositivo (idle_lock_seconds).
+	terminal, err := object(ctx, tx, "SELECT id,name,register_id,keyboard_mode,home_screen,idle_lock_seconds FROM app.devices WHERE id=$1", principal.DeviceID)
 	if err != nil {
 		return nil, err
 	}
@@ -48,5 +49,7 @@ func recoveryState(ctx context.Context, tx pgx.Tx, principal Principal) (any, er
 		"terminal":        terminal,
 		"tables":          restaurant.Tables,
 		"accounts":        restaurant.Accounts,
+		// Etapa A1: el cursor del canal de eventos al leer este estado (GET events?after=event_cursor).
+		"event_cursor": restaurant.EventCursor,
 	}, nil
 }

@@ -70,6 +70,9 @@ type service struct {
 	// scope son las estaciones visibles en la terminal para el usuario (etapa 9F); se lee una sola
 	// vez por operación.
 	scope *stationscope.Scope
+	// preparation son las cuentas cuya preparación cambió en esta transacción (etapa A1, A1-D11); al final de la
+	// operación se publica un solo restaurant.account.preparation_changed por cuenta (preparation.go).
+	preparation map[string]bool
 }
 
 var identifierPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
