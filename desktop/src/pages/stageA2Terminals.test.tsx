@@ -5,11 +5,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Device, PrecheckPrinterOption } from '../services/models';
 import {
   devicePrecheckPrinterCapability,
+  readyAlertsCapability,
   rememberServerCapabilities,
   waiterPINCapability,
 } from '../services/serverCapabilities';
 import { chooseOption, findOption, optionLabels, selectText } from '../testing/select';
-import { DevicesPage, precheckPrinterText } from './DevicesPage';
+import { DevicesPage, precheckPrinterText, readyAlertsText } from './DevicesPage';
 
 // Etapa A2, parte C: Terminales › Editar de un teléfono o tableta de meseros elige su «Impresora de precuentas» (las
 // impresoras de red y las USB de una terminal, con el nombre de su terminal; «Sin impresora»), y «Ver configuración» la
@@ -205,5 +206,89 @@ describe('Terminales: impresora de precuentas de un teléfono o tableta', () => 
     );
     expect(precheckPrinterText(null)).toBe('Sin impresora: este dispositivo no imprime precuentas');
     expect(precheckPrinterText(off)).toBe('Apagada (desactivada)');
+  });
+});
+
+describe('Terminales: avisos de platillos listos de un teléfono o tableta', () => {
+  beforeEach(() => {
+    rememberServerCapabilities([
+      'restaurant-operations',
+      waiterPINCapability,
+      devicePrecheckPrinterCapability,
+      readyAlertsCapability,
+    ]);
+  });
+
+  it('«Avisar platillos listos», «Sonido» y «Vibración» se envían (activados por omisión)', async () => {
+    render(<DevicesPage can={() => true} />);
+    await edit('Tableta 1');
+    const enabled = screen.getByRole('button', { name: 'Avisar platillos listos' });
+    const sound = screen.getByRole('button', { name: 'Sonido' });
+    const vibration = screen.getByRole('button', { name: 'Vibración' });
+    expect(enabled.getAttribute('aria-pressed')).toBe('true');
+    expect(sound.getAttribute('aria-pressed')).toBe('true');
+    expect(vibration.getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(sound);
+    expect(sound.getAttribute('aria-pressed')).toBe('false');
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+    await screen.findByText('Terminal actualizada.');
+    expect(sent('update_device')[0]?.body).toMatchObject({
+      ready_alerts_enabled: true,
+      ready_alerts_sound: false,
+      ready_alerts_vibration: true,
+    });
+  });
+
+  it('apagado, sonido y vibración no se pueden cambiar', async () => {
+    render(<DevicesPage can={() => true} />);
+    await edit('Tableta 1');
+    fireEvent.click(screen.getByRole('button', { name: 'Avisar platillos listos' }));
+    expect((screen.getByRole('button', { name: 'Sonido' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    expect((screen.getByRole('button', { name: 'Vibración' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+    await screen.findByText('Terminal actualizada.');
+    expect(sent('update_device')[0]?.body).toHaveProperty('ready_alerts_enabled', false);
+  });
+
+  it('una terminal de escritorio no los tiene y con un servidor anterior no se envían', async () => {
+    render(<DevicesPage can={() => true} />);
+    await edit('Caja de la barra');
+    expect(screen.queryByRole('button', { name: 'Avisar platillos listos' })).toBeNull();
+    cleanup();
+    requests = [];
+    rememberServerCapabilities([
+      'restaurant-operations',
+      waiterPINCapability,
+      devicePrecheckPrinterCapability,
+    ]);
+    render(<DevicesPage can={() => true} />);
+    await edit('Tableta 1');
+    expect(screen.queryByRole('button', { name: 'Avisar platillos listos' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+    await screen.findByText('Terminal actualizada.');
+    expect(sent('update_device')[0]?.body).not.toHaveProperty('ready_alerts_enabled');
+  });
+
+  it('«Ver configuración» los dice en lenguaje sencillo', async () => {
+    render(<DevicesPage can={() => true} />);
+    const row = (await screen.findByText('Tableta 1')).closest('tr') as HTMLElement;
+    fireEvent.click(within(row).getByRole('button', { name: 'Ver configuración' }));
+    const configuration = await screen.findByRole('region', { name: 'Configuración de Tableta 1' });
+    await waitFor(() =>
+      expect(configuration.textContent).toContain(
+        'Avisar platillos listosActivado · con sonido y vibración',
+      ),
+    );
+    expect(readyAlertsText({ ...tablet, ready_alerts_enabled: false })).toBe('Desactivado');
+    expect(readyAlertsText({ ...tablet, ready_alerts_sound: false })).toBe(
+      'Activado · sin sonido, con vibración',
+    );
+    expect(
+      readyAlertsText({ ...tablet, ready_alerts_sound: false, ready_alerts_vibration: false }),
+    ).toBe('Activado · sin sonido ni vibración');
   });
 });

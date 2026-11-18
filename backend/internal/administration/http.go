@@ -47,6 +47,11 @@ func (service *Service) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		service.serveEvents(writer, request, local)
 		return
 	}
+	// Etapa A2 (parte D): el canal de avisos de platillos listos, con el mismo patrón que el de eventos.
+	if request.URL.Path == "/api/v1/ready-alerts/stream" && request.Method == "GET" {
+		service.serveReadyAlerts(writer, request, local)
+		return
+	}
 	limit := int64(64 * 1024)
 	if strings.HasPrefix(request.URL.Path, "/api/v1/catalog/") || strings.HasPrefix(request.URL.Path, "/api/v1/restaurant/") || strings.HasPrefix(request.URL.Path, "/api/v1/kitchen/") {
 		limit = 2 * 1024 * 1024

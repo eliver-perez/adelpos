@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useConfirmDialog } from '../components/ConfirmDialog';
 import { dateTime, Field, Form, Notice, PageTitle } from '../components/Forms';
 import { SegmentedControl } from '../components/SegmentedControl';
+import { ToggleButton } from '../components/ToggleButton';
 import { useResource } from '../hooks/useResource';
 import { terminalHomes } from '../navigation/sections';
 import type { TerminalHome } from '../navigation/sections';
@@ -23,6 +24,7 @@ import { Select } from '../components/Select';
 import type { SelectOption } from '../components/Select';
 import {
   devicePrecheckPrinterCapability,
+  readyAlertsCapability,
   serverHas,
   waiterPINCapability,
 } from '../services/serverCapabilities';
@@ -121,6 +123,25 @@ export function precheckPrinterText(printer: PrecheckPrinterOption | null | unde
   const label = printerLabel(printer);
   const reason = printer.problem ? precheckPrinterProblems[printer.problem] : '';
   return reason ? `${label} (${reason})` : label;
+}
+
+// readyAlertsText es lo que «Ver configuración» dice de los avisos de platillos listos (etapa A2, parte D).
+export function readyAlertsText(device: Device): string {
+  if (device.ready_alerts_enabled === false) {
+    return 'Desactivado';
+  }
+  const sound = device.ready_alerts_sound !== false;
+  const vibration = device.ready_alerts_vibration !== false;
+  if (sound && vibration) {
+    return 'Activado · con sonido y vibración';
+  }
+  if (sound) {
+    return 'Activado · con sonido, sin vibración';
+  }
+  if (vibration) {
+    return 'Activado · sin sonido, con vibración';
+  }
+  return 'Activado · sin sonido ni vibración';
 }
 
 const keyboardLabels: Record<Device['keyboard_mode'], string> = {
@@ -435,6 +456,12 @@ function DeviceConfigurationPanel({ device, onClose }: { device: Device; onClose
               <dd>{precheckPrinterText(value.precheck_printer)}</dd>
             </div>
           )}
+          {shown.kind === 'android' && serverHas(readyAlertsCapability) && (
+            <div>
+              <dt>Avisar platillos listos</dt>
+              <dd>{readyAlertsText(shown)}</dd>
+            </div>
+          )}
           <div>
             <dt>Estaciones que muestra en Cocina</dt>
             <dd>
@@ -553,6 +580,11 @@ function DeviceEditor({
     enabled: precheckDevice,
   });
   const [precheckPrinter, setPrecheckPrinter] = useState(device.precheck_printer_id ?? '');
+  // Etapa A2 (parte D): sus avisos de platillos listos, solo si el servidor los admite. Activados por omisión.
+  const readyDevice = device.kind === 'android' && serverHas(readyAlertsCapability);
+  const [readyEnabled, setReadyEnabled] = useState(device.ready_alerts_enabled ?? true);
+  const [readySound, setReadySound] = useState(device.ready_alerts_sound ?? true);
+  const [readyVibration, setReadyVibration] = useState(device.ready_alerts_vibration ?? true);
   return (
     <section className="surface panel">
       <h2 className="mb-5">Editar {device.name}</h2>
@@ -568,6 +600,13 @@ function DeviceEditor({
               home_screen: home,
               ...(waiterDevice ? { idle_lock_seconds: Number(idleLock) } : {}),
               ...(precheckDevice ? { precheck_printer_id: precheckPrinter || null } : {}),
+              ...(readyDevice
+                ? {
+                    ready_alerts_enabled: readyEnabled,
+                    ready_alerts_sound: readySound,
+                    ready_alerts_vibration: readyVibration,
+                  }
+                : {}),
             },
           });
           await reload();
@@ -636,6 +675,34 @@ function DeviceEditor({
             </Field>
           )}
         </div>
+        {readyDevice && (
+          <div className="field">
+            <span>Avisos de platillos listos</span>
+            <div className="button-row">
+              <ToggleButton
+                label="Avisar platillos listos"
+                pressed={readyEnabled}
+                onChange={setReadyEnabled}
+              />
+              <ToggleButton
+                label="Sonido"
+                pressed={readySound}
+                onChange={setReadySound}
+                disabled={!readyEnabled}
+              />
+              <ToggleButton
+                label="Vibración"
+                pressed={readyVibration}
+                onChange={setReadyVibration}
+                disabled={!readyEnabled}
+              />
+            </div>
+            <small className="muted">
+              Cuando cocina marca «Listo» en la pantalla de cocina, el mesero de la cuenta recibe el
+              aviso en este dispositivo, aunque tenga la pantalla apagada.
+            </small>
+          </div>
+        )}
         {/* Etapa 9C (§1.5): pantalla en la que abre la aplicación en esta terminal y a la que vuelve
             el logotipo. Lista cerrada validada en Go; quien no pueda ver esa sección abre en la
             primera de la barra que sí puede ver. */}

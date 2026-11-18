@@ -7,7 +7,8 @@ agregó la versión mínima por tipo de cliente, la entrada con PIN y la credenc
 modificar unidades, el evento de preparación, el motivo de una cuenta que ya no está abierta, el borrador en el pedido
 sin conexión y el cursor de eventos de la recuperación (ver «Modo Mesero»). La etapa A2
 ([etapas/ETAPA_A2_ANDROID.md](etapas/ETAPA_A2_ANDROID.md)) agregó **Para llevar** (servidor 0.13.0, ver «Para llevar») e
-**imprimir la precuenta** desde el dispositivo en su impresora (esquema 26, ver «Imprimir la precuenta»).
+**imprimir la precuenta** desde el dispositivo en su impresora (esquema 26, ver «Imprimir la precuenta») y los
+**avisos de platillos listos** (ver «Avisos de platillos listos»).
 
 - **Contrato OpenAPI 3.1**: [`backend/internal/apicontract/openapi.json`](../backend/internal/apicontract/openapi.json)
   es la fuente. El servidor lo publica en `GET /api/v1/openapi.json` (sin sesión) y está incrustado en el binario.
@@ -47,7 +48,8 @@ sin conexión y el cursor de eventos de la recuperación (ver «Modo Mesero»). 
    `offline-orders-v1`, `state-recovery-v1`, `client-version-check`, `openapi-v1`…; desde la etapa A1,
    `client-versions-by-kind`, `waiter-pin-v1` (entrada con PIN, credencial de envío y su administración) y
    `waiter-mode-v1` (lo del modo Mesero de la sección «Modo Mesero»); desde la etapa A2, `takeaway-v1` (lo de la
-   sección «Para llevar») y `device-precheck-printer-v1` (lo de «Imprimir la precuenta»)). La aplicación Android 0.1.0 exige un servidor 0.12.0 o posterior; el escritorio 0.12.0 sigue
+   sección «Para llevar»), `device-precheck-printer-v1` (lo de «Imprimir la precuenta») y `ready-alerts-v1` (lo de
+   «Avisos de platillos listos»)). La aplicación Android 0.1.0 exige un servidor 0.12.0 o posterior; el escritorio 0.12.0 sigue
    funcionando con un servidor 0.11.0 y solo muestra lo del PIN si el servidor anuncia `waiter-pin-v1`.
 4. **Credenciales**: la terminal (o el teléfono) emparejada envía `X-Device-ID` y `X-Device-Token`; con sesión,
    además `Authorization: Bearer <token>` (desde la etapa A1, en `submitOfflineOrder` el teléfono puede enviar en su
@@ -81,6 +83,8 @@ sin conexión y el cursor de eventos de la recuperación (ver «Modo Mesero»). 
 | `listPinUsers`           | `GET /auth/pin-users`                          | Meseros que pueden entrar con PIN en el dispositivo (sin sesión, etapa A1).    |
 | `pinLogin`               | `POST /auth/pin-login`                         | Entrar con PIN: sesión y credencial de envío (etapa A1).                       |
 | `streamEvents`           | `GET /events`                                  | Eventos en tiempo real (SSE).                                                  |
+| `getReadyAlerts`         | `GET /ready-alerts`                            | Avisos de platillos listos desde un cursor (credencial del dispositivo, A2).   |
+| `streamReadyAlerts`      | `GET /ready-alerts/stream`                     | Canal SSE de los avisos de platillos listos (credencial del dispositivo, A2).  |
 | `getCatalogSync`         | `GET /catalog/sync`                            | Catálogo descargable completo o «solo cambios desde la versión X».             |
 | `listCatalogProducts`    | `GET /catalog/products`                        | Productos para la captura con disponibilidad, «Agotado» y precio de una lista. |
 | `getCatalogImage`        | `GET /catalog/images/{id}`                     | Imagen en JSON base64 (la usa el escritorio).                                  |
@@ -146,7 +150,8 @@ sin conexión y el cursor de eventos de la recuperación (ver «Modo Mesero»). 
    - `user.permissions`: permisos vigentes (leídos de PostgreSQL en esa petición);
    - `terminal`: la terminal (una terminal revocada no llega aquí: 401 `DEVICE_REVOKED`); desde la etapa A2, con
      `precheck_printer_id` y `precheck_printer` (`{id, name, terminal_name}` o `null`), la impresora de precuentas del
-     dispositivo (ver «Imprimir la precuenta»);
+     dispositivo (ver «Imprimir la precuenta»), y `ready_alerts_enabled`, `ready_alerts_sound` y
+     `ready_alerts_vibration` (ver «Avisos de platillos listos»);
    - `catalog_version` y `catalog_epoch`: si la época es otra, descargar todo; si no y la versión es mayor que la del
      catálogo guardado, descargar los cambios;
    - `tables` (con `restaurant.tables.read`) con su estado (`free`, `occupied`, `awaiting_payment`,
@@ -708,6 +713,74 @@ sin conexión.
    `PRINTER_NOT_CONFIGURED` con `scope: "device"`). Responde como `printPrecheck`. Sin un trabajo fallido, 409
    `PRINT_NOT_FAILED`. Con `uncertain` no se reintenta: se revisa el papel y, si hace falta, se pide otra precuenta.
 
+## Avisos de platillos listos (etapa A2, parte D)
+
+Capacidad **`ready-alerts-v1`** (servidor 0.13.0, esquema 26; decisiones A2-D4 y A2-D9). Cuando cocina marca «Listo»
+en el KDS (una unidad, el pedido de una estación o la cuenta completa), Go registra cada unidad que pasó a «Listo» en
+la misma transacción que el evento `restaurant.account.preparation_changed` (tabla `app.ready_notices`, una vez por
+unidad y versión) con el **responsable de la cuenta en ese momento**. El dispositivo los lee con **solo su credencial**
+(`X-Device-ID` y `X-Device-Token`, sin sesión: llegan aunque esté en «¿Quién eres?» o con la aplicación cerrada, desde
+su servicio en primer plano). Si la cocina no usa el KDS, no hay avisos.
+
+1. **A quién llega** (lo decide Go): un aviso es para el dispositivo D si su mesero M **entró con PIN en D durante el
+   día comercial en curso** (desde la «Hora de inicio del día» de Administración) y además, **en el momento del
+   «Listo»**, M tenía en D su sesión con PIN vigente de actividad más reciente entre sus dispositivos android, **o** no
+   tenía ninguna vigente (entonces llega a todos los dispositivos donde M entró hoy). Cerrar la sesión con `logout`
+   deja de contar desde ese momento. Una entrada con PIN **sin conexión** no le dice nada a Go: ese mesero no recibe
+   avisos en ese dispositivo hasta su primera entrada con conexión. Transferir la cuenta cambia el destinatario de lo
+   que todavía no estaba listo.
+2. **`getReadyAlerts`** (`GET /ready-alerts?after=<cursor>`) → **`ReadyAlertsBatch`**:
+
+   ```json
+   {
+     "cursor": 812,
+     "active": true,
+     "day_ends_at": "2026-11-19T11:00:00Z",
+     "settings": { "enabled": true, "sound": true, "vibration": false },
+     "alerts": [
+       {
+         "id": 812,
+         "account_id": "…",
+         "mode": "dine_in",
+         "table_name": "Mesa 4",
+         "folio": 31,
+         "customer_name": "",
+         "waiter_user_id": "…",
+         "waiter_short_name": "Ana",
+         "items": [{ "product_name": "Filete · Grande", "quantity": 2 }],
+         "ready_at": "2026-11-18T20:41:07.12Z"
+       }
+     ]
+   }
+   ```
+
+   - Un aviso es lo que cocina marcó «Listo» en una cuenta **en una misma operación**, agrupado por platillo
+     (`product_name` es el nombre visible del producto con su presentación, `quantity` las unidades). En un pedido para
+     llevar `table_name` es `null` y `customer_name` el nombre capturado. **Nunca trae precios ni importes.**
+   - **`cursor`** es el último aviso que Go revisó para el dispositivo, le corresponda o no: el dispositivo lo guarda y
+     vuelve con `after=<cursor>`; lo que se registró mientras no estuvo llega entonces, **una sola vez**. Hasta 50
+     avisos por respuesta (con más, `cursor` es el del último entregado y el resto llega en la siguiente).
+   - **`id`** crece con el cursor. Releer desde un cursor anterior devuelve los mismos `id`: el dispositivo descarta los
+     que ya avisó (guarda los del día).
+   - **`active`**: `true` si «Avisar platillos listos» está activado y hay un mesero con sesión con PIN vigente en el
+     dispositivo o que entró en él con PIN durante el día comercial en curso; si no, `false`, sin avisos (no es un
+     error) y el cursor avanza (al volver a activarse no llegan avisos viejos). El servicio en primer plano se detiene
+     con `active: false`.
+   - **`day_ends_at`**: fin del día comercial en curso; ahí dejan de contar los meseros que entraron hoy y los avisos
+     de ese día.
+   - **`settings`**: «Avisar platillos listos», «Sonido» y «Vibración» de Terminales › Editar (también en
+     `terminal.ready_alerts_*` de `getIdentity` y `getRecoveryState`).
+   - Errores: **401 `DEVICE_REVOKED`** (retirado; dejar de escuchar), 401 `DEVICE_REQUIRED`, **403
+     `READY_ALERTS_DEVICE_NOT_ALLOWED`** (no es un teléfono o tableta de meseros), 400 con un cursor inválido o un
+     parámetro desconocido, 401 `OFFLINE_CREDENTIAL_NOT_ALLOWED` con la credencial de envío.
+
+3. **`streamReadyAlerts`** (`GET /ready-alerts/stream?after=<cursor>` o con `Last-Event-ID`): como `streamEvents`,
+   mensajes `event: alerts` con `id: <cursor>` y `data: <ReadyAlertsBatch>` cada 750 ms; dura 30 s y el dispositivo se
+   vuelve a conectar desde el último `id`. **Un solo canal por dispositivo** (aparte de los dos de eventos): otro
+   mientras sigue abierto responde **429 `READY_ALERTS_CONNECTION_LIMIT`** (esperar unos segundos y reconectar; el
+   anterior se cierra solo). Cada lectura revalida el dispositivo: si ya no vale, `event: interrupted` con `id: 0` y
+   `{"error", "status"}`, y termina.
+
 ## Códigos de error más frecuentes
 
 | Código                                                   | Estado | Qué hacer                                                                                                                  |
@@ -729,6 +802,8 @@ sin conexión.
 | `IDEMPOTENCY_CONFLICT`                                   | 409    | La clave ya se usó con otro contenido: consultar el resultado.                                                             |
 | `OFFLINE_ORDER_ALREADY_ACCEPTED`                         | 409    | El pedido sin conexión (o su «Enviar a cocina», `details.origin`) ya entró: usar `details.result`, no capturarlo otra vez. |
 | `PRINTER_NOT_CONFIGURED`, `PRINTER_UNAVAILABLE`          | 409    | Sin impresora válida para la precuenta; con `details.scope: "device"`, la del dispositivo (se elige en Terminales).        |
+| `READY_ALERTS_DEVICE_NOT_ALLOWED`                        | 403    | Los avisos de platillos listos solo llegan a teléfonos y tabletas de meseros.                                              |
+| `READY_ALERTS_CONNECTION_LIMIT`                          | 429    | El dispositivo ya tiene abierto su canal de avisos: reconectar en unos segundos.                                           |
 | `PRINT_NOT_FAILED`                                       | 409    | La precuenta no tiene una impresión fallida que reintentar.                                                                |
 | `BALANCE_PENDING`                                        | 409    | El pedido para llevar tiene saldo: cobrarlo en la caja antes de marcarlo como entregado.                                   |
 | `ALREADY_DELIVERED`                                      | 409    | El pedido para llevar ya estaba entregado: volver a leerlo.                                                                |

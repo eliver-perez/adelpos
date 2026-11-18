@@ -3,7 +3,8 @@
 -- «Parte X», en el orden de las partes (la parte B, Para llevar, no necesitó cambios en la base). Es transaccional (el
 -- migrador aplica todas las pendientes en una sola transacción) y no modifica filas existentes: ventas, pagos, cortes,
 -- cuentas, pedidos, sesiones, usuarios, terminales, impresoras, trabajos de impresión ni sus fotografías. Solo agrega
--- columnas con su valor por omisión (o vacías), índices y restricciones que las filas existentes ya cumplen.
+-- columnas con su valor por omisión (o vacías), una tabla nueva vacía, índices y restricciones que las filas existentes
+-- ya cumplen.
 
 -- =====================================================================================================================
 -- Parte C · Impresora de precuentas por dispositivo (§5 de la especificación; decisión A2-D3 del coordinador en
@@ -26,3 +27,58 @@ ALTER TABLE app.devices
 CREATE INDEX devices_precheck_printer_idx ON app.devices (precheck_printer_id) WHERE precheck_printer_id IS NOT NULL;
 COMMENT ON COLUMN app.devices.precheck_printer_id IS
     'Impresora de precuentas de un dispositivo android: imprime solo en ella (etapa A2, parte C, A2-D3)';
+
+-- =====================================================================================================================
+-- Parte D · Registro y canal de platillos listos (§4 de la especificación; decisiones A2-D4 y A2-D9 del coordinador
+-- en docs/ETAPA_A2_AVANCE.md)
+-- =====================================================================================================================
+
+-- 2. Registro de «listos». El evento restaurant.account.preparation_changed no dice qué pasó a «Listo» ni para quién, y
+--    con un reset del canal de eventos no se sabe qué se perdió; el aviso al mesero necesita un registro propio que
+--    se pueda leer desde un cursor. Cocina (kitchen/preparation.go) escribe una fila por unidad en la misma
+--    transacción que publica preparation_changed, cuando la última de sus tareas vivas (no canceladas) pasa a
+--    «Listo»: «Listo» no retrocede y una modificación que cambia la receta es otra versión, otra preparación y otro
+--    aviso, así que UNIQUE (unit_id, version_id) impide que la misma preparación se avise dos veces.
+--      · sequence es la clave y el cursor de la lectura (GET ready-alerts?after=<sequence> y su canal SSE, con
+--        Last-Event-ID): crece con cada aviso; los escritores tienen el lock de la operación (7820148305) en
+--        exclusiva hasta su commit y la lectura lo toma compartido, así que ningún aviso queda detrás del cursor.
+--      · recipient_user_id es el responsable de la cuenta en el momento del «Listo» (transferir la cuenta cambia el
+--        destinatario de lo que aún no estaba listo; lo ya avisado no se repite).
+--      · recipient_device_id es, en ese mismo momento, el dispositivo android donde el responsable tiene la sesión con
+--        PIN vigente de actividad más reciente (A2-D4), o vacío si no tiene ninguna vigente (entonces el aviso va a
+--        todos los dispositivos donde entró con PIN en el día comercial en curso). Se fija al registrar el aviso para
+--        que cada dispositivo lo reciba o no sin importar cuándo lea, aunque el mesero cambie de dispositivo o un
+--        dispositivo se reconecte tarde: ni se pierde ni llega a dos dispositivos por un cambio de sesión a destiempo.
+--      · El nombre, la cantidad, la mesa o el folio se arman al leer; nunca se guardan ni se envían precios.
+--      · Es un dato derivado, no de operación: lo de más de 2 días se poda al escribir (el aviso es del día comercial
+--        en curso).
+--    Las instalaciones existentes empiezan sin filas: lo que ya estaba listo antes de la actualización no se avisa.
+CREATE TABLE app.ready_notices (
+    sequence bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    unit_id uuid NOT NULL
+        CONSTRAINT ready_notices_unit_id_fkey REFERENCES app.restaurant_item_units(id),
+    version_id uuid NOT NULL
+        CONSTRAINT ready_notices_version_id_fkey REFERENCES app.restaurant_item_versions(id),
+    account_id uuid NOT NULL
+        CONSTRAINT ready_notices_account_id_fkey REFERENCES app.restaurant_accounts(id),
+    recipient_user_id uuid NOT NULL
+        CONSTRAINT ready_notices_recipient_user_id_fkey REFERENCES app.users(id),
+    recipient_device_id uuid
+        CONSTRAINT ready_notices_recipient_device_id_fkey REFERENCES app.devices(id),
+    ready_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT ready_notices_unit_version_key UNIQUE (unit_id, version_id)
+);
+-- La lectura de un dispositivo: los avisos de sus meseros desde el cursor; la poda, por antigüedad.
+CREATE INDEX ready_notices_recipient_idx ON app.ready_notices (recipient_user_id, sequence);
+CREATE INDEX ready_notices_ready_at_idx ON app.ready_notices (ready_at);
+COMMENT ON TABLE app.ready_notices IS
+    'Unidades que pasaron a Listo, con el responsable de su cuenta en ese momento: avisos de platillos listos (etapa A2, parte D, A2-D9)';
+
+-- 3. «Avisar platillos listos», «Sonido» y «Vibración» de cada teléfono o tableta de meseros (§4.4 y §4.5), en
+--    Sistema › Terminales › Editar. Activados por omisión, también en las terminales existentes (solo los usan los
+--    dispositivos android). Con el aviso apagado, ready-alerts responde active false y sin avisos; sonido y vibración
+--    los aplica el dispositivo a su canal «Platillos listos» (A2-D7).
+ALTER TABLE app.devices
+    ADD COLUMN ready_alerts_enabled boolean NOT NULL DEFAULT true,
+    ADD COLUMN ready_alerts_sound boolean NOT NULL DEFAULT true,
+    ADD COLUMN ready_alerts_vibration boolean NOT NULL DEFAULT true;

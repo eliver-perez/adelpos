@@ -67,6 +67,9 @@ type Service struct {
 	reportsOnce sync.Once
 	streamMutex sync.Mutex
 	streams     map[string]int
+	// readyStreams cuenta los canales de avisos de platillos listos abiertos por dispositivo (etapa A2, parte D):
+	// uno por dispositivo, aparte de los dos del canal de eventos.
+	readyStreams map[string]int
 	// removalTurn deja una sola eliminación de datos de prueba a la vez en este servidor (etapa 9F,
 	// maintenance.go); se crea al primer uso.
 	removalOnce sync.Once
@@ -354,6 +357,11 @@ func (service *Service) dispatch(ctx context.Context, tx pgx.Tx, request Request
 	// sin sesión de usuario, porque imprime aunque nadie haya iniciado sesión en esa caja.
 	if strings.HasPrefix(route, "print-agent/") {
 		return service.printAgent(ctx, tx, request, route)
+	}
+	// Avisos de platillos listos (etapa A2, parte D; ready_alerts.go): solo con la credencial del teléfono o la
+	// tableta, porque llegan aunque nadie tenga la sesión abierta (en «¿Quién eres?» o con la aplicación cerrada).
+	if route == "ready-alerts" && request.Method == "GET" {
+		return readyAlerts(ctx, tx, request)
 	}
 	principal, err := authenticateSession(ctx, tx, request)
 	if err != nil {

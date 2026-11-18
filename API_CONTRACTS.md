@@ -4048,3 +4048,33 @@ terminal_name}` o `null`), con la misma consulta (`terminalIdentityQuery`, `admi
   precuentas de «…»»; el dispositivo queda sin impresora) en lugar de impedir que se elimine.
 - **Escritorio**: Terminales › Editar de un `android` muestra «Impresora de precuentas» y «Ver configuración» la informa,
   solo si el servidor anuncia `device-precheck-printer-v1`; si no, el `PATCH` no lleva el campo.
+
+## Etapa A2 · registro y canal de platillos listos (parte D, esquema 26)
+
+Especificación: [docs/etapas/ETAPA_A2_ANDROID.md](docs/etapas/ETAPA_A2_ANDROID.md) §4 y decisiones A2-D4 y A2-D9 de
+[docs/ETAPA_A2_AVANCE.md](docs/ETAPA_A2_AVANCE.md). Lo del dispositivo (`getReadyAlerts`, `streamReadyAlerts` y
+`terminal.ready_alerts_*`) está en [docs/API_V1.md](docs/API_V1.md), «Avisos de platillos listos», y en
+`internal/apicontract/openapi.json` (capacidad `ready-alerts-v1`).
+
+- **Base** (0026, parte D): `app.ready_notices` (`sequence` identidad como clave y cursor, `unit_id`, `version_id`,
+  `account_id`, `recipient_user_id`, `recipient_device_id` opcional, `ready_at`; `UNIQUE (unit_id, version_id)`; índices
+  `(recipient_user_id, sequence)` y `(ready_at)`), vacía al actualizar; `devices.ready_alerts_enabled`,
+  `ready_alerts_sound` y `ready_alerts_vibration` (`boolean NOT NULL DEFAULT true`). Ninguna fila cambia
+  (`TestStageA2Upgrade`).
+- **Escritura** (`kitchen.recordReadyNotices`, `kitchen/preparation.go`): en `publishPreparation`, la misma transacción
+  que publica `restaurant.account.preparation_changed`, cada unidad activa de las cuentas anotadas cuyas tareas vivas
+  de su versión están todas listas y la última se marcó en esta transacción (`ready_at = now()`). Así cuentan todos los
+  caminos del KDS (unidad, pedido de una estación, cuenta completa) y nunca una unidad que ya estaba lista (una
+  modificación económica no reinicia sus tareas; una de receta crea otra versión). Destinatario: el responsable de la
+  cuenta; dispositivo: el android no revocado de su sesión con PIN vigente con `last_seen_at` más reciente, o ninguno si
+  no tiene una vigente. Al registrar algo, se poda lo de más de 2 días. Ningún lock nuevo: cocina escribe con
+  7820148305 exclusivo.
+- **Lectura** (`administration/ready_alerts.go`): `GET ready-alerts` (en `dispatch`, después de `authenticateDevice` y
+  antes de la sesión: solo la credencial del dispositivo) y `GET ready-alerts/stream` (`serveReadyAlerts`, con el
+  patrón de `serveEvents` y su contador `readyStreams`, uno por dispositivo); lock 7820148305 **compartido**.
+  `active` y `day_ends_at` con `businessday` (hora de inicio del día de inventario).
+- **`PATCH devices/{id}`** (`devices.manage`): campos opcionales `ready_alerts_enabled`, `ready_alerts_sound` y
+  `ready_alerts_vibration` (sin ellos se conserva lo guardado); en una terminal que no es `android`, `400`. `GET
+devices`, la configuración (`device`), `auth/me` y `restaurant/state` (`terminal`) los informan.
+- **Escritorio**: Terminales › Editar de un `android` muestra «Avisar platillos listos», «Sonido» y «Vibración» y «Ver
+  configuración» los informa, solo si el servidor anuncia `ready-alerts-v1`; si no, el `PATCH` no los lleva.

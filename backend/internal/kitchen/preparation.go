@@ -23,6 +23,12 @@ import (
 // pendiente), la liberación automática de los pedidos programados (worker.go) y la integración con cocina de las
 // operaciones de la cuenta (confirmar, modificar, cancelar unidades o la cuenta y reprogramar), que además publican su
 // propio evento restaurant.* de la cuenta.
+//
+// Registro de platillos listos (etapa A2, parte D; decisión A2-D9). El aviso al mesero necesita saber qué pasó a
+// «Listo» y para quién, y que nada se pierda ni se repita aunque se corte la red: en la misma transacción en que se
+// publica el evento de preparación, cada unidad de esas cuentas cuya última tarea viva pasó a «Listo» en esta
+// transacción queda en app.ready_notices con el responsable de su cuenta en ese momento (recordReadyNotices). Lo leen
+// los dispositivos con GET ready-alerts (administration/ready_alerts.go).
 
 // PreparationChangedKind es el tipo del evento.
 const PreparationChangedKind = "restaurant.account.preparation_changed"
@@ -76,6 +82,9 @@ func (handler *service) publishPreparation() error {
 	}
 	sort.Strings(accountIDs)
 	handler.preparation = nil
+	if err := handler.recordReadyNotices(accountIDs); err != nil {
+		return err
+	}
 	rows, err := handler.tx.Query(handler.ctx, `SELECT id::text,mode FROM app.restaurant_accounts
         WHERE id=ANY($1::uuid[]) ORDER BY id`, accountIDs)
 	if err != nil {
@@ -111,4 +120,46 @@ func (handler *service) publishPreparation() error {
 		}
 	}
 	return nil
+}
+
+// recordReadyNotices registra cada unidad activa de las cuentas que pasó a «Listo» en esta transacción: todas sus
+// tareas vivas (no canceladas, de su versión vigente) están listas y la última se marcó ahora (ready_at es now(), el
+// instante de la transacción; states.go conserva el ready_at de una tarea que ya estaba lista). Así cuenta cualquier
+// camino que marque «Listo» (una unidad, el pedido de una estación o la cuenta entera desde el KDS) y nunca una
+// unidad que ya estaba lista: una modificación que no cambia la receta conserva sus tareas listas y no se vuelve a
+// avisar; una que la cambia las reinicia y su nueva versión se avisa al estar lista otra vez. El destinatario es el
+// responsable actual de la cuenta en que está la unidad. UNIQUE (unit_id, version_id) impide repetir la misma
+// preparación. Al registrar algo se podan los avisos de más de 2 días (dato derivado, no de operación).
+//
+// El dispositivo destinatario (A2-D4) se fija aquí: el dispositivo android, no revocado, donde el responsable tiene la
+// sesión con PIN vigente de last_seen_at más reciente, o ninguno si no tiene una vigente (entonces el aviso va a todos
+// los dispositivos donde entró con PIN en el día comercial; lo decide la lectura, administration/ready_alerts.go).
+// Fijarlo al «Listo» y no al leer hace que cada dispositivo lo reciba o no sin importar cuándo consulte: si el mesero
+// cambia de dispositivo justo entonces o uno se reconecta tarde con su cursor, el aviso no se pierde ni se duplica.
+func (handler *service) recordReadyNotices(accountIDs []string) error {
+	recorded, err := handler.tx.Exec(handler.ctx, `INSERT INTO app.ready_notices
+            (unit_id,version_id,account_id,recipient_user_id,recipient_device_id,ready_at)
+        SELECT u.id,u.version_id,u.account_id,a.assigned_user_id,
+            (SELECT s.device_id FROM app.sessions s JOIN app.devices d ON d.id=s.device_id
+                WHERE s.user_id=a.assigned_user_id AND s.opened_with_pin AND s.revoked_at IS NULL AND s.expires_at>now()
+                    AND d.kind='android' AND d.revoked_at IS NULL
+                ORDER BY s.last_seen_at DESC,s.created_at DESC,s.id LIMIT 1),
+            now()
+        FROM app.restaurant_item_units u JOIN app.restaurant_accounts a ON a.id=u.account_id
+        CROSS JOIN LATERAL (SELECT count(*) FILTER (WHERE t.state<>'cancelled') AS live,
+            count(*) FILTER (WHERE t.state='ready') AS ready,
+            max(t.ready_at) FILTER (WHERE t.state='ready') AS last_ready
+            FROM app.kitchen_tasks t WHERE t.unit_id=u.id AND t.version_id=u.version_id) tasks
+        WHERE u.account_id=ANY($1::uuid[]) AND u.state='active' AND tasks.live>0 AND tasks.ready=tasks.live
+            AND tasks.last_ready=now()
+        ORDER BY u.account_id,u.item_id,u.ordinal,u.id
+        ON CONFLICT (unit_id,version_id) DO NOTHING`, accountIDs)
+	if err != nil {
+		return err
+	}
+	if recorded.RowsAffected() == 0 {
+		return nil
+	}
+	_, err = handler.tx.Exec(handler.ctx, "DELETE FROM app.ready_notices WHERE ready_at < now() - interval '2 days'")
+	return err
 }

@@ -21,7 +21,9 @@ import (
 // Etapa A2: actualización desde el esquema 25 con roles, usuarios, terminales (de escritorio y android), sesiones e
 // impresoras existentes. La parte C de la 0026 agrega la impresora de precuentas de cada dispositivo
 // (devices.precheck_printer_id, vacía en todos), con su llave foránea, su índice y la restricción de que solo un
-// dispositivo android la tenga (A2-D3). No cambia ninguna fila existente de ninguna tabla. Deja la base vacía.
+// dispositivo android la tenga (A2-D3); la parte D, el registro de platillos listos (app.ready_notices, vacío, con
+// UNIQUE (unit_id, version_id)) y «Avisar platillos listos», «Sonido» y «Vibración» de cada terminal (activados). No
+// cambia ninguna fila existente de ninguna tabla. Deja la base vacía.
 func TestStageA2Upgrade(t *testing.T) {
 	dsn := os.Getenv("ADEL_TEST_DATABASE_URL")
 	u, err := url.Parse(dsn)
@@ -78,6 +80,37 @@ func TestStageA2Upgrade(t *testing.T) {
 		}
 	}
 	checkStageA2PrecheckPrinter(ctx, t, pool)
+	checkStageA2ReadyNotices(ctx, t, pool)
+}
+
+// checkStageA2ReadyNotices (parte D): la tabla vacía con su identidad, sus índices y su restricción única, y los tres
+// ajustes de avisos activados en todas las terminales existentes.
+func checkStageA2ReadyNotices(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	var notices, disabled int
+	var identity, unique, recipient string
+	err := pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM app.ready_notices),
+            (SELECT count(*) FROM app.devices WHERE NOT (ready_alerts_enabled AND ready_alerts_sound AND ready_alerts_vibration)),
+            (SELECT identity_generation FROM information_schema.columns WHERE table_schema='app' AND table_name='ready_notices'
+                AND column_name='sequence'),
+            coalesce((SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname='ready_notices_unit_version_key'),''),
+            coalesce((SELECT indexdef FROM pg_indexes WHERE schemaname='app' AND indexname='ready_notices_recipient_idx'),'')`).
+		Scan(&notices, &disabled, &identity, &unique, &recipient)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if notices != 0 || disabled != 0 || identity != "ALWAYS" || unique != "UNIQUE (unit_id, version_id)" ||
+		!strings.Contains(recipient, "(recipient_user_id, sequence)") {
+		t.Fatalf("ready_notices: %d avisos, %d terminales con avisos apagados, identidad %q, %q, %q", notices, disabled,
+			identity, unique, recipient)
+	}
+	// Un aviso de una unidad que no existe (23503: llave foránea).
+	_, err = pool.Exec(ctx, `INSERT INTO app.ready_notices(unit_id,version_id,account_id,recipient_user_id)
+        VALUES (gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),'00000000-0000-4000-8000-0000000000a1')`)
+	var problem *pgconn.PgError
+	if !errors.As(err, &problem) || problem.Code != "23503" {
+		t.Fatalf("aviso de una unidad que no existe: %v", err)
+	}
 }
 
 // Impresoras de una instalación existente en el esquema 25: una de red y la USB de una terminal con agente.

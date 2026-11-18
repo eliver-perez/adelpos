@@ -54,6 +54,10 @@ var capabilities = []string{
 	// respuesta de la impresión con problem, printer_name y terminal_name, GET payments/accounts/{id}/documents/status y
 	// payments.tickets.print en los permisos de mesero. El escritorio muestra «Impresora de precuentas» solo con ella.
 	"device-precheck-printer-v1",
+	// Etapa A2 (parte D): registro y canal de platillos listos (GET ready-alerts y ready-alerts/stream con la credencial
+	// del dispositivo, filtrados por destinatario en Go) y «Avisar platillos listos», «Sonido» y «Vibración» de cada
+	// teléfono o tableta (PATCH devices/{id}, su configuración y la terminal de auth/me y restaurant/state).
+	"ready-alerts-v1",
 }
 
 type ErrorBody struct {
