@@ -24,7 +24,7 @@ la caja, como siempre.
 
 Sirve cualquier teléfono o tableta con **Android 8.0 o posterior**.
 
-1. **Pasa el archivo `AD-EL-POS-Android-0.1.0.apk`** al teléfono o la tableta, de la forma que te sea más fácil:
+1. **Pasa el archivo `AD-EL-POS-Android-0.2.0.apk`** al teléfono o la tableta, de la forma que te sea más fácil:
    - **Carpeta compartida** (por ejemplo, Google Drive): súbelo desde la computadora y ábrelo en el dispositivo.
    - **Correo**: envíalo como archivo adjunto y ábrelo desde el correo del dispositivo. Algunos correos (Gmail, por
      ejemplo) no dejan adjuntar archivos `.apk`; si te pasa, usa una carpeta compartida.
@@ -127,7 +127,9 @@ versión de cada una): envía lo pendiente desde ella y sigue desde el paso 2.
    «Todavía no hay meseros con PIN», sigue con la sección 4.
 
 Después, en **Administración › Sistema › Terminales**, el dispositivo aparece con su tipo («Teléfono o tableta»), el
-mesero que lo usa y si está **en línea**. Con **«Editar»** cambias su nombre y su bloqueo por inactividad (sección 4).
+mesero que lo usa y si está **en línea**. Con **«Editar»** cambias su nombre, su bloqueo por inactividad (sección 4),
+su **impresora de precuentas** (sección 7) y sus **avisos de platillos listos** (sección 8). Estas dos últimas opciones
+solo aparecen en la computadora principal con la 0.13.0 (o en una terminal que también la tenga).
 
 ## 4. Dar permiso y PIN a los meseros
 
@@ -341,11 +343,15 @@ resumen. Se ve también en «¿Quién eres?» y en la pantalla de bloqueo.
 - **Solo funciona si la cocina marca «Listo» en la pantalla de cocina.** Si la cocina solo imprime comandas, no hay
   avisos; la función queda lista para cuando se use.
 - **A quién le llega**: al mesero responsable de la cuenta (quien la abrió o a quien se le transfirió), en el
-  dispositivo donde usó su sesión más recientemente; si no tiene ninguna abierta, en todos los dispositivos donde entró
-  con su PIN durante el día. **Transferir la cuenta** cambia a quién llegan los platillos que todavía no estaban
-  listos. A los demás meseros y a los demás dispositivos no les llega.
+  dispositivo donde usó su sesión más recientemente (entre los que tienen «Avisar platillos listos» activado); si no
+  tiene ninguna abierta, en todos los dispositivos donde entró con su PIN durante el día. **Transferir la cuenta**
+  cambia a quién llegan los platillos que todavía no estaban listos. A los demás meseros y a los demás dispositivos no
+  les llega.
+- Un dispositivo solo recibe lo que la cocina terminó **después** de que el mesero entró en él. Una sesión que empezó
+  antes de la «Hora de inicio del día» solo cuenta mientras el mesero la siga usando (en la última media hora).
 - **No se repiten ni se pierden**: si se corta la wifi justo cuando la cocina marca «Listo», el aviso llega una sola
-  vez en cuanto vuelve la conexión.
+  vez en cuanto vuelve la conexión. Lo único que no llega después es lo que la cocina terminó antes de la «Hora de
+  inicio del día» y no alcanzó a llegar (por ejemplo, por un corte de red que cruza esa hora).
 - No hace falta ningún permiso nuevo para el rol Mesero. Requiere la computadora principal en la versión **0.13.0**.
 
 **«AD-EL POS conectado».** Para que los avisos lleguen con la pantalla apagada, Android exige que la aplicación muestre
@@ -363,8 +369,9 @@ comercial no ha terminado.
 **Sonido y vibración.** Se eligen por dispositivo en la computadora principal: **Administración › Sistema ›
 Terminales**, **«Editar»** en el teléfono o la tableta, **«Avisos de platillos listos»**: **«Avisar platillos listos»**
 (activado al principio), **«Sonido»** y **«Vibración»**, y **«Guardar cambios»**; **«Ver configuración»** los muestra.
-El cambio llega al dispositivo en unos segundos. Android también deja ajustarlos en sus Ajustes, en **Aplicaciones ›
-AD-EL POS › Notificaciones › «Platillos listos»** (siempre hay un solo canal con ese nombre).
+El cambio llega al dispositivo en unos segundos; los avisos que estaban a la vista se quitan y los siguientes ya salen
+con lo nuevo. Android también deja ajustarlos en sus Ajustes, en **Aplicaciones › AD-EL POS › Notificaciones ›
+«Platillos listos»** (siempre hay un solo canal con ese nombre).
 
 **Si los avisos no llegan.** En el teléfono o la tableta, toca el nombre del mesero arriba a la derecha y elige
 **«Avisos de platillos listos»** (o toca la notificación «AD-EL POS conectado»): la ayuda dice qué falta y lleva a los
@@ -435,6 +442,7 @@ Otros avisos que puede mostrar el dispositivo:
 
 - El aviso de platillos listos **no se ha probado con la pantalla apagada en un dispositivo real** (Doze y gestores de
   batería de cada marca), solo en emuladores.
+- La precuenta desde el teléfono **no se ha impreso en papel real**: se probó con una impresora simulada.
 - **No cobra**, ni mesas ni Para llevar: se cobra en la caja.
 - No marca productos como agotados (se hace en la caja).
 - **No se ha probado en un teléfono ni en una tableta reales**, solo en emuladores.
