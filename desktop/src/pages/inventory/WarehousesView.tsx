@@ -325,7 +325,7 @@ export function WarehousesView({
         </div>
         {stations.data && stations.data.length === 0 && (
           <p className="muted">
-            Aún no hay estaciones de preparación. Se configuran en Cocina y preparación.
+            No hay estaciones de preparación. Se configuran en Cocina y preparación.
           </p>
         )}
         {stations.data && warehouses.data && (

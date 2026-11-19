@@ -296,7 +296,7 @@ pub fn change_mode(
     let service = context
         .service
         .as_ref()
-        .ok_or("En esta computadora la modalidad todavía no se puede cambiar desde aquí.")?;
+        .ok_or("En esta computadora la modalidad no se puede cambiar desde aquí.")?;
     let filename = context
         .connection_file
         .as_ref()

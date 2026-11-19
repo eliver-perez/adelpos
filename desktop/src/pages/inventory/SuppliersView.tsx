@@ -472,7 +472,7 @@ function SupplierEditorPanel({
     if (dirty.current) {
       const discard = await confirm({
         title: 'Cambios sin guardar',
-        message: 'Este proveedor tiene cambios que aún no se guardan. ¿Quieres descartarlos?',
+        message: 'Este proveedor tiene cambios sin guardar. ¿Quieres descartarlos?',
         confirmLabel: 'Descartar cambios',
         cancelLabel: 'Seguir editando',
         tone: 'danger',

@@ -59,7 +59,7 @@ test('Terminales: aprobación con código, renombrar, configuración, revocació
   const panel = page.getByRole('region', { name: 'Terminales nuevas' });
   await expect(panel).toContainText('No hay terminales esperando aprobación.');
   // El servidor temporal no abre la escucha de la red local.
-  await expect(panel).toContainText('Esta computadora todavía no recibe terminales de la red.');
+  await expect(panel).toContainText('Esta computadora no recibe terminales de la red.');
 
   // 1. Una terminal nueva pide su código: aparece con su nombre, sistema y hora.
   const caja = await requestPairingCode('Caja 2');
@@ -121,7 +121,8 @@ test('Terminales: aprobación con código, renombrar, configuración, revocació
   const summary = page.getByRole('region', { name: 'Sesiones activas por tipo de terminal' });
   await expect(summary).toContainText('Escritorio');
   await expect(summary).toContainText('Teléfono o tableta0');
-  await expect(summary).toContainText('Solo se cuentan; todavía no se limita ninguna.');
+  // Etapa A3 (§1): sin la frase provisional «Solo se cuentan; todavía no se limita ninguna.».
+  await expect(summary).not.toContainText('Solo se cuentan');
 
   // 5. Renombrar y ver su configuración (pantalla de inicio, estaciones y el hueco de las impresoras).
   await row.getByRole('button', { name: 'Editar', exact: true }).click();

@@ -254,7 +254,7 @@ export function BackupSection() {
               <strong>Último respaldo correcto: </strong>
               {state.last_success
                 ? `${backupDateTime(state.last_success.started_at)}, en ${folderLabel(state.last_success)}.`
-                : 'todavía no hay ninguno.'}
+                : 'no hay ninguno.'}
             </p>
             <p className="muted">{scheduleSummary(state)}</p>
           </div>
@@ -322,7 +322,7 @@ export function BackupSection() {
           <div className="backup-runs">
             <h3>Últimos respaldos</h3>
             {state.runs.length === 0 ? (
-              <p className="muted">Todavía no hay respaldos.</p>
+              <p className="muted">No hay respaldos.</p>
             ) : (
               <ul className="backup-run-list" aria-label="Últimos respaldos">
                 {state.runs.map((run) => (

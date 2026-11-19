@@ -39,9 +39,9 @@ const AgentOfflineSeconds = 30
 
 // Textos de los trabajos que no pueden salir, para el restaurante (antes «El destino está inactivo o
 // requiere un agente de impresión aún no implementado» y «El destino requiere un agente de impresión
-// futuro»).
+// futuro»; hasta la etapa A3, «Esta impresora todavía no puede usarse para imprimir.»).
 const (
-	unsupportedPrinterMessage = "Esta impresora todavía no puede usarse para imprimir."
+	unsupportedPrinterMessage = "Esta impresora no se puede usar para imprimir."
 )
 
 // inactivePrinterMessage dice qué impresora está desactivada.

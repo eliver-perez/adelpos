@@ -128,7 +128,7 @@ func NewWithOptions(options Options, probe Probe, origins []string, logger *slog
 			application[0].ServeHTTP(w, r)
 			return
 		}
-		fail(w, r, 501, "EVENTS_NOT_AVAILABLE", "Los eventos en tiempo real aún no están habilitados.")
+		fail(w, r, 501, "EVENTS_NOT_AVAILABLE", "Los avisos al momento no están disponibles en este servidor.")
 	})
 	if len(application) > 0 {
 		mux.Handle("/api/v1/", application[0])

@@ -195,7 +195,7 @@ describe('impresoras USB de las terminales', () => {
     const configuration = await screen.findByRole('region', { name: 'Configuración de Caja 2' });
     await waitFor(() => expect(configuration.textContent).toContain('Sin impresoras propias'));
     expect(configuration.textContent).toContain('Desconectada: sus trabajos esperan');
-    expect(configuration.textContent).toContain('Todavía no informó sus impresoras.');
+    expect(configuration.textContent).toContain('No ha informado sus impresoras.');
   });
 
   it('se registra eligiendo la terminal y una de sus impresoras que sirven', async () => {
@@ -248,7 +248,7 @@ describe('impresoras USB de las terminales', () => {
         '00000000-0000-4000-8000-0000000000e3',
       ),
     );
-    expect(screen.getByText(/Barra todavía no informó sus impresoras/)).toBeTruthy();
+    expect(screen.getByText(/Barra no ha informado sus impresoras/)).toBeTruthy();
   });
 
   it('al asignar impresoras se ve en qué terminal está y la de una terminal sirve para tickets', () => {

@@ -73,8 +73,7 @@ export function ConnectionLostLayer({
           quedan en pausa hasta que vuelva la conexión.
         </p>
         <p className="connection-lost-kept">
-          Lo que capturaste y todavía no se guardó se conserva en esta pantalla mientras no cierres
-          la ventana.
+          Lo que capturaste sin guardar se conserva en esta pantalla mientras no cierres la ventana.
         </p>
         {detail && <p className="muted connection-lost-detail">{detail}</p>}
         <p className="connection-lost-retry" aria-live="polite">

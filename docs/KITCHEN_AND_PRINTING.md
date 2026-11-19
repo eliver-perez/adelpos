@@ -390,8 +390,8 @@ propietario (lista en [INSTALAR_EN_WINDOWS.md](INSTALAR_EN_WINDOWS.md)).
 
 Precuentas, tickets de pago y documentos de caja usan la «Impresora de tickets» de Cobros › Políticas de cobro. Desde la
 9F (decisión D4) solo sirve si está configurada, activa y no es de otra terminal (desde la revisión independiente, B3,
-Cobros solo ofrece esas impresoras —las demás aparecen deshabilitadas con «desactivada» o «Esta impresora todavía no
-puede usarse para imprimir»— y Go rechaza elegir otra con `422 RECEIPT_PRINTER_UNAVAILABLE`); si no, Go avisa **antes de
+Cobros solo ofrece esas impresoras —las demás aparecen deshabilitadas con «desactivada» o «Esta impresora no se puede
+usar para imprimir»— y Go rechaza elegir otra con `422 RECEIPT_PRINTER_UNAVAILABLE`); si no, Go avisa **antes de
 encolar**
 (no queda un trabajo fallido en la cola) y la interfaz lo dice al momento: «No hay impresora configurada para
 precuentas» (con el nombre visible de la precuenta), con **«Configurar impresora»** (lleva con el único `requestScreen`
@@ -400,7 +400,8 @@ aviso dice a quién pedirlo) y **«Reintentar»** en el mismo aviso. El ticket d
 resultado del cobro dice por qué no se imprimió y ofrece los mismos dos botones («Reintentar» imprime el ticket de ese
 pago; desde la revisión B1, solo el de un pago cuyo ticket quedó pendiente por esa razón y sin devoluciones). Las
 comandas no cambian: una impresora inactiva bloquea la liberación y una de otra terminal deja la comanda en
-«Requiere intervención», ahora con «Esta impresora todavía no puede usarse para imprimir.».
+«Requiere intervención», ahora con «Esta impresora no se puede usar para imprimir.» (hasta la etapa A3, «Esta
+impresora todavía no puede usarse para imprimir.»).
 
 ### Reintentar sin motivo, reimprimir con motivo
 
@@ -411,7 +412,7 @@ comandas no cambian: una impresora inactiva bloquea la liberación y una de otra
   responde» o «La impresora … está apagada o sin conexión»; `not_found`, desde la revisión independiente (B4): «No se
   encontró la impresora de caja (o la impresora …) en el equipo», cuando la cola CUPS no existe o la impresora de
   Windows no está instalada o se renombró; `inactive`: «La impresora … está desactivada»; `unsupported`: «Esta
-  impresora todavía no puede usarse para imprimir»; `setup`: «… necesita que se revise su configuración»). Cuando un
+  impresora no se puede usar para imprimir»; `setup`: «… necesita que se revise su configuración»). Cuando un
   documento que la pantalla veía en camino a la impresora falla, aparece además un aviso que se cierra solo con
   «Reintentar» y, si se resuelve configurando la impresora (`not_found`, `inactive`, `unsupported`, `setup`), también
   «Configurar impresora» (en Caja, junto a «Reintentar» del documento).

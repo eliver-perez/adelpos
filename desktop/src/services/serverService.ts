@@ -53,7 +53,7 @@ export function uptimeLabel(seconds: number) {
 export function terminalsLabel(status: ServiceStatus) {
   const { connected, registered } = status.terminals;
   if (registered === 0) {
-    return 'Todavía no hay otras terminales registradas.';
+    return 'No hay otras terminales registradas.';
   }
   return `${countLabel(connected, 'terminal conectada', 'terminales conectadas')} de ${registered}.`;
 }

@@ -120,7 +120,7 @@ export function PaymentHistory({
   actions?: (payment: PaymentRecord) => ReactNode;
 }) {
   if (payments.length === 0) {
-    return <p className="muted text-sm">Aún no hay pagos registrados en esta cuenta.</p>;
+    return <p className="muted text-sm">No hay pagos registrados en esta cuenta.</p>;
   }
   return (
     <ol className="payment-history" aria-label="Pagos registrados">

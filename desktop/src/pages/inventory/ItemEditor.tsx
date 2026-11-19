@@ -477,7 +477,7 @@ export function ItemEditorPanel({
     if (dirty.current) {
       const discard = await confirm({
         title: 'Cambios sin guardar',
-        message: 'Este insumo tiene cambios que aún no se guardan. ¿Quieres descartarlos?',
+        message: 'Este insumo tiene cambios sin guardar. ¿Quieres descartarlos?',
         confirmLabel: 'Descartar cambios',
         cancelLabel: 'Seguir editando',
         tone: 'danger',

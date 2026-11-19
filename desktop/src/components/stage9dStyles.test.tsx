@@ -299,12 +299,13 @@ describe('acciones destructivas en rojo (§1.5)', () => {
 
 // Recorrido del código (§1.5: el rojo es solo para lo que no se puede deshacer). Todo botón cuyo
 // texto empieza con un verbo destructivo («Quitar», «Descartar», «Eliminar», «Borrar», «Anular»,
-// «Revocar», «Retirar logotipo/de prueba», «Liberar mesa», «Cancelar unidades/ajuste/orden/conteo/
+// «Revocar», «Retirar logotipo», «Liberar mesa», «Cancelar unidades/ajuste/orden/conteo/
 // arqueo/cuenta») lleva la clase destructiva, salvo dos listas explícitas:
 //   - `notDestructive`: no destruyen nada (teclas de borrado de los teclados en pantalla);
 //   - `reversible`: vacían un campo o quitan un renglón de un formulario que todavía no se guarda (o
 //     se deshacen con «Deshacer»); usan el estilo secundario normal y nunca el rojo.
-// Siguen en rojo Eliminar, Descartar, Cancelar cuenta/unidades, Liberar mesa, Retirar de prueba y
+// Siguen en rojo Eliminar, Descartar, Cancelar cuenta/unidades, Liberar mesa, el «Quitar producto» de
+// la previsualización de precios (antes «Retirar de prueba»; etapa A3, §1) y
 // todo lo que se aplica en el momento sin poder deshacerse (p. ej. «Quitar nivel», «Quitar porción»,
 // el «Quitar» de los insumos de un proveedor y el de un renglón de un conteo abierto, que guardan al
 // instante). Otros textos no entran en la expresión porque no destruyen nada: «Retirar efectivo»
@@ -312,7 +313,7 @@ describe('acciones destructivas en rojo (§1.5)', () => {
 // preparación» (envía a cocina) y «Cancelar» a secas o «Cancelar corrección/apertura del cajón»
 // (cierran un formulario sin registrar nada).
 const destructiveLabel =
-  /^(Quitar|Descartar|Eliminar|Borrar|Anular|Revocar|Retirar (logotipo|de prueba)|Liberar mesa|Cancelar (unidades|ajuste|orden|conteo|arqueo|el arqueo|cuenta))\b/;
+  /^(Quitar|Descartar|Eliminar|Borrar|Anular|Revocar|Retirar logotipo|Liberar mesa|Cancelar (unidades|ajuste|orden|conteo|arqueo|el arqueo|cuenta))\b/;
 const notDestructive = [
   'components/VirtualKeyboard.tsx: Borrar',
   'components/NumericKeypad.tsx: Borrar último carácter',

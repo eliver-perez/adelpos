@@ -118,7 +118,7 @@ func testPrintingStage9F(t *testing.T, fixture *paymentsFixture) {
 			message string
 		}{
 			{nil, "PRINTER_NOT_CONFIGURED", "missing", "No hay impresora configurada para precuentas."},
-			{agent.ID, "PRINTER_UNAVAILABLE", "unsupported", "Esta impresora todavía no puede usarse para imprimir."},
+			{agent.ID, "PRINTER_UNAVAILABLE", "unsupported", "Esta impresora no se puede usar para imprimir."},
 			{inactive.ID, "PRINTER_UNAVAILABLE", "inactive", "La impresora Tickets apagada 9F está desactivada."},
 		}
 		for _, testCase := range cases {

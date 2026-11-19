@@ -237,7 +237,7 @@ func (service *Service) createPairingRequest(ctx context.Context, tx pgx.Tx, req
 	var establishment string
 	err := tx.QueryRow(ctx, "SELECT name FROM app.establishment").Scan(&establishment)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, pairingFault(409, "SETUP_REQUIRED", "El servidor todavía no está preparado. Termina primero la configuración en la computadora principal.")
+		return nil, pairingFault(409, "SETUP_REQUIRED", "El servidor no está preparado. Termina primero la configuración en la computadora principal.")
 	}
 	if err != nil {
 		return nil, err
@@ -338,7 +338,7 @@ func pairingUnavailable(service *Service) error {
 	if service.IdentityProblem != "" {
 		return pairingFault(503, "PAIRING_UNAVAILABLE", "Este servidor no puede emparejar terminales porque su identidad necesita revisión de soporte.")
 	}
-	return pairingFault(503, "PAIRING_UNAVAILABLE", "Este servidor todavía no puede emparejar terminales.")
+	return pairingFault(503, "PAIRING_UNAVAILABLE", "Este servidor no puede emparejar terminales ahora.")
 }
 
 // auditPairing registra un movimiento de una terminal que todavía no tiene identidad (la solicitud de
@@ -534,7 +534,7 @@ func (service *Service) claimPairing(ctx context.Context, tx pgx.Tx, request Req
 	}
 	if row.visibleState != "approved" {
 		if row.visibleState == "pending" {
-			return nil, pairingFault(409, "PAIRING_NOT_APPROVED", "La solicitud todavía no se aprueba en la computadora principal.")
+			return nil, pairingFault(409, "PAIRING_NOT_APPROVED", "La solicitud no se ha aprobado en la computadora principal.")
 		}
 		return nil, pairingStateFault(row.visibleState)
 	}
@@ -675,7 +675,7 @@ func (service *Service) approvePairing(ctx context.Context, tx pgx.Tx, request R
 		return nil, pairingStateFault(row.visibleState)
 	}
 	if !row.revealedAlready {
-		return nil, pairingFault(409, "PAIRING_NOT_READY", "La terminal todavía no termina de pedir su código. Espera unos segundos.")
+		return nil, pairingFault(409, "PAIRING_NOT_READY", "La terminal no ha terminado de pedir su código. Espera unos segundos.")
 	}
 	// El código se calcula con la huella guardada al crear la solicitud (la del certificado con el que
 	// el servidor respondió); si la identidad cambiara en medio, la huella vigente no coincidiría.

@@ -21,7 +21,7 @@ export function correctable(payment: PaymentRecord) {
 }
 
 const closedShiftMessage =
-  'El turno del pago ya está cerrado: su método no puede corregirse aquí. Usa una regularización posterior (etapa 7) o, si corresponde, una devolución.';
+  'El turno del pago ya está cerrado: su método no puede corregirse aquí. Usa una regularización en Caja o, si corresponde, una devolución.';
 
 // Corrección de un método capturado por error: Go registra un reverso y un pago nuevo enlazados;
 // el pago original no se edita.

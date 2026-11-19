@@ -443,7 +443,7 @@ export function ProductionsView({
                 {data.items.length === 0 && (
                   <tr>
                     <td colSpan={costsVisible ? 9 : 8} className="muted">
-                      Aún no hay elaboraciones registradas.
+                      No hay elaboraciones registradas.
                     </td>
                   </tr>
                 )}

@@ -7,5 +7,5 @@ func CheckStartup(environment, mode string) error {
 	if environment == "development" && mode == "development" {
 		return nil
 	}
-	return errors.New("la distribución comercial requiere integrar el proveedor de licencias; no está implementado en etapa 1")
+	return errors.New("la distribución comercial requiere integrar el proveedor de licencias, que no está implementado")
 }

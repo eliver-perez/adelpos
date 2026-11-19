@@ -110,7 +110,7 @@ const STORAGE_PENDING_MESSAGE: &str =
 const STORAGE_PENDING_MESSAGE: &str = "Esperando autorización del almacén seguro del sistema.";
 
 /// Una terminal «Solo terminal» que todavía no se conecta a ningún servidor (etapa 9G).
-const AWAITING_SERVER_MESSAGE: &str = "Esta terminal todavía no está conectada a un servidor.";
+const AWAITING_SERVER_MESSAGE: &str = "Esta terminal no está conectada a un servidor.";
 
 #[derive(Serialize)]
 pub struct HTTPResult {

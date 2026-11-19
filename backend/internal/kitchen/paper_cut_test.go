@@ -342,7 +342,7 @@ func TestPrintProblemCodes(t *testing.T) {
 		PrinterSnapshot: Printer{Name: "Otra terminal", Transport: "agent", Destination: "Caja 2", PaperWidth: 80, Copies: 1, Port: 9100},
 		Content:         "PRUEBA",
 	})
-	if agent.State != "intervention" || agent.Code != ProblemUnsupported || agent.Message != "Esta impresora todavía no puede usarse para imprimir." {
+	if agent.State != "intervention" || agent.Code != ProblemUnsupported || agent.Message != "Esta impresora no se puede usar para imprimir." {
 		t.Fatalf("La impresora de otra terminal no explica el problema: %+v", agent)
 	}
 	if PrinterProblem(&Printer{Active: true, Transport: "cups"}) != "" || PrinterProblem(&Printer{Active: false, Transport: "cups"}) != ProblemInactive ||

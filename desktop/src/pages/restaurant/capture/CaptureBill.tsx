@@ -294,7 +294,7 @@ export function CaptureBill({
                   void confirm({
                     title: 'Descartar productos nuevos',
                     message:
-                      'Se quitarán de esta terminal los productos nuevos que aún no se guardaron en la cuenta.',
+                      'Se quitarán de esta terminal los productos nuevos que no se han guardado en la cuenta.',
                     confirmLabel: 'Descartar productos',
                     cancelLabel: 'Conservarlos',
                     tone: 'danger',
@@ -329,7 +329,7 @@ export function CaptureBill({
           onCustomize={onCustomize}
         />
         {bill.lines.length === 0 && localDraft.length === 0 && (
-          <p className="muted capture-empty">La cuenta aún no tiene productos.</p>
+          <p className="muted capture-empty">La cuenta no tiene productos.</p>
         )}
         {account.notes && <p className="bill-account-notes">Observaciones: {account.notes}</p>}
       </div>

@@ -144,7 +144,7 @@ describe('Modalidad en el primer arranque', () => {
 });
 
 describe('Buscar el servidor', () => {
-  it('dice que la terminal aún no está conectada y que los datos de servidor se conservan', () => {
+  it('dice que la terminal no está conectada y que los datos de servidor se conservan', () => {
     render(
       <FindServerPage
         state={{
@@ -157,7 +157,7 @@ describe('Buscar el servidor', () => {
       />,
     );
     expect(screen.getByRole('status').textContent).toContain(
-      'todavía no está conectada al servidor del restaurante',
+      'no está conectada al servidor del restaurante',
     );
     expect(screen.getByRole('note').textContent).toContain('sus datos se conservan');
   });
