@@ -17,19 +17,18 @@ import com.adelpos.meseros.core.data.waiter.db.WaiterDao
 import com.adelpos.meseros.core.domain.catalog.CatalogSource
 import com.adelpos.meseros.core.domain.catalog.LineSelection
 import com.adelpos.meseros.core.domain.connection.LinkState
+import com.adelpos.meseros.core.domain.connection.ServerLink
 import com.adelpos.meseros.core.domain.realtime.RealtimeFeed
 import com.adelpos.meseros.core.domain.waiter.OrderFactory
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 /**
@@ -42,6 +41,10 @@ import kotlinx.coroutines.launch
  *
  * [start] (desde `AdelPosApplication`) recupera la cola después de un reinicio y pide envíos al
  * volver la red, al volver a primer plano y cuando un mesero vuelve a entrar con conexión.
+ *
+ * @param linkState la red de Android: solo dispara «volvió la red» de la cola (su regla no cambia).
+ * @param serverLink el estado único de conexión (etapa A3, A3-D1): Mesas vuelve a leer al volver y
+ *   la precuenta lo pregunta en el momento; [serverReachable] es el mismo estado como «En línea».
  */
 class WaiterModeContainer(
     private val dao: WaiterDao,
@@ -53,6 +56,8 @@ class WaiterModeContainer(
     private val catalog: CatalogSource,
     realtime: RealtimeFeed,
     private val linkState: Flow<LinkState>,
+    private val serverLink: ServerLink,
+    private val serverReachable: StateFlow<Boolean>,
     private val foreground: StateFlow<Boolean>,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -95,6 +100,7 @@ class WaiterModeContainer(
             realtime = realtime,
             scope = scope,
             elapsedClock = SystemClock::elapsedRealtime,
+            link = serverLink.state,
         )
 
     val sentLines: SentLineRepository = SentLineRepository(server, api)
@@ -118,11 +124,9 @@ class WaiterModeContainer(
             dao = dao,
             server = server,
             api = api,
-            connected =
-                linkState
-                    .map { it == LinkState.ONLINE }
-                    .stateIn(scope, SharingStarted.Eagerly, true),
+            connected = serverReachable,
             scope = scope,
+            confirmConnection = serverLink::confirm,
         )
 
     fun start() {

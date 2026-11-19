@@ -3,6 +3,7 @@ package com.adelpos.meseros
 import android.content.Context
 import android.os.Build
 import android.os.SystemClock
+import android.util.Log
 import com.adelpos.meseros.core.capture.CaptureDependencies
 import com.adelpos.meseros.core.data.access.AccessRepository
 import com.adelpos.meseros.core.data.access.PairingRepository
@@ -11,6 +12,7 @@ import com.adelpos.meseros.core.data.db.AppDatabase
 import com.adelpos.meseros.core.data.discovery.HttpsServerProbe
 import com.adelpos.meseros.core.data.discovery.NsdServerBrowser
 import com.adelpos.meseros.core.data.network.ConnectionMonitor
+import com.adelpos.meseros.core.data.network.ServerLinkMonitor
 import com.adelpos.meseros.core.data.preferences.DevicePreferencesRepository
 import com.adelpos.meseros.core.data.security.KeystoreSecretSealer
 import com.adelpos.meseros.core.data.session.DeviceServerAccess
@@ -31,6 +33,7 @@ import com.adelpos.meseros.core.domain.access.UnsentOrdersSource
 import com.adelpos.meseros.core.domain.access.WaiterWorkGate
 import com.adelpos.meseros.core.domain.connection.LinkState
 import com.adelpos.meseros.core.domain.connection.PendingOrdersSource
+import com.adelpos.meseros.core.domain.realtime.RealtimeState
 import com.adelpos.meseros.core.domain.security.SecretSealer
 import com.adelpos.meseros.core.domain.server.ServerAnnouncements
 import com.adelpos.meseros.core.domain.server.ServerRelocator
@@ -41,7 +44,12 @@ import com.adelpos.meseros.ready.ReadyAlertsController
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 /**
@@ -81,7 +89,39 @@ class AppContainer(context: Context, private val settings: Settings = Settings()
      */
     val clientIdentity: ClientIdentity = ClientIdentity(version = settings.clientVersion)
 
+    /** La red de Android (solo alimenta a [serverLink] y a los disparadores de «volvió la red»). */
     val connectionMonitor: ConnectionMonitor by lazy { ConnectionMonitor(appContext) }
+
+    /**
+     * **El estado único de conexión** con la computadora principal (etapa A3, A3-D1): lo leen la
+     * barra, «¿Quién eres?», Mesas, Para llevar, la precuenta, «Entregado» y la notificación del
+     * canal de avisos; lo alimentan la red de Android y cada respuesta de Go del cliente del
+     * servidor emparejado. Lo arranca AdelPosApplication.
+     */
+    val serverLink: ServerLinkMonitor by lazy {
+        ServerLinkMonitor(
+            network = connectionMonitor.linkState,
+            initialNetwork = connectionMonitor.current(),
+            foreground = appForeground.inForeground,
+            // Se arma al recogerse (en start()): el canal de tiempo real necesita la entrada, que
+            // necesita este estado; así no se crean en círculo.
+            channelOpen =
+                flow {
+                    emitAll(catalogRealtime.realtime.state.map { it is RealtimeState.Connected })
+                },
+            probing = { relocate, quick -> deviceAccess.probeServer(relocate, quick) },
+            scope = appScope,
+            clock = SystemClock::elapsedRealtime,
+            log = { message -> Log.i(SERVER_LINK_TAG, message) },
+        )
+    }
+
+    /** El estado único como «hay conexión» para quien lo necesita al momento (la precuenta). */
+    private val serverReachable: StateFlow<Boolean> by lazy {
+        serverLink.state
+            .map { it == LinkState.ONLINE }
+            .stateIn(appScope, SharingStarted.Eagerly, serverLink.state.value == LinkState.ONLINE)
+    }
 
     val database: AppDatabase by lazy { AppDatabase.open(appContext) }
 
@@ -195,10 +235,11 @@ class AppContainer(context: Context, private val settings: Settings = Settings()
                     probe = HttpsServerProbe(clientIdentity),
                     clock = SystemClock::elapsedRealtime,
                 ),
-            isOnline = { connectionMonitor.current() == LinkState.ONLINE },
+            link = serverLink,
             unsentOrders = unsentOrders,
             scope = appScope,
             wipe = deviceDataWipe,
+            answers = serverLink,
         )
     }
 
@@ -288,6 +329,8 @@ class AppContainer(context: Context, private val settings: Settings = Settings()
             catalog = catalogRealtime.catalog,
             realtime = catalogRealtime.realtime,
             linkState = connectionMonitor.linkState,
+            serverLink = serverLink,
+            serverReachable = serverReachable,
             foreground = appForeground.inForeground,
         )
     }
@@ -316,6 +359,7 @@ class AppContainer(context: Context, private val settings: Settings = Settings()
             activeWaiter = deviceAccess.activeWaiter,
             takeaway = waiterMode.takeaway,
             precheck = waiterMode.precheck,
+            link = serverLink.state,
         )
     }
 
@@ -348,6 +392,7 @@ class AppContainer(context: Context, private val settings: Settings = Settings()
             preferences = devicePreferences,
             foreground = appForeground.inForeground,
             linkState = connectionMonitor.linkState,
+            serverLink = serverLink.state,
             retryOrders = { orderQueue.retryNow() },
             enabled = settings.readyAlerts,
             askPermissions = settings.askAlertPermissions,
@@ -361,7 +406,12 @@ class AppContainer(context: Context, private val settings: Settings = Settings()
             pairing = pairing,
             work = waiterWork,
             idleLock = idleLock,
-            linkState = connectionMonitor.linkState,
+            serverLink = serverLink,
         )
+    }
+
+    private companion object {
+        /** El registro de los cambios del estado único de conexión y de cada falla. */
+        const val SERVER_LINK_TAG = "AdelLink"
     }
 }

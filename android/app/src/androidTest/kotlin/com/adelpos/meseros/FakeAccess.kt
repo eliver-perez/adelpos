@@ -10,6 +10,7 @@ import com.adelpos.meseros.core.domain.access.NoWaiterWork
 import com.adelpos.meseros.core.domain.access.UnsentOrder
 import com.adelpos.meseros.core.domain.access.WaiterProfile
 import com.adelpos.meseros.core.domain.access.WaiterRoster
+import com.adelpos.meseros.core.domain.connection.FixedServerLink
 import com.adelpos.meseros.core.domain.connection.LinkState
 import com.adelpos.meseros.core.domain.error.AppError
 import com.adelpos.meseros.core.domain.pairing.FoundServerChoice
@@ -24,20 +25,20 @@ import com.adelpos.meseros.feature.access.AccessActions
 import com.adelpos.meseros.feature.access.AccessDependencies
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.flowOf
 
 /**
  * Entrada falsa para las pruebas de interfaz con estados forzados: la lista de meseros, el PIN
- * correcto («4829») y un servidor encontrado en la red. Nunca habla con un servidor.
+ * correcto («4829») y un servidor encontrado en la red. Nunca habla con un servidor. Con [online]
+ * en false, la lista es la de los meseros conocidos y el estado único de conexión ([link], etapa
+ * A3) empieza en «Sin conexión»; la prueba lo puede cambiar.
  */
 class FakeAccess(
     var waiters: List<WaiterProfile> = SAMPLE_WAITERS,
     var online: Boolean = true,
 ) : DeviceAccess {
+    val link = FixedServerLink(if (online) LinkState.ONLINE else LinkState.OFFLINE)
     val mutableStatus =
-        MutableStateFlow<DeviceStatus>(
-            DeviceStatus.Ready("Fonda Doña Ñeli", "Tableta 1", 3_600, online = true),
-        )
+        MutableStateFlow<DeviceStatus>(DeviceStatus.Ready("Fonda Doña Ñeli", "Tableta 1", 3_600))
     val mutableActive = MutableStateFlow<ActiveWaiter?>(null)
     override val status: StateFlow<DeviceStatus> = mutableStatus
     override val activeWaiter: StateFlow<ActiveWaiter?> = mutableActive
@@ -82,7 +83,7 @@ class FakeAccess(
             pairing = FakePairing,
             work = NoWaiterWork,
             idleLock = IdleLock(SystemClock::elapsedRealtime, NoWaiterWork),
-            linkState = flowOf(LinkState.ONLINE),
+            serverLink = link,
         )
 
     companion object {

@@ -13,6 +13,7 @@ import com.adelpos.meseros.core.domain.access.DeviceStatus
 import com.adelpos.meseros.core.domain.access.EntryResult
 import com.adelpos.meseros.core.domain.access.OfflineAttemptPolicy
 import com.adelpos.meseros.core.domain.access.UnsentOrder
+import com.adelpos.meseros.core.domain.connection.LinkState
 import com.adelpos.meseros.core.domain.error.AppError
 import com.adelpos.meseros.core.domain.server.ServerRelocator
 import com.adelpos.meseros.core.domain.text.Hex
@@ -52,10 +53,18 @@ class AccessSafetyTest {
     private lateinit var go: FakeGoServer
     private lateinit var database: AppDatabase
     private val sealer = FakeSecretSealer()
-    private var online = true
     private var now = 1_700_000_000_000L
     private val unsent = mutableListOf<UnsentOrder>()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    // El estado único de conexión (A3-D1) con la red de Android que pone cada prueba.
+    private val link = TestServerLink(scope)
+    private var online: Boolean
+        get() = link.online
+        set(value) {
+            link.online = value
+        }
+
     private val identity = ClientIdentity("0.1.0")
     private val ana = "aaaaaaaa-0000-4000-8000-000000000001"
     private val beto = "bbbbbbbb-0000-4000-8000-000000000002"
@@ -77,19 +86,21 @@ class AccessSafetyTest {
 
     private fun repository(wipe: DeviceDataWipe = DeviceDataWipe()) =
         AccessRepository(
-            dao = database.access(),
-            sealer = sealer,
-            destroyKey = {},
-            identity = identity,
-            relocator = ServerRelocator({ emptyList() }, { _, _ -> false }, { 0L }),
-            isOnline = { online },
-            unsentOrders = { unsent.toList() },
-            scope = scope,
-            wipe = wipe,
-            wallClock = { now },
-            verifierIterations = 1_000,
-            busyRetryMillis = 10,
-        )
+                dao = database.access(),
+                sealer = sealer,
+                destroyKey = {},
+                identity = identity,
+                relocator = ServerRelocator({ emptyList() }, { _, _ -> false }, { 0L }),
+                link = link.monitor,
+                unsentOrders = { unsent.toList() },
+                scope = scope,
+                wipe = wipe,
+                wallClock = { now },
+                verifierIterations = 1_000,
+                busyRetryMillis = 10,
+                answers = link.monitor,
+            )
+            .also { link.access = it }
 
     private suspend fun AccessRepository.pair() {
         onPaired(
@@ -261,7 +272,8 @@ class AccessSafetyTest {
         assertEquals(AccessRepository.BUSY_ATTEMPTS, go.pinLoginAttempts)
         assertNull(access.activeWaiter.value)
         assertEquals(0, database.access().knownWaiter(ana)!!.offlineFailures)
-        assertTrue((access.status.value as DeviceStatus.Ready).online)
+        assertTrue(access.status.value is DeviceStatus.Ready)
+        assertEquals(LinkState.ONLINE, link.monitor.state.value)
     }
 
     @Test
@@ -277,7 +289,7 @@ class AccessSafetyTest {
             AccessRepository.CLIENT_KIND_MISMATCH,
             (result as EntryResult.Failed).error.code,
         )
-        assertTrue("sigue en línea", (access.status.value as DeviceStatus.Ready).online)
+        assertEquals("sigue en línea", LinkState.ONLINE, link.monitor.state.value)
         assertNotNull(database.access().knownWaiter(ana))
         // El mismo error avisado por otra parte tampoco termina la sesión ni pide el PIN.
         access.report(
@@ -287,7 +299,8 @@ class AccessSafetyTest {
         delay(200)
         assertEquals(session, access.sessionToken(ana))
         assertFalse(access.activeWaiter.value!!.mustReenterPin)
-        assertTrue((access.status.value as DeviceStatus.Ready).online)
+        assertTrue(access.status.value is DeviceStatus.Ready)
+        assertEquals(LinkState.ONLINE, link.monitor.state.value)
     }
 
     @Test

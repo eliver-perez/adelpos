@@ -10,6 +10,7 @@ import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.adelpos.meseros.core.domain.connection.LinkState
 import com.adelpos.meseros.core.domain.preferences.TablesView
 import com.adelpos.meseros.core.domain.waiter.AccountSummary
 import com.adelpos.meseros.core.domain.waiter.Capture
@@ -44,6 +45,9 @@ class TablesViewModel(
     val view: StateFlow<RestaurantView> = dependencies.restaurant.view
     val permissions: StateFlow<WaiterPermissions> = dependencies.restaurant.permissions
     val status: StateFlow<RestaurantStatus> = dependencies.restaurant.status
+
+    /** El estado único de conexión (etapa A3, A3-D1): «Sin conexión» solo con él. */
+    val link: StateFlow<LinkState> = dependencies.link
     val openAccounts: StateFlow<List<AccountSummary>> = dependencies.restaurant.openAccounts
 
     private val userId: String? = dependencies.activeWaiter.value?.userId

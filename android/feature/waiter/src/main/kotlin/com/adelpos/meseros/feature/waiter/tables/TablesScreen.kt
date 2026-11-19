@@ -34,6 +34,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.adelpos.meseros.core.capture.R as CaptureR
+import com.adelpos.meseros.core.domain.connection.LinkState
 import com.adelpos.meseros.core.domain.preferences.TablesView
 import com.adelpos.meseros.core.domain.table.TableState
 import com.adelpos.meseros.core.domain.waiter.AccountSummary
@@ -74,6 +75,7 @@ fun TablesRoute(
     val view by viewModel.view.collectAsState()
     val permissions by viewModel.permissions.collectAsState()
     val status by viewModel.status.collectAsState()
+    val link by viewModel.link.collectAsState()
     val accounts by viewModel.openAccounts.collectAsState()
     val tablesView by viewModel.tablesView.collectAsState()
     val captures by viewModel.captures.collectAsState()
@@ -87,6 +89,7 @@ fun TablesRoute(
                 view = view,
                 permissions = permissions,
                 status = status,
+                offline = link == LinkState.OFFLINE,
                 tablesView = tablesView,
                 search = viewModel.search,
                 now = now,
@@ -116,11 +119,15 @@ fun TablesRoute(
     )
 }
 
-/** Lo que muestra la lista o el mapa. */
+/**
+ * Lo que muestra la lista o el mapa. [offline] es el estado único de conexión (etapa A3, A3-D1), el
+ * mismo de la barra: «Sin conexión» se dice solo con él, nunca por una lectura que falló.
+ */
 data class TablesState(
     val view: RestaurantView,
     val permissions: WaiterPermissions,
     val status: RestaurantStatus,
+    val offline: Boolean,
     val tablesView: TablesView,
     val search: String,
     val now: Long,
@@ -209,7 +216,7 @@ private fun TablesPane(state: TablesState, actions: TablesActions) {
                 Text(stringResource(R.string.tables_pending))
             }
         }
-        StatusLine(state.status, actions.onRefresh)
+        StatusLine(state.status, state.offline, actions.onRefresh)
         if (!state.permissions.allows(WaiterAction.VIEW_TABLES)) {
             Message(stringResource(R.string.tables_no_permission))
             return@Column
@@ -260,11 +267,13 @@ private fun ViewSwitch(current: TablesView, onChange: (TablesView) -> Unit) {
 }
 
 @Composable
-private fun StatusLine(status: RestaurantStatus, onRefresh: () -> Unit) {
+private fun StatusLine(status: RestaurantStatus, offline: Boolean, onRefresh: () -> Unit) {
+    // Etapa A3: una lectura que falló con el estado «En línea» se repite sola (sin aviso); solo
+    // el estado único dice «Sin conexión».
     val text =
         when {
             status.loading -> stringResource(R.string.tables_loading)
-            !status.live -> stringResource(R.string.tables_offline)
+            offline -> stringResource(R.string.tables_offline)
             else -> null
         }
     if (text == null) {

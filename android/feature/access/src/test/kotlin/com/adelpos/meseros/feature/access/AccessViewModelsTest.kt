@@ -16,6 +16,7 @@ import com.adelpos.meseros.core.domain.access.WaiterProfile
 import com.adelpos.meseros.core.domain.access.WaiterRoster
 import com.adelpos.meseros.core.domain.access.WaiterWork
 import com.adelpos.meseros.core.domain.connection.LinkState
+import com.adelpos.meseros.core.domain.connection.ServerLink
 import com.adelpos.meseros.core.domain.error.AppError
 import com.adelpos.meseros.core.domain.pairing.PairingFlow
 import com.adelpos.meseros.core.domain.pairing.PairingProblem
@@ -83,7 +84,7 @@ class AccessViewModelsTest {
 
     private class FakeAccess : DeviceAccess {
         val mutableStatus =
-            MutableStateFlow<DeviceStatus>(DeviceStatus.Ready("Fonda", "Tableta 1", 60, true))
+            MutableStateFlow<DeviceStatus>(DeviceStatus.Ready("Fonda", "Tableta 1", 60))
         val mutableActive = MutableStateFlow<ActiveWaiter?>(null)
         var next: EntryResult = EntryResult.WrongPin
         val pins = mutableListOf<String>()
@@ -215,7 +216,7 @@ class AccessViewModelsTest {
                     work = { work },
                     idleLock =
                         IdleLock(clock = { scope.testScheduler.currentTime }, work = { work }),
-                    linkState = link,
+                    serverLink = linkOf(link),
                 ),
             )
         }
@@ -303,7 +304,7 @@ class AccessViewModelsTest {
                                         pairing = NoPairing,
                                         work = { WaiterWork.NONE },
                                         idleLock = idle,
-                                        linkState = link,
+                                        serverLink = linkOf(link),
                                     ),
                                 )
                             }
@@ -390,6 +391,14 @@ class AccessViewModelsTest {
             runCurrent()
             assertEquals(before + 1, access.rechecks)
             store.clear()
+        }
+
+    // El estado único de conexión (etapa A3) que pone la prueba.
+    private fun linkOf(link: MutableStateFlow<LinkState>): ServerLink =
+        object : ServerLink {
+            override val state: StateFlow<LinkState> = link
+
+            override suspend fun confirm(): Boolean = link.value == LinkState.ONLINE
         }
 
     private object NoPairing : PairingFlow {

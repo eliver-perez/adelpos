@@ -3,6 +3,7 @@ package com.adelpos.meseros.core.data.access
 import com.adelpos.meseros.core.data.api.ApiOutcome
 import com.adelpos.meseros.core.data.api.ClientIdentity
 import com.adelpos.meseros.core.data.api.DeviceCredentials
+import com.adelpos.meseros.core.data.api.IgnoredBody
 import com.adelpos.meseros.core.data.api.PinLoginRequest
 import com.adelpos.meseros.core.data.api.PinLoginResponse
 import com.adelpos.meseros.core.data.api.PinUsersResponse
@@ -10,8 +11,10 @@ import com.adelpos.meseros.core.data.api.PinnedHttpClient
 import com.adelpos.meseros.core.data.api.ServerApi
 import com.adelpos.meseros.core.data.api.VersionInfo
 import com.adelpos.meseros.core.data.session.ServerTransport
+import com.adelpos.meseros.core.domain.connection.ServerAnswers
 import com.adelpos.meseros.core.domain.error.AppError
 import com.adelpos.meseros.core.domain.server.ServerRelocator
+import java.util.concurrent.TimeUnit
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 
@@ -21,6 +24,10 @@ import okhttp3.OkHttpClient
  * respondió otro certificado), busca el servidor en la red por su `server_id` y su huella
  * ([ServerRelocator]) y, si lo encuentra en otra dirección con la huella completa, guarda la nueva
  * ([onMoved]) y repite la petición allí una sola vez: como no llegó, repetirla no duplica nada.
+ *
+ * Cada respuesta de Go (o su falta) de este cliente llega a [answers], el estado único de conexión
+ * (etapa A3, A3-D1): es el cliente de todo lo que habla con el servidor emparejado (entrada,
+ * catálogo, modo Mesero, canal de eventos y de avisos).
  */
 internal class PairedConnection(
     val serverId: String,
@@ -30,7 +37,9 @@ internal class PairedConnection(
     identity: ClientIdentity,
     private val relocator: ServerRelocator,
     private val onMoved: suspend (String) -> Unit,
-    private val client: OkHttpClient = PinnedHttpClient.create(fingerprint, identity),
+    answers: ServerAnswers? = null,
+    private val client: OkHttpClient =
+        PinnedHttpClient.create(fingerprint, identity, answers = answers),
 ) {
     @Volatile
     var base: String = initialBase
@@ -52,6 +61,24 @@ internal class PairedConnection(
             PinLoginResponse.serializer(),
             credentials.headers(),
         )
+    }
+
+    /**
+     * La sonda del estado de conexión (`GET health/live`, sin credenciales). Con [relocate], si no
+     * responde en su dirección se busca en la red (cambio de IP); con [quick] (el mesero está
+     * esperando), con un plazo de conexión corto.
+     */
+    suspend fun live(relocate: Boolean, quick: Boolean): ApiOutcome<IgnoredBody> {
+        if (relocate) {
+            return call { api -> api.get(LIVE_PATH, IgnoredBody.serializer()) }
+        }
+        val probeClient =
+            if (quick) {
+                client.newBuilder().connectTimeout(QUICK_CONNECT_SECONDS, TimeUnit.SECONDS).build()
+            } else {
+                client
+            }
+        return ServerApi(base.toHttpUrl(), probeClient).get(LIVE_PATH, IgnoredBody.serializer())
     }
 
     private suspend fun <T> call(block: suspend (ServerApi) -> ApiOutcome<T>): ApiOutcome<T> {
@@ -85,4 +112,14 @@ internal class PairedConnection(
     // (y otro equipo tomó la anterior). Solo se acepta la dirección nueva con la huella completa.
     private fun AppError.mayHaveMoved(): Boolean =
         this == AppError.Unreachable || this == AppError.ServerIdentityChanged
+
+    private companion object {
+        const val LIVE_PATH = "health/live"
+
+        /**
+         * Plazo de conexión de la sonda del momento: en la red local una conexión tarda
+         * milisegundos; el mesero no espera los 5 s del cliente normal.
+         */
+        const val QUICK_CONNECT_SECONDS = 2L
+    }
 }

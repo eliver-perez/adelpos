@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.adelpos.meseros.core.capture.CustomerDialog
 import com.adelpos.meseros.core.capture.customerSummary
+import com.adelpos.meseros.core.domain.connection.LinkState
 import com.adelpos.meseros.core.domain.waiter.DeliveryOffer
 import com.adelpos.meseros.core.domain.waiter.ElapsedTime
 import com.adelpos.meseros.core.domain.waiter.OrderState
@@ -67,6 +68,7 @@ fun TakeawayRoute(
     val entries by viewModel.entries.collectAsState()
     val permissions by viewModel.permissions.collectAsState()
     val status by viewModel.status.collectAsState()
+    val link by viewModel.link.collectAsState()
     val readAt by viewModel.readAt.collectAsState()
     val clock by viewModel.clock.collectAsState()
     var editingKey by rememberSaveable { mutableStateOf<String?>(null) }
@@ -88,9 +90,10 @@ fun TakeawayRoute(
         entries = entries,
         permissions = permissions,
         status = status,
+        offline = link == LinkState.OFFLINE,
         readAt = readAt,
         clock = clock,
-        online = viewModel.online,
+        online = viewModel.online && link != LinkState.OFFLINE,
         delivering = viewModel.delivering,
         message = message,
         actions =
@@ -142,6 +145,7 @@ fun TakeawayScreen(
     entries: List<TakeawayEntry>,
     permissions: WaiterPermissions,
     status: RestaurantStatus,
+    offline: Boolean,
     readAt: TakeawayRead?,
     clock: TakeawayClock,
     online: Boolean,
@@ -178,7 +182,7 @@ fun TakeawayScreen(
                         modifier = Modifier.testTag(TAG_TAKEAWAY_READ_ONLY),
                     )
                 }
-                ReadStatus(status, readAt, actions.onRefresh)
+                ReadStatus(status, offline, readAt, actions.onRefresh)
                 if (message != null) {
                     Text(
                         message,
@@ -215,15 +219,23 @@ fun TakeawayScreen(
     }
 }
 
-/** «Leyendo…» o, sin conexión, lo último que se vio con su hora, y «Actualizar». */
+/**
+ * «Leyendo…» o, sin conexión, lo último que se vio con su hora, y «Actualizar». «Sin conexión» sale
+ * solo del estado único ([offline], etapa A3, A3-D1), el mismo de la barra.
+ */
 @Composable
-private fun ReadStatus(status: RestaurantStatus, readAt: TakeawayRead?, onRefresh: () -> Unit) {
+private fun ReadStatus(
+    status: RestaurantStatus,
+    offline: Boolean,
+    readAt: TakeawayRead?,
+    onRefresh: () -> Unit,
+) {
     val text =
         when {
             status.loading -> stringResource(R.string.takeaway_loading)
-            !status.live && readAt != null ->
+            offline && readAt != null ->
                 stringResource(R.string.takeaway_offline_since, clockText(readAt.wallMillis))
-            !status.live -> stringResource(R.string.takeaway_offline_never)
+            offline -> stringResource(R.string.takeaway_offline_never)
             else -> null
         }
     Row(verticalAlignment = Alignment.CenterVertically) {

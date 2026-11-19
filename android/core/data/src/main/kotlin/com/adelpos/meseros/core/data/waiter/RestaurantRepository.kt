@@ -6,6 +6,7 @@ import com.adelpos.meseros.core.data.waiter.db.RestaurantSnapshotEntity
 import com.adelpos.meseros.core.data.waiter.db.WaiterDao
 import com.adelpos.meseros.core.data.waiter.db.WaiterPermissionsEntity
 import com.adelpos.meseros.core.data.waiter.db.WaiterStorage
+import com.adelpos.meseros.core.domain.connection.LinkState
 import com.adelpos.meseros.core.domain.error.AppError
 import com.adelpos.meseros.core.domain.error.AppResult
 import com.adelpos.meseros.core.domain.realtime.RealtimeFeed
@@ -29,6 +30,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -47,6 +50,9 @@ import kotlinx.serialization.builtins.ListSerializer
  *
  * @param elapsedClock reloj monótono (el tiempo de las mesas se cuenta desde la lectura).
  * @param wallClock hora del dispositivo, solo para traducir el momento de una lectura guardada.
+ * @param link el estado único de conexión (etapa A3, A3-D1): al volver a «En línea» se vuelve a
+ *   leer, y una lectura sin respuesta con «En línea» se repite sola a los [retryMillis] (la
+ *   pantalla dice «Sin conexión» solo con el estado único, nunca por una lectura vieja).
  */
 class RestaurantRepository(
     private val dao: WaiterDao,
@@ -56,6 +62,8 @@ class RestaurantRepository(
     private val scope: CoroutineScope,
     private val elapsedClock: () -> Long,
     private val wallClock: () -> Long = System::currentTimeMillis,
+    private val link: StateFlow<LinkState>? = null,
+    private val retryMillis: Long = RETRY_AFTER_NO_ANSWER_MILLIS,
 ) : RestaurantSource {
     private val mutableView = MutableStateFlow(RestaurantView.EMPTY)
     private val mutablePermissions = MutableStateFlow(WaiterPermissions.UNKNOWN)
@@ -89,6 +97,7 @@ class RestaurantRepository(
             return
         }
         started = true
+        followLink()
         scope.launch { loadSaved() }
         scope.launch {
             server.activeWaiter
@@ -118,15 +127,22 @@ class RestaurantRepository(
         scope.launch { feed.rebuilds().collect { refreshSoon() } }
     }
 
+    // Etapa A3: lo que dice la pantalla sale del estado único de conexión; al volver a «En línea»
+    // se vuelve a leer, para no quedarse con la lectura de antes.
+    private fun followLink() {
+        val state = link ?: return
+        scope.launch { state.drop(1).filter { it == LinkState.ONLINE }.collect { refreshSoon() } }
+    }
+
     override fun refresh() {
         scope.launch { refreshNow() }
     }
 
     /** Vuelve a leer después de una pausa corta: varios eventos seguidos dan una sola lectura. */
-    private fun refreshSoon() {
+    private fun refreshSoon(delayMillis: Long = REFRESH_DELAY_MILLIS) {
         pendingRefresh?.cancel()
         pendingRefresh = scope.launch {
-            delay(REFRESH_DELAY_MILLIS)
+            delay(delayMillis)
             refreshNow()
         }
     }
@@ -158,6 +174,11 @@ class RestaurantRepository(
                     live = error == null,
                     lastError = error,
                 )
+            // Reintento sin decir nada: Go no respondió pero el estado único sigue «En línea» (una
+            // falla aislada). Con «Sin conexión» se espera a que vuelva (followLink).
+            if (error == AppError.Unreachable && link?.value == LinkState.ONLINE) {
+                refreshSoon(retryMillis)
+            }
         }
     }
 
@@ -270,6 +291,12 @@ class RestaurantRepository(
         private const val KIND_ACCOUNTS = "accounts"
         private const val DINE_IN = "dine_in"
         private const val REFRESH_DELAY_MILLIS = 400L
+
+        /**
+         * Una lectura sin respuesta con el estado «En línea» se repite a los 5 s, el mismo ritmo de
+         * la sonda mientras el estado duda (`ServerLinkTracker.DOUBT_PROBE_MILLIS`).
+         */
+        private const val RETRY_AFTER_NO_ANSWER_MILLIS = 5_000L
         private const val CHANGES_BUFFER = 64
         private val ACCOUNTS = ListSerializer(AccountDto.serializer())
     }

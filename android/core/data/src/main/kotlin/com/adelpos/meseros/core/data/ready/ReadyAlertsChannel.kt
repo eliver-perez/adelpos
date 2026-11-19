@@ -1,5 +1,6 @@
 package com.adelpos.meseros.core.data.ready
 
+import com.adelpos.meseros.core.domain.connection.LinkState
 import com.adelpos.meseros.core.domain.error.AppError
 import com.adelpos.meseros.core.domain.ready.ReadyAlertsBatch
 import com.adelpos.meseros.core.domain.ready.ReadyAlertsLedger
@@ -29,7 +30,7 @@ sealed interface ReadyChannelState {
 
 /** Qué dice la notificación permanente del servicio. */
 enum class ReadyOngoing {
-    /** Todavía no abre el canal: no dice «Recibiendo avisos» (RD5). */
+    /** El canal no está abierto: no dice «Recibiendo avisos» (RD5). */
     CONNECTING,
 
     /** El canal está abierto: «Recibiendo avisos de platillos listos». */
@@ -40,14 +41,16 @@ enum class ReadyOngoing {
 
     companion object {
         /**
-         * El texto tras [state], viniendo de [shown]: mientras reintenta (abrir después de una
-         * falla), se queda el de sin conexión; así no se vuelve a publicar en cada intento.
+         * El texto con el estado del canal y el estado único de conexión [link] (etapa A3, A3-D1):
+         * «Sin conexión…» solo cuando la barra también lo dice (una falla del canal, que se
+         * reconecta solo, no basta); «Recibiendo avisos» solo con el canal abierto (RD5); si no,
+         * «Conectando…». Mientras dure «Sin conexión», el texto no cambia en cada intento.
          */
-        fun after(shown: ReadyOngoing, state: ReadyChannelState): ReadyOngoing =
-            when (state) {
-                ReadyChannelState.Connected -> CONNECTED
-                is ReadyChannelState.Waiting -> WAITING
-                ReadyChannelState.Connecting -> if (shown == WAITING) WAITING else CONNECTING
+        fun of(state: ReadyChannelState, link: LinkState): ReadyOngoing =
+            when {
+                link == LinkState.OFFLINE -> WAITING
+                state == ReadyChannelState.Connected -> CONNECTED
+                else -> CONNECTING
             }
     }
 }
