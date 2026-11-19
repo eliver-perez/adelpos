@@ -138,7 +138,7 @@
     <string name="precheck_print_bill">Imprimir cuenta</string>
     <string name="precheck_sending">Enviando…</string>
     <string name="precheck_destination">Se imprime en %1$s.</string>
-    <string name="precheck_no_printer_known">Este dispositivo todavía no tiene impresora asignada.</string>
+    <string name="precheck_no_printer_known">Este dispositivo no tiene impresora asignada.</string>
     <string name="precheck_sent">Enviada a %1$s</string>
     <string name="precheck_sent_masculine">Enviado a %1$s</string>
     <string name="precheck_sent_any">Enviada a la impresora</string>

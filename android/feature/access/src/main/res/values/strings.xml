@@ -21,8 +21,8 @@
     <string name="access_loading">Preparando…</string>
 
     <!-- Buscar el servidor (§4). -->
-    <string name="find_server_status">%1$s todavía no está conectada a la computadora principal del restaurante.</string>
-    <string name="find_server_status_phone">%1$s todavía no está conectado a la computadora principal del restaurante.</string>
+    <string name="find_server_status">%1$s no está conectada a la computadora principal del restaurante.</string>
+    <string name="find_server_status_phone">%1$s no está conectado a la computadora principal del restaurante.</string>
     <string name="find_server_name_label">Nombre de %1$s</string>
     <string name="find_server_found_title">Computadoras principales en la red</string>
     <string name="find_server_search_again">Buscar otra vez</string>
@@ -81,7 +81,7 @@
     <string name="entry_heading">¿Quién eres?</string>
     <string name="entry_help">Toca tu nombre y escribe tu PIN.</string>
     <string name="entry_offline">Sin conexión con la computadora principal: solo pueden entrar los meseros que ya entraron antes en %1$s.</string>
-    <string name="entry_empty_online">Todavía no hay meseros con PIN. En la computadora principal, asígnalo en Personal › Usuarios.</string>
+    <string name="entry_empty_online">No hay meseros con PIN. En la computadora principal, asígnalo en Personal › Usuarios.</string>
     <string name="entry_empty_offline">Sin conexión y nadie ha entrado antes en %1$s. Conecta el dispositivo a la red del restaurante para entrar.</string>
     <string name="entry_refresh">Actualizar</string>
     <string name="entry_locked_until">Bloqueado hasta las %1$s</string>
@@ -128,7 +128,7 @@
     <!-- Versiones (§4). -->
     <string name="update_app_title">Actualiza esta aplicación</string>
     <string name="update_app_text">La computadora principal del restaurante necesita una versión más reciente de AD-EL POS en %1$s. Instala la versión nueva y vuelve a abrirla.</string>
-    <string name="update_app_pending">Estos pedidos todavía no se envían: instala la versión nueva encima de la actual y se enviarán solos. No desinstales la aplicación de %1$s, porque se perderían.</string>
+    <string name="update_app_pending">Estos pedidos no se han enviado: instala la versión nueva encima de la actual y se enviarán solos. No desinstales la aplicación de %1$s, porque se perderían.</string>
     <string name="update_server_title">Actualiza el servidor del restaurante</string>
     <string name="update_server_choose_another">Elegir otra computadora principal</string>
     <string name="update_server_text">La computadora principal del restaurante tiene una versión anterior de AD-EL POS que no sirve para esta versión de la aplicación de meseros: le faltan funciones que la aplicación usa (necesita la versión 0.13.0 o posterior). Pide que la actualicen.</string>

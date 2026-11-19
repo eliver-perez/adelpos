@@ -431,7 +431,7 @@ class OrderQueueRepository(
                 capture.tableName
             }
         if (capture.sync == DraftSync.DISCARDING) {
-            return "$place (descartado, sin quitar todavía de la cuenta): $lines"
+            return "$place (descartado, falta quitarlo de la cuenta): $lines"
         }
         return "$place (sin enviar a cocina): $lines"
     }
