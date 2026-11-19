@@ -467,8 +467,28 @@ func contractWaiterMode(t *testing.T, client *contractClient, data contractWaite
 		"operation_id": contractID(), "mode": "dine_in", "items": []map[string]any{item},
 	}, nil, 200).Body.Bytes())["account"].(map[string]any)
 	discardedID := fmt.Sprint(discarded["id"])
-	client.setup("POST", "/restaurant/accounts/"+discardedID+"/discard",
-		map[string]any{"operation_id": contractID(), "revision": discarded["revision"]}, 200)
+	// Etapa A3 (A3-D8): discardAccount en el contrato. Una cuenta con solo borrador es descartable y no liberable; una
+	// con productos enviados no se descarta (409 ACCOUNT_NOT_EMPTY) y sigue abierta.
+	if discarded["discardable"] != true || discarded["releasable"] != false {
+		t.Fatalf("cuenta con solo borrador: discardable %v, releasable %v", discarded["discardable"], discarded["releasable"])
+	}
+	if opened := bill["account"].(map[string]any); opened["discardable"] != false || opened["releasable"] != false {
+		t.Fatalf("cuenta con productos enviados: discardable %v, releasable %v", opened["discardable"], opened["releasable"])
+	}
+	notEmpty := decodeContract[map[string]any](t, client.call("POST", route+"/discard", map[string]any{
+		"operation_id": contractID(), "revision": bill["account"].(map[string]any)["revision"],
+	}, nil, 409).Body.Bytes())
+	if code := notEmpty["error"].(map[string]any)["code"]; code != "ACCOUNT_NOT_EMPTY" {
+		t.Fatalf("descartar una cuenta con productos enviados: %v", code)
+	}
+	discardedBill := decodeContract[map[string]any](t, client.call("POST", "/restaurant/accounts/"+discardedID+"/discard",
+		map[string]any{"operation_id": contractID(), "revision": discarded["revision"]}, nil, 200).Body.Bytes())
+	if account := discardedBill["account"].(map[string]any); account["state"] != "voided" || account["discardable"] != false {
+		t.Fatalf("cuenta descartada: %v", account)
+	}
+	if draft, _ := discardedBill["draft"].([]any); len(draft) != 0 {
+		t.Fatalf("el descarte debía borrar el borrador: %v", discardedBill["draft"])
+	}
 	rejected := decodeContract[map[string]any](t, client.call("PUT", "/restaurant/accounts/"+discardedID+"/draft", map[string]any{
 		"operation_id": contractID(), "revision": discarded["revision"], "items": []map[string]any{item},
 	}, nil, 400).Body.Bytes())

@@ -4092,3 +4092,32 @@ Especificación: [docs/etapas/ETAPA_A2_ANDROID.md](docs/etapas/ETAPA_A2_ANDROID.
 devices`, la configuración (`device`), `auth/me` y `restaurant/state` (`terminal`) los informan.
 - **Escritorio**: Terminales › Editar de un `android` muestra «Avisar platillos listos», «Sonido» y «Vibración» y «Ver
   configuración» los informa, solo si el servidor anuncia `ready-alerts-v1`; si no, el `PATCH` no los lleva.
+
+## Etapa A3 · Terminales por tipo de dispositivo (Fase D, esquema 27; servidor 0.14.0)
+
+Especificación: [docs/etapas/ETAPA_A3_AJUSTES.md](docs/etapas/ETAPA_A3_AJUSTES.md) §5 y decisiones A3-D7, A3-D8 y
+A3-D12 de [docs/ETAPA_A3_AVANCE.md](docs/ETAPA_A3_AVANCE.md). Ninguna ruta nueva ni capacidad nueva:
+`min_client_versions` sigue igual (escritorio 0.10.0 y Android 0.1.0, A3-D9).
+
+- **Base** (`0027_android_a3_adjustments.sql`, la única de la etapa): sección «Fase A» (A3-D12), la nota de la versión 1
+  de las diez plantillas del sistema pasa de «Formato predeterminado, igual al anterior a la etapa 9B» a «Formato
+  predeterminado», solo donde es exactamente ese texto (el disparador de inmutabilidad de las versiones se desactiva
+  solo para esa sentencia y vuelve a quedar activo); sección «Fase D» (A3-D7), los dispositivos `android` con
+  `home_screen` `kitchen` o `cash` pasan a `tables` y `CHECK devices_android_home_check (kind <> 'android' OR
+home_screen IN ('tables', 'takeaway'))`. Ninguna otra fila cambia (`TestStageA3Upgrade`).
+- **`PATCH devices/{id}`** (`devices.manage`): en un `android`, un `home_screen` que no sea `tables` o `takeaway`
+  responde `400 VALIDATION_ERROR` «En un teléfono o tableta de meseros la pantalla inicial es Mesas o Para llevar.» sin
+  escribir ni auditar. Sin el campo se conserva lo guardado, como siempre; los demás campos no cambian (Go sigue
+  aceptando `register_id` y `keyboard_mode` en un `android`: el escritorio 0.14.0 envía los guardados sin cambio).
+- **`GET kitchen/access`** (`kitchen.stations.manage`, Cocina › Estaciones › Terminales de cocina): ya no lista los
+  dispositivos `android`, que no tienen modo cocina (§5.1: cada tipo solo ve lo que le aplica). `PUT kitchen/access` no
+  cambia.
+- **Contrato v1** (A3-D8, sin cambiar el comportamiento): `discardAccount` (`POST restaurant/accounts/{id}/discard`) y
+  los campos `discardable` y `releasable` de `Account` en `internal/apicontract/openapi.json` y
+  [docs/API_V1.md](docs/API_V1.md), «Descartar una cuenta vacía»; `TestContractV1` los recorre.
+- **Escritorio** (`pages/DevicesPage.tsx`): en un `android`, «Pantalla inicial» ofrece solo Mesas y Para llevar (un
+  valor guardado que no aplica se muestra como Mesas), sin «Caja física», «Teclado virtual» ni la nota de Cocina en
+  «Editar», y «Ver configuración» sin caja, teclado, estaciones, aviso sonoro ni impresoras de la terminal; en la tabla
+  su caja es «—». La tabla ya no muestra el identificador de ninguna terminal: «Ver configuración» lo dice como
+  «Identificador», y el filtro del Registro de movimientos se llama «Identificador de la terminal». Sin operaciones
+  nuevas en Rust.

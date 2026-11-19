@@ -131,9 +131,9 @@ const allowedDevelopmentText: { file: string; line: RegExp; reason: string }[] =
   },
   {
     file: 'pages/DevicesPage.tsx',
-    line: /Código: <span className="font-mono">\{device\.id\}<\/span>/,
+    line: /^\s*<dd className="font-mono">\{shown\.id\}<\/dd>$/,
     reason:
-      '«Código» de la terminal en la tabla de Terminales: lo quitan los ajustes de Terminales de la etapa (§5.3), que lo llevan a «Ver configuración» como «Identificador»',
+      '«Identificador» de la terminal solo en «Ver configuración» (§5.3 de la A3: salió de la tabla); es el dato que piden soporte y el filtro por terminal del Registro de movimientos',
   },
 ];
 

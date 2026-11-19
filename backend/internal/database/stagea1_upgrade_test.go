@@ -135,7 +135,9 @@ func stageA1Tables(ctx context.Context, t *testing.T, pool *pgxpool.Pool) map[st
 }
 
 // stageA1Snapshot resume las filas de una tabla con las columnas dadas. En permissions y role_permissions se excluye el
-// permiso nuevo de la 0025, que se comprueba en checkStageA1Permission.
+// permiso nuevo de la 0025, que se comprueba en checkStageA1Permission. En document_template_versions se excluye la nota,
+// que la 0027 reescribe en las versiones del sistema (etapa A3, A3-D12; se comprueba en TestStageA3Upgrade): las pruebas
+// de la A1 y la A2 suben hasta el esquema vigente.
 func stageA1Snapshot(ctx context.Context, t *testing.T, pool *pgxpool.Pool, table, columns string) string {
 	t.Helper()
 	filter := ""
@@ -144,6 +146,8 @@ func stageA1Snapshot(ctx context.Context, t *testing.T, pool *pgxpool.Pool, tabl
 		filter = " WHERE key<>'waiter_devices.use'"
 	case "role_permissions":
 		filter = " WHERE permission_key<>'waiter_devices.use'"
+	case "document_template_versions":
+		columns = withoutColumn(columns, "note")
 	}
 	var snapshot string
 	query := "SELECT coalesce(md5(string_agg(row_to_json(r)::text,'|' ORDER BY row_to_json(r)::text)),'') || ':' || count(*) " +
