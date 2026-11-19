@@ -81,7 +81,7 @@ function idleLockOptions(current: number) {
 // impresora no sirve lo decide Go (problem); aquí solo se dice en lenguaje sencillo.
 const precheckPrinterProblems: Record<string, string> = {
   inactive: 'desactivada',
-  unsupported: 'todavía no puede usarse para imprimir',
+  unsupported: 'no se puede usar para imprimir',
 };
 
 // precheckPrinterOptions son las opciones del selector: «Sin impresora» y todas las impresoras (de red y USB de una
@@ -328,14 +328,12 @@ function PairingRequestsPanel({
         </p>
       )}
       {data?.pairing_available !== false && network && !network.available && (
-        <p className="muted pairing-help">
-          Esta computadora todavía no recibe terminales de la red.
-        </p>
+        <p className="muted pairing-help">Esta computadora no recibe terminales de la red.</p>
       )}
       {data?.limit_reached && (
         <p className="pairing-alert">
           Se pidieron demasiados códigos de terminal en los últimos {data.window_minutes ?? 10}{' '}
-          minutos: por ahora no se aceptan más solicitudes.
+          minutos. Espera un poco antes de pedir otro.
         </p>
       )}
       {(data?.recent_abandoned ?? 0) > 0 && (
@@ -391,7 +389,6 @@ function SessionsSummaryPanel() {
           </div>
         ))}
       </dl>
-      <p className="muted pairing-help">Solo se cuentan; todavía no se limita ninguna.</p>
     </section>
   );
 }
@@ -525,7 +522,7 @@ function LocalPrinters({
           : 'Desconectada: sus trabajos esperan hasta que AD-EL POS esté abierto en ella.'}{' '}
         {local.reported_at
           ? `Informó su lista: ${dateTime(local.reported_at)}`
-          : 'Todavía no informó sus impresoras.'}
+          : 'No ha informado sus impresoras.'}
       </p>
       {local.queues.length > 0 ? (
         <ul className="device-local-printer-list">

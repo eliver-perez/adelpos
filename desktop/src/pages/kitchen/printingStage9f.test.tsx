@@ -257,7 +257,7 @@ describe('impresora de tickets que puede imprimir (revisión 9F, B3)', () => {
       ['agent', true],
       ['off', true],
     ]);
-    expect(options[2]!.description).toBe('Esta impresora todavía no puede usarse para imprimir');
+    expect(options[2]!.description).toBe('Esta impresora no se puede usar para imprimir');
     expect(options[3]!.description).toBe('desactivada');
   });
 });
@@ -287,7 +287,7 @@ describe('textos de impresión y «Mesa» sin repetir (§4.2 y §4.6)', () => {
       'La impresora Tickets está desactivada.',
     );
     expect(printProblemMessage('unsupported', 'Otra')).toBe(
-      'Esta impresora todavía no puede usarse para imprimir.',
+      'Esta impresora no se puede usar para imprimir.',
     );
     expect(printProblemMessage(null, 'Tickets')).toBe('');
   });

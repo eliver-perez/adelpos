@@ -125,7 +125,10 @@ export function AuditPage() {
           <Field label="Usuario (nombre de acceso exacto)">
             <input value={actor} onChange={(event) => setActor(event.target.value)} />
           </Field>
-          <Field label="Código de la operación" hint="Tal como aparece en la columna Operación.">
+          <Field
+            label="Código de la operación"
+            hint="Tal como aparece en «Ver cambios» de cada movimiento."
+          >
             <input
               placeholder="Por ejemplo: user.updated"
               value={action}
@@ -134,7 +137,7 @@ export function AuditPage() {
           </Field>
           <Field
             label="Código de la terminal"
-            hint="El que aparece bajo su nombre en Sistema → Terminales."
+            hint="El que aparece como «Terminal» en «Ver cambios» de sus movimientos."
           >
             <input value={device} onChange={(event) => setDevice(event.target.value)} />
           </Field>
@@ -185,16 +188,21 @@ export function AuditPage() {
                   </small>
                 </td>
                 <td>
-                  {actionLabels[event.action] && (
-                    <span className="block">{actionLabels[event.action]}</span>
+                  {/* Etapa A3 (§1): la operación con su nombre; el código interno solo si no tiene uno.
+                      El código y el tipo de registro quedan en «Ver cambios», junto a los demás datos
+                      técnicos del movimiento (los que se usan para filtrar). */}
+                  {actionLabels[event.action] ?? (
+                    <span className="font-mono text-xs">{event.action}</span>
                   )}
-                  <span className="font-mono text-xs">{event.action}</span>
-                  <small className="muted block">{event.entity_type}</small>
                 </td>
                 <td>{event.success ? 'Correcto' : 'Rechazado'}</td>
                 <td>
                   <Accordion title="Ver cambios">
                     <dl className="audit-details">
+                      <dt>Código de la operación</dt>
+                      <dd className="font-mono">{event.action}</dd>
+                      <dt>Tipo de registro</dt>
+                      <dd className="font-mono">{event.entity_type}</dd>
                       <dt>Registro afectado</dt>
                       <dd>{event.entity_id ?? '—'}</dd>
                       <dt>Terminal</dt>

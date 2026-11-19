@@ -543,7 +543,7 @@ describe('panel lateral de la mesa', () => {
     await waitFor(() =>
       expect(within(panel).getByRole('heading', { name: 'Cuenta #2 · Familia Ruiz' })).toBeTruthy(),
     );
-    expect(within(panel).getByText('La cuenta aún no tiene productos.')).toBeTruthy();
+    expect(within(panel).getByText('La cuenta no tiene productos.')).toBeTruthy();
     fireEvent.click(within(panel).getByRole('button', { name: 'Capturar pedidos en esta mesa' }));
     await screen.findByRole('heading', { name: 'Mesa 1 · Cuenta #2' });
     expect(opens).toHaveLength(0);

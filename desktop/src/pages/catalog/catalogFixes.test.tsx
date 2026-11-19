@@ -94,7 +94,7 @@ afterEach(() => {
 
 async function openNewProduct() {
   render(<CatalogPage can={() => true} />);
-  await screen.findByText('Aún no hay registros');
+  await screen.findByText('No hay registros');
   fireEvent.click(screen.getByRole('button', { name: 'Crear registro' }));
   return screen.findByLabelText('Nombre');
 }
@@ -116,7 +116,7 @@ describe('etapa 6.1 · errores del catálogo', () => {
     await waitFor(() =>
       expect(screen.queryByRole('button', { name: 'Volver al listado' })).toBeNull(),
     );
-    expect(screen.getByText('Aún no hay registros')).toBeTruthy();
+    expect(screen.getByText('No hay registros')).toBeTruthy();
   });
 
   it('1.2 sin cambios vuelve al listado de inmediato', async () => {

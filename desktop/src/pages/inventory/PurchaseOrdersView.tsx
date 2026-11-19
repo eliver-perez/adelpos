@@ -464,7 +464,7 @@ function PurchaseOrderPanel({
     if (dirtyRef.current) {
       const discard = await confirm({
         title: 'Cambios sin guardar',
-        message: 'Este borrador tiene cambios que aún no se guardan. ¿Quieres descartarlos?',
+        message: 'Este borrador tiene cambios sin guardar. ¿Quieres descartarlos?',
         confirmLabel: 'Descartar cambios',
         cancelLabel: 'Seguir editando',
         tone: 'danger',

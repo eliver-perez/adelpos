@@ -486,7 +486,7 @@ describe('elaboraciones', () => {
     );
     await openRecipes();
     fireEvent.click(screen.getByRole('button', { name: 'Elaboraciones' }));
-    await screen.findByText('Aún no hay elaboraciones registradas.');
+    await screen.findByText('No hay elaboraciones registradas.');
     fireEvent.click(screen.getByRole('button', { name: 'Registrar elaboración' }));
     const select = await screen.findByLabelText('Preparación elaborada');
     // Solo las almacenables activas se elaboran.

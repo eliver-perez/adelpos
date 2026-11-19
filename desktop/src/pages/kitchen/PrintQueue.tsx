@@ -464,7 +464,7 @@ function JobEditor({
         </Form>
       )}
       <Accordion title="Historial de intentos" defaultOpen>
-        {detail.data?.attempts.length === 0 && <p className="muted">Todavía no hay intentos.</p>}
+        {detail.data?.attempts.length === 0 && <p className="muted">No hay intentos.</p>}
         {detail.data?.attempts.map((attempt) => (
           <div key={attempt.id} className="print-queue-attempt">
             <strong>

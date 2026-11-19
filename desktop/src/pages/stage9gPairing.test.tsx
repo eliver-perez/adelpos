@@ -359,9 +359,9 @@ describe('Sistema › Terminales con solicitudes, configuración y sesiones (eta
     const panel = await screen.findByRole('region', { name: 'Terminales nuevas' });
     await waitFor(() => expect(panel.textContent).toContain('7 solicitudes canceladas'));
     expect(panel.textContent).toContain('hacerse pasar por una terminal');
-    expect(panel.textContent).toContain('por ahora no se aceptan más solicitudes');
+    expect(panel.textContent).toContain('Espera un poco antes de pedir otro.');
     expect(within(panel).getByRole('alert').textContent).toContain('identidad necesita revisión');
-    expect(panel.textContent).not.toContain('todavía no recibe terminales de la red');
+    expect(panel.textContent).not.toContain('no recibe terminales de la red');
   });
 
   it('en otra terminal no se aprueba: lo explica y no pide el código', async () => {
@@ -396,7 +396,8 @@ describe('Sistema › Terminales con solicitudes, configuración y sesiones (eta
     const summary = screen.getByRole('region', { name: 'Sesiones activas por tipo de terminal' });
     expect(summary.textContent).toContain('Escritorio3');
     expect(summary.textContent).toContain('Teléfono o tableta1');
-    expect(summary.textContent).toContain('todavía no se limita ninguna');
+    // Etapa A3 (§1): sin la frase provisional «Solo se cuentan; todavía no se limita ninguna.».
+    expect(summary.textContent).not.toMatch(/Solo se cuentan|todavía no/);
     fireEvent.click(within(row).getByRole('button', { name: 'Ver configuración' }));
     const configuration = await screen.findByRole('region', {
       name: 'Configuración de Caja de la barra',

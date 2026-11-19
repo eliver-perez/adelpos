@@ -259,7 +259,7 @@ export function alertMessage(alert: BackupAlert) {
     const since =
       alert.reason === 'stale'
         ? `El último respaldo correcto es del ${backupDateTime(alert.since)}.`
-        : 'Todavía no hay ningún respaldo correcto.';
+        : 'No hay ningún respaldo correcto.';
     return {
       title: 'No hay un respaldo reciente de la base de datos',
       description: `${since} Revisa que la computadora principal esté encendida a la hora del respaldo y usa «Respaldar ahora» en Sistema › Mantenimiento.`,
@@ -280,7 +280,7 @@ export function lastBackupCard(run: BackupRun | null | undefined): {
   if (!run) {
     return {
       value: 'Sin registro',
-      description: 'Todavía no hay respaldos automáticos ni de «Respaldar ahora».',
+      description: 'No hay respaldos automáticos ni de «Respaldar ahora».',
       state: 'neutral',
     };
   }

@@ -259,7 +259,7 @@ export function CategoriesAdmin({
               <tr>
                 <td colSpan={4} className="muted">
                   {ordered.length === 0
-                    ? 'Todavía no hay categorías de insumos.'
+                    ? 'No hay categorías de insumos.'
                     : 'Ninguna categoría coincide con la búsqueda.'}
                 </td>
               </tr>

@@ -75,7 +75,7 @@ export function CatalogPage({ can }: { can: (permission: string) => boolean }) {
     if (draft && JSON.stringify(draft) !== savedDraft) {
       const discard = await confirm({
         title: 'Cambios sin guardar',
-        message: 'Este registro tiene cambios que aún no se guardan. ¿Quieres descartarlos?',
+        message: 'Este registro tiene cambios sin guardar. ¿Quieres descartarlos?',
         confirmLabel: 'Descartar cambios',
         cancelLabel: 'Seguir editando',
         tone: 'danger',
@@ -358,7 +358,7 @@ export function CatalogPage({ can }: { can: (permission: string) => boolean }) {
             )}
             {!list.loading && list.data?.total === 0 && (
               <div className="catalog-empty">
-                <h2>Aún no hay registros</h2>
+                <h2>No hay registros</h2>
                 <p className="muted">
                   Crea la configuración de tu restaurante. Para productos, comienza por una
                   categoría.

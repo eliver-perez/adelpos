@@ -66,7 +66,7 @@ export function printProblemMessage(
     case 'inactive':
       return `${named(printerName)} está desactivada.`;
     case 'unsupported':
-      return 'Esta impresora todavía no puede usarse para imprimir.';
+      return 'Esta impresora no se puede usar para imprimir.';
     case 'setup':
       return `${named(printerName)} necesita que se revise su configuración.`;
     case 'uncertain':

@@ -125,7 +125,7 @@ describe('textos de los respaldos', () => {
     expect(stale.title).toBe('No hay un respaldo reciente de la base de datos');
     expect(stale.description).toContain('El último respaldo correcto es del');
     const never = alertMessage({ kind: 'overdue', reason: 'never', since: '', failures: 0 });
-    expect(never.description).toContain('Todavía no hay ningún respaldo correcto.');
+    expect(never.description).toContain('No hay ningún respaldo correcto.');
     for (const text of [
       message.description,
       fallback.description,

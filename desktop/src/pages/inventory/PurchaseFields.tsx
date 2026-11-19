@@ -462,7 +462,7 @@ export function PurchaseLinesEditor({
           onRemove={() => onChange(lines.filter((entry) => entry.key !== line.key))}
         />
       ))}
-      {lines.length === 0 && <p className="muted text-sm">La orden aún no tiene renglones.</p>}
+      {lines.length === 0 && <p className="muted text-sm">La orden no tiene renglones.</p>}
       <div className="button-row">
         <button
           type="button"

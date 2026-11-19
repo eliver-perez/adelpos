@@ -72,9 +72,7 @@ test('modalidad de la computadora: primer arranque, Mantenimiento, «Solo servid
   const serverNavigation = page.getByRole('navigation', { name: 'Secciones del servidor' });
   await expect(serverNavigation.getByRole('button', { name: 'Estado del servidor' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Mesas', exact: true })).toHaveCount(0);
-  await expect(
-    page.getByText(/terminales? conectadas? de|Todavía no hay otras terminales/),
-  ).toBeVisible();
+  await expect(page.getByText(/terminales? conectadas? de|No hay otras terminales/)).toBeVisible();
   // Etapa 9G (fase F): el último respaldo lo informa el servidor; puede haber ya respaldos (de
   // workflow-stage9g-backups o del respaldo automático diario del servidor temporal).
   await expect(page.getByText('Último respaldo', { exact: true })).toBeVisible();
@@ -111,7 +109,7 @@ test('modalidad de la computadora: primer arranque, Mantenimiento, «Solo servid
     timeout: 15000,
   });
   await expect(page.locator('.find-server-status')).toContainText(
-    'Esta terminal todavía no está conectada al servidor del restaurante.',
+    'Esta terminal no está conectada al servidor del restaurante.',
   );
   await expect(page.getByRole('note')).toContainText('sus datos se conservan');
   await page

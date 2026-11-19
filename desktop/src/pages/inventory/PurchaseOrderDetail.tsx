@@ -176,7 +176,7 @@ export function OrderReceiptsTable({
   onOpen: (id: string) => void;
 }) {
   if (order.receipts.length === 0) {
-    return <p className="muted text-sm">Aún no hay recepciones de esta orden.</p>;
+    return <p className="muted text-sm">No hay recepciones de esta orden.</p>;
   }
   return (
     <div className="table-container cash-table">

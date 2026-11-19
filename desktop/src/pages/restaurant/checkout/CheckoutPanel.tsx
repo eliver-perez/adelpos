@@ -470,7 +470,7 @@ export function CheckoutPanel({
   const dollarNotice = rateMissing ? (
     <div className="checkout-usd" role="status">
       <p className="checkout-usd-equivalent">
-        Este turno no tiene tipo de cambio del dólar: por ahora solo acepta pesos.
+        Este turno no tiene tipo de cambio del dólar: solo acepta pesos.
       </p>
       {can('payments.usd_rate.manage') ? (
         <button
