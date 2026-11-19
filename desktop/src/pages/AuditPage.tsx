@@ -136,8 +136,8 @@ export function AuditPage() {
             />
           </Field>
           <Field
-            label="Código de la terminal"
-            hint="El que aparece como «Terminal» en «Ver cambios» de sus movimientos."
+            label="Identificador de la terminal"
+            hint="El que aparece en «Ver configuración» de Sistema › Terminales, o como «Terminal» en «Ver cambios» de sus movimientos."
           >
             <input value={device} onChange={(event) => setDevice(event.target.value)} />
           </Field>

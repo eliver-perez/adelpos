@@ -144,6 +144,29 @@ export function readyAlertsText(device: Device): string {
   return 'Activado · sin sonido ni vibración';
 }
 
+// Etapa A3 (§5.1, A3-D7): cada tipo de terminal solo ve lo que le aplica. Un teléfono o tableta de meseros (android)
+// no cobra ni tiene modo cocina: no tiene caja física, teclado virtual, estaciones de Cocina, aviso sonoro ni
+// impresoras de la terminal, y su pantalla inicial es Mesas o Para llevar (Go rechaza las demás). Las terminales de
+// escritorio y de cocina conservan todo.
+function isWaiterDevice(device: Device) {
+  return device.kind === 'android';
+}
+
+// terminalHomeOptions son las pantallas iniciales que se ofrecen para la terminal según su tipo.
+export function terminalHomeOptions(device: Device) {
+  if (!isWaiterDevice(device)) {
+    return terminalHomes;
+  }
+  return terminalHomes.filter((entry) => entry.value === 'tables' || entry.value === 'takeaway');
+}
+
+// editableHome es la pantalla inicial con la que abre el editor: la guardada si el tipo la admite; si no (un teléfono
+// con «Cocina» o «Caja» guardada en un servidor anterior a la 0027), Mesas, que es donde la aplicación ya abría.
+function editableHome(device: Device): TerminalHome {
+  const saved = device.home_screen ?? 'tables';
+  return terminalHomeOptions(device).some((entry) => entry.value === saved) ? saved : 'tables';
+}
+
 const keyboardLabels: Record<Device['keyboard_mode'], string> = {
   auto: 'Automático',
   always: 'Siempre habilitado',
@@ -399,6 +422,7 @@ function DeviceConfigurationPanel({ device, onClose }: { device: Device; onClose
   });
   const value = configuration.data;
   const shown = value?.device ?? device;
+  const waiterDevice = isWaiterDevice(shown);
   return (
     <section
       className="surface panel device-configuration"
@@ -430,14 +454,18 @@ function DeviceConfigurationPanel({ device, onClose }: { device: Device; onClose
             <dt>Pantalla inicial</dt>
             <dd>{homeLabel(shown)}</dd>
           </div>
-          <div>
-            <dt>Caja física</dt>
-            <dd>{shown.register_name ?? 'Sin caja asociada'}</dd>
-          </div>
-          <div>
-            <dt>Teclado virtual</dt>
-            <dd>{keyboardLabels[shown.keyboard_mode]}</dd>
-          </div>
+          {!waiterDevice && (
+            <div>
+              <dt>Caja física</dt>
+              <dd>{shown.register_name ?? 'Sin caja asociada'}</dd>
+            </div>
+          )}
+          {!waiterDevice && (
+            <div>
+              <dt>Teclado virtual</dt>
+              <dd>{keyboardLabels[shown.keyboard_mode]}</dd>
+            </div>
+          )}
           {shown.kind === 'android' && serverHas(waiterPINCapability) && (
             <div>
               <dt>Bloqueo por inactividad</dt>
@@ -459,37 +487,53 @@ function DeviceConfigurationPanel({ device, onClose }: { device: Device; onClose
               <dd>{readyAlertsText(shown)}</dd>
             </div>
           )}
+          {!waiterDevice && (
+            <div>
+              <dt>Estaciones que muestra en Cocina</dt>
+              <dd>
+                {value.kitchen_all_stations || value.kitchen_stations.length === 0
+                  ? 'Todas'
+                  : value.kitchen_stations.map((station) => station.name).join(', ')}
+              </dd>
+            </div>
+          )}
+          {!waiterDevice && (
+            <div>
+              <dt>Aviso sonoro de comandas nuevas</dt>
+              <dd>{value.kitchen_sound_alert ? 'Activado' : 'Desactivado'}</dd>
+            </div>
+          )}
+          {!waiterDevice && (
+            <div>
+              <dt>Impresoras de esta terminal</dt>
+              {/* Etapa 9G (fase E): impresoras USB conectadas a la terminal, que imprime su agente. */}
+              <dd>
+                {value.printers.length > 0
+                  ? value.printers
+                      .map((printer) =>
+                        printer.active === false ? `${printer.name} (desactivada)` : printer.name,
+                      )
+                      .join(', ')
+                  : 'Sin impresoras propias'}
+              </dd>
+            </div>
+          )}
+          {/* Etapa A3 (§5.3): el identificador ya no está en la tabla; aquí sirve para soporte y para filtrar el
+              Registro de movimientos por terminal. */}
           <div>
-            <dt>Estaciones que muestra en Cocina</dt>
-            <dd>
-              {value.kitchen_all_stations || value.kitchen_stations.length === 0
-                ? 'Todas'
-                : value.kitchen_stations.map((station) => station.name).join(', ')}
-            </dd>
-          </div>
-          <div>
-            <dt>Aviso sonoro de comandas nuevas</dt>
-            <dd>{value.kitchen_sound_alert ? 'Activado' : 'Desactivado'}</dd>
-          </div>
-          <div>
-            <dt>Impresoras de esta terminal</dt>
-            {/* Etapa 9G (fase E): impresoras USB conectadas a la terminal, que imprime su agente. */}
-            <dd>
-              {value.printers.length > 0
-                ? value.printers
-                    .map((printer) =>
-                      printer.active === false ? `${printer.name} (desactivada)` : printer.name,
-                    )
-                    .join(', ')
-                : 'Sin impresoras propias'}
-            </dd>
+            <dt>Identificador</dt>
+            <dd className="font-mono">{shown.id}</dd>
           </div>
         </dl>
       )}
-      {value && <LocalPrinters name={shown.name} local={value.local_printers ?? null} />}
-      <p className="muted pairing-help">
-        Las estaciones y el aviso sonoro se eligen en Cocina › Estaciones › Terminales de cocina.
-      </p>
+      {value && !waiterDevice && (
+        <LocalPrinters name={shown.name} local={value.local_printers ?? null} />
+      )}
+      {!waiterDevice && (
+        <p className="muted pairing-help">
+          Las estaciones y el aviso sonoro se eligen en Cocina › Estaciones › Terminales de cocina.
+        </p>
+      )}
       <button className="secondary-button mt-4" onClick={onClose}>
         Cerrar configuración
       </button>
@@ -562,7 +606,10 @@ function DeviceEditor({
   const [name, setName] = useState(device.name);
   const [registerID, setRegisterID] = useState(device.register_id ?? '');
   const [keyboard, setKeyboard] = useState(device.keyboard_mode);
-  const [home, setHome] = useState<TerminalHome>(device.home_screen ?? 'tables');
+  const [home, setHome] = useState<TerminalHome>(editableHome(device));
+  // Etapa A3: un teléfono o tableta de meseros no muestra la caja ni el teclado; se envían los guardados sin cambio
+  // (registerID y keyboard empiezan con ellos), así que editarlo nunca le cambia la caja aunque tenga un turno abierto.
+  const android = isWaiterDevice(device);
   const [idleLock, setIdleLock] = useState(
     String(device.idle_lock_seconds ?? defaultIdleLockSeconds),
   );
@@ -620,29 +667,33 @@ function DeviceEditor({
               onChange={(event) => setName(event.target.value)}
             />
           </Field>
-          <Field label="Caja física">
-            <Select
-              value={registerID}
-              options={[
-                { value: '', label: 'Sin caja asociada' },
-                ...registers
-                  .filter((register) => register.active)
-                  .map((register) => ({ value: register.id, label: register.name })),
-              ]}
-              onChange={setRegisterID}
-            />
-          </Field>
-          <Field label="Teclado virtual">
-            <Select<Device['keyboard_mode']>
-              value={keyboard}
-              options={[
-                { value: 'auto', label: 'Automático' },
-                { value: 'always', label: 'Siempre habilitado' },
-                { value: 'disabled', label: 'Desactivado' },
-              ]}
-              onChange={setKeyboard}
-            />
-          </Field>
+          {!android && (
+            <Field label="Caja física">
+              <Select
+                value={registerID}
+                options={[
+                  { value: '', label: 'Sin caja asociada' },
+                  ...registers
+                    .filter((register) => register.active)
+                    .map((register) => ({ value: register.id, label: register.name })),
+                ]}
+                onChange={setRegisterID}
+              />
+            </Field>
+          )}
+          {!android && (
+            <Field label="Teclado virtual">
+              <Select<Device['keyboard_mode']>
+                value={keyboard}
+                options={[
+                  { value: 'auto', label: 'Automático' },
+                  { value: 'always', label: 'Siempre habilitado' },
+                  { value: 'disabled', label: 'Desactivado' },
+                ]}
+                onChange={setKeyboard}
+              />
+            </Field>
+          )}
           {waiterDevice && (
             <Field
               label="Bloqueo por inactividad"
@@ -708,7 +759,7 @@ function DeviceEditor({
           <SegmentedControl<TerminalHome>
             label="Pantalla inicial de la terminal"
             value={home}
-            options={terminalHomes}
+            options={terminalHomeOptions(device)}
             onChange={setHome}
           />
           <small className="muted">
@@ -716,11 +767,13 @@ function DeviceEditor({
             ver.
           </small>
           {/* Etapa 9F (§5.1): una terminal de cocina abre en Cocina › Preparación; sus estaciones y
-              su aviso sonoro se eligen junto a las estaciones. */}
-          <small className="muted">
-            Con «Cocina» abre en Preparación. Las estaciones que muestra y el aviso sonoro se eligen
-            en Cocina › Estaciones › Terminales de cocina.
-          </small>
+              su aviso sonoro se eligen junto a las estaciones. Un teléfono o tableta no tiene Cocina. */}
+          {!android && (
+            <small className="muted">
+              Con «Cocina» abre en Preparación. Las estaciones que muestra y el aviso sonoro se
+              eligen en Cocina › Estaciones › Terminales de cocina.
+            </small>
+          )}
         </div>
       </Form>
     </section>
@@ -867,15 +920,15 @@ export function DevicesPage({
                 <tr key={device.id}>
                   <td>
                     <strong>{device.name}</strong>
-                    <small className="muted block">
-                      Código: <span className="font-mono">{device.id}</span>
-                    </small>
                   </td>
                   <td>
                     {deviceKindLabels[device.kind ?? 'desktop']}
                     <small className="muted block">{device.os || 'Esta computadora'}</small>
                   </td>
-                  <td>{device.register_name ?? 'Sin asociación'}</td>
+                  {/* Etapa A3 (§5.2): un teléfono o tableta no cobra; un guion en lugar de «Sin asociación». */}
+                  <td>
+                    {isWaiterDevice(device) ? '—' : (device.register_name ?? 'Sin asociación')}
+                  </td>
                   <td>{homeLabel(device)}</td>
                   <td>{device.last_seen_at ? dateTime(device.last_seen_at) : '—'}</td>
                   <td>{device.revoked_at ? '—' : (device.current_user ?? 'Nadie')}</td>
