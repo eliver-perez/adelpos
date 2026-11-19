@@ -2913,3 +2913,96 @@ eso sigue así al fusionar.
   textos «en esta tableta» que también salen en un teléfono. Las pruebas que ese arreglo toca se repiten después; lo
   demás de esta fase vale para el código final de Android, que fuera de ese arreglo no cambia.
 - La notificación propia de Android 8.0 («… is running in the background») es del sistema y se documenta en la guía.
+
+## Arreglo de la navegación en el teléfono horizontal
+
+Árbol `$SP/wt/nav`, rama `etapa-a2-nav` desde `etapa-a2-android` (`40ca93d`, con las fases A–D, las correcciones de la
+revisión y la documentación), 18/11/2026, `ISO_TAG=N` (Go temporal 8271/8531). Encargo del coordinador sobre el
+hallazgo de la Fase E (en el teléfono horizontal la barra inferior «Mesas | Para llevar» dejaba la captura sin
+espacio) y dos propuestas suyas para `scripts/android-e2e.sh`. Sin dependencias nuevas; servidor y escritorio sin
+cambios.
+
+### Qué se hizo
+
+| Commit    | Contenido                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `485b8d7` | **Navegación.** `navigationPlacementFor`/`currentNavigationPlacement` y `isHeightCompact`/`currentHeightCompact` en `core/ui/.../layout/PaneLayout.kt` (el mismo límite de 480 dp de la regla de los paneles; ningún umbral nuevo). En `AdelPosApp.kt`: barra inferior (`MainNavigationBar`) en vertical y **riel lateral** (`MainNavigationRail`, `NavigationRail` de Material 3 con los mismos dos destinos, íconos, textos y etiquetas de prueba, centrados, dentro del contenido que ya respeta los bordes del sistema) con poca altura o en horizontal; sigue siempre a la vista, también en la captura. **Catálogo compacto** con poca altura (`CatalogBrowser(compactHeight)`): búsqueda (etiqueta de una línea) y categorías en una fila, y tarjetas bajas (imagen de 72 dp a la izquierda, nombre y precio a la derecha). Pruebas: `PaneLayoutTest` (+1), `MainNavigationLayoutTest` (nueva), `CatalogComponentsTest.conPocaAlturaLasTarjetasCabenConSuNombre` y `TakeawayOnGoTest.t9` |
+| `bdbcb57` | «en este dispositivo» en `sync_pending`, `pending_others_title` y `tables_empty` (los únicos textos con «tableta» o «teléfono» que no dependían del equipo; los de `feature:access` ya tienen su variante de teléfono y los «teléfono» de Para llevar son el del cliente)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `cf1e3e3` | **Guion.** `take_root` (tres intentos y comprueba `id -u` = 0) y `offline_step`: si `adb root` o el corte fallan, el guion lo dice («no se pudo tomar root en … »), ese paso sale **FALLA** y se sigue con el siguiente (antes, con `set -e`, terminaba sin ningún mensaje). Todos los pasos sin red (`w3`, `w7b`, `w12b`, `w13b`, `f5a`, `f7b`, `t4`, `p6`, `access 3` en Android 8–10) pasan por `offline_step`; `r4` sin root también falla con su motivo. **`r4` en Android 8–10**: el corte dura hasta que la prueba anota «r4 corte visto por el canal» (75 s como mucho desde el «Listo»), y `AlertsOnGoTest.r4` espera ese momento hasta 90 s (antes 60). Suite `takeaway` con `t9` y sus capturas en `<salida>/screens`                                                                                                                                                                                                                                                                |
+| `5a01ba2` | `android/CLAUDE.md` («Diseño»: la navegación y el catálogo compacto; «Para llevar»: `MainNavigationRail`) y `docs/ANDROID_INSTALAR.md` (§6: «Mesas» y «Para llevar» abajo en vertical y a un lado en horizontal)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+
+### Decisiones (con su porqué)
+
+1. **Tableta: riel en horizontal y barra en vertical.** En la tableta horizontal (1280 × 800 dp) lo escaso para el
+   catálogo y la cuenta es la altura: el riel toma 80 dp de un ancho que sobra y los dos paneles quedan con toda la
+   altura (captura `n-work/e2e-takeaway-5584/screens/t9-captura-para-llevar-horizontal.png`). En vertical (800 × 1280
+   dp) la barra solo quita 80 de 1280 dp de alto y el riel le quitaría ancho a los dos paneles. La regla es «poca
+   altura o horizontal → riel», sin otro umbral.
+2. **Catálogo compacto además del riel.** Con el riel la cuadrícula ya tenía altura, pero en el teléfono horizontal las
+   tarjetas normales (imagen 4:3 arriba) solo mostraban el principio de la imagen, sin nombre (la misma situación que
+   la Fase E vio sin barra, `09-…`). Con poca altura la búsqueda y las categorías van en una fila y las tarjetas son
+   bajas: se ven las tarjetas completas con nombre y precio. En vertical y en la tableta no cambia nada.
+
+### Antes y después (capturas de pantalla)
+
+|                                          | Captura                                                                                                                                                                                                                       |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Antes (Fase E, `Pixel_8`)                | `$SP/e-work/landscape-pixel8/04-captura-para-llevar-horizontal.png`: barra inferior, ningún producto (copia en `$SP/n-work/antes-captura-para-llevar-horizontal-pixel8.png`)                                                  |
+| Solo con el riel (`ADEL_A1_Phone_API33`) | `$SP/n-work/e2e-takeaway-5586-r1/screens/t9-captura-para-llevar-horizontal.png`: riel; tarjetas visibles pero cortadas, sin nombre                                                                                            |
+| Después (`ADEL_A1_Phone_API33`)          | `$SP/n-work/e2e-takeaway-5586/screens/t9-captura-para-llevar-horizontal.png`: riel; «Hamburguesa T $120.00» y «Tacos T $90.00» completos. Vertical: `…/t9-captura-para-llevar-vertical.png` (barra inferior, igual que antes) |
+| Después (`Pixel_Tablet`)                 | `$SP/n-work/e2e-takeaway-5584/screens/t9-captura-para-llevar-horizontal.png` (riel, dos paneles con toda la altura) y `…-vertical.png` (barra)                                                                                |
+
+### Pruebas
+
+Un emulador a la vez, con la Mac cargada (Playwright completo del escritorio corría al mismo tiempo). Antes de cada
+corrida se desinstalaron las apps nuevas y viejas con sus `.test`.
+
+| Qué                                                                                  | Dónde                                                         | Resultado                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ------------------------------------------------------------------------------------ | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ktfmtCheck`, `:core:domain:test`, `testDebugUnitTest`, `lintDebug`, `assembleDebug` | Mac, al final                                                 | Aprobados: **345 pruebas de la JVM, 0 fallas** (con `PaneLayoutTest` +1); lint sin problemas (solo el aviso informativo de siempre del `lint.jar` de lifecycle en `core:ui`)                                                                                                                                                                                                                                                  |
+| `:app:connectedDebugAndroidTest`                                                     | `ADEL_A1_Phone_API33` (Android 13)                            | **103, 0 fallas**, 68 omitidas a propósito (las de punta a punta sin argumentos; +1 por `t9`) — 1 XML; con `MainNavigationLayoutTest` (vertical → barra, horizontal → riel). Corrida final con el código final                                                                                                                                                                                                                |
+| `:core:ui:connectedDebugAndroidTest`                                                 | `ADEL_A1_Phone_API33`                                         | **14, 0 fallas** en la corrida final. Antes, dos corridas con 1 falla de la prueba nueva de poca altura: la etiqueta de la búsqueda se partía en tres renglones (arreglado en el producto: una línea en la forma compacta) y la prueba miraba la segunda tarjeta en lugar de la primera                                                                                                                                       |
+| `:core:ui:connectedDebugAndroidTest` y `:app:connectedDebugAndroidTest`              | `Pixel_Tablet` (Android 17)                                   | **14, 0 fallas** y **103, 0 fallas** (68 omitidas) — 2 XML; `MainNavigationLayoutTest`: horizontal → riel, vertical → barra                                                                                                                                                                                                                                                                                                   |
+| `--suite takeaway` (t1–t9)                                                           | `ADEL_A1_Phone_API33`, Go nuevo                               | **9 de 9** (y antes 9 de 9 con solo el riel, antes de la forma compacta)                                                                                                                                                                                                                                                                                                                                                      |
+| `--suite waiter` (w1–w13c)                                                           | `ADEL_A1_Phone_API33`, Go nuevo                               | **19 de 19**                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `--suite takeaway --steps "t1 t9"`                                                   | `Pixel_Tablet`, Go nuevo                                      | **2 de 2** (capturas de la tableta)                                                                                                                                                                                                                                                                                                                                                                                           |
+| `--suite alerts --steps "r1 r4"`                                                     | `ADEL_A1_Tablet_API26` (Android 8.0), Go nuevo, **dos veces** | **2 de 2** las dos veces; en el registro del guion: corte, «Listo» marcado desde la Mac durante el corte, «el canal vio el corte», red devuelta, y el aviso llegó una sola vez. (Dos repeticiones de `r4` solo, sobre el mismo Go, fallaron porque la prueba vuelve a abrir la cuenta en la mesa R8, que ya la tenía de la corrida anterior: `TABLE_HAS_ACCOUNT`; `r4` necesita su `r1` con un Go nuevo, como dice la Fase E) |
+| `take_root` y `offline_step` con un `adb` simulado                                   | Mac (bash, sin dispositivo)                                   | Con `adb root` que falla: «no se pudo tomar root en …», el paso `w3` sale FALLA, el siguiente corre y el resultado final es «hubo pasos sin aprobar». Con root: `root`, `svc wifi/data disable`, `root`, `svc … enable`, `unroot`, en ese orden                                                                                                                                                                               |
+| `iso.sh format`, `fmt-check`                                                         | árbol `nav`                                                   | Aprobados; `md5` de `docs/etapas/*.md` igual                                                                                                                                                                                                                                                                                                                                                                                  |
+
+Ninguna prueba usó la red real ni el servicio de la Mac. Al terminar se apagaron los emuladores (5586, 5584 y 5582,
+sin aplicaciones instaladas y el de Android 8 sin root, con red) y el Go temporal (con su base).
+
+### No verificado
+
+- `Pixel_8` (el teléfono donde la Fase E vio el hallazgo): se probó en `ADEL_A1_Phone_API33`, que en horizontal es
+  igual de bajo; y `ADEL_A1_Tablet_API26` solo para `r4`.
+- Que `svc … disable` **no** corte la conexión abierta durante `r4` (el caso frágil de la Fase E): en las dos corridas
+  el canal vio el corte enseguida (la primera, ≈ 9 s después de pedirlo; la segunda, el canal ya estaba en «Waiting»
+  —`failures=2`— medio segundo después de pedirlo, antes de que el guion cortara). En el caso lento el guion ahora
+  espera hasta 75 s y la prueba 90 s; ese caso no se reprodujo.
+- La pantalla del PIN en el teléfono horizontal (de la A1, la Fase E vio solo las teclas 1–6) no se tocó.
+
+### Para el coordinador
+
+- La comprobación «el canal nota el corte» de `r4` puede cumplirse por otro motivo (en la segunda corrida el canal ya
+  estaba en «Waiting» con `failures=2` antes del corte). La prueba sigue comprobando lo importante (el «Listo» marcado
+  sin red y el aviso **una sola vez**), pero quien revise el canal de avisos (Fase D) puede querer saber por qué el
+  canal tenía fallas recién abierto en Android 8 con la Mac cargada.
+- `--suite takeaway` tiene ahora 9 pasos (`t9`), también dentro de `--suite all`.
+
+### Decisiones del coordinador sobre el arreglo de la navegación
+
+Se acepta el riel lateral con poca altura o en horizontal (también en la tableta horizontal, donde lo escaso es la altura)
+y la forma compacta del catálogo con poca altura, que no se había pedido pero es lo que deja ver los productos en el
+teléfono horizontal; en vertical y en la tableta vertical nada cambia. La observación de `r4` (el canal de avisos en
+«Waiting» con dos fallas medio segundo después de pedir el corte, en Android 8 con la Mac cargada) queda anotada; la
+prueba sigue comprobando que el «Listo» se marca sin red y que el aviso llega una sola vez. Fusión: `etapa-a2-nav`
+(`5a01ba2`) en `08d4d05`.
+
+**Verificación del coordinador del arreglo** (copia exacta de `08d4d05`, en los dos emuladores que el arreglo no
+cubrió): `:app:connectedDebugAndroidTest` y `:core:ui:connectedDebugAndroidTest` en `Pixel_8` (Android 17): 103 pruebas
+y 0 fallas (68 omitidas a propósito) y 14 y 0; en `ADEL_A1_Tablet_API26` (Android 8.0): `core:ui` 14 y 0, y `app` una
+falla en la primera corrida cuyo nombre no quedó registrado (el guion del coordinador borró el XML al pasar al siguiente
+emulador: error del guion, no de la prueba) y, repetida sola con el emulador recién encendido, 103 pruebas y 0 fallas
+(70 omitidas). Se anota como falla intermitente sin identificar.
