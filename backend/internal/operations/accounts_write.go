@@ -11,7 +11,7 @@ func (handler *service) validateAccountInput(input *AccountInput, previous *Acco
 	input.CustomerName = strings.TrimSpace(input.CustomerName)
 	input.Phone = strings.TrimSpace(input.Phone)
 	input.Origin = strings.TrimSpace(input.Origin)
-	if input.Name == "" || len(input.Name) > 100 || len(input.CustomerName) > 100 || len(input.Phone) > 40 || len(input.Origin) > 80 || len(input.Notes) > 2000 {
+	if input.Name == "" || len(input.Name) > 100 || !validCustomerFields(input.CustomerName, input.Phone) || len(input.Origin) > 80 || len(input.Notes) > 2000 {
 		return nil, invalid("Revisa nombre/referencia (100), cliente (100), teléfono (40), origen (80) y observaciones (2000 caracteres).")
 	}
 	if input.Mode != "dine_in" && input.Mode != "takeaway" {

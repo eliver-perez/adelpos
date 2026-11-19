@@ -6,6 +6,14 @@
 // Entrada con PIN, credencial de envío y su administración (Personal › Usuarios, «Mi PIN» y Terminales).
 export const waiterPINCapability = 'waiter-pin-v1';
 
+// Etapa A2 (parte C, servidor 0.13.0): impresora de precuentas de cada teléfono o tableta de meseros (Terminales ›
+// Editar y «Ver configuración»). Un servidor anterior rechazaría el campo en PATCH devices/{id}.
+export const devicePrecheckPrinterCapability = 'device-precheck-printer-v1';
+
+// Etapa A2 (parte D, servidor 0.13.0): «Avisar platillos listos», «Sonido» y «Vibración» de cada teléfono o tableta
+// (Terminales › Editar y «Ver configuración»).
+export const readyAlertsCapability = 'ready-alerts-v1';
+
 let announced: ReadonlySet<string> = new Set();
 
 // rememberServerCapabilities guarda lo que informó el servidor al conectar (useSession lo llama con la respuesta de

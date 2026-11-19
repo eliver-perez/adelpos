@@ -249,6 +249,8 @@ func routePermission(method string, parts []string) string {
 				// cancelación no puede exigir accounts.cancel aquí: sin él procede con la autorización de un
 				// supervisor, que la ruta decide antes de escribir (account_cancellation.go).
 				"discard": "accounts.open", "cancel-account": "accounts.open",
+				// Etapa A2 (A2-D1): nombre del cliente y teléfono de un pedido para llevar, sin accounts.manage.
+				"customer": "takeaway.manage",
 			}[action]
 		}
 	}

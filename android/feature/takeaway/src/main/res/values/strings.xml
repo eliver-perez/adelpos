@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Textos de Para llevar (etapa A2, §3). En español del restaurante, sin tecnicismos. -->
+<resources xmlns:tools="http://schemas.android.com/tools" tools:locale="es">
+    <string name="takeaway_title">Para llevar</string>
+    <string name="takeaway_new_order">Nuevo pedido</string>
+    <string name="takeaway_read_only">Puedes ver los pedidos para llevar. Para tomarlos, pide a un administrador el permiso «Administrar datos de pedidos para llevar».</string>
+    <string name="takeaway_refresh">Actualizar</string>
+    <string name="takeaway_loading">Leyendo los pedidos…</string>
+    <string name="takeaway_offline_since">Sin conexión: es lo último que se vio, a las %1$s.</string>
+    <string name="takeaway_offline_never">Sin conexión: todavía no hay pedidos para llevar guardados en este dispositivo.</string>
+    <string name="takeaway_empty">No hay pedidos para llevar abiertos.</string>
+    <string name="takeaway_folio">Folio %1$d</string>
+    <string name="takeaway_not_in_go">Pedido nuevo (sin folio todavía)</string>
+    <string name="takeaway_received">Recibido por el restaurante</string>
+    <string name="takeaway_has_queued">Tiene productos por enviar desde este dispositivo.</string>
+    <string name="takeaway_has_draft">Tiene productos tuyos sin enviar a cocina.</string>
+    <plurals name="takeaway_draft_products">
+        <item quantity="one">%d producto sin enviar a cocina</item>
+        <item quantity="many">%d productos sin enviar a cocina</item>
+        <item quantity="other">%d productos sin enviar a cocina</item>
+    </plurals>
+    <string name="takeaway_customer_pending">El nombre o el teléfono se guardará en la computadora principal en cuanto haya conexión.</string>
+    <string name="takeaway_edit_customer">Nombre y teléfono</string>
+    <string name="takeaway_deliver">Entregado</string>
+    <string name="takeaway_collect_first">Cobrar en caja antes de entregar</string>
+    <string name="takeaway_delivered_notice">Pedido entregado.</string>
+    <string name="takeaway_already_delivered">Este pedido ya estaba entregado.</string>
+    <string name="takeaway_deliver_offline">Para marcarlo entregado necesitas conexión con la computadora principal.</string>
+    <string name="takeaway_deliver_failed">No se pudo marcar entregado. Inténtalo de nuevo.</string>
+</resources>

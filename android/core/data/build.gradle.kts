@@ -8,7 +8,7 @@ plugins {
 }
 
 android {
-    namespace = "local.adel.pos.android.core.data"
+    namespace = "com.adelpos.meseros.core.data"
     compileSdk { version = release(37) }
 
     defaultConfig {

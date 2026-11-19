@@ -3869,8 +3869,9 @@ que usa el escritorio (no están en el contrato para clientes, como `devices/*`)
   solo tienen los permisos efectivos del usuario que están en la lista cerrada `administration.WaiterPermissions`
   (`waiter_scope.go`, el único lugar): `waiter_devices.use`, `restaurant.tables.read`, `restaurant.areas.read`,
   `accounts.read`, `accounts.open`, `orders.capture`, `orders.confirm`, `orders.edit`, `orders.cancel`, `catalog.read`,
-  `catalog.prices.read` y `events.read`. Un administrador con PIN no puede usar por esa sesión ninguna ruta de
-  administración (`users.*`, `devices.*`, `settings.*`…; 403 con `access.denied`) ni Para llevar; `auth/me` y
+  `catalog.prices.read` y `events.read` (desde la etapa A2, también Para llevar: ver «Etapa A2 · Para llevar en el
+  servidor»). Un administrador con PIN no puede usar por esa sesión ninguna ruta de
+  administración (`users.*`, `devices.*`, `settings.*`…; 403 con `access.denied`) ni de cobros; `auth/me` y
   `restaurant/state` informan los permisos acotados. «Cambiar contraseña» desde esa sesión abre otra igual de acotada.
   Las sesiones con contraseña (también en un teléfono) no cambian. `waiter_scope_test.go` comprueba que el contrato,
   `docs/API_V1.md` y este archivo repiten la lista.
@@ -3963,3 +3964,130 @@ Decisión A1-D18 de [docs/ETAPA_A1_AVANCE.md](docs/ETAPA_A1_AVANCE.md) («Decisi
 - **Mesa con las partidas en una cuenta abierta suya** (borrador o enviadas): cambio bloqueante `items_in_account` con
   `account_id` y `now` = folio, sin `table_has_account`. `OfflineChange` agrega `account_id` (opcional, solo en ese
   cambio).
+
+## Etapa A2 · Para llevar en el servidor (parte B, sin migración; servidor 0.13.0)
+
+Especificación: [docs/etapas/ETAPA_A2_ANDROID.md](docs/etapas/ETAPA_A2_ANDROID.md) §3 y §0-B, decisiones A2-D1, A2-D2 y
+A2-D6 de [docs/ETAPA_A2_AVANCE.md](docs/ETAPA_A2_AVANCE.md). Todo es de la API para clientes: forma exacta en
+[docs/API_V1.md](docs/API_V1.md), «Para llevar», y en `internal/apicontract/openapi.json` (capacidad `takeaway-v1`).
+Esquema 25 (sin migración); `min_client_versions` no cambia (`desktop` 0.10.0, `android` 0.1.0). Ninguna ruta del
+escritorio cambia de forma y el escritorio no cambió (solo su versión, 0.13.0).
+
+- **Permisos de mesero** (`administration.WaiterPermissions`, A1-D17): la lista cerrada de la sesión con PIN y de la
+  credencial de envío queda en `waiter_devices.use`, `restaurant.tables.read`, `restaurant.areas.read`,
+  `accounts.read`, `accounts.open`, `orders.capture`, `orders.confirm`, `orders.edit`, `orders.cancel`,
+  `catalog.read`, `catalog.prices.read`, `events.read`, **`takeaway.read`**, **`takeaway.manage`** y
+  **`takeaway.deliver`** (el último, opcional en el rol). Siguen fuera los cobros (`payments.*`), la caja y lo
+  administrativo.
+- **`POST restaurant/offline-orders`** (`submitOfflineOrder`): destino nuevo, opcional y exclusivo con `account_id` y
+  `table_id`, **`destination.takeaway: {customer_name?, phone?}`** (límites de `AccountInput`, 100 y 40, recortados;
+  sin `seen_account_ids`, `name` ni `replaces_draft_items`). Exige además `accounts.open` y `takeaway.manage`. Abre la
+  cuenta `mode: takeaway` con `origin` «Para llevar» (`operations.TakeawayOrigin`, el mismo que manda la caja),
+  responsable = quien envía (sesión o credencial de envío) y la confirma en la misma operación. Las reglas de la clave
+  son las de A1-D6, A1-D18 y A1-D19: un reintento devuelve el resultado guardado y nunca abre otro pedido; si las
+  partidas ya están en un pedido para llevar abierto (borrador o enviadas), el cambio bloqueante `items_in_account`
+  con su `account_id` (`openAccountsWithItems`, la misma consulta de la mesa). Código en
+  `operations/offline_orders.go`.
+- **`POST restaurant/accounts/{id}/customer`** (`updateTakeawayCustomer`, A2-D1; permiso `takeaway.manage`):
+  `{operation_id, customer_name, phone}` (los dos obligatorios; vacío quita) → la cuenta. Solo pedidos para llevar
+  abiertos (de salón: `400 OPERATION_VALIDATION`; que ya no está abierto: el rechazo de `ensureOpen` con
+  `details.reason: account_not_open`). **Sin revisión** (no la pide ni la sube). Idempotente (`restaurant_operations`),
+  con historia `account.updated`, evento `restaurant.account.updated` en el ámbito `takeaway` y auditoría
+  `restaurant.account.updated` en la misma transacción; sin cambios no escribe nada. Toma el lock 7820148305 exclusivo
+  como toda escritura de `restaurant/*` (ningún lock nuevo). Código en `operations/takeaway.go`.
+- **`POST payments/accounts/{id}/deliver`** (`deliverTakeaway`, ya existía; A2-D2): sin cambios de regla (409
+  `BALANCE_PENDING` con saldo, 409 `ALREADY_DELIVERED`, cierre del pedido pagado y entregado). La respuesta
+  `{finance, closed, delivered}` lleva `finance` **solo con `payments.read`**; sin él, `null` (la sesión con PIN del
+  mesero no consulta cobros). El escritorio no usa ese `finance` (`payments_deliver`). Código en `payments/delivery.go`.
+- **Contrato**: `Account` documenta `customer_name`, `phone` y `origin` (obligatorios: Go siempre los entrega) y los
+  valores de `payment_state` y `delivery_state`; `listAccounts` con `mode=takeaway`; `getRecoveryState` con las
+  cuentas para llevar; `pinLogin` con la lista de permisos nueva. Pruebas: `TestStageA2Takeaway` (`operations`) y
+  `contractTakeaway` en `TestContractV1`.
+- **Versiones**: servidor 0.13.0 (esquema 25); `GET version` anuncia `takeaway-v1`.
+
+## Etapa A2 · impresora de precuentas por dispositivo (parte C, esquema 26)
+
+Especificación: [docs/etapas/ETAPA_A2_ANDROID.md](docs/etapas/ETAPA_A2_ANDROID.md) §5 y decisión A2-D3 de
+[docs/ETAPA_A2_AVANCE.md](docs/ETAPA_A2_AVANCE.md). Lo del dispositivo (`printPrecheck`, `getDocumentStatus`,
+`retryDocument` y `terminal.precheck_printer`) está en [docs/API_V1.md](docs/API_V1.md), «Imprimir la precuenta», y en
+`internal/apicontract/openapi.json` (capacidad `device-precheck-printer-v1`). Aquí, lo de la computadora principal.
+
+- **Base** (0026, parte C): `devices.precheck_printer_id` (uuid opcional, llave foránea a `kitchen_printers`, índice
+  parcial `devices_precheck_printer_idx` y `CHECK (precheck_printer_id IS NULL OR kind = 'android')`), vacía en todas
+  las terminales existentes; ninguna fila cambia (`TestStageA2Upgrade`).
+- **`PATCH devices/{id}`** (`devices.manage`): campo opcional nuevo `precheck_printer_id`. **Sin el campo se conserva**
+  la guardada (clientes anteriores); **`null` la quita**; un identificador la asigna si el dispositivo es `android`
+  (si no, `400` «La impresora de precuentas solo se asigna a teléfonos y tabletas de meseros.») y la impresora existe
+  y puede imprimir precuentas (activa y con un transporte que imprime, `kitchen.PrinterProblem`; si no, `400` con el
+  motivo). Queda en el Registro de movimientos (`device.updated`, antes y después).
+- **`GET devices`**, la respuesta del `PATCH` y la auditoría: `precheck_printer_id`, `precheck_printer_name` y
+  `precheck_printer_terminal_name` (la terminal, solo si es la USB de una terminal).
+- **`GET devices/{id}/configuration`** (`devices.read`): `precheck_printer` (`{id, name, transport, terminal_name,
+active, problem}` de la asignada, o `null`) y `precheck_printer_options` (todas las impresoras con su `problem`, por
+  nombre, para el selector; vacía en una terminal que no es `android`). Así quien edita terminales elige sin necesitar
+  `kitchen.printers.manage`.
+- **`auth/me` y `restaurant/state`**: `terminal.precheck_printer_id` y `terminal.precheck_printer` (`{id, name,
+terminal_name}` o `null`), con la misma consulta (`terminalIdentityQuery`, `administration/devices.go`).
+- **Resolución** (`payments.receiptPrinter`, `payments/document_printing.go`): un dispositivo `android` imprime **solo**
+  en su impresora de precuentas (precuenta, reintento, reimpresión y, si algún día los pidiera, tickets y documentos de
+  caja); sin ella, `409 PRINTER_NOT_CONFIGURED` con `details.scope: "device"` y «Este dispositivo no tiene impresora
+  asignada. Pide al administrador que la elija en Terminales.»; con una que dejó de servir, `409 PRINTER_UNAVAILABLE`
+  con `details.scope: "device"`. Las terminales de escritorio y de cocina: igual que antes (la de su caja o la general,
+  sin `scope`).
+- **Respuestas**: `precheck/print`, `documents/retry` y `documents/reprint` agregan `problem` (`agent_offline` si la
+  terminal de la impresora no consulta, ya al encolar), `printer_name` y `terminal_name` (`addJobFeedback`). El ticket de
+  pago (`printing` del cobro) también, cuando se encola.
+- **`GET payments/accounts/{id}/documents/status?ticket_id=…`** (`payments.tickets.print`, lock 7820148305 compartido):
+  el `DocumentRecord` de ese documento (`job_state`, `job_problem`, `printer_name`, `copies`, `terminal_name`), sin
+  importes; 404 si no es de la cuenta. Va con query porque el puente admite un solo identificador por ruta.
+- **Permisos de mesero** (`WaiterPermissions`): `waiter_devices.use`, `restaurant.tables.read`, `restaurant.areas.read`,
+  `accounts.read`, `accounts.open`, `orders.capture`, `orders.confirm`, `orders.edit`, `orders.cancel`, `catalog.read`,
+  `catalog.prices.read`, `events.read`, `takeaway.read`, `takeaway.manage`, `takeaway.deliver` y
+  **`payments.tickets.print`**. No `payments.tickets.reprint`: volver a imprimir arma una precuenta nueva, como en la caja.
+- **«Quitar datos de prueba»**: si la impresora de precuentas de un dispositivo es de prueba, se desvincula («Impresora de
+  precuentas de «…»»; el dispositivo queda sin impresora) en lugar de impedir que se elimine.
+- **Escritorio**: Terminales › Editar de un `android` muestra «Impresora de precuentas» y «Ver configuración» la informa,
+  solo si el servidor anuncia `device-precheck-printer-v1`; si no, el `PATCH` no lleva el campo.
+
+## Etapa A2 · registro y canal de platillos listos (parte D, esquema 26)
+
+Especificación: [docs/etapas/ETAPA_A2_ANDROID.md](docs/etapas/ETAPA_A2_ANDROID.md) §4 y decisiones A2-D4 y A2-D9 de
+[docs/ETAPA_A2_AVANCE.md](docs/ETAPA_A2_AVANCE.md). Lo del dispositivo (`getReadyAlerts`, `streamReadyAlerts` y
+`terminal.ready_alerts_*`) está en [docs/API_V1.md](docs/API_V1.md), «Avisos de platillos listos», y en
+`internal/apicontract/openapi.json` (capacidad `ready-alerts-v1`).
+
+- **Base** (0026, parte D): `app.ready_notices` (`sequence` identidad como clave y cursor, `unit_id`, `version_id`,
+  `account_id`, `recipient_user_id`, `recipient_device_id` opcional, `alert_key` (`uuid` del grupo, nunca se reutiliza),
+  `ready_at`; `UNIQUE (unit_id, version_id)`; índices `(recipient_user_id, sequence)` y `(ready_at)`), vacía al
+  actualizar; `devices.ready_alerts_enabled`, `ready_alerts_sound` y `ready_alerts_vibration`
+  (`boolean NOT NULL DEFAULT true`); índices parciales de `sessions` `(device_id, created_at) WHERE opened_with_pin` y
+  `(device_id) WHERE opened_with_pin AND revoked_at IS NULL` para las lecturas de cada 750 ms (revisión R5). Ninguna
+  fila cambia (`TestStageA2Upgrade`).
+- **Escritura** (`kitchen.recordReadyNotices`, `kitchen/preparation.go`): en `publishPreparation`, la misma transacción
+  que publica `restaurant.account.preparation_changed`, cada unidad activa de las cuentas anotadas cuyas tareas vivas
+  de su versión están todas listas y, en esta transacción, se marcó la última (`ready_at = now()`) o se canceló la que
+  faltaba (revisión R1). Así cuentan todos los caminos que escriben tareas (KDS: unidad, pedido de una estación, cuenta
+  completa; modificaciones y cancelaciones de `operations` con `kitchen.Integrate`; la liberación de
+  `Worker.ReleaseDue`, que solo crea tareas pendientes) y nunca una unidad que ya
+  estaba lista (una modificación económica no reinicia sus tareas; una de receta crea otra versión). Destinatario: el
+  responsable de la cuenta; dispositivo: el de su sesión con PIN vigente con `last_seen_at` más reciente que cuente
+  (creada desde el inicio del día comercial, o de antes y con `last_seen_at` de los últimos 30 minutos,
+  `kitchen.ReadyAlertsRecentUse`, A2-D12), solo entre
+  `android` no revocados con `ready_alerts_enabled` y, si se conoce `app_version`, 0.2.0 o posterior (revisión R7), o
+  ninguno. Las filas de una cuenta en la misma operación comparten un `alert_key` nuevo (`gen_random_uuid()`, R3). Al
+  registrar algo, se poda lo de más de 2 días. Ningún lock nuevo: cocina escribe con 7820148305 exclusivo.
+- **Lectura** (`administration/ready_alerts.go`): `GET ready-alerts` (en `dispatch`, que toma 7820148305
+  **compartido** antes de `authenticateDevice`, el mismo orden que los escritores: lock y después la fila del
+  dispositivo, revisión R8; solo la credencial del dispositivo, sin sesión) y `GET ready-alerts/stream`
+  (`serveReadyAlerts`: revisa cada 750 ms y solo escribe con novedades, `: ping` cada 15 s, 5 minutos; `readyStreams`
+  guarda el canal abierto de cada dispositivo y uno nuevo cierra el anterior, R12). `authenticateDevice` actualiza
+  `devices.last_seen_at` de estas lecturas como mucho una vez por minuto. Presencia del mesero (`active` y los avisos):
+  sesión con PIN en el dispositivo creada desde el inicio del día comercial, o de antes pero vigente y usada en los
+  últimos 30 minutos (A2-D12, para que la última entrada de la noche no deje el servicio activo hasta la mañana), y
+  solo avisos desde su primera sesión que cuente (R2, R11); la cuenta sigue `merged_into_id` y no se avisan unidades canceladas (R10). `active` y
+  `day_ends_at` con `businessday` (hora de inicio del día de inventario).
+- **`PATCH devices/{id}`** (`devices.manage`): campos opcionales `ready_alerts_enabled`, `ready_alerts_sound` y
+  `ready_alerts_vibration` (sin ellos se conserva lo guardado); en una terminal que no es `android`, `400`. `GET
+devices`, la configuración (`device`), `auth/me` y `restaurant/state` (`terminal`) los informan.
+- **Escritorio**: Terminales › Editar de un `android` muestra «Avisar platillos listos», «Sonido» y «Vibración» y «Ver
+  configuración» los informa, solo si el servidor anuncia `ready-alerts-v1`; si no, el `PATCH` no los lleva.

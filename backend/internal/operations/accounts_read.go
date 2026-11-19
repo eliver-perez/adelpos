@@ -306,6 +306,8 @@ func (handler *service) accounts(parts []string) (any, error) {
 		return handler.cancelAccount(id)
 	case "history":
 		return handler.history(id)
+	case "customer":
+		return handler.updateTakeawayCustomer(id)
 	}
 	return nil, invalid(fmt.Sprintf("Acción de cuenta no disponible: %s.", parts[2]))
 }

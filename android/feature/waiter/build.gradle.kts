@@ -1,12 +1,14 @@
-// Modo Mesero: mesas, cuentas, captura, pendientes y «Requiere tu revisión» (Fase E). En la Fase A,
-// solo la pantalla de muestra «Mesas» con su campo que sobrevive a la rotación.
+// Modo Mesero: Mesas y el panel de la mesa con sus cuentas (Fase E). La captura, «Pedidos
+// pendientes» y «Requiere tu revisión» viven en core:capture desde la etapa A2 (compartidas con
+// Para
+// llevar).
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.compose)
 }
 
 android {
-    namespace = "local.adel.pos.android.feature.waiter"
+    namespace = "com.adelpos.meseros.feature.waiter"
     compileSdk { version = release(37) }
 
     defaultConfig { minSdk = 26 }
@@ -38,6 +40,7 @@ android {
 
 dependencies {
     implementation(project(":core:ui"))
+    implementation(project(":core:capture"))
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.lifecycle.viewmodel.savedstate)
     implementation(libs.compose.ui.tooling.preview)

@@ -13,20 +13,30 @@ import (
 )
 
 // A1-D17: la lista de permisos de mesero está en un solo lugar (WaiterPermissions), solo tiene permisos registrados,
-// nada administrativo ni de Para llevar, y el contrato (pinLogin), docs/API_V1.md y API_CONTRACTS.md la repiten
-// completa (si la lista cambia, la documentación debe cambiar con ella).
+// nada administrativo, y el contrato (pinLogin), docs/API_V1.md y API_CONTRACTS.md la repiten completa (si la lista
+// cambia, la documentación debe cambiar con ella). Etapa A2: las únicas excepciones a los prefijos prohibidos son las
+// de las funciones nuevas de la aplicación de meseros, una por una (Para llevar, A2-D2; imprimir la precuenta, A2-D3).
 func TestWaiterPermissionsAreClosedAndDocumented(t *testing.T) {
+	stageA2 := []string{"takeaway.read", "takeaway.manage", "takeaway.deliver", "payments.tickets.print"}
 	seen := map[string]bool{}
 	for _, key := range WaiterPermissions {
 		if !knownPermission(key) || seen[key] {
 			t.Fatalf("permiso de mesero desconocido o repetido: %s", key)
 		}
 		seen[key] = true
+		if slices.Contains(stageA2, key) {
+			continue
+		}
 		for _, prefix := range []string{"users.", "roles.", "permissions.", "devices.", "settings.", "sessions.", "registers.",
 			"audit.", "payments.", "cash.", "takeaway.", "inventory.", "reports.", "documents.", "kitchen."} {
 			if strings.HasPrefix(key, prefix) {
 				t.Fatalf("la lista de mesero no admite %s", key)
 			}
+		}
+	}
+	for _, key := range stageA2 {
+		if !seen[key] {
+			t.Fatalf("falta %s (etapa A2) en la lista de mesero", key)
 		}
 	}
 	for _, required := range []string{"waiter_devices.use", "orders.confirm", "accounts.read", "events.read"} {
@@ -67,8 +77,8 @@ func TestWaiterPermissionsAreClosedAndDocumented(t *testing.T) {
 }
 
 func TestWaiterScopeKeepsOnlyWaiterPermissions(t *testing.T) {
-	all := []string{"accounts.read", "users.manage", "orders.confirm", "takeaway.read", "settings.manage", "events.read"}
-	if scoped := waiterScope(all); !slices.Equal(scoped, []string{"accounts.read", "orders.confirm", "events.read"}) {
+	all := []string{"accounts.read", "users.manage", "orders.confirm", "takeaway.read", "settings.manage", "payments.collect", "events.read"}
+	if scoped := waiterScope(all); !slices.Equal(scoped, []string{"accounts.read", "orders.confirm", "takeaway.read", "events.read"}) {
 		t.Fatalf("permisos acotados: %v", scoped)
 	}
 	if scoped := waiterScope(nil); len(scoped) != 0 {

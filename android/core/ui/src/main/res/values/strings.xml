@@ -28,4 +28,17 @@
     <!-- Menú del mesero activo (cambio rápido de usuario, §3.2). -->
     <string name="waiter_menu_switch">Cambiar de mesero</string>
     <string name="waiter_menu_offline">Entraste sin conexión</string>
+    <string name="waiter_menu_alerts">Avisos de platillos listos</string>
+    <!-- Para llevar (etapa A2, §3.3): preparación y pago como los dice Go. -->
+    <string name="takeaway_preparation_not_sent">Sin enviar a cocina</string>
+    <string name="takeaway_preparation_pending">Pendiente</string>
+    <string name="takeaway_preparation_preparing">En preparación</string>
+    <string name="takeaway_preparation_ready">Listo</string>
+    <string name="takeaway_preparation_cancelled">Cancelado</string>
+    <string name="takeaway_preparation_unknown">Sin estado de cocina</string>
+    <string name="takeaway_payment_unpaid">Sin pagar</string>
+    <string name="takeaway_payment_partial">Pago parcial</string>
+    <string name="takeaway_payment_paid">Pagado</string>
+    <string name="takeaway_payment_unknown">Pago sin dato</string>
+    <string name="takeaway_delivered">Entregado</string>
 </resources>

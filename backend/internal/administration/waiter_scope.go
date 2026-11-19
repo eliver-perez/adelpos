@@ -33,6 +33,19 @@ var WaiterPermissions = []string{
 	"catalog.prices.read",
 	// Tiempo real: streamEvents.
 	"events.read",
+	// Para llevar (etapa A2, §3 de la especificación y decisiones A2-D1 y A2-D2): ver los pedidos para llevar abiertos
+	// con su preparación, pago y entrega (listAccounts, getAccount, restaurant/state) y sus eventos del ámbito takeaway;
+	// abrirlos y capturarlos, también sin conexión (destination.takeaway), y cambiar su nombre y teléfono
+	// (POST restaurant/accounts/{id}/customer); y marcar «Entregado» un pedido ya pagado (deliverTakeaway). Este último es
+	// opcional en el rol: Go sigue rechazando la entrega con saldo pendiente (BALANCE_PENDING), así que el mesero
+	// nunca entrega un pedido sin pagar ni cobra.
+	"takeaway.read",
+	"takeaway.manage",
+	"takeaway.deliver",
+	// Imprimir la precuenta desde el dispositivo (etapa A2, §5 y decisión A2-D3): printPrecheck, retryDocument y
+	// getDocumentStatus, siempre en la impresora de precuentas del dispositivo. No incluye payments.read (el cobro) ni
+	// payments.tickets.reprint: volver a tocar «Imprimir precuenta» arma una precuenta nueva, como en la caja.
+	"payments.tickets.print",
 }
 
 // waiterScope deja de los permisos efectivos del usuario solo los de mesero, en el mismo orden.

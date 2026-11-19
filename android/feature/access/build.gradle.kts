@@ -7,7 +7,7 @@ plugins {
 }
 
 android {
-    namespace = "local.adel.pos.android.feature.access"
+    namespace = "com.adelpos.meseros.feature.access"
     compileSdk { version = release(37) }
 
     defaultConfig { minSdk = 26 }

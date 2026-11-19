@@ -5,7 +5,10 @@ Contrato de la API que usan la aplicación de escritorio y las terminales y la *
 agregó la versión mínima por tipo de cliente, la entrada con PIN y la credencial de envío
 ([etapas/ETAPA_A1_ANDROID.md](etapas/ETAPA_A1_ANDROID.md), §3) y, para el modo Mesero (§6–§8), las mesas, cancelar y
 modificar unidades, el evento de preparación, el motivo de una cuenta que ya no está abierta, el borrador en el pedido
-sin conexión y el cursor de eventos de la recuperación (ver «Modo Mesero»).
+sin conexión y el cursor de eventos de la recuperación (ver «Modo Mesero»). La etapa A2
+([etapas/ETAPA_A2_ANDROID.md](etapas/ETAPA_A2_ANDROID.md)) agregó **Para llevar** (servidor 0.13.0, ver «Para llevar») e
+**imprimir la precuenta** desde el dispositivo en su impresora (esquema 26, ver «Imprimir la precuenta») y los
+**avisos de platillos listos** (ver «Avisos de platillos listos»).
 
 - **Contrato OpenAPI 3.1**: [`backend/internal/apicontract/openapi.json`](../backend/internal/apicontract/openapi.json)
   es la fuente. El servidor lo publica en `GET /api/v1/openapi.json` (sin sesión) y está incrustado en el binario.
@@ -44,9 +47,10 @@ sin conexión y el cursor de eventos de la recuperación (ver «Modo Mesero»).
    cada operación. `capabilities` dice qué funciones existen (`catalog-sync-v1`, `catalog-sold-out`,
    `offline-orders-v1`, `state-recovery-v1`, `client-version-check`, `openapi-v1`…; desde la etapa A1,
    `client-versions-by-kind`, `waiter-pin-v1` (entrada con PIN, credencial de envío y su administración) y
-   `waiter-mode-v1` (lo del modo Mesero de la sección «Modo Mesero»)). La
-   aplicación Android exige un servidor 0.12.0 o posterior; el escritorio 0.12.0 sigue funcionando con un servidor
-   0.11.0 y solo muestra lo del PIN si el servidor anuncia `waiter-pin-v1`.
+   `waiter-mode-v1` (lo del modo Mesero de la sección «Modo Mesero»); desde la etapa A2, `takeaway-v1` (lo de la
+   sección «Para llevar»), `device-precheck-printer-v1` (lo de «Imprimir la precuenta») y `ready-alerts-v1` (lo de
+   «Avisos de platillos listos»)). La aplicación Android 0.1.0 exige un servidor 0.12.0 o posterior; el escritorio 0.12.0 sigue
+   funcionando con un servidor 0.11.0 y solo muestra lo del PIN si el servidor anuncia `waiter-pin-v1`.
 4. **Credenciales**: la terminal (o el teléfono) emparejada envía `X-Device-ID` y `X-Device-Token`; con sesión,
    además `Authorization: Bearer <token>` (desde la etapa A1, en `submitOfflineOrder` el teléfono puede enviar en su
    lugar la credencial de envío del mesero, `X-Offline-Credential`; ver «Entrada con PIN y credencial de envío»). Los tokens se guardan en el almacén seguro del sistema. Go valida terminal,
@@ -68,40 +72,47 @@ sin conexión y el cursor de eventos de la recuperación (ver «Modo Mesero»).
 
 ## Operaciones
 
-| `operationId`            | Método y ruta (bajo `/api/v1`)                | Para qué                                                                       |
-| ------------------------ | --------------------------------------------- | ------------------------------------------------------------------------------ |
-| `getVersion`             | `GET /version`                                | Versión del servidor, `min_client_version`, tipos de cliente y funciones.      |
-| `getReadiness`           | `GET /health/ready`                           | Servidor y base de datos listos (200) o no (503).                              |
-| `getOpenAPI`             | `GET /openapi.json`                           | Este contrato.                                                                 |
-| `login`                  | `POST /auth/login`                            | Iniciar sesión en una terminal emparejada.                                     |
-| `logout`                 | `POST /auth/logout`                           | Cerrar la sesión.                                                              |
-| `getIdentity`            | `GET /auth/me`                                | Usuario, permisos vigentes, preferencias, terminal y establecimiento.          |
-| `listPinUsers`           | `GET /auth/pin-users`                         | Meseros que pueden entrar con PIN en el dispositivo (sin sesión, etapa A1).    |
-| `pinLogin`               | `POST /auth/pin-login`                        | Entrar con PIN: sesión y credencial de envío (etapa A1).                       |
-| `streamEvents`           | `GET /events`                                 | Eventos en tiempo real (SSE).                                                  |
-| `getCatalogSync`         | `GET /catalog/sync`                           | Catálogo descargable completo o «solo cambios desde la versión X».             |
-| `listCatalogProducts`    | `GET /catalog/products`                       | Productos para la captura con disponibilidad, «Agotado» y precio de una lista. |
-| `getCatalogImage`        | `GET /catalog/images/{id}`                    | Imagen en JSON base64 (la usa el escritorio).                                  |
-| `getCatalogImageContent` | `GET /catalog/images/{id}/content`            | Imagen binaria con `ETag` (304 con `If-None-Match`).                           |
-| `setProductSoldOut`      | `POST /catalog/products/{id}/sold-out`        | «Agotado» y «Disponible otra vez».                                             |
-| `getRecoveryState`       | `GET /restaurant/state`                       | Estado al reconectar: permisos, mesas, cuentas, preparación y cursor.          |
-| `getRestaurantOverview`  | `GET /restaurant/overview`                    | Áreas, mesas (lista y mapa) y umbrales de tiempo (etapa A1).                   |
-| `listAccounts`           | `GET /restaurant/accounts`                    | Cuentas con sus estados.                                                       |
-| `openAccount`            | `POST /restaurant/accounts`                   | Abrir una cuenta con su primer producto.                                       |
-| `getAccount`             | `GET /restaurant/accounts/{id}`               | Cuenta con su borrador y sus partidas confirmadas.                             |
-| `saveDraft`              | `PUT /restaurant/accounts/{id}/draft`         | Guardar el borrador.                                                           |
-| `previewDraft`           | `GET /restaurant/accounts/{id}/preview`       | Calcular el borrador y obtener su huella.                                      |
-| `confirmDraft`           | `POST /restaurant/accounts/{id}/confirm`      | Confirmar (enviar a cocina) el borrador.                                       |
-| `cancelUnits`            | `POST /restaurant/accounts/{id}/cancel`       | Cancelar unidades enviadas, con motivo (etapa A1 en el contrato).              |
-| `previewEdit`            | `POST /restaurant/accounts/{id}/edit-preview` | Calcular la modificación de una partida enviada y su huella.                   |
-| `editUnits`              | `POST /restaurant/accounts/{id}/edit`         | Modificar una partida enviada, con motivo.                                     |
-| `submitOfflineOrder`     | `POST /restaurant/offline-orders`             | Pedido capturado sin conexión (Android; con sesión o credencial de envío).     |
-| `createPairingRequest`   | `POST /pairing/requests`                      | Pedir un código de emparejamiento (sin credencial).                            |
-| `revealPairingNonce`     | `POST /pairing/requests/{id}/reveal`          | Revelar el número de la terminal después de recibir el del servidor.           |
-| `getPairingRequest`      | `GET /pairing/requests/{id}`                  | Consultar si la computadora principal ya aprobó el código.                     |
-| `renamePairingRequest`   | `POST /pairing/requests/{id}/name`            | Corregir el nombre propuesto mientras espera.                                  |
-| `cancelPairingRequest`   | `POST /pairing/requests/{id}/cancel`          | Dejar de esperar la aprobación.                                                |
-| `claimPairingCredential` | `POST /pairing/requests/{id}/claim`           | Recibir una sola vez la credencial de la terminal.                             |
+| `operationId`            | Método y ruta (bajo `/api/v1`)                 | Para qué                                                                       |
+| ------------------------ | ---------------------------------------------- | ------------------------------------------------------------------------------ |
+| `getVersion`             | `GET /version`                                 | Versión del servidor, `min_client_version`, tipos de cliente y funciones.      |
+| `getReadiness`           | `GET /health/ready`                            | Servidor y base de datos listos (200) o no (503).                              |
+| `getOpenAPI`             | `GET /openapi.json`                            | Este contrato.                                                                 |
+| `login`                  | `POST /auth/login`                             | Iniciar sesión en una terminal emparejada.                                     |
+| `logout`                 | `POST /auth/logout`                            | Cerrar la sesión.                                                              |
+| `getIdentity`            | `GET /auth/me`                                 | Usuario, permisos vigentes, preferencias, terminal y establecimiento.          |
+| `listPinUsers`           | `GET /auth/pin-users`                          | Meseros que pueden entrar con PIN en el dispositivo (sin sesión, etapa A1).    |
+| `pinLogin`               | `POST /auth/pin-login`                         | Entrar con PIN: sesión y credencial de envío (etapa A1).                       |
+| `streamEvents`           | `GET /events`                                  | Eventos en tiempo real (SSE).                                                  |
+| `getReadyAlerts`         | `GET /ready-alerts`                            | Avisos de platillos listos desde un cursor (credencial del dispositivo, A2).   |
+| `streamReadyAlerts`      | `GET /ready-alerts/stream`                     | Canal SSE de los avisos de platillos listos (credencial del dispositivo, A2).  |
+| `getCatalogSync`         | `GET /catalog/sync`                            | Catálogo descargable completo o «solo cambios desde la versión X».             |
+| `listCatalogProducts`    | `GET /catalog/products`                        | Productos para la captura con disponibilidad, «Agotado» y precio de una lista. |
+| `getCatalogImage`        | `GET /catalog/images/{id}`                     | Imagen en JSON base64 (la usa el escritorio).                                  |
+| `getCatalogImageContent` | `GET /catalog/images/{id}/content`             | Imagen binaria con `ETag` (304 con `If-None-Match`).                           |
+| `setProductSoldOut`      | `POST /catalog/products/{id}/sold-out`         | «Agotado» y «Disponible otra vez».                                             |
+| `getRecoveryState`       | `GET /restaurant/state`                        | Estado al reconectar: permisos, mesas, cuentas, preparación y cursor.          |
+| `getRestaurantOverview`  | `GET /restaurant/overview`                     | Áreas, mesas (lista y mapa) y umbrales de tiempo (etapa A1).                   |
+| `listAccounts`           | `GET /restaurant/accounts`                     | Cuentas con sus estados.                                                       |
+| `openAccount`            | `POST /restaurant/accounts`                    | Abrir una cuenta con su primer producto.                                       |
+| `getAccount`             | `GET /restaurant/accounts/{id}`                | Cuenta con su borrador y sus partidas confirmadas.                             |
+| `saveDraft`              | `PUT /restaurant/accounts/{id}/draft`          | Guardar el borrador.                                                           |
+| `previewDraft`           | `GET /restaurant/accounts/{id}/preview`        | Calcular el borrador y obtener su huella.                                      |
+| `confirmDraft`           | `POST /restaurant/accounts/{id}/confirm`       | Confirmar (enviar a cocina) el borrador.                                       |
+| `cancelUnits`            | `POST /restaurant/accounts/{id}/cancel`        | Cancelar unidades enviadas, con motivo (etapa A1 en el contrato).              |
+| `previewEdit`            | `POST /restaurant/accounts/{id}/edit-preview`  | Calcular la modificación de una partida enviada y su huella.                   |
+| `editUnits`              | `POST /restaurant/accounts/{id}/edit`          | Modificar una partida enviada, con motivo.                                     |
+| `updateTakeawayCustomer` | `POST /restaurant/accounts/{id}/customer`      | Nombre del cliente y teléfono de un pedido para llevar (etapa A2).             |
+| `submitOfflineOrder`     | `POST /restaurant/offline-orders`              | Pedido capturado sin conexión (Android; con sesión o credencial de envío).     |
+| `printPrecheck`          | `POST /payments/accounts/{id}/precheck/print`  | Imprimir la precuenta (etapa A2 en el contrato).                               |
+| `getDocumentStatus`      | `GET /payments/accounts/{id}/documents/status` | Estado de impresión de una precuenta, sin importes (etapa A2).                 |
+| `retryDocument`          | `POST /payments/accounts/{id}/documents/retry` | Reintentar sin motivo una precuenta que no salió (etapa A2 en el contrato).    |
+| `deliverTakeaway`        | `POST /payments/accounts/{id}/deliver`         | Marcar entregado un pedido para llevar ya pagado (etapa A2 en el contrato).    |
+| `createPairingRequest`   | `POST /pairing/requests`                       | Pedir un código de emparejamiento (sin credencial).                            |
+| `revealPairingNonce`     | `POST /pairing/requests/{id}/reveal`           | Revelar el número de la terminal después de recibir el del servidor.           |
+| `getPairingRequest`      | `GET /pairing/requests/{id}`                   | Consultar si la computadora principal ya aprobó el código.                     |
+| `renamePairingRequest`   | `POST /pairing/requests/{id}/name`             | Corregir el nombre propuesto mientras espera.                                  |
+| `cancelPairingRequest`   | `POST /pairing/requests/{id}/cancel`           | Dejar de esperar la aprobación.                                                |
+| `claimPairingCredential` | `POST /pairing/requests/{id}/claim`            | Recibir una sola vez la credencial de la terminal.                             |
 
 ## Encontrar el servidor y emparejarse (fases B y C)
 
@@ -137,7 +148,10 @@ sin conexión y el cursor de eventos de la recuperación (ver «Modo Mesero»).
    depende de haber recibido todos los eventos. Responde a cualquier sesión válida, aunque el usuario ya no pueda
    consultar cuentas, para que el cliente sepa qué permisos perdió:
    - `user.permissions`: permisos vigentes (leídos de PostgreSQL en esa petición);
-   - `terminal`: la terminal (una terminal revocada no llega aquí: 401 `DEVICE_REVOKED`);
+   - `terminal`: la terminal (una terminal revocada no llega aquí: 401 `DEVICE_REVOKED`); desde la etapa A2, con
+     `precheck_printer_id` y `precheck_printer` (`{id, name, terminal_name}` o `null`), la impresora de precuentas del
+     dispositivo (ver «Imprimir la precuenta»), y `ready_alerts_enabled`, `ready_alerts_sound` y
+     `ready_alerts_vibration` (ver «Avisos de platillos listos»);
    - `catalog_version` y `catalog_epoch`: si la época es otra, descargar todo; si no y la versión es mayor que la del
      catálogo guardado, descargar los cambios;
    - `tables` (con `restaurant.tables.read`) con su estado (`free`, `occupied`, `awaiting_payment`,
@@ -202,11 +216,13 @@ terminales de escritorio siguen con usuario y contraseña). Llevan la credencial
      envío tienen los permisos del usuario **que están en la lista cerrada de permisos de mesero**, aunque la persona
      sea administrador o supervisor (lo administrativo sigue con contraseña en la computadora): `waiter_devices.use`,
      `restaurant.tables.read`, `restaurant.areas.read`, `accounts.read`, `accounts.open`, `orders.capture`,
-     `orders.confirm`, `orders.edit`, `orders.cancel`, `catalog.read`, `catalog.prices.read` y `events.read` (nada de
-     Para llevar todavía). `getIdentity` y `getRecoveryState` informan ya los permisos acotados; cualquier otra ruta
-     responde 403 como sin el permiso. La lista vive en un solo lugar del servidor
-     (`administration/waiter_scope.go`) y solo crece con las funciones de la aplicación (en la A2: Para llevar e
-     impresión de la precuenta). Cambiar la contraseña desde esa sesión no la amplía.
+     `orders.confirm`, `orders.edit`, `orders.cancel`, `catalog.read`, `catalog.prices.read`, `events.read` y, desde la
+     etapa A2, `takeaway.read`, `takeaway.manage` y `takeaway.deliver` (Para llevar) y `payments.tickets.print`
+     (imprimir la precuenta). `getIdentity` y
+     `getRecoveryState` informan ya los permisos acotados; cualquier otra ruta responde 403 como sin el permiso. La
+     lista vive en un solo lugar del servidor (`administration/waiter_scope.go`) y solo crece con las funciones de la
+     aplicación (en la A2: Para llevar e impresión de la precuenta). Cambiar la contraseña desde esa sesión no la
+     amplía.
 3. **Verificador local y `pin_version`**: el dispositivo guarda el verificador del PIN de cada mesero con su
    `pin_version`. Al reconectarse (y al abrir la aplicación) pide `listPinUsers` y borra el verificador de quien ya no
    aparece (desactivado, sin PIN o sin permiso) o tiene otra `pin_version`. Cambiar o quitar el PIN (o que el propio
@@ -392,7 +408,8 @@ que se combinó). El cliente lleva el pedido a «Requiere tu revisión» por `de
 
 La aplicación Android podrá capturar sin señal con el catálogo guardado y una cola de pedidos. Cada pedido de la cola
 se envía con **`submitOfflineOrder`** (`POST /restaurant/offline-orders`; permisos `orders.confirm`, `orders.capture`,
-`accounts.read`, `catalog.read`, `catalog.prices.read` y, para abrir una cuenta en una mesa, `accounts.open`):
+`accounts.read`, `catalog.read`, `catalog.prices.read`, para abrir una cuenta en una mesa `accounts.open` y, para un
+pedido para llevar nuevo o una cuenta para llevar, además `takeaway.manage`):
 
 ```json
 {
@@ -413,8 +430,10 @@ se envía con **`submitOfflineOrder`** (`POST /restaurant/offline-orders`; permi
 }
 ```
 
-- `destination`: una cuenta abierta (`account_id`) o una mesa donde abrir una cuenta nueva (`table_id`, con las
-  cuentas que el mesero veía abiertas en ella y un `name` opcional).
+- `destination`: **uno solo de** una cuenta abierta (`account_id`), una mesa donde abrir una cuenta nueva (`table_id`,
+  con las cuentas que el mesero veía abiertas en ella y un `name` opcional) o, desde la etapa A2, un pedido para
+  llevar nuevo (`takeaway`, con `customer_name` y `phone` opcionales; ver «Para llevar»). Dos destinos, ninguno, o
+  `seen_account_ids`/`name` sin `table_id`: 400.
 - `replaces_draft_items` (desde la etapa A1, opcional y **solo con `account_id`**; ver «Borrador del servidor y pedido
   sin conexión»): los renglones del borrador que el pedido sustituye, como `DraftItem`.
 - `seen_unit_price`: el precio por unidad (con su personalización, antes de promociones) que vio el mesero; para un
@@ -547,7 +566,246 @@ la respuesta de la operación anterior se haya perdido:
    `ORDER_REQUIRES_CONFIRMATION` (`requires_changes: true`) con el cambio **`items_in_account`** (`acceptable:
 false`, **`account_id`** = esa cuenta, `now` = su folio, `item_id` y `product_id` en `null`), sin
    `table_has_account`. El dispositivo reenvía **con la misma `operation_id`** a `destination.account_id` = esa
-   cuenta; ahí aplican los puntos 2 y 3.
+   cuenta; ahí aplican los puntos 2 y 3. Desde la etapa A2, lo mismo con un **pedido para llevar nuevo**
+   (`destination.takeaway`) cuyas partidas ya están en un pedido para llevar abierto (ver «Para llevar»).
+
+## Para llevar (etapa A2, parte B)
+
+Capacidad **`takeaway-v1`** (servidor 0.13.0). Un pedido para llevar es **una cuenta con `mode: "takeaway"` y sin
+mesa** (`table_id: null`; no hay mesa ficticia): las mismas rutas de cuentas, borrador, «Enviar a cocina», cancelar y
+modificar unidades valen para él. En una cuenta para llevar toda lectura exige además **`takeaway.read`** y toda
+escritura **`takeaway.manage`** (403 sin ellos); la lista cerrada de permisos de mesero los incluye desde esta etapa
+(ver «Entrada con PIN y credencial de envío»). El rol Mesero de una instalación no los trae: los marca el
+administrador (`docs/ANDROID_INSTALAR.md`).
+
+1. **«Nuevo pedido» con conexión** (como la caja): `openAccount` con `mode: "takeaway"`, `origin: "Para llevar"`,
+   `customer_name` y `phone` (opcionales) e `items` con el primer producto (sin `table_id` ni `seen_account_ids`; sin
+   `name`, Go pone «Pedido para llevar»). Exige `accounts.open`, `takeaway.manage`, `orders.capture`, `catalog.read` y
+   `catalog.prices.read`. El responsable (`assigned_user_id`) es quien lo abre. Después, `saveDraft`, `previewDraft` y
+   `confirmDraft` como cualquier cuenta.
+2. **Sin conexión**: `submitOfflineOrder` con **`destination.takeaway`**:
+
+   ```json
+   {
+     "operation_id": "una por pedido de la cola",
+     "catalog_version": 41,
+     "captured_at": "2026-11-18T20:15:00Z",
+     "destination": { "takeaway": { "customer_name": "Juan", "phone": "5551234567" } },
+     "items": [
+       {
+         "id": "…",
+         "product_id": "…",
+         "variant_id": null,
+         "quantity": 1,
+         "customization": {},
+         "seen_unit_price": "95.00"
+       }
+     ]
+   }
+   ```
+
+   - `customer_name` (hasta 100) y `phone` (hasta 40) son opcionales y se recortan; más largos, 400. `takeaway` excluye
+     `account_id`, `table_id`, `seen_account_ids`, `name` y `replaces_draft_items` (400).
+   - Exige además **`accounts.open`** y **`takeaway.manage`** (403 sin ellos, antes de revisar el pedido). Con la
+     credencial de envío valen los permisos de mesero vigentes del usuario.
+   - Aceptado (200, `OfflineOrderResult`): abre la cuenta para llevar (`mode: "takeaway"`, `origin: "Para llevar"`,
+     el cliente y el teléfono del destino, `name: "Pedido para llevar"`, responsable = el mesero de la sesión o de la
+     credencial) y la confirma en la misma operación; cocina la recibe. `bill.account` trae su `folio`.
+   - **La misma clave nunca abre dos pedidos**: un reintento con la misma `operation_id` y el mismo contenido (con la
+     sesión o con la credencial) devuelve la misma respuesta; con otro contenido, `409 OFFLINE_ORDER_ALREADY_ACCEPTED`
+     (`details.origin: "offline_order"`, `details.result` con el pedido que entró); desde otro usuario o dispositivo,
+     `409 IDEMPOTENCY_CONFLICT`. Los cambios de precio o de catálogo se confirman igual que en una mesa.
+   - **Apertura en línea sin respuesta** (A1-D18): si las partidas ya están en un pedido para llevar abierto (en su
+     borrador o ya enviadas), `409 ORDER_REQUIRES_CONFIRMATION` con `requires_changes: true` y el cambio
+     **`items_in_account`** (`acceptable: false`, `account_id`, `now: "folio 12"`, `message: "Lo que capturaste ya está
+en el pedido para llevar de Juan (folio 12). Envía el pedido a esa cuenta."`; sin nombre del cliente, «…en el pedido
+     para llevar (folio 12)…»). El dispositivo lo reenvía **con la misma `operation_id`** a
+     `destination.account_id` = esa cuenta (ahí aplican `replaces_draft_items`, el último guardado propio y
+     `draft_item_sent`).
+
+3. **Nombre y teléfono en cualquier momento** (decisión A2-D1): **`updateTakeawayCustomer`**
+   (`POST /restaurant/accounts/{id}/customer`, `takeaway.manage`) `{"operation_id", "customer_name", "phone"}` → la
+   cuenta (`Bill`).
+   - **Sin revisión**: no la pide ni la sube (solo cambia esos dos datos), así que no choca con el borrador que se
+     guarda al mismo tiempo; si se editan en dos lugares, gana la última edición.
+   - Los dos campos son obligatorios (vacío **quita** el dato; sin uno de los dos, 400); se recortan y caben 100 y 40
+     caracteres (400 si no). Un campo de más (por ejemplo `revision`): 400.
+   - Solo pedidos para llevar abiertos: una cuenta de salón, `400 OPERATION_VALIDATION`; un pedido cobrado y
+     entregado, cancelado o combinado, `400 OPERATION_VALIDATION` con `details.reason: "account_not_open"`
+     (`AccountNotOpenDetails`).
+   - Idempotente con `operation_id` (otro contenido con la misma clave: `409 IDEMPOTENCY_CONFLICT`). Publica
+     `restaurant.account.updated` en el ámbito `takeaway` y queda en la historia de la cuenta y en el Registro de
+     movimientos (`restaurant.account.updated`); si los datos ya eran esos, no registra nada.
+   - Editados sin conexión en un pedido que ya está en Go, el dispositivo los guarda y los manda al volver la conexión
+     con su propia `operation_id`.
+4. **Pendientes**: `listAccounts?mode=takeaway&state=open` (con `takeaway.read`; sin él, 403) o las cuentas de
+   `getRecoveryState`, que incluyen los pedidos para llevar abiertos solo con `takeaway.read`. Cada cuenta trae
+   `folio`, `customer_name`, `phone`, `origin`, `elapsed_seconds` y `urgency` (con la hora del servidor), y los tres
+   estados, independientes y calculados por Go:
+   - `preparation_state`: «Pendiente» = `pending_release`, `scheduled` o `released`; «En preparación» = `preparing`;
+     «Listo» = `ready` (más `without_items`, `draft`, `change_pending` y `cancelled`, como en «Estados de
+     preparación»);
+   - `payment_state`: `not_recorded` (sin pagar), `partial` (con abonos) o `paid` (pagado);
+   - `delivery_state`: `not_delivered` o `delivered`. Un pedido pagado y entregado (sin nada por enviar) se cierra y
+     sale de la lista.
+
+   Los cambios llegan por `streamEvents` en el ámbito **`takeaway`** (que exige `takeaway.read`), con la cuenta como
+   agregado: `restaurant.account.opened`, `restaurant.order.confirmed`, `restaurant.account.updated`,
+   `restaurant.draft.saved`, `restaurant.account.preparation_changed`, `takeaway.delivered`, `restaurant.account.closed`,
+   etc. El cliente vuelve a leer la cuenta (o la lista).
+
+5. **«Entregado»** (decisión A2-D2): **`deliverTakeaway`** (`POST /payments/accounts/{id}/deliver`,
+   `{"operation_id"}`; permisos `takeaway.deliver`, `accounts.read` y `takeaway.read`). **Go no entrega un pedido sin
+   pagar**:
+   - con saldo pendiente: **`409 BALANCE_PENDING`** («El pedido tiene saldo pendiente. Cóbralo antes de marcarlo como
+     entregado.») y no registra nada;
+   - ya entregado: **`409 ALREADY_DELIVERED`**; una cuenta de salón: 400;
+   - entregado: `200 {"delivered": true, "closed": <bool>, "finance": <estado financiero completo o null>}`. Pagado,
+     entregado y sin nada por enviar en su borrador, la cuenta se cierra (`closed: true`; con borrador queda abierta
+     y entregada). **`finance` solo llega con `payments.read`**: a la sesión con PIN
+     de un mesero (que nunca lo tiene) llega `null`, para no exponer los pagos;
+   - idempotente con `operation_id` (el reintento devuelve lo mismo). Publica `takeaway.delivered` (y, al cerrarse,
+     `restaurant.account.closed`) en el ámbito `takeaway`.
+
+   El dispositivo ofrece «Entregado» solo con el permiso y `payment_state == "paid"`; sin pagar muestra «Cobrar en caja
+   antes de entregar» (también si llega `BALANCE_PENDING` porque otra caja dejó saldo). El mesero no cobra: el cobro
+   sigue en la caja.
+
+## Imprimir la precuenta (etapa A2, parte C)
+
+Capacidad **`device-precheck-printer-v1`** (servidor 0.13.0, esquema 26; decisión A2-D3). El mesero imprime la
+precuenta de una mesa o de un pedido para llevar **en la impresora asignada a su dispositivo** en Administración ›
+Sistema › Terminales › Editar («Impresora de precuentas»: una de red o la USB de una terminal con agente de impresión).
+Permiso **`payments.tickets.print`** («Imprimir tickets y precuentas»; está en la lista de permisos de mesero), además
+de `accounts.read` (y `takeaway.read` en un pedido para llevar). **Imprimir requiere conexión**: nunca entra en la cola
+sin conexión.
+
+1. **La impresora del dispositivo**: `terminal.precheck_printer` de `getIdentity` y `getRecoveryState` (`null` si no
+   tiene). Un dispositivo `android` imprime **solo** en ella: sin ella **no** pasa a la impresora de tickets de Cobros ni
+   a la de una caja. Las terminales de escritorio siguen como hasta ahora (la de su caja o la general).
+2. **El nombre visible**: el botón dice «Imprimir precuenta», «Imprimir ticket de venta» o «Imprimir cuenta» según
+   `establishment.precheck_name` de `getIdentity` (`precheck`, `sales_ticket` o `bill`); el impreso lo pone Go con el
+   mismo nombre (PRECUENTA, TICKET DE VENTA o CUENTA), con la misma plantilla y el mismo renderizador de la caja, y
+   «Atendió: <quien la imprime>».
+3. **`printPrecheck`** (`POST /payments/accounts/{id}/precheck/print`, `{"operation_id"}`) → **200**
+   `{"requested": true, "status", "job_id", "ticket_id", "message", "problem", "printer_name", "terminal_name"}`.
+   Cada toque arma **una precuenta nueva** con el estado vigente de la cuenta (como en la caja): no hay «copia» ni
+   motivo. `problem` es lo que Go ya sabe al encolar: **`agent_offline`** si la impresora es la USB de una terminal cuyo
+   agente no consulta desde hace más de 30 s (el trabajo espera y sale cuando vuelve) o `null`. `printer_name` es la
+   impresora y `terminal_name` su terminal (si es la USB de una terminal; `null` en una de red). Rechazos (no se encola
+   nada, esquema `PrinterRejection`):
+   - **409 `PRINTER_NOT_CONFIGURED`** con `details: {"document": "precheck", "problem": "missing", "scope": "device"}` y
+     el mensaje «Este dispositivo no tiene impresora asignada. Pide al administrador que la elija en Terminales.»;
+   - **409 `PRINTER_UNAVAILABLE`** con `details: {"document", "problem": "inactive" | "unsupported", "printer_name",
+"scope": "device"}` si la impresora asignada dejó de servir;
+   - 403 sin `payments.tickets.print`; 409 `IDEMPOTENCY_CONFLICT` con la misma clave y otro contenido.
+4. **`getDocumentStatus`** (`GET /payments/accounts/{id}/documents/status?ticket_id=<de printPrecheck>`, permiso
+   `payments.tickets.print`; **sin importes ni pagos**) → `{"ticket_id", "kind", "payment_id", "created_at", "job_id",
+"job_state", "job_problem", "printer_name", "copies", "terminal_name"}`. Para seguir la precuenta unos segundos
+   después de mandarla (el trabajador de la cola intenta cada segundo y tarda unos 4 s en saber que una impresora de red
+   no responde): `job_problem` `unreachable` («La impresora no responde»), `agent_offline` («La Caja 2 está
+   desconectada», con `terminal_name`), `uncertain` (revisar el papel antes de pedir otra), `not_found`, `inactive`,
+   `unsupported` o `setup`; `job_state` `submitted` es que la impresora o su cola lo aceptó. 404 si el documento no es de
+   esa cuenta; 400 si `ticket_id` no es un identificador.
+5. **`retryDocument`** (`POST /payments/accounts/{id}/documents/retry`, `{"operation_id", "ticket_id", "job_id"?}`, permiso
+   `payments.tickets.print`): reintenta **sin motivo** una precuenta cuyo último trabajo nunca salió en papel (`error` o
+   `intervention`; regla de la 9F), en la impresora del dispositivo (la misma resolución: sin ella, el mismo 409
+   `PRINTER_NOT_CONFIGURED` con `scope: "device"`). Responde como `printPrecheck`. Sin un trabajo fallido, 409
+   `PRINT_NOT_FAILED`. Con `uncertain` no se reintenta: se revisa el papel y, si hace falta, se pide otra precuenta.
+
+## Avisos de platillos listos (etapa A2, parte D)
+
+Capacidad **`ready-alerts-v1`** (servidor 0.13.0, esquema 26; decisiones A2-D4 y A2-D9, con las correcciones de la
+revisión independiente). Cuando cocina marca «Listo» en el KDS (una unidad, el pedido de una estación o la cuenta
+completa), o cuando una unidad queda con todas sus partes listas porque en esa misma operación se canceló la que
+faltaba, Go registra cada unidad que pasó a «Listo» en la misma transacción que el evento
+`restaurant.account.preparation_changed` (tabla `app.ready_notices`, una vez por unidad y versión) con el **responsable
+de la cuenta en ese momento**. El dispositivo los lee con **solo su credencial** (`X-Device-ID` y `X-Device-Token`, sin
+sesión: llegan aunque esté en «¿Quién eres?» o con la aplicación cerrada, desde su servicio en primer plano). Si la
+cocina no usa el KDS, no hay avisos.
+
+1. **A quién llega** (lo decide Go). El mesero M **está en** el dispositivo D si tiene en D una sesión con PIN
+   **creada desde el inicio del día comercial en curso** (la «Hora de inicio del día» de Administración), o una de
+   antes que **sigue vigente y se usó (alguna petición con esa sesión) en los últimos 30 minutos** (decisión A2-D12: cubre al mesero que trabaja justo en
+   el cambio de día sin que la última entrada de la noche, que dura 12 h, mantenga el servicio activo hasta la mañana);
+   es la misma regla que `active`. Un aviso de M llega a D si:
+   - M está en D y el aviso es **posterior a la entrada de M en D** (su primera sesión con PIN en D que cuente): un
+     dispositivo nuevo, o una lectura sin cursor, no recibe lo que se marcó «Listo» antes de que M entrara en él;
+   - y el aviso quedó **para D o para todos**: al registrar el «Listo», Go lo fija al dispositivo de la sesión con PIN
+     vigente de actividad más reciente de M que cuente (con la misma regla), pero solo entre dispositivos `android` no
+     retirados, con «Avisar platillos listos» activado y, si Go conoce su versión, 0.2.0 o posterior. Si ninguno sirve (por ejemplo, M cerró su sesión
+     con `logout` o su dispositivo tiene el aviso apagado), el aviso es para todos los dispositivos donde M está.
+
+   Cerrar la sesión con `logout` hace que los «Listo» siguientes ya no se fijen a ese dispositivo; como M entró en él
+   hoy, sigue recibiendo los que quedan para todos hasta el fin del día comercial. Una entrada con PIN **sin conexión**
+   no le dice nada a Go: ese mesero no recibe avisos en ese dispositivo hasta su primera entrada con conexión.
+   Transferir la cuenta cambia el destinatario de lo que todavía no estaba listo.
+
+2. **`getReadyAlerts`** (`GET /ready-alerts?after=<cursor>`) → **`ReadyAlertsBatch`**:
+
+   ```json
+   {
+     "cursor": 812,
+     "active": true,
+     "day_ends_at": "2026-11-19T11:00:00Z",
+     "settings": { "enabled": true, "sound": true, "vibration": false },
+     "alerts": [
+       {
+         "id": 812,
+         "key": "5f0c2d6e-3b1a-4c8e-9f27-6d4b1a0e7c35",
+         "account_id": "…",
+         "mode": "dine_in",
+         "table_name": "Mesa 4",
+         "folio": 31,
+         "customer_name": "",
+         "waiter_user_id": "…",
+         "waiter_short_name": "Ana",
+         "items": [{ "product_name": "Filete · Grande", "quantity": 2 }],
+         "ready_at": "2026-11-18T20:41:07.12Z"
+       }
+     ]
+   }
+   ```
+
+   - Un aviso es lo que cocina marcó «Listo» en una cuenta **en una misma operación**, agrupado por platillo
+     (`product_name` es el nombre visible del producto con su presentación, `quantity` las unidades). En un pedido para
+     llevar `table_name` es `null` y `customer_name` el nombre capturado. **Nunca trae precios ni importes.**
+   - **`key`** es la clave del aviso: única y **nunca se reutiliza**, ni siquiera tras restaurar un respaldo. El
+     dispositivo descarta por `key` los que ya avisó (guarda las del día).
+   - **`id`** es solo el cursor (crece con él; tras restaurar un respaldo un número puede repetirse con otro aviso).
+     **`cursor`** es el último aviso que Go revisó para el dispositivo, le corresponda o no: el dispositivo lo guarda y
+     vuelve con `after=<cursor>`; lo que se registró mientras no estuvo llega entonces. Hasta 50 avisos por respuesta
+     (con más, `cursor` es el del último entregado y el resto llega en la siguiente). Un cursor mayor que el último
+     aviso registrado (la base volvió atrás) se lee desde el inicio del día comercial; `key` evita los repetidos.
+   - **`account_id`** es la cuenta vigente: si la cuenta se combinó en otra, la de destino. Las unidades que se
+     cancelaron después del «Listo» ya no aparecen en `items`, y un aviso cuyas unidades se cancelaron todas no se
+     manda (el cursor avanza igual). Al tocar un aviso de una cuenta que ya se cerró o se canceló, la aplicación muestra
+     «Esta cuenta ya no está abierta».
+   - **`active`**: `true` si «Avisar platillos listos» está activado y algún mesero está en el dispositivo (sesión con
+     PIN creada desde el inicio del día comercial, o de antes pero vigente y usada en los últimos 30 minutos); si no, `false`, sin avisos (no es un error) y el cursor
+     avanza (al volver a activarse no llegan avisos viejos). El servicio en primer plano se detiene con
+     `active: false`.
+   - **`day_ends_at`**: fin del día comercial en curso. Los avisos cuentan en el día comercial de su `ready_at`: al
+     llegar la hora de inicio del día siguiente dejan de contar los meseros que entraron en el día anterior (salvo que
+     su sesión siga vigente y la usen en los últimos 30 minutos; después, `active` pasa a `false` sola) y **los avisos del día anterior que no se entregaron ya no llegan**. Un corte de red que
+     cruza esa hora pierde lo que se marcó «Listo» en los últimos minutos del día anterior (con la hora de inicio de
+     madrugada casi nunca pasa); es la regla del día comercial.
+   - **`settings`**: «Avisar platillos listos», «Sonido» y «Vibración» de Terminales › Editar (también en
+     `terminal.ready_alerts_*` de `getIdentity` y `getRecoveryState`).
+   - Errores: **401 `DEVICE_REVOKED`** (retirado; dejar de escuchar), 401 `DEVICE_REQUIRED`, **403
+     `READY_ALERTS_DEVICE_NOT_ALLOWED`** (no es un teléfono o tableta de meseros), 400 con un cursor inválido o un
+     parámetro desconocido, 401 `OFFLINE_CREDENTIAL_NOT_ALLOWED` con la credencial de envío.
+
+3. **`streamReadyAlerts`** (`GET /ready-alerts/stream?after=<cursor>` o con `Last-Event-ID`): SSE con la misma lectura.
+   Go revisa la base cada 750 ms, pero **solo manda** `event: alerts` (con `id: <cursor>` y `data: <ReadyAlertsBatch>`)
+   al abrir y cuando hay avisos nuevos o cambian `active`, `settings` o `day_ends_at`; en silencio manda el comentario
+   SSE `: ping` cada **15 s** (para saber que la conexión sigue viva). El canal dura **5 minutos** y el dispositivo lo
+   vuelve a abrir de inmediato con `Last-Event-ID`. **Un canal nuevo del mismo dispositivo reemplaza al anterior** (el
+   viejo se cierra): tras un cambio de red no hay que esperar. Cada lectura revalida el dispositivo: si falla, manda
+   `event: interrupted` **sin `id`** (el cursor no cambia) con `data: {"code": "…"}` y termina. Solo
+   **`DEVICE_REVOKED`** (o un 401 `DEVICE_REVOKED` al abrir) significa que el dispositivo se retiró; con cualquier otro
+   código (`TEMPORARY` si la base no respondió a tiempo, o el código del rechazo) se reconecta con espera creciente.
+   Al abrir, los errores son los de `getReadyAlerts`.
 
 ## Códigos de error más frecuentes
 
@@ -569,6 +827,11 @@ false`, **`account_id`** = esa cuenta, `now` = su folio, `item_id` y `product_id
 | `ORDER_REQUIRES_CONFIRMATION`                            | 409    | Mostrar los cambios al mesero y reenviar con su confirmación.                                                              |
 | `IDEMPOTENCY_CONFLICT`                                   | 409    | La clave ya se usó con otro contenido: consultar el resultado.                                                             |
 | `OFFLINE_ORDER_ALREADY_ACCEPTED`                         | 409    | El pedido sin conexión (o su «Enviar a cocina», `details.origin`) ya entró: usar `details.result`, no capturarlo otra vez. |
+| `PRINTER_NOT_CONFIGURED`, `PRINTER_UNAVAILABLE`          | 409    | Sin impresora válida para la precuenta; con `details.scope: "device"`, la del dispositivo (se elige en Terminales).        |
+| `READY_ALERTS_DEVICE_NOT_ALLOWED`                        | 403    | Los avisos de platillos listos solo llegan a teléfonos y tabletas de meseros.                                              |
+| `PRINT_NOT_FAILED`                                       | 409    | La precuenta no tiene una impresión fallida que reintentar.                                                                |
+| `BALANCE_PENDING`                                        | 409    | El pedido para llevar tiene saldo: cobrarlo en la caja antes de marcarlo como entregado.                                   |
+| `ALREADY_DELIVERED`                                      | 409    | El pedido para llevar ya estaba entregado: volver a leerlo.                                                                |
 | `LOGIN_THROTTLED`                                        | 429    | Esperar 15 minutos.                                                                                                        |
 | `PIN_INVALID`                                            | 401    | PIN incorrecto: volver a escribirlo.                                                                                       |
 | `PIN_LOCKED`                                             | 429    | PIN bloqueado hasta `details.locked_until`, o hasta que un administrador lo desbloquee (`details.requires_unlock`).        |

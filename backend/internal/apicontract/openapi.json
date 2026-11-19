@@ -27,6 +27,9 @@
       "name": "Restaurante"
     },
     {
+      "name": "Cobros"
+    },
+    {
       "name": "Emparejamiento"
     }
   ],
@@ -249,7 +252,7 @@
       "get": {
         "operationId": "getIdentity",
         "summary": "Sesión, permisos y terminal",
-        "description": "El usuario con sus permisos vigentes, sus preferencias, la terminal y los datos del establecimiento. Etapa A1 (A1-D17): en una sesión abierta con pinLogin, los permisos que informa son solo los de mesero.",
+        "description": "El usuario con sus permisos vigentes, sus preferencias, la terminal y los datos del establecimiento. Etapa A1 (A1-D17): en una sesión abierta con pinLogin, los permisos que informa son solo los de mesero. Etapa A2 (parte C): terminal.precheck_printer es la impresora de precuentas del dispositivo android (con el nombre de su terminal si es la USB de una terminal), o null. Etapa A2 (parte D): terminal.ready_alerts_enabled, ready_alerts_sound y ready_alerts_vibration son los avisos de platillos listos del dispositivo.",
         "parameters": [
           {
             "$ref": "#/components/parameters/ClientVersion"
@@ -317,7 +320,7 @@
       "post": {
         "operationId": "pinLogin",
         "summary": "Entrar con PIN en un dispositivo de meseros",
-        "description": "Solo un dispositivo android emparejado (403 PIN_DEVICE_NOT_ALLOWED en otro tipo), con su credencial. PIN de 4 a 6 dígitos (400 si no tiene esa forma). PIN incorrecto o usuario que no puede entrar: 401 PIN_INVALID. 5 fallos en 15 minutos, desde cualquier dispositivo, bloquean el PIN de ese usuario 5 minutos: 429 PIN_LOCKED con details.locked_until (RFC 3339) y details.requires_unlock false. Etapa A1 (A1-D16): el tercer bloqueo seguido en 24 horas sin una entrada correcta deja el PIN bloqueado hasta que un administrador lo desbloquee: 429 PIN_LOCKED con details.locked_until null y details.requires_unlock true. Una entrada correcta borra la serie de bloqueos. PIN correcto sin el permiso waiter_devices.use: 403 PERMISSION_DENIED. Pocas entradas con PIN a la vez en el servidor: si no hay turno en unos segundos, 503 PIN_LOGIN_BUSY (reintentar). Responde como login (sesión de 12 horas; reemplaza solo la sesión anterior de ese usuario en ese dispositivo, así que el cambio rápido de mesero no cierra las de los demás) más pin_version y la credencial de envío, que sustituye a la anterior de ese mesero en ese dispositivo. Etapa A1 (A1-D17): la sesión y la credencial de envío solo tienen los permisos del usuario que están en la lista cerrada de permisos de mesero: waiter_devices.use, restaurant.tables.read, restaurant.areas.read, accounts.read, accounts.open, orders.capture, orders.confirm, orders.edit, orders.cancel, catalog.read, catalog.prices.read, events.read. Aunque el usuario sea administrador, nada más (getIdentity y getRecoveryState informan ya los permisos acotados).",
+        "description": "Solo un dispositivo android emparejado (403 PIN_DEVICE_NOT_ALLOWED en otro tipo), con su credencial. PIN de 4 a 6 dígitos (400 si no tiene esa forma). PIN incorrecto o usuario que no puede entrar: 401 PIN_INVALID. 5 fallos en 15 minutos, desde cualquier dispositivo, bloquean el PIN de ese usuario 5 minutos: 429 PIN_LOCKED con details.locked_until (RFC 3339) y details.requires_unlock false. Etapa A1 (A1-D16): el tercer bloqueo seguido en 24 horas sin una entrada correcta deja el PIN bloqueado hasta que un administrador lo desbloquee: 429 PIN_LOCKED con details.locked_until null y details.requires_unlock true. Una entrada correcta borra la serie de bloqueos. PIN correcto sin el permiso waiter_devices.use: 403 PERMISSION_DENIED. Pocas entradas con PIN a la vez en el servidor: si no hay turno en unos segundos, 503 PIN_LOGIN_BUSY (reintentar). Responde como login (sesión de 12 horas; reemplaza solo la sesión anterior de ese usuario en ese dispositivo, así que el cambio rápido de mesero no cierra las de los demás) más pin_version y la credencial de envío, que sustituye a la anterior de ese mesero en ese dispositivo. Etapa A1 (A1-D17): la sesión y la credencial de envío solo tienen los permisos del usuario que están en la lista cerrada de permisos de mesero: waiter_devices.use, restaurant.tables.read, restaurant.areas.read, accounts.read, accounts.open, orders.capture, orders.confirm, orders.edit, orders.cancel, catalog.read, catalog.prices.read, events.read y, desde la etapa A2 (Para llevar), takeaway.read, takeaway.manage y takeaway.deliver, y para imprimir la precuenta, payments.tickets.print. Aunque el usuario sea administrador, nada más (getIdentity y getRecoveryState informan ya los permisos acotados).",
         "parameters": [
           {
             "$ref": "#/components/parameters/ClientVersion"
@@ -428,6 +431,100 @@
           }
         },
         "tags": ["Tiempo real"]
+      }
+    },
+    "/ready-alerts": {
+      "get": {
+        "operationId": "getReadyAlerts",
+        "summary": "Avisos de platillos listos",
+        "description": "Etapa A2 (parte D): la lectura de recuperación de los avisos desde el cursor (hasta 50 por respuesta; con más, cursor es el del último entregado). Solo con la credencial del dispositivo (X-Device-ID y X-Device-Token), sin sesión: llega aunque el dispositivo esté en «¿Quién eres?». Solo dispositivos android (otro tipo: 403 READY_ALERTS_DEVICE_NOT_ALLOWED); revocado: 401 DEVICE_REVOKED. Go decide a quién llega: un aviso es para el dispositivo D si su mesero (el responsable de la cuenta al «Listo») tiene en D una sesión con PIN creada desde el inicio del día comercial, o una de antes que sigue vigente y se usó en los últimos 30 minutos (A2-D12; la misma regla que active), el aviso es posterior a su primera sesión con PIN en D que cuente, y además, al «Listo», D era el dispositivo de su sesión con PIN vigente más reciente que cuenta, entre los que pueden recibirlo (no revocados, con «Avisar platillos listos» activado y la aplicación 0.2.0 o posterior) o no había ninguno (entonces llega a todos los dispositivos donde está). Cada unidad se avisa una sola vez (UNIQUE por unidad y versión); la relectura desde un cursor anterior devuelve los mismos avisos con la misma key. Con «Avisar platillos listos» apagado: active false y sin avisos.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "description": "El cursor que guardó el dispositivo (0 o sin él: desde el principio del día comercial)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Avisos desde el cursor.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadyAlertsBatch"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Tiempo real"],
+        "security": [
+          {
+            "deviceId": [],
+            "deviceToken": []
+          }
+        ]
+      }
+    },
+    "/ready-alerts/stream": {
+      "get": {
+        "operationId": "streamReadyAlerts",
+        "summary": "Canal de avisos de platillos listos (SSE)",
+        "description": "Etapa A2 (parte D): flujo text/event-stream. Go revisa la base cada 750 ms pero solo manda un mensaje «alerts» (id: <cursor>, data: ReadyAlertsBatch) cuando hay avisos nuevos o cambian active, settings o day_ends_at (el primero llega enseguida); sin novedades, un comentario «: ping» cada 15 s. Dura 5 minutos y el dispositivo se vuelve a conectar enseguida con ?after=<cursor> o Last-Event-ID. Un canal nuevo del mismo dispositivo reemplaza al anterior, que se cierra (aparte de los dos del canal de eventos). Si una lectura falla, «interrupted» sin línea id (el cursor del dispositivo no cambia) con data {\"code\": …} y termina: solo DEVICE_REVOKED significa que el dispositivo fue retirado; cualquier otro código (TEMPORARY si la base no respondió) es para reconectar con espera creciente. Solo con la credencial del dispositivo (X-Device-ID y X-Device-Token), sin sesión: llega aunque el dispositivo esté en «¿Quién eres?». Solo dispositivos android (otro tipo: 403 READY_ALERTS_DEVICE_NOT_ALLOWED); revocado: 401 DEVICE_REVOKED. Go decide a quién llega: un aviso es para el dispositivo D si su mesero (el responsable de la cuenta al «Listo») tiene en D una sesión con PIN vigente o creada desde el inicio del día comercial (la misma regla que active), el aviso es posterior a su primera sesión con PIN en D que cuente, y además, al «Listo», D era el dispositivo de su sesión con PIN vigente más reciente entre los que pueden recibirlo (no revocados, con «Avisar platillos listos» activado y la aplicación 0.2.0 o posterior) o no había ninguno (entonces llega a todos los dispositivos donde está). Cada unidad se avisa una sola vez (UNIQUE por unidad y versión); la relectura desde un cursor anterior devuelve los mismos avisos con la misma key. Con «Avisar platillos listos» apagado: active false y sin avisos.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "description": "El cursor que guardó el dispositivo (0 o sin él: desde el principio del día comercial)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Flujo de avisos; cada data es un ReadyAlertsBatch.",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Tiempo real"],
+        "security": [
+          {
+            "deviceId": [],
+            "deviceToken": []
+          }
+        ]
       }
     },
     "/catalog/sync": {
@@ -778,7 +875,7 @@
       "get": {
         "operationId": "getRecoveryState",
         "summary": "Recuperación del estado al reconectar",
-        "description": "Responde a cualquier sesión válida: permisos vigentes, terminal, versión del catálogo y, según los permisos, mesas y cuentas abiertas con su revisión y estados de preparación. Una terminal revocada recibe 401 DEVICE_REVOKED. Etapa A1: event_cursor es el cursor del canal de eventos en el momento de la lectura (abrir streamEvents con ?after=event_cursor). Etapa A1 (A1-D17): en una sesión abierta con pinLogin, los permisos que informa son solo los de mesero.",
+        "description": "Responde a cualquier sesión válida: permisos vigentes, terminal, versión del catálogo y, según los permisos, mesas y cuentas abiertas con su revisión y estados de preparación. Una terminal revocada recibe 401 DEVICE_REVOKED. Etapa A1: event_cursor es el cursor del canal de eventos en el momento de la lectura (abrir streamEvents con ?after=event_cursor). Etapa A1 (A1-D17): en una sesión abierta con pinLogin, los permisos que informa son solo los de mesero. Etapa A2: con takeaway.read, accounts incluye los pedidos para llevar abiertos (mode takeaway, sin mesa) con su cliente, preparation_state, payment_state y delivery_state; sus cambios llegan por streamEvents en el ámbito takeaway (restaurant.account.*, restaurant.order.confirmed, restaurant.account.preparation_changed, takeaway.delivered, restaurant.account.closed). Etapa A2 (parte C): terminal.precheck_printer es la impresora de precuentas del dispositivo android (con el nombre de su terminal si es la USB de una terminal), o null. Etapa A2 (parte D): terminal.ready_alerts_enabled, ready_alerts_sound y ready_alerts_vibration son los avisos de platillos listos del dispositivo.",
         "parameters": [
           {
             "$ref": "#/components/parameters/ClientVersion"
@@ -840,7 +937,7 @@
       "get": {
         "operationId": "listAccounts",
         "summary": "Cuentas",
-        "description": "Cuentas paginadas (abiertas por omisión) con sus estados de preparación, pago y entrega. Requiere accounts.read.",
+        "description": "Cuentas paginadas (abiertas por omisión) con sus estados de preparación, pago y entrega. Requiere accounts.read. Etapa A2 (Para llevar): mode=takeaway&state=open es la lista de pedidos para llevar pendientes (folio, customer_name, phone, elapsed_seconds, urgency, preparation_state, payment_state y delivery_state; las más antiguas primero); con mode=takeaway exige además takeaway.read (403 sin él) y sin mode las cuentas para llevar solo se incluyen con takeaway.read. search busca en folio, cliente, teléfono y nombre.",
         "parameters": [
           {
             "$ref": "#/components/parameters/ClientVersion"
@@ -1444,11 +1541,76 @@
         "tags": ["Restaurante"]
       }
     },
+    "/restaurant/accounts/{id}/customer": {
+      "post": {
+        "operationId": "updateTakeawayCustomer",
+        "summary": "Nombre del cliente y teléfono de un pedido para llevar",
+        "description": "Etapa A2 (decisión A2-D1): cambia el nombre del cliente y el teléfono de un pedido para llevar abierto, en cualquier momento. Requiere takeaway.manage (y accounts.read). Sin revisión: no la pide ni la sube (solo cambia esos dos datos), así que no choca con el borrador; si dos dispositivos los editan, la última edición gana. Los dos campos son obligatorios: vacío quita el dato; se recortan los espacios y caben 100 y 40 caracteres (400 OPERATION_VALIDATION si no). Una cuenta de salón: 400 OPERATION_VALIDATION; un pedido que ya no está abierto: 400 OPERATION_VALIDATION con details AccountNotOpenDetails. Idempotente con operation_id (otro contenido con la misma clave: 409 IDEMPOTENCY_CONFLICT). Publica restaurant.account.updated en el ámbito takeaway y queda en la historia de la cuenta y en el Registro de movimientos; sin cambios no registra nada. Devuelve la cuenta.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cuenta con los datos del cliente.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Bill"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Restaurante"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "operation_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "customer_name": {
+                    "type": "string",
+                    "maxLength": 100
+                  },
+                  "phone": {
+                    "type": "string",
+                    "maxLength": 40
+                  }
+                },
+                "required": ["operation_id", "customer_name", "phone"]
+              }
+            }
+          }
+        }
+      }
+    },
     "/restaurant/offline-orders": {
       "post": {
         "operationId": "submitOfflineOrder",
         "summary": "Pedido capturado sin conexión",
-        "description": "Para la aplicación Android: el pedido de la cola con la versión del catálogo con que se capturó, la hora de captura, el destino y el precio por unidad que vio el mesero. Sin cambios se acepta y se confirma (cocina lo recibe). Con cambios responde 409 ORDER_REQUIRES_CONFIRMATION con la lista; se acepta al reenviarlo con la misma operation_id y confirmation (la catalog_version vigente que devolvió el rechazo y los cambios que vio el mesero), siempre con los precios del servidor. Requiere orders.confirm, orders.capture, accounts.read, catalog.read y catalog.prices.read (y accounts.open para una mesa). Etapa A1: en lugar de la sesión acepta la credencial de envío del mesero (X-Offline-Credential, de pinLogin) junto con la del dispositivo, para que la cola salga aunque la sesión haya vencido; Go valida al recibir el dispositivo, el usuario activo, su PIN vigente (misma pin_version), waiter_devices.use y los permisos de la operación. Si la credencial ya no vale (PIN cambiado o quitado, usuario desactivado o sin waiter_devices.use, credencial reemplazada): 401 OFFLINE_CREDENTIAL_INVALID; el pedido se conserva y el mesero entra con su PIN con conexión. Sesión y credencial juntas: 400. Etapa A1 (A1-D6): con account_id, replaces_draft_items dice qué renglones del borrador de la cuenta sustituye el pedido (tal como los vio el dispositivo); al aceptarlo Go los quita del borrador en la misma transacción (removed_draft_item_ids) y avisa a las demás terminales como un guardado del borrador. Un renglón cambiado, quitado o ya enviado desde otra terminal es un cambio más (draft_item_changed, draft_item_removed, draft_item_sent) que el mesero confirma con la misma operation_id o corrige. A1-D18 (el servidor nunca repite lo que ya entró): una partida con el id de un renglón del borrador de la cuenta lo sustituye aunque no venga en replaces_draft_items (igual, o guardado por última vez por el mismo mesero en el mismo dispositivo: se quita; cambiado en otra terminal: draft_item_changed); una partida ya enviada a cocina es draft_item_sent y al confirmarlo se envía lo demás (si no queda nada, 200 sin pedido nuevo, already_sent_item_ids); la misma operation_id de un confirmDraft ya aplicado en esa cuenta por el mismo usuario y dispositivo es 409 OFFLINE_ORDER_ALREADY_ACCEPTED (origin confirm_draft) sin mandar nada (con otra cuenta, una mesa, otro usuario u otra operación, IDEMPOTENCY_CONFLICT); un pedido a una mesa cuyas partidas ya están en una cuenta abierta de esa mesa es items_in_account con account_id.",
+        "description": "Para la aplicación Android: el pedido de la cola con la versión del catálogo con que se capturó, la hora de captura, el destino y el precio por unidad que vio el mesero. Sin cambios se acepta y se confirma (cocina lo recibe). Con cambios responde 409 ORDER_REQUIRES_CONFIRMATION con la lista; se acepta al reenviarlo con la misma operation_id y confirmation (la catalog_version vigente que devolvió el rechazo y los cambios que vio el mesero), siempre con los precios del servidor. Requiere orders.confirm, orders.capture, accounts.read, catalog.read y catalog.prices.read (y accounts.open para una mesa). Etapa A1: en lugar de la sesión acepta la credencial de envío del mesero (X-Offline-Credential, de pinLogin) junto con la del dispositivo, para que la cola salga aunque la sesión haya vencido; Go valida al recibir el dispositivo, el usuario activo, su PIN vigente (misma pin_version), waiter_devices.use y los permisos de la operación. Si la credencial ya no vale (PIN cambiado o quitado, usuario desactivado o sin waiter_devices.use, credencial reemplazada): 401 OFFLINE_CREDENTIAL_INVALID; el pedido se conserva y el mesero entra con su PIN con conexión. Sesión y credencial juntas: 400. Etapa A1 (A1-D6): con account_id, replaces_draft_items dice qué renglones del borrador de la cuenta sustituye el pedido (tal como los vio el dispositivo); al aceptarlo Go los quita del borrador en la misma transacción (removed_draft_item_ids) y avisa a las demás terminales como un guardado del borrador. Un renglón cambiado, quitado o ya enviado desde otra terminal es un cambio más (draft_item_changed, draft_item_removed, draft_item_sent) que el mesero confirma con la misma operation_id o corrige. A1-D18 (el servidor nunca repite lo que ya entró): una partida con el id de un renglón del borrador de la cuenta lo sustituye aunque no venga en replaces_draft_items (igual, o guardado por última vez por el mismo mesero en el mismo dispositivo: se quita; cambiado en otra terminal: draft_item_changed); una partida ya enviada a cocina es draft_item_sent y al confirmarlo se envía lo demás (si no queda nada, 200 sin pedido nuevo, already_sent_item_ids); la misma operation_id de un confirmDraft ya aplicado en esa cuenta por el mismo usuario y dispositivo es 409 OFFLINE_ORDER_ALREADY_ACCEPTED (origin confirm_draft) sin mandar nada (con otra cuenta, una mesa, otro usuario u otra operación, IDEMPOTENCY_CONFLICT); un pedido a una mesa cuyas partidas ya están en una cuenta abierta de esa mesa es items_in_account con account_id. Etapa A2 (Para llevar): con destination.takeaway abre un pedido para llevar nuevo (mode takeaway, sin mesa, origin «Para llevar», el cliente y el teléfono del destino, responsable = el mesero de la sesión o de la credencial de envío) y exige además accounts.open y takeaway.manage. Mismas reglas de la clave: un reintento con la misma operation_id devuelve el mismo pedido (nunca abre otro) y, si sus partidas ya están en un pedido para llevar abierto (la apertura en línea entró y su respuesta se perdió), responde items_in_account con su account_id para reenviarlo con la misma operation_id a destination.account_id.",
         "parameters": [
           {
             "$ref": "#/components/parameters/ClientVersion"
@@ -1515,6 +1677,316 @@
             "offlineCredential": []
           }
         ]
+      }
+    },
+    "/payments/accounts/{id}/precheck/print": {
+      "post": {
+        "operationId": "printPrecheck",
+        "summary": "Imprimir la precuenta",
+        "description": "Arma una precuenta nueva con el estado vigente de la cuenta (la misma plantilla, el mismo renderizador y el nombre visible de la caja, establishment.precheck_name; «Atendió:» es quien la pide) y la encola. Volver a pedirla arma otra precuenta, como «Imprimir precuenta» en la caja. Requiere payments.tickets.print, accounts.read y, en un pedido para llevar, takeaway.read. Idempotente con operation_id. Etapa A2 (parte C, A2-D3): un dispositivo android imprime solo en su impresora de precuentas (Terminal.precheck_printer); sin ella responde 409 PRINTER_NOT_CONFIGURED con details.scope «device», y nunca pasa a la impresora de tickets general. Las terminales de escritorio siguen con la de su caja o la general. La respuesta dice problem (agent_offline si la terminal de la impresora está desconectada), printer_name y terminal_name; lo que pase después se consulta con getDocumentStatus. Publica payments.document.printed en el ámbito de la cuenta.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Precuenta encolada.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrintedDocument"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Sin impresora válida (PRINTER_NOT_CONFIGURED o PRINTER_UNAVAILABLE) o la clave es de otra operación (IDEMPOTENCY_CONFLICT).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/PrinterRejection"
+                    },
+                    {
+                      "$ref": "#/components/schemas/Error"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Cobros"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "operation_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                },
+                "required": ["operation_id"]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/payments/accounts/{id}/documents/status": {
+      "get": {
+        "operationId": "getDocumentStatus",
+        "summary": "Estado de impresión de una precuenta",
+        "description": "Etapa A2 (parte C): el estado del último trabajo de impresión de una precuenta o un ticket de la cuenta, con su problema, la impresora y la terminal de la impresora. Es la lectura estrecha con la que el dispositivo sigue la precuenta que mandó (por ejemplo, unos 15 s): requiere payments.tickets.print (y accounts.read, y takeaway.read en un pedido para llevar), no payments.read, y no trae importes ni pagos. ticket_id es el de printPrecheck. Un documento que no es de la cuenta, 404; un identificador inválido, 400.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "ticket_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Estado del documento.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentStatus"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Cobros"]
+      }
+    },
+    "/payments/accounts/{id}/documents/retry": {
+      "post": {
+        "operationId": "retryDocument",
+        "summary": "Reintentar una precuenta que no salió",
+        "description": "Vuelve a enviar sin motivo una precuenta o un ticket cuyo último trabajo nunca salió en papel (error o intervention; regla de la etapa 9F) a la impresora que le corresponde hoy a quien lo pide: en un dispositivo android, su impresora de precuentas (A2-D3; sin ella, 409 PRINTER_NOT_CONFIGURED con details.scope «device»). Requiere payments.tickets.print. Sin un trabajo fallido, 409 PRINT_NOT_FAILED; con uncertain se revisa el papel antes de pedir otra precuenta. Un documento de otra cuenta, 404. Idempotente con operation_id. La respuesta es la de printPrecheck.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Documento encolado otra vez.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrintedDocument"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Sin trabajo fallido (PRINT_NOT_FAILED), sin impresora válida (PRINTER_NOT_CONFIGURED o PRINTER_UNAVAILABLE) o la clave es de otra operación.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/PrinterRejection"
+                    },
+                    {
+                      "$ref": "#/components/schemas/Error"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Cobros"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "operation_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "ticket_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "job_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Opcional: el trabajo que se reintenta; sin él, el más reciente del documento."
+                  }
+                },
+                "required": ["operation_id", "ticket_id"]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/payments/accounts/{id}/deliver": {
+      "post": {
+        "operationId": "deliverTakeaway",
+        "summary": "Marcar entregado un pedido para llevar pagado",
+        "description": "Registra la entrega de un pedido para llevar (ya existía; la etapa A2 lo agregó al contrato). Requiere takeaway.deliver, accounts.read y takeaway.read. Go no entrega un pedido sin pagar: con saldo pendiente responde 409 BALANCE_PENDING («Cóbralo antes de marcarlo como entregado»); entregado antes, 409 ALREADY_DELIVERED; una cuenta de salón, 400. Pagado, entregado y sin nada por enviar en su borrador, el pedido se cierra (closed true; con borrador queda abierto y entregado). Idempotente con operation_id. Publica takeaway.delivered (y restaurant.account.closed) en el ámbito takeaway. Etapa A2: finance (el estado financiero completo, con los pagos) solo llega a quien tiene payments.read; a los demás (la sesión con PIN de un mesero nunca lo tiene) es null.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Entrega registrada.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "delivered": {
+                      "const": true
+                    },
+                    "closed": {
+                      "type": "boolean",
+                      "description": "La cuenta quedó liquidada y entregada, y se cerró (false si su borrador tiene algo por enviar)."
+                    },
+                    "finance": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "account_id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "payment_state": {
+                              "type": "string"
+                            },
+                            "delivery_state": {
+                              "type": "string"
+                            },
+                            "balance": {
+                              "$ref": "#/components/schemas/Money"
+                            }
+                          },
+                          "required": ["account_id", "payment_state", "delivery_state", "balance"]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Estado financiero completo de la cuenta, solo con payments.read; si no, null."
+                    }
+                  },
+                  "required": ["delivered", "closed", "finance"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Saldo pendiente (BALANCE_PENDING), ya entregado (ALREADY_DELIVERED) o la clave es de otra operación (IDEMPOTENCY_CONFLICT).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Cobros"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "operation_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                },
+                "required": ["operation_id"]
+              }
+            }
+          }
+        }
       }
     },
     "/pairing/requests": {
@@ -2022,7 +2494,7 @@
     },
     "responses": {
       "Error": {
-        "description": "Error. 400 datos inválidos, 401 terminal o sesión (DEVICE_*, SESSION_*), 403 sin permiso, 404 no existe, 409 conflicto (ACCOUNT_CONFLICT, QUOTE_CHANGED, IDEMPOTENCY_CONFLICT, PRODUCT_SOLD_OUT…), 426 CLIENT_UPDATE_REQUIRED, 429 demasiados intentos (LOGIN_THROTTLED, PIN_LOCKED con details.locked_until y details.requires_unlock). Etapa A1: 400 CLIENT_KIND_MISMATCH; 401 PIN_INVALID, OFFLINE_CREDENTIAL_INVALID y OFFLINE_CREDENTIAL_NOT_ALLOWED; 403 PIN_DEVICE_NOT_ALLOWED; 503 PIN_LOGIN_BUSY. Desde la etapa A1, una cuenta que ya no está abierta responde 400 OPERATION_VALIDATION con details AccountNotOpenDetails (reason account_not_open).",
+        "description": "Error. 400 datos inválidos, 401 terminal o sesión (DEVICE_*, SESSION_*), 403 sin permiso, 404 no existe, 409 conflicto (ACCOUNT_CONFLICT, QUOTE_CHANGED, IDEMPOTENCY_CONFLICT, PRODUCT_SOLD_OUT…), 426 CLIENT_UPDATE_REQUIRED, 429 demasiados intentos (LOGIN_THROTTLED, PIN_LOCKED con details.locked_until y details.requires_unlock). Etapa A1: 400 CLIENT_KIND_MISMATCH; 401 PIN_INVALID, OFFLINE_CREDENTIAL_INVALID y OFFLINE_CREDENTIAL_NOT_ALLOWED; 403 PIN_DEVICE_NOT_ALLOWED; 503 PIN_LOGIN_BUSY. Desde la etapa A1, una cuenta que ya no está abierta responde 400 OPERATION_VALIDATION con details AccountNotOpenDetails (reason account_not_open). Etapa A2: 409 BALANCE_PENDING y ALREADY_DELIVERED en deliverTakeaway. Etapa A2 (parte C): 409 PRINTER_NOT_CONFIGURED y PRINTER_UNAVAILABLE (PrinterRejection, con details.scope «device» en un dispositivo android) y PRINT_NOT_FAILED en printPrecheck y retryDocument. Etapa A2 (parte D): 403 READY_ALERTS_DEVICE_NOT_ALLOWED en los avisos de platillos listos.",
         "content": {
           "application/json": {
             "schema": {
@@ -2231,9 +2703,60 @@
             "minimum": 30,
             "maximum": 3600,
             "description": "Etapa A1: segundos sin uso tras los que el dispositivo de meseros vuelve a la pantalla de entrada (120 por omisión)."
+          },
+          "precheck_printer_id": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "Etapa A2 (parte C): la impresora de precuentas del dispositivo android (null si no tiene; en las terminales de escritorio siempre null)."
+          },
+          "precheck_printer": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "terminal_name": {
+                    "type": ["string", "null"],
+                    "description": "La terminal que la tiene conectada, si es la impresora USB de una terminal."
+                  }
+                },
+                "required": ["id", "name", "terminal_name"]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Etapa A2 (parte C): la impresora de precuentas con su nombre y el de su terminal, para que el dispositivo diga a dónde se envía la precuenta. Se asigna en Administración › Sistema › Terminales › Editar."
+          },
+          "ready_alerts_enabled": {
+            "type": "boolean",
+            "description": "Etapa A2 (parte D): «Avisar platillos listos» (activado por omisión)."
+          },
+          "ready_alerts_sound": {
+            "type": "boolean",
+            "description": "Etapa A2 (parte D): Sonido del aviso (sí o no)."
+          },
+          "ready_alerts_vibration": {
+            "type": "boolean",
+            "description": "Etapa A2 (parte D): Vibración del aviso (sí o no)."
           }
         },
-        "required": ["id", "name", "idle_lock_seconds"]
+        "required": [
+          "id",
+          "name",
+          "idle_lock_seconds",
+          "precheck_printer_id",
+          "precheck_printer",
+          "ready_alerts_enabled",
+          "ready_alerts_sound",
+          "ready_alerts_vibration"
+        ]
       },
       "Identity": {
         "type": "object",
@@ -3931,6 +4454,18 @@
             "type": "string",
             "format": "uuid"
           },
+          "customer_name": {
+            "type": "string",
+            "description": "Nombre del cliente (vacío si no se capturó). Etapa A2: en un pedido para llevar se cambia con updateTakeawayCustomer."
+          },
+          "phone": {
+            "type": "string",
+            "description": "Teléfono del cliente (vacío si no se capturó)."
+          },
+          "origin": {
+            "type": "string",
+            "description": "Origen del pedido para llevar («Para llevar» al abrirlo con «Nuevo pedido», en la caja o desde la aplicación; la caja también usa otros, como «Ventanilla»); vacío en una cuenta de salón."
+          },
           "assigned_user_id": {
             "type": "string",
             "format": "uuid"
@@ -3952,10 +4487,12 @@
             "description": "without_items, draft (solo borrador), pending_release, scheduled, released, preparing, ready, change_pending o cancelled. Cambia sin otra operación de la cuenta cuando cocina avanza: evento restaurant.account.preparation_changed."
           },
           "payment_state": {
-            "type": "string"
+            "type": "string",
+            "description": "Lo calcula Go con los pagos reales: not_recorded (sin pagos), partial (con abonos) o paid (liquidada; también una cuenta con productos y total cero)."
           },
           "delivery_state": {
-            "type": "string"
+            "type": "string",
+            "description": "not_delivered o delivered (solo pedidos para llevar: deliverTakeaway o la entrega junto con el cobro en la caja). Un pedido para llevar pagado y entregado se cierra."
           },
           "confirmed_quantity": {
             "type": "integer"
@@ -3987,6 +4524,9 @@
           "mode",
           "state",
           "table_id",
+          "customer_name",
+          "phone",
+          "origin",
           "revision",
           "created_at",
           "updated_at",
@@ -3997,7 +4537,7 @@
           "draft_quantity",
           "totals"
         ],
-        "description": "Cuenta con su revisión (control optimista: toda escritura la envía) y los estados que calcula Go."
+        "description": "Cuenta con su revisión (control optimista: toda escritura la envía) y los estados que calcula Go. Un pedido para llevar es una cuenta con mode takeaway, sin mesa (table_id null), con su folio, el cliente, el origen y sus estados de preparación, pago y entrega independientes (estar pagado no es estar entregado)."
       },
       "Table": {
         "type": "object",
@@ -4276,7 +4816,7 @@
           "accounts",
           "event_cursor"
         ],
-        "description": "Estado para un cliente que se reconecta. tables es null sin restaurant.tables.read y accounts es null sin accounts.read (las cuentas para llevar exigen además takeaway.read)."
+        "description": "Estado para un cliente que se reconecta. tables es null sin restaurant.tables.read y accounts es null sin accounts.read; accounts trae las cuentas abiertas, y las para llevar (mode takeaway, con su preparación, pago y entrega) solo con takeaway.read."
       },
       "OfflineItem": {
         "type": "object",
@@ -4345,9 +4885,23 @@
               "name": {
                 "type": "string",
                 "maxLength": 100
+              },
+              "takeaway": {
+                "type": "object",
+                "properties": {
+                  "customer_name": {
+                    "type": "string",
+                    "maxLength": 100
+                  },
+                  "phone": {
+                    "type": "string",
+                    "maxLength": 40
+                  }
+                },
+                "description": "Etapa A2: un pedido para llevar nuevo (exclusivo con account_id y table_id; sin seen_account_ids, name ni replaces_draft_items). customer_name y phone son opcionales (vacíos si no se capturaron; con los límites de la cuenta, 100 y 40 caracteres ya recortados)."
               }
             },
-            "description": "Una cuenta abierta (account_id) o una mesa donde abrir una cuenta nueva (table_id, con las cuentas que el mesero veía abiertas en ella)."
+            "description": "Uno solo de: una cuenta abierta (account_id), una mesa donde abrir una cuenta nueva (table_id, con las cuentas que el mesero veía abiertas en ella y un name opcional) o, desde la etapa A2, un pedido para llevar nuevo (takeaway)."
           },
           "items": {
             "type": "array",
@@ -4912,6 +5466,258 @@
         },
         "required": ["error"],
         "description": "Etapa A1: PIN bloqueado. Por tiempo: locked_until con la hora y requires_unlock false. Hasta que un administrador lo desbloquee (A1-D16): locked_until null y requires_unlock true."
+      },
+      "PrintedDocument": {
+        "type": "object",
+        "properties": {
+          "requested": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "description": "Estado del trabajo en la cola de impresión al encolarlo (casi siempre pending). Que salió en papel no se sabe aquí: getDocumentStatus."
+          },
+          "job_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "ticket_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "message": {
+            "type": "string"
+          },
+          "problem": {
+            "type": ["string", "null"],
+            "description": "Etapa A2: el problema que Go ya conoce al encolar: agent_offline si la impresora es la USB de una terminal cuyo agente no consulta desde hace más de 30 s («La Caja 2 está desconectada»; el trabajo espera y sale cuando vuelve); null si no hay."
+          },
+          "printer_name": {
+            "type": ["string", "null"],
+            "description": "Etapa A2: la impresora en que se encoló."
+          },
+          "terminal_name": {
+            "type": ["string", "null"],
+            "description": "Etapa A2: la terminal de esa impresora si es la USB de una terminal («Enviada a Caja 1»); null si es de red."
+          }
+        },
+        "required": ["status", "job_id", "ticket_id", "problem", "printer_name", "terminal_name"],
+        "description": "Documento encolado (precuenta nueva o reintento)."
+      },
+      "PrinterRejection": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "enum": ["PRINTER_NOT_CONFIGURED", "PRINTER_UNAVAILABLE"]
+              },
+              "message": {
+                "type": "string"
+              },
+              "request_id": {
+                "type": "string"
+              },
+              "details": {
+                "type": "object",
+                "properties": {
+                  "document": {
+                    "enum": ["precheck", "receipt", "cash_document"]
+                  },
+                  "problem": {
+                    "type": "string",
+                    "description": "missing (sin impresora), inactive (desactivada) o unsupported (no puede imprimir)."
+                  },
+                  "printer_name": {
+                    "type": "string"
+                  },
+                  "scope": {
+                    "const": "device",
+                    "description": "Etapa A2 (A2-D3): la impresora que falta o no sirve es la del dispositivo android que pide (se elige en Terminales); sin scope, la de Cobros o la de la caja."
+                  }
+                },
+                "required": ["document", "problem"]
+              }
+            },
+            "required": ["code", "message", "details"]
+          }
+        },
+        "required": ["error"],
+        "description": "Documento sin impresora válida: no se encoló nada."
+      },
+      "DocumentStatus": {
+        "type": "object",
+        "properties": {
+          "ticket_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "enum": ["precheck", "receipt"]
+          },
+          "payment_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "job_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "job_state": {
+            "type": ["string", "null"],
+            "description": "Estado del último trabajo: pending, processing, submitted (la impresora o su cola lo aceptó), error, intervention, uncertain o cancelled."
+          },
+          "job_problem": {
+            "type": ["string", "null"],
+            "description": "Si exige atención: unreachable (la impresora no responde), agent_offline (la terminal de la impresora está desconectada), not_found, inactive, unsupported, setup o uncertain (revisar el papel antes de pedir otra)."
+          },
+          "printer_name": {
+            "type": ["string", "null"]
+          },
+          "copies": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "terminal_name": {
+            "type": ["string", "null"]
+          }
+        },
+        "required": [
+          "ticket_id",
+          "kind",
+          "created_at",
+          "job_id",
+          "job_state",
+          "job_problem",
+          "printer_name",
+          "copies",
+          "terminal_name"
+        ],
+        "description": "Estado de impresión de una precuenta o un ticket, sin importes ni pagos."
+      },
+      "ReadyAlert": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Número del último aviso del grupo: es solo el cursor (puede repetirse si se restaura un respaldo)."
+          },
+          "key": {
+            "type": "string",
+            "description": "Clave única del aviso, que nunca se reutiliza (también tras restaurar un respaldo): el dispositivo descarta los avisos repetidos por esta clave."
+          },
+          "account_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "La cuenta vigente: si la del «Listo» se combinó después, la cuenta en que se combinó."
+          },
+          "mode": {
+            "enum": ["dine_in", "takeaway"]
+          },
+          "table_name": {
+            "type": ["string", "null"],
+            "description": "La mesa de la cuenta (null en un pedido para llevar)."
+          },
+          "folio": {
+            "type": "integer"
+          },
+          "customer_name": {
+            "type": "string",
+            "description": "Nombre del cliente (vacío si no se capturó)."
+          },
+          "waiter_user_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "El mesero responsable de la cuenta al «Listo»."
+          },
+          "waiter_short_name": {
+            "type": "string"
+          },
+          "items": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "properties": {
+                "product_name": {
+                  "type": "string",
+                  "description": "Nombre visible del producto, con su presentación si la tiene («Filete · Grande»)."
+                },
+                "quantity": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              },
+              "required": ["product_name", "quantity"]
+            }
+          },
+          "ready_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "key",
+          "account_id",
+          "mode",
+          "table_name",
+          "folio",
+          "customer_name",
+          "waiter_user_id",
+          "waiter_short_name",
+          "items",
+          "ready_at"
+        ],
+        "description": "Lo que cocina marcó «Listo» en una cuenta en una misma operación, agrupado por platillo; sin las unidades que se cancelaron después (si se cancelaron todas, no hay aviso). Nunca trae precios ni importes."
+      },
+      "ReadyAlertsBatch": {
+        "type": "object",
+        "properties": {
+          "cursor": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "El último aviso que Go revisó para el dispositivo (le corresponda o no): se guarda y se vuelve con after=cursor."
+          },
+          "active": {
+            "type": "boolean",
+            "description": "El dispositivo debe mantener su servicio de avisos: «Avisar platillos listos» está activado y hay un mesero con una sesión con PIN en él creada desde el inicio del día comercial en curso, o de antes pero vigente y usada en los últimos 30 minutos (A2-D12). Con false, sin avisos (no es un error)."
+          },
+          "day_ends_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Fin del día comercial en curso (la hora de inicio del día siguiente): ahí dejan de contar los meseros que entraron hoy."
+          },
+          "settings": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "sound": {
+                "type": "boolean"
+              },
+              "vibration": {
+                "type": "boolean"
+              }
+            },
+            "required": ["enabled", "sound", "vibration"]
+          },
+          "alerts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReadyAlert"
+            }
+          }
+        },
+        "required": ["cursor", "active", "day_ends_at", "settings", "alerts"],
+        "description": "Avisos de platillos listos de un dispositivo desde un cursor."
       }
     }
   }

@@ -51,9 +51,16 @@ func (handler *service) deliver(parts []string) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	saved, err := loadFinance(handler.ctx, handler.tx, accountID)
-	if err != nil {
-		return nil, err
+	// Etapa A2 (A2-D2): el mesero marca «Entregado» desde su teléfono con takeaway.deliver, sin payments.read (la sesión
+	// con PIN solo tiene permisos de mesero, A1-D17). El estado financiero completo (pagos con su método, referencia,
+	// caja y quién cobró) solo se devuelve a quien puede consultar cobros; a los demás, finance es null y les basta
+	// delivered y closed (la cuenta, con sus estados de pago y entrega, se vuelve a leer como siempre).
+	var saved *Finance
+	if handler.request.Actor.Can("payments.read") {
+		saved, err = loadFinance(handler.ctx, handler.tx, accountID)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return map[string]any{"finance": saved, "closed": closed, "delivered": true}, nil
 }

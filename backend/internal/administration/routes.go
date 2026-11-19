@@ -293,8 +293,9 @@ func currentIdentity(ctx context.Context, tx pgx.Tx, principal Principal) (any, 
 	}
 	// La terminal informa su pantalla de inicio (etapa 9C, §1.5): la aplicación abre en ella al
 	// iniciar sesión y el logotipo vuelve a ella. La preferencia por usuario ya no decide el inicio.
-	// Etapa A1 (fase B): idle_lock_seconds es el bloqueo por inactividad del dispositivo (lo usa el de meseros).
-	terminal, err := object(ctx, tx, "SELECT id,name,register_id,keyboard_mode,home_screen,idle_lock_seconds FROM app.devices WHERE id=$1", principal.DeviceID)
+	// Etapa A1 (fase B): idle_lock_seconds es el bloqueo por inactividad del dispositivo (lo usa el de meseros); etapa
+	// A2 (parte C): la impresora de precuentas de un dispositivo android.
+	terminal, err := object(ctx, tx, terminalIdentityQuery, principal.DeviceID)
 	if err != nil {
 		return nil, err
 	}

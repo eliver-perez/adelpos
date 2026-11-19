@@ -690,11 +690,13 @@ func TestStageA1WaiterPIN(t *testing.T) {
 		env.fails(adminPhone, "GET", "users", nil, 403, "PERMISSION_DENIED")
 		env.fails(adminPhone, "PUT", "users/"+beto+"/pin", map[string]any{"pin": "6152"}, 403, "PERMISSION_DENIED")
 		env.fails(adminPhone, "GET", "devices", nil, 403, "PERMISSION_DENIED")
-		env.fails(adminPhone, "GET", "restaurant/accounts?mode=takeaway", nil, 403, "PERMISSION_DENIED")
+		// Etapa A2: Para llevar ya es de mesero (takeaway.*), los cobros no (payments.read).
+		env.fails(adminPhone, "GET", "payments/methods", nil, 403, "PERMISSION_DENIED")
 		if env.scalar("SELECT count(*) FROM app.audit_events WHERE action='access.denied'") != denials+4 {
 			t.Fatal("las denegaciones de la sesión con PIN no quedaron registradas")
 		}
 		env.call(adminPhone, "GET", "restaurant/accounts", nil, 200)
+		env.call(adminPhone, "GET", "restaurant/accounts?mode=takeaway", nil, 200)
 		env.call(adminPhone, "GET", "catalog/sync", nil, 200)
 		// Con la credencial de envío: el pedido entra (permisos de mesero) y nada más.
 		credential := pinActor{device: phone.device, secret: phone.secret, credential: fmt.Sprint(login["offline_credential"])}

@@ -2,6 +2,7 @@ package kitchen
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -111,6 +112,52 @@ func PrinterProblem(printer *Printer) string {
 		return ProblemUnsupported
 	}
 	return ""
+}
+
+// DocumentPrinterOption es una impresora para precuentas y tickets tal como se elige en Terminales › Editar de un
+// teléfono o tableta de meseros (etapa A2, parte C): su nombre, el de la terminal que la tiene conectada si es la
+// USB de una terminal y, si no puede imprimir esos documentos, por qué (PrinterProblem: inactive o unsupported).
+type DocumentPrinterOption struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Transport    string `json:"transport"`
+	TerminalName string `json:"terminal_name"`
+	Active       bool   `json:"active"`
+	Problem      string `json:"problem"`
+}
+
+// DocumentPrinterOptions son todas las impresoras con su problema para esos documentos, por nombre; las que no pueden
+// imprimir se muestran deshabilitadas con el motivo, como en Cobros › Políticas.
+func DocumentPrinterOptions(ctx context.Context, tx pgx.Tx) ([]DocumentPrinterOption, error) {
+	printers, err := many[Printer](ctx, tx, printerListQuery+" ORDER BY p.name,p.id")
+	if err != nil {
+		return nil, err
+	}
+	options := make([]DocumentPrinterOption, 0, len(printers))
+	for index := range printers {
+		options = append(options, documentPrinterOption(&printers[index]))
+	}
+	return options, nil
+}
+
+// DocumentPrinterChoice es la impresora elegida con su problema, o nil si no existe.
+func DocumentPrinterChoice(ctx context.Context, tx pgx.Tx, id string) (*DocumentPrinterOption, error) {
+	printer, err := one[Printer](ctx, tx, printerListQuery+" WHERE p.id=$1", id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	option := documentPrinterOption(printer)
+	return &option, nil
+}
+
+func documentPrinterOption(printer *Printer) DocumentPrinterOption {
+	return DocumentPrinterOption{
+		ID: printer.ID, Name: printer.Name, Transport: printer.Transport, TerminalName: printer.TerminalName,
+		Active: printer.Active, Problem: PrinterProblem(printer),
+	}
 }
 
 // UnavailablePrinterError es el rechazo 409 PRINTER_UNAVAILABLE de una impresora que no puede imprimir, con

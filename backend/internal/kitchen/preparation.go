@@ -2,7 +2,9 @@ package kitchen
 
 import (
 	"sort"
+	"time"
 
+	"local/ad-el-pos/server/internal/businessday"
 	"local/ad-el-pos/server/internal/events"
 )
 
@@ -23,6 +25,12 @@ import (
 // pendiente), la liberación automática de los pedidos programados (worker.go) y la integración con cocina de las
 // operaciones de la cuenta (confirmar, modificar, cancelar unidades o la cuenta y reprogramar), que además publican su
 // propio evento restaurant.* de la cuenta.
+//
+// Registro de platillos listos (etapa A2, parte D; decisión A2-D9). El aviso al mesero necesita saber qué pasó a
+// «Listo» y para quién, y que nada se pierda ni se repita aunque se corte la red: en la misma transacción en que se
+// publica el evento de preparación, cada unidad de esas cuentas cuya última tarea viva pasó a «Listo» en esta
+// transacción queda en app.ready_notices con el responsable de su cuenta en ese momento (recordReadyNotices). Lo leen
+// los dispositivos con GET ready-alerts (administration/ready_alerts.go).
 
 // PreparationChangedKind es el tipo del evento.
 const PreparationChangedKind = "restaurant.account.preparation_changed"
@@ -76,6 +84,9 @@ func (handler *service) publishPreparation() error {
 	}
 	sort.Strings(accountIDs)
 	handler.preparation = nil
+	if err := handler.recordReadyNotices(accountIDs); err != nil {
+		return err
+	}
 	rows, err := handler.tx.Query(handler.ctx, `SELECT id::text,mode FROM app.restaurant_accounts
         WHERE id=ANY($1::uuid[]) ORDER BY id`, accountIDs)
 	if err != nil {
@@ -111,4 +122,79 @@ func (handler *service) publishPreparation() error {
 		}
 	}
 	return nil
+}
+
+// ReadyAlertsRecentUse es cuánto cuenta, para los avisos de platillos listos, una sesión con PIN abierta antes del
+// inicio del día comercial en curso (decisión A2-D12 del coordinador): solo si sigue vigente y su last_seen_at es de
+// los últimos 30 minutos. Así se cubre al mesero que trabaja justo en el cambio de día (revisión R2) sin que la última
+// entrada de la noche (una sesión con PIN dura 12 h) mantenga activo toda la noche el servicio de avisos de las
+// tabletas (revisión RD2). Las sesiones creadas desde el inicio del día cuentan siempre durante ese día. La usan la
+// elección del dispositivo fijado (recordReadyNotices) y la lectura (administration/ready_alerts.go: active y «entró
+// en el dispositivo»), para que un aviso nunca se fije a un dispositivo que no lo entregaría.
+const ReadyAlertsRecentUse = 30 * time.Minute
+
+// recordReadyNotices registra cada unidad activa de las cuentas que quedó en «Listo» en esta transacción: todas sus
+// tareas vivas (no canceladas, de su versión vigente) están listas y, o bien la última se marcó ahora (ready_at es
+// now(), el instante de la transacción; states.go conserva el ready_at de una tarea que ya estaba lista), o bien ahora
+// se canceló la que faltaba sin haber estado lista (revisión R1: una modificación quita la parte pendiente de un combo
+// y lo que queda ya estaba listo; la cancelación conserva ready_at, así que quitar una parte que ya estaba lista no
+// vuelve a avisar). Los caminos que escriben tareas son tres y todos pasan por aquí: el avance del KDS (states.go: una
+// unidad, el pedido de una estación o la cuenta completa), las modificaciones y cancelaciones con sus reintentos
+// (changes.go) y la liberación (releases.go, que solo crea tareas pendientes). Nunca se avisa una unidad que ya estaba
+// lista: una modificación que no cambia la receta conserva sus tareas listas; una que la cambia las reinicia y su nueva
+// versión se avisa al estar lista otra vez. UNIQUE (unit_id, version_id) impide repetir la misma preparación.
+//
+// Las unidades de una misma cuenta comparten alert_key, un uuid aleatorio que nunca se reutiliza (revisión R3): es la
+// clave con que el dispositivo descarta avisos repetidos, aunque se restaure un respaldo y sequence repita números. El
+// destinatario es el responsable actual de la cuenta en que está la unidad.
+//
+// El dispositivo destinatario (A2-D4) se fija aquí: entre los dispositivos android que pueden recibir el aviso (no
+// revocados, con «Avisar platillos listos» activado y con la aplicación 0.2.0 o posterior si Go conoce su versión, la
+// primera que lee avisos; revisión R7), el de la sesión con PIN vigente del responsable con last_seen_at más reciente
+// entre las que cuentan (creadas desde el inicio del día comercial, o de antes pero usadas en los últimos 30 minutos;
+// A2-D12); si ninguno sirve, ninguno (entonces el aviso va a todos los dispositivos donde entró; lo decide la lectura,
+// administration/ready_alerts.go). Fijarlo al «Listo» y no al leer hace que cada dispositivo lo reciba o no sin
+// importar cuándo consulte: si el mesero cambia de dispositivo justo entonces o uno se reconecta tarde con su cursor,
+// el aviso no se pierde ni se duplica. Al registrar algo se podan los avisos de más de 2 días (dato derivado).
+func (handler *service) recordReadyNotices(accountIDs []string) error {
+	config, err := businessday.Load(handler.ctx, handler.tx)
+	if err != nil {
+		return err
+	}
+	dayStart := config.Start(config.DayOf(time.Now()).Date)
+	recorded, err := handler.tx.Exec(handler.ctx, `WITH ready AS (
+            SELECT u.id AS unit_id,u.version_id,u.account_id,a.assigned_user_id,u.item_id,u.ordinal
+            FROM app.restaurant_item_units u JOIN app.restaurant_accounts a ON a.id=u.account_id
+            CROSS JOIN LATERAL (SELECT
+                count(*) FILTER (WHERE t.version_id=u.version_id AND t.state<>'cancelled') AS live,
+                count(*) FILTER (WHERE t.version_id=u.version_id AND t.state='ready') AS ready,
+                max(t.ready_at) FILTER (WHERE t.version_id=u.version_id AND t.state='ready') AS last_ready,
+                count(*) FILTER (WHERE t.state='cancelled' AND t.ready_at IS NULL AND t.updated_at=now()) AS cancelled_now
+                FROM app.kitchen_tasks t WHERE t.unit_id=u.id) tasks
+            WHERE u.account_id=ANY($1::uuid[]) AND u.state='active' AND tasks.live>0 AND tasks.ready=tasks.live
+                AND (tasks.last_ready=now() OR tasks.cancelled_now>0)
+        ), keys AS (
+            SELECT account_id,gen_random_uuid() AS alert_key FROM (SELECT DISTINCT account_id FROM ready) accounts
+        )
+        INSERT INTO app.ready_notices(unit_id,version_id,account_id,recipient_user_id,recipient_device_id,alert_key,ready_at)
+        SELECT r.unit_id,r.version_id,r.account_id,r.assigned_user_id,
+            (SELECT s.device_id FROM app.sessions s JOIN app.devices d ON d.id=s.device_id
+                WHERE s.user_id=r.assigned_user_id AND s.opened_with_pin AND s.revoked_at IS NULL AND s.expires_at>now()
+                    AND (s.created_at>=$2 OR s.last_seen_at>=now()-make_interval(secs=>$3))
+                    AND d.kind='android' AND d.revoked_at IS NULL AND d.ready_alerts_enabled
+                    AND (coalesce(d.app_version,'') !~ '^\d{1,6}\.\d{1,6}\.\d{1,6}'
+                        OR (regexp_match(d.app_version,'^(\d{1,6})\.(\d{1,6})\.(\d{1,6})'))::int[] >= ARRAY[0,2,0])
+                ORDER BY s.last_seen_at DESC,s.created_at DESC,s.id LIMIT 1),
+            k.alert_key,now()
+        FROM ready r JOIN keys k ON k.account_id=r.account_id
+        ORDER BY r.account_id,r.item_id,r.ordinal,r.unit_id
+        ON CONFLICT (unit_id,version_id) DO NOTHING`, accountIDs, dayStart, ReadyAlertsRecentUse.Seconds())
+	if err != nil {
+		return err
+	}
+	if recorded.RowsAffected() == 0 {
+		return nil
+	}
+	_, err = handler.tx.Exec(handler.ctx, "DELETE FROM app.ready_notices WHERE ready_at < now() - interval '2 days'")
+	return err
 }

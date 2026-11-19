@@ -131,7 +131,7 @@
     <string name="update_app_pending">Estos pedidos todavía no se envían: instala la versión nueva encima de la actual y se enviarán solos. No desinstales la aplicación de %1$s, porque se perderían.</string>
     <string name="update_server_title">Actualiza el servidor del restaurante</string>
     <string name="update_server_choose_another">Elegir otra computadora principal</string>
-    <string name="update_server_text">La computadora principal del restaurante tiene una versión anterior de AD-EL POS que no permite entrar con PIN en los teléfonos y tabletas. Pide que la actualicen.</string>
+    <string name="update_server_text">La computadora principal del restaurante tiene una versión anterior de AD-EL POS que no sirve para esta versión de la aplicación de meseros: le faltan funciones que la aplicación usa (necesita la versión 0.13.0 o posterior). Pide que la actualicen.</string>
     <string name="update_check_again">Volver a comprobar</string>
     <string name="support_title">Datos para soporte</string>
     <string name="support_app_version">Versión de esta aplicación: %1$s</string>
