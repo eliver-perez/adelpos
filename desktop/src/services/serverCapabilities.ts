@@ -14,6 +14,11 @@ export const devicePrecheckPrinterCapability = 'device-precheck-printer-v1';
 // (Terminales › Editar y «Ver configuración»).
 export const readyAlertsCapability = 'ready-alerts-v1';
 
+// Etapa A3 (§3, servidor 0.14.0): la pantalla de permisos agrupada de un rol, con su vista sencilla, sus dependencias y
+// «Restablecer permisos predeterminados» (GET permissions/catalog y roles/{id}/defaults). Con un servidor anterior,
+// Roles y permisos muestra la lista de siempre.
+export const permissionGroupsCapability = 'permission-groups-v1';
+
 let announced: ReadonlySet<string> = new Set();
 
 // rememberServerCapabilities guarda lo que informó el servidor al conectar (useSession lo llama con la respuesta de

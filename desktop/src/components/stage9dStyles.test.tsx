@@ -335,6 +335,9 @@ const reversible: Record<string, string> = {
   'pages/inventory/CountPanel.tsx: Borrar captura': 'vacía la cantidad del renglón, sin guardar',
   'pages/documents/designer/StructureList.tsx: Quitar':
     'bloque del borrador de la plantilla, con «Deshacer»',
+  // Etapa A3 (§3.2): quita del rol en edición los permisos del grupo; nada cambia hasta guardar el rol.
+  'components/PermissionEditor.tsx: Quitar todo el grupo':
+    'quita los permisos del grupo del rol en edición; se aplica al guardarlo',
   // Etapa A1 (fase B): quitar el PIN de un mesero se deshace asignándole otro; lo confirma un diálogo normal.
   'pages/UserPin.tsx: Quitar PIN': 'el PIN se puede volver a asignar en el mismo panel',
 };
