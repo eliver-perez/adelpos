@@ -4133,13 +4133,14 @@ capacidad nueva **`permission-groups-v1`** de `GET version`. `GET permissions` n
   «Cocina e impresión», `cash` «Caja y cobros», `catalog`, `inventory`, `reports`, `staff` «Personal» y `system`
   «Terminales y sistema»), la descripción corta y `requires` (lo que exige la ruta o la pantalla que usa); las once
   capacidades de la vista sencilla (las nueve de §3.2 más «Manejar inventario» y «Autorizar y corregir», A3-D5); y los
-  conjuntos de fábrica (A3-D2: Mesero 14, Cajero 36, Cocina 8, Supervisor 89, Inventarios 20 y Finanzas 28, cerrados bajo
+  conjuntos de fábrica (A3-D2: Mesero 14, Cajero 36, Cocina 8, Supervisor 88 desde la revisión, A3-D19, Inventarios 20 y Finanzas 28, cerrados bajo
   `requires`; el Administrador, todos). El nombre visible es el que registra cada módulo, salvo `events.read` («Ver al
   momento los cambios de otras terminales») y `kitchen.kds.ack` («Confirmar que la cocina recibió la comanda»). Go **no
   impone** `requires` al guardar un rol (A3-D4): solo lo informa; cada ruta sigue validando sus permisos.
 - **`GET permissions/catalog`** (`permissions.read`) → `{groups: [{code, name, permissions: [clave]}], permissions:
 [{key, name, description, group, requires: [clave]}], capabilities: [{code, name, description, permissions:
-[clave]}], factory_roles: [código]}`, en el orden de la pantalla.
+[clave]}], factory_roles: [código], factory_permissions: {código: [clave]}}`, en el orden de la pantalla.
+  `factory_permissions` (revisión R2, A3-D17) deja a la pantalla no ofrecer «Restablecer» donde Go lo rechazaría.
 - **Asistente** (`POST setup`): cada rol de fábrica recibe su conjunto (sustituye lo que concedía hasta la A2: algunos de
   consulta al supervisor, al cajero y a finanzas, y `waiter_devices.use` al mesero, que ya están dentro). En una
   instalación existente **nada cambia** (la `0027` no toca roles).
@@ -4158,6 +4159,14 @@ ROLE_CHANGED`** sin escribir. Solo cambia `role_permissions`: el límite de desc
 - **Puente nativo** (`desktop/src-tauri/src/api.rs`): `permission_catalog` (`GET permissions/catalog`), `role_defaults`
   (`GET roles/{id}/defaults`) y `restore_role_defaults` (`POST roles/{id}/defaults`), con identificador validado y su
   prueba de `cargo`.
+- **`POST sessions/{id}/revoke`** (`sessions.manage`; revisión R1, A3-D16): cerrar la sesión de **otro** usuario aplica
+  la regla de delegación (`requireManageableUser`: sus permisos efectivos y su límite de descuento dentro de los del
+  actor); si no, `403 PERMISSION_DENIED` «No puedes cerrar la sesión de un usuario con permisos que tú no tienes.». La
+  propia se cierra siempre; la del soporte reservado, como antes, solo el soporte. Es la única ruta de `sessions.*` que
+  cierra sesiones (las demás que lo hacen —desactivar un usuario, cambiar su PIN— ya aplicaban la regla).
 - **Escritorio**: Roles › «Editar permisos» con la vista sencilla y la detallada y «Restablecer permisos
   predeterminados» en los roles de `factory_roles` (ver `CLAUDE.md`, «Permisos agrupados y roles de fábrica»); sin la
-  capacidad, la lista de siempre.
+  capacidad, la lista de siempre. Desde la revisión: el botón no se ofrece donde Go lo rechazaría (rol propio, rol o
+  conjunto de fábrica con permisos que quien edita no tiene, límite de descuento mayor; se dice por qué, R2); con una
+  búsqueda, los botones del grupo actúan solo sobre lo que se ve («Marcar los 3 que se ven», R3); y tras `409
+ROLE_CHANGED` la pantalla carga los permisos que el rol tiene ahora y lo avisa (R5).
