@@ -398,8 +398,9 @@ Un pedido para llevar es una cuenta de Go con `mode: "takeaway"` y sin mesa (no 
 captura y la misma cola de la A1, con la modalidad en la captura, el pedido y el guardado sin respuesta
 (`OrderMode`, `Capture.tableId` opcional) y el cliente (`TakeawayCustomer`, A2-D1).
 
-- **Acceso** (§3.1): la navegación principal (`navigation/AdelPosApp.kt`, `MainNavigationBar`) muestra «Mesas» y
-  «Para llevar» solo si `WaiterPermissions.grants(VIEW_TAKEAWAY)` (`takeaway.read` en los permisos de Go del mesero
+- **Acceso** (§3.1): la navegación principal (`navigation/AdelPosApp.kt`: `MainNavigationBar` abajo en vertical,
+  `MainNavigationRail` a un lado con poca altura o en horizontal; ver «Diseño») muestra «Mesas» y «Para llevar» solo
+  si `WaiterPermissions.grants(VIEW_TAKEAWAY)` (`takeaway.read` en los permisos de Go del mesero
   activo; con permisos desconocidos no aparece). «Nuevo pedido» y capturar exigen `takeaway.manage` (`OPEN_TAKEAWAY`,
   `MANAGE_TAKEAWAY`); sin él, solo la lista.
 - **Captura** (`CaptureService.openTakeaway`, `setCustomer`): «Nuevo pedido» entra directo al catálogo; el pedido nace
@@ -600,6 +601,19 @@ siempre.
 - **Uno o dos paneles** (`AdaptivePanes`, `currentPaneLayout()` con `currentWindowAdaptiveInfoV2()`): dos paneles con
   ancho ≥ 600 dp **y** alto ≥ 480 dp (tableta en ambas orientaciones); uno en el teléfono, también horizontal (≈ 914 ×
   411 dp), con el otro panel «a un toque» y «Volver a …» o Atrás para regresar.
+- **Navegación principal «Mesas | Para llevar»** (§3.1 de la A2, siempre a la vista, también en la captura;
+  `navigationPlacementFor` y `currentNavigationPlacement()` en `core:ui/layout/PaneLayout.kt`): **barra inferior**
+  (`NavigationBar`) en vertical y **riel lateral** (`NavigationRail`, los mismos dos destinos, íconos y textos) con
+  poca altura (< 480 dp, el mismo límite de los paneles) o en horizontal. En el teléfono horizontal la barra de 80 dp
+  dejaba la cuadrícula de productos sin altura (hallazgo de la Fase E); en la tableta horizontal lo escaso también es
+  la altura, y en la tableta vertical la barra solo quita 80 de 1280 dp de alto (el riel le quitaría ancho a los dos
+  paneles). El riel va dentro del contenido, que ya respeta los bordes del sistema (sin márgenes propios). Con poca
+  altura (`isHeightCompact`, el mismo límite) el catálogo de la captura usa además su **forma compacta**
+  (`CatalogBrowser(compactHeight)`): la búsqueda y las categorías en una fila y tarjetas bajas (imagen pequeña a la
+  izquierda, nombre y precio a la derecha); con la forma normal, en el teléfono horizontal ninguna tarjeta cabía
+  completa (ni sin la barra). Pruebas: `PaneLayoutTest` (JVM), `MainNavigationLayoutTest` (las dos orientaciones en
+  el dispositivo), `CatalogComponentsTest.conPocaAlturaLasTarjetasCabenConSuNombre` y `takeaway t9` (productos a la
+  vista en horizontal, con capturas de pantalla).
 - **De borde a borde** en todas las versiones (`enableEdgeToEdge()` y `WindowInsets.safeDrawing` en el `Scaffold`).
 
 ## Diferencias de plataforma (avance §1.6)

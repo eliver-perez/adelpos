@@ -249,8 +249,9 @@ Cada pedido tiene uno de estos estados:
 
 ## 6. Para llevar
 
-Abajo de la pantalla están **«Mesas»** y **«Para llevar»** (en el teléfono y en la tableta). «Para llevar» solo
-aparece si el rol del mesero tiene el permiso de ver los pedidos para llevar (sección 4).
+**«Mesas»** y **«Para llevar»** están siempre a la vista: abajo de la pantalla con el dispositivo en vertical y a un
+lado con el dispositivo en horizontal (así, en un teléfono horizontal, la captura sigue mostrando los productos).
+«Para llevar» solo aparece si el rol del mesero tiene el permiso de ver los pedidos para llevar (sección 4).
 
 **Tomar un pedido.**
 
