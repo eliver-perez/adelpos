@@ -1456,3 +1456,349 @@ espaciada.
   se ve «En línea», hasta la primera respuesta de Go, el primer aviso de red de Android o el plazo de la tolerancia).
 - El texto para `CLAUDE.md` de la raíz sobre Android (y el nombre `PlainLanguageTest` en la regla de la A3) se une en
   la Fase E, para no pisar los cambios del agente del servidor en la Fase B.
+
+---
+
+## Fase B · Permisos agrupados y roles de fábrica (§3)
+
+Agente del servidor y el escritorio, en `$SP/wt/srv` (rama `etapa-a3-srv`, sobre la Fase D que el coordinador fusionó en
+`etapa-a3` con `699cb3b`), 19 de noviembre de 2026. Sin migración (A3-D2: todo vive en Go; la `0027` no se tocó). Sin
+cambios en `android/` ni en este avance. Pruebas en copias aisladas (`ISO_TAG=SV`: clúster temporal 55499, Go temporal en
+8187 y vista previa en 1427); ninguna contra el servicio real. Commits: ver «Commits» al final.
+
+### Qué se hizo
+
+**Go: el catálogo de permisos en un solo lugar** (A3-D4/D5).
+
+- `backend/internal/administration/permission_catalog.go`: los diez grupos de §3.2 en su orden, las **once capacidades**
+  de la vista sencilla (las nueve de la especificación más «Manejar inventario» y «Autorizar y corregir», A3-D5), los
+  **conjuntos de fábrica** de los seis roles (`factoryRolePermissions`, A3-D2 y A3-D3, los del anexo de la Fase 0 sin
+  cambios: Mesero 14, Cajero 36, Cocina 8, Supervisor 89 —88 desde la revisión R4, A3-D19—, Inventarios 20, Finanzas 28) y las funciones que arman la
+  respuesta (`buildPermissionCatalog`), cierran un conjunto bajo sus dependencias (`closePermissions`) y dan el conjunto
+  de un rol (`factoryPermissions`, `FactoryRolePermissions` para las pruebas de otros paquetes).
+- `permission_catalog_entries.go`: los **156 permisos**, cada uno con su grupo, su **descripción corta** en lenguaje
+  claro (una frase, redactadas en esta fase), **lo que necesita** (`requires`, las 138 dependencias de la Fase 0) y, solo
+  en dos, un nombre visible que corrige el del módulo: `events.read` («Ver al momento los cambios de otras terminales»,
+  antes «Recibir eventos autenticados») y `kitchen.kds.ack` («Confirmar que la cocina recibió la comanda», antes con la
+  sigla KDS, §0.2). Los módulos siguen registrando sus claves y su nombre (`Permissions`); el nombre registrado no se tocó
+  porque las pruebas comparan el de Go con el que sembraron las migraciones.
+- **`GET permissions/catalog`** (`permissions.read`, `routes.go`) con `{groups, permissions, capabilities,
+factory_roles}`. `GET permissions` no cambia.
+- **Capacidad `permission-groups-v1`** en `GET version` (`httpapi/router.go`, con su caso en `clientversion_test.go`).
+- **Asistente** (`setup.go`): cada rol de fábrica recibe su conjunto en una instalación nueva (sustituye lo que concedía
+  hasta la A2, que ya estaba dentro de cada conjunto). El Administrador sigue con todos. Una instalación existente no
+  cambia.
+- **«Restablecer permisos predeterminados»** (`role_defaults.go`, A3-D6): `GET roles/{id}/defaults` (vista previa:
+  `current`, `factory`, `add`, `remove`) y `POST roles/{id}/defaults` con `{expected}`; reglas en «Para el revisor».
+- **Puente de Rust** (`api.rs`): `permission_catalog`, `role_defaults` y `restore_role_defaults` con su prueba
+  `stage_a3_permission_routes_are_closed`, en el formato que lee `e2e/native-driver.ts` (el driver las tomó solo).
+
+**Escritorio** (`pages/RolesPage.tsx`, `components/PermissionEditor.tsx`, `services/permissionCatalog.ts`):
+
+- Pestaña inicial **«Vista sencilla»**: una casilla por capacidad que marca su conjunto con lo que necesita, o lo quita
+  si está completa (sin quitar lo que pertenece a otra capacidad completa); parcial con `aria-checked="mixed"`, la casilla
+  indeterminada y «Parcial: 1 de 9».
+- **«Vista detallada»**: un `Accordion` por grupo con «5 de 12» en el resumen, «Marcar todo el grupo» y «Quitar todo el
+  grupo», el buscador por nombre y descripción (sin acentos ni mayúsculas; abre las secciones con coincidencias) y la
+  descripción corta de cada permiso.
+- **Dependencias** leídas del catálogo: marcar agrega lo que hace falta y lo dice («También se marcó lo que necesita: …»);
+  quitar avisa qué dejará de funcionar («Sin lo que quitaste dejarán de funcionar: …») y no quita nada más (§3.2, A3-D4).
+- **«Restablecer permisos predeterminados»** en el editor, solo para los roles de `factory_roles` (no el Administrador ni
+  los del usuario): vista previa de Go, `ConfirmDialog` con lo que se agregará y lo que se quitará con sus nombres (y que
+  no cambian el límite de descuento ni los permisos propios de cada usuario; si hay cambios sin guardar, que se pierden),
+  confirmación con `expected` = lo que mostró la vista previa, aviso y la selección del editor al día; con `ROLE_CHANGED`,
+  el mensaje de Go.
+- Registro de movimientos: «Permisos predeterminados del rol restablecidos» (`AuditPage.tsx`).
+- Sin `permission-groups-v1`, la lista de siempre (`PermissionChecklist` y `GET permissions`).
+
+**Documentación**: `docs/ANDROID_INSTALAR.md` §4 («Permisos del rol Mesero»: ya viene todo marcado; lo opcional,
+«Modificar» y «Cancelar unidades», y cómo darlo en la vista detallada; la pantalla nueva; y «Restablecer» en una
+instalación existente), `API_CONTRACTS.md` (sección «Etapa A3 · permisos agrupados y roles de fábrica»), `CLAUDE.md`
+(composición del backend, seguridad, «Permisos agrupados y roles de fábrica (etapa A3)» y la regla permanente «El
+catálogo de permisos está en un solo lugar») y `docs/API_V1.md` (la capacidad nueva en la lista).
+
+### Decisiones propuestas
+
+- **Sin `operation_id` en la confirmación**: `POST roles/{id}/defaults` lleva solo `{expected}`, como `PATCH
+roles/{id}` (que tampoco lo lleva). El reintento es seguro igual: si el rol ya tiene exactamente sus permisos de
+  fábrica, responde `200` con `changed: false` sin escribir ni auditar (el patrón de `users/{id}/kitchen-stations` de la
+  9F); si no y los permisos ya no son los mostrados, `409 ROLE_CHANGED`.
+- **Orden de las comprobaciones**: primero si el rol tiene conjunto (un rol del usuario o el Administrador responden
+  `400` aunque sea el rol propio de quien pide), después el rol propio y la delegación.
+- **`permissions.read` además de `roles.manage` y `permissions.manage`** en las dos rutas (la vista previa enumera
+  permisos y la pantalla ya pedía los tres para editar). Es más estricto que `PATCH`, nunca menos.
+- **Capacidades al quitarlas**: se quitan sus permisos salvo los que pertenecen a otra capacidad completa; lo que
+  necesitaba lo quitado se avisa, no se quita (igual que en la vista detallada).
+- **Auditoría**: antes, el rol (como `role.updated`); después, `{role, added, removed}` para que el Registro diga qué
+  cambió.
+- **Prueba de la Fase A en la A1**: el armado del servidor de prueba de `TestStageA1WaiterPIN` pasó a
+  `newPinEnvironment` (mismo código, sin cambios de comportamiento) para que lo use también la prueba nueva, sin copiarlo.
+
+### Para el revisor
+
+Revisión independiente de §3 (roles de fábrica y restablecimiento; A3-D2 y A3-D6). Archivos:
+
+- `backend/internal/administration/permission_catalog.go` (conjuntos de fábrica, capacidades, grupos) y
+  `permission_catalog_entries.go` (grupo, descripción y `requires` de cada permiso).
+- `backend/internal/administration/role_defaults.go` (las dos rutas), `roles.go` (el despacho a `roleDefaults` antes de
+  `roles.manage`), `routes.go` (`permissions/catalog`), `setup.go` (concesión en el asistente).
+- Comparar con `roles.go` (`PATCH roles/{id}`) y `delegation.go` (`requireWithin`, `lockAdministration`,
+  `preserveAdministration`, `requireLimitWithin`, `fullAdministrators`).
+- Pruebas: `permission_catalog_test.go` (unidad) y `role_defaults_acceptance_test.go` (`TestStageA3FactoryRoles`).
+- Escritorio: `desktop/src/pages/RolesPage.tsx` (`useRoleDefaults`, que envía `expected`) y
+  `services/permissionCatalog.ts` (reglas de la pantalla; no deciden nada de seguridad).
+
+Reglas de seguridad implementadas en `role_defaults.go`:
+
+1. **Quién**: `roles.manage`, `permissions.manage` y `permissions.read` en las dos rutas (`403` si falta uno; una sesión
+   con PIN nunca los tiene, `WaiterPermissions`).
+2. **Qué roles**: solo los de `factoryRoleCodes` por `app.roles.code` (`waiter`, `cashier`, `kitchen`, `supervisor`,
+   `inventory`, `finance`); reservado (`support`) `403`; sin conjunto (código nulo o `administrator`) `400`; inexistente
+   `404`.
+3. **Rol propio**: `roleID == principal.RoleID` → `403` «No puedes modificar tu propio rol.».
+4. **`requireWithin`**: el actor debe tener **todos los permisos actuales** del rol («No puedes editar un rol con
+   permisos que tú no tienes.») **y todos los de fábrica** («No puedes conceder a un rol permisos que tú no tienes.»),
+   ambos `403`, en la vista previa y en la confirmación. Más `requireLimitWithin` (el límite de descuento del rol no
+   mayor que el del actor), como al editar.
+5. **Último administrador**: `lockAdministration` (mismo lock que `PATCH roles/{id}`) antes de leer el rol `FOR
+UPDATE`, y el cambio dentro de `preserveAdministration` (`400` «Debe permanecer al menos un administrador ordinario
+   activo.» si `fullAdministrators` pasaría de más de cero a cero; `sa` no cuenta).
+6. **Carrera vista previa ↔ confirmación**: `expected` (lo `current` que mostró la vista previa) se compara como conjunto
+   con los permisos leídos bajo el lock; distinto → `409 ROLE_CHANGED` sin escribir. Ya en los de fábrica → `200
+changed: false` sin escribir ni auditar.
+7. **Alcance**: solo `DELETE` + `INSERT` en `role_permissions` del rol; ni `role_discount_limits` ni `user_permissions`.
+8. **Auditoría** en la misma transacción: `role.defaults_restored`, entidad `role`, antes el rol y después `{role, added,
+removed}`.
+9. **Sin cambios silenciosos**: la `0027` no toca roles; el asistente concede los conjuntos solo en una instalación nueva;
+   una versión nueva de `factoryRolePermissions` no cambia roles existentes sin el botón.
+10. **El servidor sigue validando cada permiso en cada ruta**; Go no impone `requires` al guardar (A3-D4).
+
+Puntos que vale la pena mirar: que el Supervisor de fábrica no dé algo que un supervisor no deba tener (el conjunto es el
+del anexo de la Fase 0); que `events.read` y `waiter_devices.use` estén en «Mesas y cuentas»; y que la capacidad
+«Autorizar y corregir» (A3-D5) reúna lo que corresponde.
+
+### Pruebas nuevas o ampliadas
+
+- **Go, unidad** (`permission_catalog_test.go`): los 156 permisos registrados están en el catálogo y cada uno en un solo
+  grupo de los diez, con descripción de una frase y `requires` (aunque vacío); dependencias conocidas, sin
+  autodependencias ni ciclos (recorrido en profundidad) y las que pide la especificación (`accounts.open` →
+  `accounts.read`, `orders.cancel` → `orders.edit`…); los seis conjuntos de fábrica con su tamaño del anexo, sin
+  desconocidos ni repetidos y **cerrados bajo las dependencias**; el Mesero de fábrica es `WaiterPermissions` menos
+  `orders.edit` y `orders.cancel` y una sesión con PIN lo conserva completo; las once capacidades con permisos conocidos;
+  sin la sigla KDS en nombres ni descripciones. `TestPlainLanguageMessages` (Fase A) revisa además las 156 descripciones.
+- **Go, integración** (`TestStageA3FactoryRoles`, `administration`): instalación nueva con cada rol de fábrica igual a su
+  conjunto y el Administrador con todos; **un mesero nuevo con el rol Mesero y su PIN entra en una tableta, ve las mesas,
+  abre una cuenta con dos productos y la envía a cocina sin tocar permisos**, y Go le rechaza cancelar unidades, los
+  cobros y la vista previa de roles (`403`); el catálogo (156 permisos, 10 grupos, 11 capacidades, 6 roles de fábrica) y
+  `403` sin `permissions.read`; restablecer con vista previa (lo que se agrega y se quita), sin escribir en la vista
+  previa, con la auditoría (antes, agregado y quitado), sin tocar el límite de descuento ni la excepción del usuario,
+  repetido con `changed: false` y sin otra auditoría, y `400` sin `expected`; `409 ROLE_CHANGED` si el rol cambió entre la
+  vista previa y la confirmación (y con la vista previa nueva sí); escalada rechazada (un jefe de personal sin, por
+  ejemplo, autorizar devoluciones no restablece el Supervisor, ni en la vista previa) y el rol con un permiso que el
+  actor no tiene; el rol propio; un rol propio del usuario y el Administrador `400`, el soporte `403`, uno inexistente
+  `404`; y **nunca sin administrador** (el único administrador completo en el Supervisor, restablecido por `sa`: `400` y
+  nada cambia).
+- **Pruebas existentes que contaban los permisos tras el asistente**, al día: `pin_acceptance_test.go` (el Mesero tenía
+  solo `waiter_devices.use`), `long_open_hours_acceptance_test.go` («Cancelar cuentas» solo del Administrador; ahora
+  también del Supervisor de fábrica) y `operations/inventory_core_test.go` (Inventarios vacío; ahora con su conjunto). La
+  de PIN se reorganizó para compartir el armado del servidor (`newPinEnvironment`).
+- **Rust**: `stage_a3_permission_routes_are_closed`.
+- **Vitest** (`pages/stageA3Roles.test.tsx`, 11): las reglas con datos de Go (marcar con lo que se necesita, quitar con
+  lo que deja de funcionar, capacidad completa, parcial o ninguna, quitar una capacidad conservando otra completa, el
+  buscador sin acentos); la pantalla abre en la vista sencilla con la parcial; marcar capacidades y guardar; grupos con
+  «x de y», marcar y quitar el grupo con su aviso; dependencias en la vista detallada; el buscador por nombre y
+  descripción; «Restablecer» solo en el rol de fábrica (no en el Administrador ni en un rol propio) con la vista previa,
+  la confirmación con `expected` y la selección al día; `ROLE_CHANGED`; y sin la capacidad, la lista de siempre.
+- **Playwright** `workflow-stagea3-roles.spec.ts` (después de las de la A2 y antes de `workflow-zz-test-data`): el Mesero
+  de una instalación nueva con sus permisos de fábrica; el Administrador sin el botón; la vista sencilla («Atender
+  mesas» y «Para llevar» completas, «Cobrar» parcial «1 de 9»); la detallada («3 de 4», «2 de 5» → «4 de 5» al marcar
+  «Cancelar…», que marca «Modificar…»), el aviso al quitar «Consultar cuentas e importes», quitar y marcar todo «Para
+  llevar», el buscador por la descripción; guardar; restablecer con «Se quitarán (3)», confirmación y el Mesero otra vez
+  con sus permisos de fábrica; y la etiqueta en el Registro de movimientos. Deja el Mesero como llegó.
+
+### Pruebas ejecutadas
+
+Todas con el arnés `$SP/iso.sh` y `ISO_TAG=SV`, en `$SP/wt/srv`, sobre el código de los commits (la única corrección
+posterior a la primera corrida es de una prueba de integración de `administration`, que se repitió completa).
+
+| Qué                                                                                                   | Resultado                                                                                                                                                               |
+| ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `go-unit` (vet normal e `integration`, `go test -race` de todo, `GOOS=windows` build y vet)           | Aprobado: 35 paquetes `ok` (con el catálogo y `TestPlainLanguageMessages`)                                                                                              |
+| `cargo test --locked --offline`                                                                       | 108 aprobadas (una nueva), 3 ignoradas                                                                                                                                  |
+| Vitest con `tsc --noEmit` (suite completa)                                                            | **99 archivos, 943 pruebas aprobadas** (11 nuevas)                                                                                                                      |
+| `go-int ./internal/administration`, primera corrida                                                   | Todo aprobado salvo `9D_permiso_cancelar_cuentas` (esperaba «Cancelar cuentas» solo en el Administrador; ahora lo trae también el Supervisor de fábrica): prueba al día |
+| `go-int ./internal/administration`, segunda corrida completa                                          | `ok` (255 s): `TestStageA3FactoryRoles`, `TestStageTwoAcceptance` y `TestStageA1WaiterPIN` (con `newPinEnvironment`) incluidas                                          |
+| `TestStageA3FactoryRoles` sola, mientras se escribía                                                  | `ok` (27 s)                                                                                                                                                             |
+| `go-int ./internal/apicontract` (`TestContractV1` con el asistente nuevo)                             | `ok` (43 s)                                                                                                                                                             |
+| `go-int ./internal/operations` con `ISO_RUN=TestRestaurantAcceptance` (incluye `inventory_core`)      | `ok` (263 s)                                                                                                                                                            |
+| Playwright Chromium: `workflow-stagea1-pin` (usa el rol Mesero de fábrica) y `workflow-stagea3-roles` | 2 de 2                                                                                                                                                                  |
+| Playwright WebKit: las mismas                                                                         | 2 de 2                                                                                                                                                                  |
+| `format`, `fmt-check`, `sync-check`                                                                   | Aprobados                                                                                                                                                               |
+| `md5 -q docs/etapas/*.md \| md5` antes y después de formatear                                         | `3555c65b1300ce044695adcc1ec19f0d` las dos veces                                                                                                                        |
+
+No ejecutado (no lo pide la fase): la regresión completa (otras especificaciones de Playwright que crean usuarios con
+roles propios, `go-int` de los demás paquetes), `build` y Android. **No verificado**: el paso de la aplicación Android
+contra el Go temporal con un mesero de fábrica (el plan lo deja para la Fase E: «el mismo paso con la aplicación»); en
+Go ya está probado por HTTP con las cabeceras de la aplicación 0.1.0.
+
+### Commits (rama `etapa-a3-srv`, sin push ni fusión)
+
+- `726b837` etapa A3 fase B: catálogo de permisos en un solo lugar (…) con GET permissions/catalog y la capacidad
+  permission-groups-v1, los roles de fábrica en el asistente y «Restablecer permisos predeterminados» (…), con sus pruebas
+- `37d0ca8` etapa A3 fase B: puente nativo con permission_catalog, role_defaults y restore_role_defaults, y su prueba de
+  cargo
+- `15de037` etapa A3 fase B: pantalla de permisos de un rol agrupada por área (…) y «Restablecer permisos
+  predeterminados» con vista previa en los roles de fábrica, escondida sin permission-groups-v1, con stageA3Roles.test.tsx
+  y workflow-stagea3-roles
+- `2915e2b` etapa A3 fase B: arquitectura de permisos y roles de fábrica en CLAUDE.md, API_CONTRACTS.md y API_V1.md, y
+  docs/ANDROID_INSTALAR.md §4
+
+### Correcciones de la revisión
+
+La revisión independiente (`$SP/doc-rev.md`, rama `etapa-a3-rev`) no encontró ningún hallazgo alto. Las pruebas del
+revisor se trajeron sin cambios con `git cherry-pick` (`60eac80` ← `c17cb74`, `TestStageA3FactoryRolesReview`; `2169862`
+← `7c40f41`, `stageA3RolesReview.test.tsx`) y las dos pasan con las correcciones, decididas por el coordinador:
+
+| N.º | Decisión   | Corrección                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | Commit                               | Pruebas                                                                                                                                                                                                                                                                                                                                                    |
+| --- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R1  | A3-D16 (b) | `POST sessions/{id}/revoke` (`sessions_audit.go`) aplica `requireManageableUser` sobre el dueño de una sesión ajena (sus permisos efectivos y su límite de descuento dentro de los del actor): `403` «No puedes cerrar la sesión de un usuario con permisos que tú no tienes.». La propia se cierra siempre. El Supervisor de fábrica conserva `sessions.manage`. Es la única ruta de `sessions.*` que cierra sesiones; las otras que lo hacen (desactivar a un usuario, cambiar su PIN) ya aplicaban la regla, y revocar una terminal es de `devices.manage` (administra la terminal, no al usuario). | `a0ef54e`                            | Del revisor: el Supervisor de fábrica no cierra la del Administrador (`403`, el Administrador sigue con `auth/me` `200`). Mía (`A3_supervisor_cierra_sesiones_solo_de_quien_puede_administrar`): el mensaje exacto, y el Supervisor sí cierra la de un cajero (`200`, el cajero `401 SESSION_REVOKED`, `session.revoked` en el Registro).                  |
+| R2  | A3-D17     | El catálogo informa además `factory_permissions` (el conjunto de cada rol de fábrica; datos fijos, con `permissions.read`). `App.tsx` pasa a `RolesPage` el `role_id` y `support` de `auth/me`, y el límite de descuento de quien edita sale del de su rol (el soporte, 100 %). `roleDefaultsBlocker` no ofrece el botón —y dice por qué en palabras del restaurante— con el rol propio, un rol o un conjunto de fábrica con permisos que quien edita no tiene, o un límite de descuento mayor: ningún clic normal llega a un `403`. Go no se aflojó.                                                  | `a0ef54e` (Go), `f917894` (pantalla) | Del revisor (rol con un permiso que quien edita no tiene: sin botón). Mías: el rol propio, el conjunto de fábrica con un permiso que no se tiene, el límite mayor y el soporte (sí se ofrece), sin ninguna llamada a `role_defaults`; `TestPermissionCatalogCoversEveryRegisteredPermission` y `A3_catalogo_de_permisos` comprueban `factory_permissions`. |
+| R3  | A3-D18     | Con una búsqueda escrita, los botones del grupo actúan solo sobre lo que se ve y lo dicen («Marcar los 2 que se ven», «Marcar el que se ve», «Quitar el que se ve»); lo que eso necesita se sigue marcando solo, con su aviso. Sin búsqueda, «Marcar todo el grupo» y «Quitar todo el grupo», como antes.                                                                                                                                                                                                                                                                                              | `f917894`                            | Vitest «con una búsqueda, los botones del grupo actúan solo sobre lo que se ve» (lo que no se ve queda sin marcar) y el paso nuevo de `workflow-stagea3-roles`.                                                                                                                                                                                            |
+| R4  | A3-D19     | Sin `catalog.availability.manage` en el Supervisor de fábrica (88; conserva `catalog.availability.override` y `catalog.sold_out.manage`). Sigue cerrado bajo las dependencias. El anexo de este documento (y `API_CONTRACTS.md`) dice 88.                                                                                                                                                                                                                                                                                                                                                              | `a0ef54e`                            | `TestFactoryRolesAreClosedUnderDependencies` (88 y cerrado), `TestStageA3FactoryRoles` (el Supervisor de la instalación nueva igual a su conjunto).                                                                                                                                                                                                        |
+| R5  | A3-D20     | Tras `409 ROLE_CHANGED`, la pantalla vuelve a leer la lista de roles, pone en el editor los permisos que el rol tiene ahora y avisa que otra persona los cambió y que se descartaron los cambios sin guardar; un «Guardar rol» posterior parte de lo de ahora.                                                                                                                                                                                                                                                                                                                                         | `f917894`                            | Vitest «si el rol cambió entre la vista previa y la confirmación, lo dice y carga lo de ahora»: el editor queda con el cambio de la otra persona y el `PATCH` siguiente lo conserva.                                                                                                                                                                       |
+
+Ajuste de una prueba mía: `stage9dStyles.test.tsx` ya no lista «Quitar todo el grupo» entre los botones reversibles,
+porque su texto ahora se arma según la búsqueda (sigue con el estilo secundario). Documentación: `API_CONTRACTS.md`
+(`factory_permissions`, la regla de `sessions/{id}/revoke` y lo de la pantalla) y `CLAUDE.md` (seguridad y la pantalla).
+Commit de documentación: `159e538`.
+
+Pruebas ejecutadas después de las correcciones (`ISO_TAG=SV`, sobre el código de los commits):
+
+| Qué                                                                                                | Resultado                                                                      |
+| -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `go-int ./internal/administration` con `ISO_RUN=TestStageA3FactoryRoles` (la mía y la del revisor) | `ok` (58 s)                                                                    |
+| `go-unit`                                                                                          | Aprobado: 35 paquetes `ok`                                                     |
+| Vitest con `tsc --noEmit` (suite completa)                                                         | **100 archivos, 946 pruebas aprobadas** (con la del revisor y las nuevas mías) |
+| `go-int ./internal/administration` completo                                                        | `ok` (272 s)                                                                   |
+| Playwright `workflow-stagea3-roles` Chromium / WebKit                                              | 1 de 1 / 1 de 1                                                                |
+| `format`, `fmt-check`, `sync-check`; `md5 -q docs/etapas/*.md \| md5`                              | Aprobados; `3555c65b1300ce044695adcc1ec19f0d` antes y después                  |
+
+`cargo` no se corrió: `api.rs` no cambió en las correcciones.
+
+---
+
+## Revisión independiente · Fase B (roles de fábrica y «Restablecer permisos predeterminados»)
+
+Revisor independiente de §0 de la especificación («sin revisor independiente, salvo para los roles de fábrica y el
+restablecimiento de permisos (§3)»), 19 de noviembre de 2026. Árbol `$SP/wt/rev`, rama `etapa-a3-rev`, sobre la cabeza de
+la Fase B (`2915e2b`); se revisó `git diff 7e9a957..2915e2b` contra la especificación, A3-D2 a A3-D6 y el anexo del
+avance. Cada afirmación del resumen del autor se comprobó en el código. Pruebas con el arnés (`ISO_TAG=RV`, clúster temporal
+55499, Go temporal 8189 y vista previa 1429 solo para Playwright); nada contra el servicio real. Sin cambios en el código del
+autor: solo dos pruebas nuevas en mi rama (abajo).
+
+### Hallazgos
+
+| N.º    | Gravedad | Dónde                                                                                                                          | Escenario (entrada → resultado incorrecto)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | Prueba                                                                                                                                                                                              | Corrección propuesta                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **R1** | Media    | `backend/internal/administration/permission_catalog.go:260` (`sessions.manage` en el Supervisor) con `sessions_audit.go:20-37` | El Supervisor de fábrica trae `sessions.manage` («Revocar sesiones», grupo **Personal**, parte de la capacidad «Administrar personal») y `POST sessions/{id}/revoke` no aplica la regla de delegación (`delegation.go`: «nadie administra a un usuario con más permisos que los suyos»; solo protege a `sa`). En una **instalación nueva**, un usuario con el rol Supervisor ve en Sesiones activas el botón de revocar en las sesiones del Administrador (`SessionsPage.tsx:59`) y las cierra cuando quiera: `POST sessions/{sesión del admin}/revoke` → `200 {"ok":true}` y el `auth/me` siguiente del Administrador → `401 SESSION_REVOKED`. No es una escalada de permisos, pero es administrar a un usuario con más permisos (y cortar a cualquier cajero o supervisor en su turno) concedido de fábrica. La ruta ya existía; la Fase B la vuelve disponible de fábrica. | `c17cb74`, `TestStageA3FactoryRolesReview/RV_supervisor_de_fabrica_no_cierra_la_sesion_del_administrador` (**falla hoy**: revocar 200, `auth/me` 401). Pasa con cualquiera de las dos correcciones. | Decisión del coordinador (toca A3-D2 o una ruta existente): **(a)** quitar `sessions.manage` del Supervisor de fábrica (queda `sessions.read`; el Supervisor pasa a 88 y hay que ajustar el anexo y `TestFactoryRolesAreClosedUnderDependencies`), o **(b)** en `POST sessions/{id}/revoke`, `requireManageableUser` sobre el dueño de la sesión (salvo la propia), como `users/{id}`, lo que también protege a los roles personalizados. Recomiendo (b) y, si «cerrar una sesión olvidada» de un mesero es la razón, conservar el permiso en el Supervisor. |
+| **R2** | Baja     | `desktop/src/pages/RolesPage.tsx:188,195`                                                                                      | «Restablecer permisos predeterminados» se muestra en todo rol de fábrica si quien edita tiene `roles.manage`, `permissions.manage` y `permissions.read`, aunque Go lo vaya a rechazar: (1) un rol con permisos que quien edita no tiene (la pantalla lo sabe con `can`) → la vista previa responde `403` «No puedes editar un rol con permisos que tú no tienes.»; (2) el propio rol de quien edita (`RolesPage` no recibe el `role_id` de la sesión) → `403` «No puedes modificar tu propio rol.»; (3) un conjunto de fábrica con permisos que quien edita no tiene (el catálogo solo informa los códigos, no los conjuntos) → `403`; (4) un rol con un límite de descuento mayor que el suyo. Cada clic deja además un `access.denied` en el Registro de movimientos. Go sigue protegiendo: es solo la pantalla, pero el encargo pide esconderlo donde Go lo rechaza.       | `7c40f41`, `desktop/src/pages/stageA3RolesReview.test.tsx` (caso 1; **falla hoy**: el botón aparece). Los casos 2 a 4, por lectura del código.                                                      | Esconder el botón (o mostrarlo deshabilitado con la explicación) si `role.id` es el `role_id` de la sesión o si `role.permissions.some((key) => !can(key))`; para (3), que el catálogo informe los conjuntos (`factory_roles: [{code, permissions}]`) y comparar con `can`, o mostrar sin más el mensaje de Go (hoy ya lo muestra el aviso). (4) puede quedar con el mensaje de Go.                                                                                                                                                                          |
+| **R3** | Baja     | `desktop/src/components/PermissionEditor.tsx:245` (con el buscador de `:213`)                                                  | Con una búsqueda escrita, cada sección muestra solo las coincidencias, pero «Marcar todo el grupo» marca **todo** el grupo, también lo que no se ve, y sin aviso (el aviso solo cuenta lo que se marcó por dependencia). Ejemplo real: buscar «precuenta» deja en «Caja y cobros» solo «Imprimir tickets y precuentas»; «Marcar todo el grupo» marca los 40 de Caja y cobros (devoluciones, autorizaciones, configuración de caja y de cobros…). Comprobado con un caso de Vitest que no se confirmó: con «PIN» en el buscador, «Marcar todo el grupo» en «Mesas y cuentas» deja «2 de 2» y marca «Consultar cuentas e importes», que no estaba a la vista, sin ningún aviso. Go no deja conceder más de lo que el actor tiene, y se ve el «x de y» antes de guardar.                                                                                                         | Caso ad hoc de Vitest (no confirmado: la corrección es de diseño).                                                                                                                                  | Mientras haya una búsqueda, que «Marcar todo el grupo» y «Quitar todo el grupo» actúen solo sobre lo visible (y lo digan: «Marcar los 3 que coinciden»), o esconderlos mientras se busca.                                                                                                                                                                                                                                                                                                                                                                    |
+| **R4** | Baja     | `backend/internal/administration/permission_catalog.go:248` (`catalog.availability.manage` en el Supervisor)                   | El anexo dice del Supervisor «Sin administrar catálogo», pero `catalog.availability.manage` («Modificar disponibilidad y horarios») le deja cambiar en Catálogo los **horarios** de disponibilidad de cualquier producto (`PATCH catalog/products/{id}/availability`, `actions.go:241`; `ProductEditor.tsx:190`, `CatalogRecord.tsx:118`), que es configuración del catálogo. Lo operativo del turno ya lo cubre `catalog.sold_out.manage` («Marcar productos como agotados…»), que también trae.                                                                                                                                                                                                                                                                                                                                                                             | Lectura del código.                                                                                                                                                                                 | Decisión del coordinador sobre A3-D2: quitar `catalog.availability.manage` del Supervisor (88, con `catalog.availability.override` si tampoco se quiere; no rompe el cierre bajo dependencias) o dejarlo y corregir el porqué del anexo («y los horarios de disponibilidad»).                                                                                                                                                                                                                                                                                |
+| **R5** | Baja     | `desktop/src/pages/RolesPage.tsx:122-126`                                                                                      | Con `409 ROLE_CHANGED` la pantalla avisa, pero no vuelve a leer el rol ni la lista: el editor conserva la selección de cuando se abrió. Si después se toca «Guardar rol», `PATCH roles/{id}` (que no tiene control de concurrencia, como hasta la A2) reemplaza sin aviso el cambio que hizo la otra persona y que el 409 acababa de detectar. Go hace lo correcto; es la pantalla tras el 409.                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | Lectura del código (la prueba del autor «si el rol cambió entre la vista previa y la confirmación…» confirma que la selección no cambia).                                                           | Tras `ROLE_CHANGED`, `await onSaved()` (recarga la lista) y poner la selección del editor en lo que Go tiene ahora (otra `GET roles/{id}/defaults` da `current`), avisando que se descartaron los cambios sin guardar.                                                                                                                                                                                                                                                                                                                                       |
+
+Ningún hallazgo de gravedad alta: no encontré ningún camino por el que el restablecimiento (vista previa o confirmación) dé
+o quite algo que `PATCH roles/{id}` no permitiría, ni una instalación existente que cambie sola.
+
+### Lo que comprobé y está bien
+
+- **Reglas del restablecimiento** (`role_defaults.go`), contra `roles.go` y `delegation.go`: las dos rutas exigen
+  `roles.manage`, `permissions.manage` y `permissions.read` antes de leer nada (más estricto que `PATCH`); reservado `403`
+  antes del código; sin conjunto (rol del usuario con `code` nulo, Administrador, código vacío) `400`; el propio rol `403`;
+  `requireWithin` sobre los permisos **actuales** y los **de fábrica** y `requireLimitWithin`, en la vista previa y en la
+  confirmación; inexistente `404` (`pgx.ErrNoRows` → `publicFault`), identificador que no es UUID `400` (`routes.go:200`).
+  La confirmación decodifica, exige `expected`, toma `lockAdministration` y después la fila del rol `FOR UPDATE` (el mismo
+  orden que `PATCH roles/{id}` y `PATCH users/{id}`), repite todas las comprobaciones bajo el lock y solo entonces escribe
+  (`DELETE` + `INSERT` de `role_permissions` dentro de `preserveAdministration`) y audita. **Ningún camino escribe antes de
+  validar**; además un `403` revierte el savepoint (`runProtected`) y solo deja `access.denied`. `changed: false` exige las
+  mismas comprobaciones y no escribe. Solo toca `role_permissions`: el límite y `user_permissions` quedan igual (prueba del
+  autor). La transacción es `READ COMMITTED` (sin nivel explícito), así que lo leído después del lock está al día.
+- **Carreras**: dos confirmaciones a la vez → una `changed: true`, la otra `changed: false`, un solo registro; dos
+  restablecimientos a la vez que juntos dejarían el sistema sin administrador completo → uno `200` y otro `400` (mis
+  pruebas); vista previa ↔ confirmación con `409 ROLE_CHANGED` y repetir la confirmación (pruebas del autor). Las ediciones
+  de usuarios que tienen el rol (`PATCH users/{id}`, `PUT users/{id}/permissions`) toman el mismo lock consultivo.
+- **`GET permissions/catalog`**: exige `permissions.read` (`403` sin él, prueba del autor) y solo devuelve datos fijos del
+  código (grupos, descripciones, dependencias, capacidades y los **códigos** de los roles de fábrica, no sus conjuntos); una
+  sesión con PIN nunca lo tiene (`WaiterPermissions`). Está antes de la validación de UUID de `routes.go:200`.
+- **Conjuntos de fábrica**: los seis de Go son **exactamente** los del anexo (comparé las tablas del anexo con
+  `factoryRolePermissions` con un script: 14, 36, 8, 89, 20 y 28, iguales); **cerrados** bajo `requires` y **sin ciclos**
+  (mi script sobre el catálogo completo, además de la prueba unitaria). El Mesero es la tabla de la guía §4 (en `7e9a957`)
+  con Para llevar, «Entregado» (A3-D3) y la precuenta, sin `orders.edit` ni `orders.cancel`, y está dentro de
+  `WaiterPermissions` (una sesión con PIN lo conserva entero). Ninguno concede `users.manage`, `roles.*`, `permissions.*`,
+  `devices.manage`, `settings.*`, `registers.manage`, `documents.*` ni configuración de cobros, caja, cocina o inventario;
+  las autorizaciones solo en el Supervisor (y autorizar compras en Finanzas). Lo que me pareció fuera de puesto está en R1
+  y R4. Cada rol abre en una pantalla que puede usar (Finanzas, con `accounts.read` sin mesas, ve solo la pestaña Cuentas
+  de `OperationalPage`; Cocina abre en Cocina; Inventarios en Administración).
+- **Solo en el asistente y con el botón**: los únicos que escriben `role_permissions` fuera de migraciones antiguas son
+  `setup.go` (detrás de `configured`, con el lock del asistente), `roles.go` y `role_defaults.go`; `ensureFoundations`
+  solo inserta permisos y roles con `ON CONFLICT DO NOTHING`; la `0027` no toca roles y `TestStageA3Upgrade` exige que
+  ninguna otra fila cambie; nada al arrancar (`cmd/`), ni la importación del sistema anterior (solo asigna roles por
+  código).
+- **Dependencias y validación**: un solo lugar (`permission_catalog_entries.go`); `permissionCatalogEntries` solo lo usan
+  el catálogo y `closePermissions` (ninguna ruta). La interfaz no puede guardar una clave que Go no valide
+  (`knownPermission` y `requireWithin` en `POST`/`PATCH roles`). Go no impone `requires` (A3-D4) y **cada ruta sigue
+  validando**: un rol con «Abrir cuentas» sin «Consultar cuentas e importes» se guarda y `POST restaurant/accounts` responde
+  `403` sin abrir nada (mi prueba), además de la del autor (el Mesero de fábrica no cancela unidades ni cobra).
+- **Auditoría**: `role.defaults_restored` en la misma transacción, con el rol de antes y `{role, added, removed}` después;
+  la etiqueta en `AuditPage.tsx`; la vista previa no escribe nada.
+- **Puente de Rust**: tres operaciones nuevas en la lista cerrada con método y ruta fijos (`GET permissions/catalog`, `GET`
+  y `POST roles/{id}/defaults`), identificador validado por `resource_id`; React no elige ruta ni método.
+- **Escritorio**: el botón no aparece en el Administrador ni en un rol del usuario; sin `permission-groups-v1`, la lista de
+  siempre y nada del catálogo (pruebas del autor, que pasan en mi corrida).
+
+### No verificado
+
+- Playwright en WebKit (solo corrí Chromium) y nada de Android (no aplica a esta revisión).
+- Los casos 2 a 4 de R2 y R4–R5 solo por lectura del código (R2.2 no se puede montar: `RolesPage` no recibe la sesión).
+- Si el negocio quiere que el Supervisor cierre sesiones del Administrador (R1) o edite horarios (R4): es decisión del
+  coordinador; lo señalo porque contradice la regla de delegación y el «sin administrar catálogo» del anexo.
+
+### Pruebas ejecutadas (todas con `ISO_TAG=RV`)
+
+| Qué                                                                                              | Resultado                                                                                                                                                                                                     |
+| ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `go-int ./internal/administration` con `ISO_RUN=TestStageA3FactoryRoles` (la del autor y la mía) | La del autor aprobada; la mía: 4 subpruebas aprobadas (límite de descuento, dos confirmaciones, dependencias con la ruta que valida, dos restablecimientos sin administrador) y **R1 falla** como se esperaba |
+| `go-int ./internal/administration` con `ISO_RUN=TestStageA3FactoryRoles$` (solo la del autor)    | `ok` (29 s)                                                                                                                                                                                                   |
+| `go-int ./internal/administration` completo, con mi prueba                                       | 274 s: todo aprobado salvo **la subprueba de R1**, la única que falla (como se esperaba)                                                                                                                      |
+| `go-unit` (vet normal e `integration`, `test -race` de todo, `GOOS=windows`)                     | Aprobado (35 paquetes `ok`)                                                                                                                                                                                   |
+| `vitest` (con `tsc --noEmit`)                                                                    | 100 archivos, 944 pruebas: 943 aprobadas y **1 falla, la de R2** (las 11 del autor aprueban)                                                                                                                  |
+| Caso ad hoc de Vitest de R3 (no confirmado, borrado)                                             | Aprobado: confirma el comportamiento descrito                                                                                                                                                                 |
+| `cargo test` (puente nativo)                                                                     | 108 aprobadas, 3 ignoradas (`stage_a3_permission_routes_are_closed` incluida)                                                                                                                                 |
+| Playwright Chromium `workflow-stagea3-roles`                                                     | 1 de 1                                                                                                                                                                                                        |
+| Scripts propios sobre el catálogo volcado de Go (cierre, ciclos, anexo contra Go)                | Sin ciclos ni claves desconocidas; seis conjuntos cerrados e iguales al anexo                                                                                                                                 |
+| `format`, `fmt-check`; `md5 -q docs/etapas/*.md \| md5` antes y después                          | Aprobados; `3555c65b1300ce044695adcc1ec19f0d` las dos veces                                                                                                                                                   |
+
+### Commits (rama `etapa-a3-rev`, sin push ni fusión)
+
+- `c17cb74` etapa A3 revisión de la fase B: `TestStageA3FactoryRolesReview`
+  (`backend/internal/administration/role_defaults_review_acceptance_test.go`; la subprueba de R1 falla hasta corregirlo).
+- `7c40f41` etapa A3 revisión de la fase B: `desktop/src/pages/stageA3RolesReview.test.tsx` (R2; falla hasta corregirlo).
+
+### Decisiones del coordinador sobre la revisión de la Fase B
+
+Ningún hallazgo alto; ninguno obligó a cambiar la especificación. Correcciones del autor en `etapa-a3-srv` (`60eac80`,
+`2169862` —las pruebas del revisor, sin cambios—, `a0ef54e`, `f917894` y `159e538`), fusionadas con la Fase B en
+`215fd81`; las dos pruebas del revisor, que fallaban, pasan.
+
+- **A3-D16 (R1)**: `POST sessions/{id}/revoke` aplica la regla de delegación (`requireManageableUser` sobre el dueño de
+  una sesión ajena, como al editar un usuario, su PIN o su contraseña); la sesión propia se cierra siempre. El
+  Supervisor de fábrica conserva «Revocar sesiones» y ya no puede cerrar la del Administrador. Endurece una ruta
+  existente sin cambiar ninguna decisión de la especificación.
+- **A3-D17 (R2)**: la pantalla no ofrece «Restablecer permisos predeterminados» donde Go lo rechazaría (rol propio, rol o
+  conjunto de fábrica con permisos que quien edita no tiene, límite de descuento mayor) y dice por qué; el catálogo
+  informa el conjunto de cada rol de fábrica (`factory_permissions`, con `permissions.read`). Go no se aflojó.
+- **A3-D18 (R3)**: con una búsqueda escrita, «Marcar» y «Quitar» del grupo actúan solo sobre lo que se ve y lo dicen.
+- **A3-D19 (R4)**: el Supervisor de fábrica no trae `catalog.availability.manage` (horarios de venta del catálogo: es
+  administrar el catálogo); queda en **88** permisos y conserva `catalog.availability.override` y
+  `catalog.sold_out.manage`. Sustituye la fila del Supervisor del anexo de la Fase 0.
+- **A3-D20 (R5)**: tras un 409 `ROLE_CHANGED` la pantalla vuelve a leer el rol y avisa, para que guardar no pise sin aviso
+  el cambio de otra persona.
