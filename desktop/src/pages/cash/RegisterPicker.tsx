@@ -1,4 +1,4 @@
-import { shiftStateLabels } from '../../services/cash';
+import { shiftStateLabel } from '../../services/cash';
 import type { RegisterShift } from '../../services/cash';
 
 // Selector de caja. Por omisión, la de esta terminal; las demás solo aparecen si Go las entrega
@@ -18,7 +18,7 @@ export function RegisterPicker({
   return (
     <div className="cash-choice-grid cash-register-picker" role="group" aria-label="Caja">
       {registers.map((entry) => {
-        const state = entry.shift ? shiftStateLabels[entry.shift.state] : 'Sin turno';
+        const state = entry.shift ? shiftStateLabel(entry.shift.state) : 'Sin turno';
         return (
           <button
             type="button"

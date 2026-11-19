@@ -735,8 +735,18 @@ export const cashDifferenceLabels: Record<CashDifferenceResult, string> = {
   short: 'Faltante',
 };
 
+// Etapa A3 (A3-D22): un valor que esta versión no conoce se dice en general, nunca con su código.
+export function cashJobLabel(state: string) {
+  return cashJobLabels[state] ?? 'Otro estado de impresión';
+}
+
 export const shiftStateLabels: Record<string, string> = {
   open: 'Abierto',
   closing: 'Cierre en curso',
   closed: 'Cerrado',
 };
+
+// Etapa A3 (A3-D22): un valor que esta versión no conoce se dice en general, nunca con su código.
+export function shiftStateLabel(state: string) {
+  return shiftStateLabels[state] ?? 'Otro estado del turno';
+}

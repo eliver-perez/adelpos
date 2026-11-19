@@ -3,7 +3,7 @@ import { HistoryDetails } from '../../components/restaurant/HistoryDetails';
 import { Notice } from '../../components/Forms';
 import { IconLabel } from '../../components/Icon';
 import { useLiveResource } from '../../hooks/useLiveResource';
-import { eventLabels, serverDateTime } from '../../services/restaurant';
+import { eventLabel, serverDateTime } from '../../services/restaurant';
 import type { Bill, HistoryPage } from '../../services/restaurant';
 import { useState } from 'react';
 
@@ -26,7 +26,7 @@ export function AccountHistory({ bill, onClose }: { bill: Bill; onClose: () => v
       {history.data?.items.map((event) => (
         <Accordion
           key={event.id}
-          title={eventLabels[event.kind] ?? event.kind}
+          title={eventLabel(event.kind)}
           summary={`${serverDateTime(event.created_at, bill.timezone)} · ${event.author_name} · ${event.device_name}`}
         >
           <p className="muted text-xs">Movimiento #{event.sequence} de la cuenta.</p>

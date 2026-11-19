@@ -786,6 +786,24 @@ export const deliveryStateDescriptions: Record<DeliveryState, string> = {
   delivered: 'entregado',
 };
 
+// Etapa A3 (A3-D22): un valor que esta versión no conoce se dice en general, nunca con su código.
+// Las etiquetas cortas (Cuentas y Para llevar) y las descripciones en minúsculas (la cuenta abierta).
+export function paymentStateBadge(state: string) {
+  return paymentStateBadges[state as PaymentState] ?? 'Otro estado';
+}
+
+export function paymentStateDescription(state: string) {
+  return paymentStateDescriptions[state as PaymentState] ?? 'otro estado de cobro';
+}
+
+export function deliveryStateBadge(state: string) {
+  return deliveryStateBadges[state as DeliveryState] ?? 'Otro estado';
+}
+
+export function deliveryStateDescription(state: string) {
+  return deliveryStateDescriptions[state as DeliveryState] ?? 'otro estado de entrega';
+}
+
 export const methodIconLabels: Record<MethodIcon, string> = {
   cash: 'Efectivo',
   card: 'Tarjeta',

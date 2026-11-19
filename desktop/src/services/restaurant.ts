@@ -627,3 +627,8 @@ export const eventLabels: Record<string, string> = {
   'item.modified': 'Producto modificado',
   'item.cancelled': 'Producto cancelado',
 };
+
+// Etapa A3 (A3-D22): un valor que esta versión no conoce se dice en general, nunca con su código.
+export function eventLabel(kind: string) {
+  return eventLabels[kind] ?? 'Otro movimiento de la cuenta';
+}
