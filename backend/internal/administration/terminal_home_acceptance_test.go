@@ -4,6 +4,8 @@ package administration_test
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -128,4 +130,81 @@ func testTerminalHome(t *testing.T, env *delegationEnvironment) {
 			t.Fatalf("el usuario de la terminal no recibió su pantalla de inicio: %q", home)
 		}
 	})
+
+	t.Run("A3_android_solo_mesas_o_para_llevar", func(t *testing.T) {
+		testAndroidTerminalHome(t, env)
+	})
+}
+
+// testAndroidTerminalHome cubre la pantalla de inicio de un teléfono o tableta de meseros (etapa A3, §5.1 y A3-D7):
+// Go rechaza «Cocina» y «Caja» con un mensaje claro y sin escribir ni auditar nada, acepta Mesas y Para llevar, una
+// edición sin el campo conserva la guardada y el CHECK devices_android_home_check de la 0027 lo repite en la base.
+// Además, Cocina › Estaciones › Terminales de cocina (GET kitchen/access) ya no lista los dispositivos android.
+func testAndroidTerminalHome(t *testing.T, env *delegationEnvironment) {
+	var androidID string
+	if err := env.pool.QueryRow(env.ctx, `INSERT INTO app.devices(name,secret_hash,kind,os,app_version,paired_at)
+        VALUES ('Tableta A3',md5(random()::text),'android','Android 15','0.3.0',now()) RETURNING id`).Scan(&androidID); err != nil {
+		t.Fatal(err)
+	}
+	body := func(home any) map[string]any {
+		values := map[string]any{"name": "Tableta A3", "register_id": nil, "keyboard_mode": "auto"}
+		if home != nil {
+			values["home_screen"] = home
+		}
+		return values
+	}
+	updates := func() int {
+		return env.scalar(t, "SELECT count(*) FROM app.audit_events WHERE action='device.updated' AND entity_id=$1", androidID)
+	}
+	if storedTerminalHome(t, env, androidID) != "tables" {
+		t.Fatal("un teléfono o tableta nuevo debía iniciar en Mesas")
+	}
+	for _, rejected := range []string{"kitchen", "cash"} {
+		var reply struct {
+			Error struct {
+				Code    string `json:"code"`
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal(env.call(env.admin, "PATCH", "devices/"+androidID, body(rejected), 400), &reply); err != nil {
+			t.Fatal(err)
+		}
+		if reply.Error.Code != "VALIDATION_ERROR" ||
+			reply.Error.Message != "En un teléfono o tableta de meseros la pantalla inicial es Mesas o Para llevar." {
+			t.Fatalf("%s en un android: %+v", rejected, reply.Error)
+		}
+	}
+	if storedTerminalHome(t, env, androidID) != "tables" || updates() != 0 {
+		t.Fatal("una pantalla de inicio rechazada cambió el dispositivo o quedó auditada como cambio")
+	}
+	for _, accepted := range []string{"takeaway", "tables", "takeaway"} {
+		env.call(env.admin, "PATCH", "devices/"+androidID, body(accepted), 200)
+		if storedTerminalHome(t, env, androidID) != accepted {
+			t.Fatalf("no se aceptó %q en un android", accepted)
+		}
+	}
+	// Un escritorio anterior que no envía el campo edita el dispositivo sin cambiar su inicio.
+	env.call(env.admin, "PATCH", "devices/"+androidID, body(nil), 200)
+	if storedTerminalHome(t, env, androidID) != "takeaway" || updates() != 4 {
+		t.Fatal("una edición sin home_screen cambió la pantalla de inicio o no quedó auditada")
+	}
+	// La base lo repite: ni «Cocina» ni «Caja» en un android, aunque se escriba sin pasar por Go.
+	for _, rejected := range []string{"kitchen", "cash"} {
+		_, err := env.pool.Exec(env.ctx, "UPDATE app.devices SET home_screen=$1 WHERE id=$2", rejected, androidID)
+		if err == nil || !strings.Contains(err.Error(), "devices_android_home_check") {
+			t.Fatalf("la base aceptó %q en un android: %v", rejected, err)
+		}
+	}
+	// Terminales de cocina: la terminal de escritorio sí aparece; el teléfono o tableta, no.
+	var access []map[string]any
+	if err := json.Unmarshal(env.call(env.admin, "GET", "kitchen/access", nil, 200), &access); err != nil {
+		t.Fatal(err)
+	}
+	listed := map[string]bool{}
+	for _, terminal := range access {
+		listed[fmt.Sprint(terminal["device_id"])] = true
+	}
+	if !listed[env.admin.id] || listed[androidID] {
+		t.Fatalf("Terminales de cocina: escritorio %v, android %v", listed[env.admin.id], listed[androidID])
+	}
 }

@@ -41,11 +41,12 @@ func (handler *service) read(parts []string) (any, error) {
 		return handler.settings()
 	case "access":
 		// Etapa 9F: por terminal, si muestra todas las estaciones o su selección, el aviso sonoro y su
-		// pantalla de inicio (para recordar que una terminal de cocina abre en Cocina).
+		// pantalla de inicio (para recordar que una terminal de cocina abre en Cocina). Desde la etapa A3 (§5.1:
+		// cada tipo solo ve lo que le aplica) sin los teléfonos y tabletas de meseros, que no tienen modo cocina.
 		return many[map[string]any](handler.ctx, handler.tx, `SELECT jsonb_build_object('device_id',d.id,'device_name',d.name,
             'home_screen',d.home_screen,'all_stations',d.kitchen_all_stations,'sound_alert',d.kitchen_sound_alert,
             'station_ids',coalesce((SELECT jsonb_agg(station_id ORDER BY station_id) FROM app.kitchen_device_stations a WHERE a.device_id=d.id),'[]'))
-            FROM app.devices d WHERE revoked_at IS NULL ORDER BY d.name`)
+            FROM app.devices d WHERE revoked_at IS NULL AND kind <> 'android' ORDER BY d.name`)
 	case "releases":
 		if err := handler.request.Actor.Require("kitchen.stations.all"); err != nil {
 			return nil, err
