@@ -28,7 +28,7 @@ import com.adelpos.meseros.feature.access.pin.TAG_REENTER
 import com.adelpos.meseros.feature.access.pin.TAG_REENTER_MESSAGE
 import com.adelpos.meseros.feature.takeaway.TAG_TAKEAWAY_EMPTY
 import com.adelpos.meseros.feature.takeaway.TAG_TAKEAWAY_NEW
-import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_SEARCH
+import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_SCREEN
 import com.adelpos.meseros.navigation.TAG_MAIN_NAVIGATION
 import com.adelpos.meseros.navigation.TAG_NAV_TABLES
 import com.adelpos.meseros.navigation.TAG_NAV_TAKEAWAY
@@ -81,7 +81,7 @@ class AppNavigationTest {
     fun entrarSinConexionLlevaAMesasYElMenuCambiaDeMesero() {
         TestDevice.seedOfflineWaiter()
         scenario = ActivityScenario.launch(MainActivity::class.java)
-        assertTitle("Entrar")
+        assertTitle("Ingresar")
         // El servidor de prueba no responde: «Sin conexión» llega con la tolerancia del estado
         // único (etapa A3: 3 fallas seguidas y 20 s), no con la primera falla.
         compose.waitUntil(timeoutMillis = 60_000) {
@@ -92,7 +92,7 @@ class AppNavigationTest {
 
         compose.onNodeWithTag(TAG_WAITER_MENU).performClick()
         compose.onNodeWithTag(TAG_WAITER_SWITCH).performClick()
-        assertTitle("Entrar")
+        assertTitle("Ingresar")
         compose.onNodeWithTag(TAG_ENTRY).assertIsDisplayed()
     }
 
@@ -117,7 +117,7 @@ class AppNavigationTest {
         compose.onNode(hasText("Vuelve a escribir tu PIN", substring = true)).assertIsDisplayed()
         // La pantalla del mesero sigue debajo, con su barra.
         compose.onNode(hasText("Mesas").and(hasAnyAncestor(hasTestTag(TAG_TOP_BAR)))).assertExists()
-        compose.onNodeWithTag(TAG_TABLES_SEARCH).assertExists()
+        compose.onNodeWithTag(TAG_TABLES_SCREEN).assertExists()
 
         // Los toques en el diálogo (otra ventana) reinician el plazo del bloqueo por inactividad.
         val timeout = 3_600_000L
@@ -184,7 +184,8 @@ class AppNavigationTest {
             assertTitle("Para llevar")
             waitForTag(TAG_TAKEAWAY_NEW)
             compose.onNodeWithTag(TAG_TAKEAWAY_NEW).performClick()
-            assertTitle("Captura")
+            // Etapa A3 (§4.2): la barra dice dónde se está.
+            assertTitle("Nuevo pedido para llevar")
             waitForTag(TAG_CAPTURE)
             // La navegación principal sigue a la vista durante la captura.
             compose.onNodeWithTag(TAG_MAIN_NAVIGATION).assertIsDisplayed()
@@ -197,12 +198,12 @@ class AppNavigationTest {
             compose.onNodeWithTag(TAG_TAKEAWAY_EMPTY).assertIsDisplayed()
             compose.onNodeWithTag(TAG_NAV_TABLES).performClick()
             assertTitle("Mesas")
-            compose.onNodeWithTag(TAG_TABLES_SEARCH).assertIsDisplayed()
+            compose.onNodeWithTag(TAG_TABLES_SCREEN).assertIsDisplayed()
 
             // Sin el permiso de ver los pedidos para llevar, no aparece.
             compose.onNodeWithTag(TAG_WAITER_MENU).performClick()
             compose.onNodeWithTag(TAG_WAITER_SWITCH).performClick()
-            assertTitle("Entrar")
+            assertTitle("Ingresar")
             runBlocking { waiter.deleteAllPermissions() }
             TestDevice.enter(compose)
             assertTitle("Mesas")

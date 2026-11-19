@@ -87,7 +87,8 @@ fun PinEntryRoute(
             viewModel.refresh()
         }
     }
-    // Etapa A2: se tocó un aviso de platillos listos en «¿Quién eres?»: se le pide el PIN a su
+    // Etapa A2: se tocó un aviso de platillos listos en «Selecciona tu usuario»: se le pide el PIN
+    // a su
     // mesero (si está en la lista y nadie eligió otro).
     val roster = viewModel.roster
     LaunchedEffect(requestedWaiter, roster) {
@@ -116,8 +117,8 @@ fun PinEntryRoute(
 }
 
 /**
- * La lista de «¿Quién eres?» con la pantalla a la vista (A3-D1: la revisión se espacia con el
- * dispositivo sin uso; cada respuesta cuenta también como la revisión de la conexión).
+ * La lista de «Selecciona tu usuario» con la pantalla a la vista (A3-D1: la revisión se espacia con
+ * el dispositivo sin uso; cada respuesta cuenta también como la revisión de la conexión).
  */
 private const val REFRESH_MILLIS = 60_000L
 

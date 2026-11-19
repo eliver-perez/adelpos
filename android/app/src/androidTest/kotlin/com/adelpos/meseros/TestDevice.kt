@@ -12,7 +12,7 @@ import com.adelpos.meseros.core.domain.access.PinVerifier
 import com.adelpos.meseros.core.ui.components.TAG_PIN_KEY_PREFIX
 import com.adelpos.meseros.core.ui.components.TAG_PIN_SUBMIT
 import com.adelpos.meseros.feature.access.pin.TAG_WAITER_PREFIX
-import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_SEARCH
+import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_SCREEN
 import kotlinx.coroutines.runBlocking
 
 /**
@@ -90,7 +90,7 @@ object TestDevice {
         }
         compose.onNodeWithTag(TAG_PIN_SUBMIT).performClick()
         compose.waitUntil(timeoutMillis = 30_000) {
-            compose.onAllNodes(hasTestTag(TAG_TABLES_SEARCH)).fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodes(hasTestTag(TAG_TABLES_SCREEN)).fetchSemanticsNodes().isNotEmpty()
         }
     }
 }

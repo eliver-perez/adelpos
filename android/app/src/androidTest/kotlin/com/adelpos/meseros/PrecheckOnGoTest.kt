@@ -52,7 +52,7 @@ import com.adelpos.meseros.feature.waiter.tables.TAG_ACCOUNT_PANE
 import com.adelpos.meseros.feature.waiter.tables.TAG_ACCOUNT_PREFIX
 import com.adelpos.meseros.feature.waiter.tables.TAG_NEW_ACCOUNT
 import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_LIST
-import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_SEARCH
+import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_SCREEN
 import com.adelpos.meseros.feature.waiter.tables.TAG_TABLE_PREFIX
 import com.adelpos.meseros.navigation.TAG_NAV_TABLES
 import com.adelpos.meseros.navigation.TAG_NAV_TAKEAWAY
@@ -401,7 +401,7 @@ class PrecheckOnGoTest {
             compose.onNodeWithTag("$TAG_PIN_KEY_PREFIX$digit").performClick()
         }
         compose.onNodeWithTag(TAG_PIN_SUBMIT).performClick()
-        waitFor(TAG_TABLES_SEARCH)
+        waitFor(TAG_TABLES_SCREEN)
     }
 
     private fun openTakeaway() {
@@ -469,19 +469,19 @@ class PrecheckOnGoTest {
     /** Sale de la captura (o de la mesa en el teléfono) hasta la lista de Mesas. */
     private fun backToTables() {
         repeat(4) {
-            if (!present(TAG_TABLES_SEARCH) || present(TAG_CAPTURE)) {
+            if (!present(TAG_TABLES_SCREEN) || present(TAG_CAPTURE)) {
                 pressBack()
             }
         }
-        if (!present(TAG_TABLES_SEARCH) && present(TAG_NAV_TABLES)) {
+        if (!present(TAG_TABLES_SCREEN) && present(TAG_NAV_TABLES)) {
             compose.onNodeWithTag(TAG_NAV_TABLES).performClick()
         }
-        waitFor(TAG_TABLES_SEARCH)
+        waitFor(TAG_TABLES_SCREEN)
     }
 
     /** Mesas: en el teléfono con la mesa abierta, primero «Volver a Mesas». */
     private fun showTables() {
-        waitUntil("Mesas") { present(TAG_TABLES_SEARCH) || present(TAG_ACCOUNT_PANE) }
+        waitUntil("Mesas") { present(TAG_TABLES_SCREEN) || present(TAG_ACCOUNT_PANE) }
         if (present(TAG_ACCOUNT_PANE) && present(TAG_PANE_BACK)) {
             pressBack()
         }

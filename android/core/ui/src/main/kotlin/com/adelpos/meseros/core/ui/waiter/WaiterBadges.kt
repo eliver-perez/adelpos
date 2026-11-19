@@ -18,6 +18,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.adelpos.meseros.core.domain.waiter.ElapsedTime
 import com.adelpos.meseros.core.domain.waiter.OrderState
@@ -263,7 +264,13 @@ fun ElapsedLabel(
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Icon(AdelIcons.Clock, contentDescription = null, modifier = Modifier.size(16.dp))
-            Text(text = text, style = MaterialTheme.typography.labelLarge)
+            // Etapa A3 (§4.8): una etiqueta nunca se parte; si no cabe, se acorta.
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
         return
     }
@@ -290,7 +297,13 @@ fun ElapsedLabel(
                 tint = colors.warningMark,
                 modifier = Modifier.size(16.dp),
             )
-            Text(text = text, style = MaterialTheme.typography.labelLarge)
+            // Etapa A3 (§4.8): una etiqueta nunca se parte; si no cabe, se acorta.
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
@@ -315,7 +328,13 @@ private fun StateBadge(text: String, icon: ImageVector, tone: BadgeTone, modifie
                 tint = tone.accent,
                 modifier = Modifier.size(18.dp),
             )
-            Text(text = text, style = MaterialTheme.typography.labelLarge)
+            // Etapa A3 (§4.8): una etiqueta nunca se parte; si no cabe, se acorta.
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }

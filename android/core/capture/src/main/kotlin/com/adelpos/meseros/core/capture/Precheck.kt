@@ -29,10 +29,13 @@ import com.adelpos.meseros.core.ui.theme.AdelTheme
 
 /**
  * Lo que necesita la sección de la precuenta en la cuenta (null en `OrderPanel`: no se muestra,
- * porque la cuenta todavía no existe en Go o el mesero no tiene `payments.tickets.print`).
+ * porque la cuenta todavía no existe en Go).
  *
  * @param available hay conexión con la computadora principal y el mesero tiene sesión de Go:
  *   imprimir **nunca** entra en la cola sin conexión.
+ * @param allowed el mesero tiene `payments.tickets.print` (o todavía no se saben sus permisos: Go
+ *   decide). Etapa A3 (§4.9): sin el permiso el botón se ve deshabilitado con su motivo, en lugar
+ *   de ocultarse sin decir nada.
  */
 class PrecheckSection(
     val setup: PrecheckSetup,
@@ -40,6 +43,7 @@ class PrecheckSection(
     val available: Boolean,
     val onPrint: () -> Unit,
     val onRetry: () -> Unit,
+    val allowed: Boolean = true,
 )
 
 /**
@@ -50,9 +54,21 @@ class PrecheckSection(
  * «Enviar a cocina».
  */
 @Composable
-fun PrecheckPrintBar(section: PrecheckSection, modifier: Modifier = Modifier) {
-    val state = section.state
-    val name = section.setup.name
+fun PrecheckPrintBar(
+    section: PrecheckSection,
+    modifier: Modifier = Modifier,
+    framed: Boolean = true,
+) {
+    if (!framed) {
+        // Dentro de una tarjeta que ya tiene su borde (las cuentas del panel de la mesa, A3).
+        Column(
+            modifier = modifier.fillMaxWidth().testTag(TAG_PRECHECK),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            PrecheckContent(section)
+        }
+        return
+    }
     Surface(
         shape = MaterialTheme.shapes.medium,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
@@ -62,41 +78,59 @@ fun PrecheckPrintBar(section: PrecheckSection, modifier: Modifier = Modifier) {
             modifier = Modifier.padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            SecondaryButton(
-                text =
-                    if (state.busy) {
-                        stringResource(R.string.precheck_sending)
-                    } else {
-                        stringResource(printLabel(name))
-                    },
-                onClick = section.onPrint,
-                enabled = section.available && !state.busy,
-                modifier = Modifier.fillMaxWidth().testTag(TAG_PRECHECK_PRINT),
-            )
-            if (!section.available) {
-                // Sin conexión: lo último que se dijo ya no importa; solo cómo se puede imprimir.
-                Text(
-                    stringResource(R.string.precheck_no_connection),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.testTag(TAG_PRECHECK_OFFLINE),
-                )
-                return@Column
-            }
-            val message = state.message
-            if (message == null || message == PrintMessage.Sending) {
-                Destination(section.setup)
-            } else {
-                MessageBox(message, name)
-            }
-            if (state.canRetry && !state.busy) {
-                SecondaryButton(
-                    text = stringResource(R.string.precheck_retry),
-                    onClick = section.onRetry,
-                    modifier = Modifier.testTag(TAG_PRECHECK_RETRY),
-                )
-            }
+            PrecheckContent(section)
         }
+    }
+}
+
+// El botón y lo que se dice debajo (dentro del marco o de la tarjeta de quien lo usa).
+@Composable
+private fun PrecheckContent(section: PrecheckSection) {
+    val state = section.state
+    val name = section.setup.name
+    SecondaryButton(
+        text =
+            if (state.busy) {
+                stringResource(R.string.precheck_sending)
+            } else {
+                stringResource(printLabel(name))
+            },
+        onClick = section.onPrint,
+        enabled = section.allowed && section.available && !state.busy,
+        modifier = Modifier.fillMaxWidth().testTag(TAG_PRECHECK_PRINT),
+    )
+    if (!section.allowed) {
+        // Etapa A3 (§4.9): el botón a la vista, con el motivo (Go valida igual).
+        Text(
+            stringResource(R.string.precheck_not_allowed),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.testTag(TAG_PRECHECK_NOT_ALLOWED),
+        )
+        return
+    }
+    if (!section.available) {
+        // Sin conexión: lo último que se dijo ya no importa; solo cómo se puede imprimir.
+        Text(
+            stringResource(R.string.precheck_no_connection),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.testTag(TAG_PRECHECK_OFFLINE),
+        )
+        return
+    }
+    val message = state.message
+    if (message == null || message == PrintMessage.Sending) {
+        Destination(section.setup)
+    } else {
+        MessageBox(message, name)
+    }
+    if (state.canRetry && !state.busy) {
+        SecondaryButton(
+            text = stringResource(R.string.precheck_retry),
+            onClick = section.onRetry,
+            modifier = Modifier.testTag(TAG_PRECHECK_RETRY),
+        )
     }
 }
 
@@ -245,6 +279,7 @@ const val TAG_PRECHECK = "precheck"
 const val TAG_PRECHECK_PRINT = "precheck-print"
 const val TAG_PRECHECK_RETRY = "precheck-retry"
 const val TAG_PRECHECK_OFFLINE = "precheck-offline"
+const val TAG_PRECHECK_NOT_ALLOWED = "precheck-not-allowed"
 const val TAG_PRECHECK_DESTINATION = "precheck-destination"
 const val TAG_PRECHECK_MESSAGE = "precheck-message"
 const val TAG_PRECHECK_HINT = "precheck-hint"

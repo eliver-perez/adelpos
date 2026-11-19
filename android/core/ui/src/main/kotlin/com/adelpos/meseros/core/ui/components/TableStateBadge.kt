@@ -17,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.adelpos.meseros.core.domain.table.TableState
 import com.adelpos.meseros.core.ui.R
@@ -52,7 +53,12 @@ fun TableStateBadge(state: TableState, modifier: Modifier = Modifier) {
                     Modifier.size(20.dp)
                         .testTag("$TAG_TABLE_STATE_ICON_PREFIX${tableStateIconName(state)}"),
             )
-            Text(text = tableStateLabel(state), style = MaterialTheme.typography.labelLarge)
+            Text(
+                text = tableStateLabel(state),
+                style = MaterialTheme.typography.labelLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }

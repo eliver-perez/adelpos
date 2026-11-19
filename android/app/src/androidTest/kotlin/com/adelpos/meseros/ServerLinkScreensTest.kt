@@ -44,8 +44,8 @@ import org.junit.runner.RunWith
 /**
  * Etapa A3, §2 y §6: la barra y los avisos de cada pantalla leen **el mismo** estado de conexión
  * (`ServerLink`) y nunca se contradicen. Con un estado forzado (`FakeAccess` y su
- * [FixedServerLink]), cada cambio se ve igual en la barra y en «¿Quién eres?», Mesas y Para llevar;
- * una lectura que falló con el estado «En línea» no dice «Sin conexión».
+ * [FixedServerLink]), cada cambio se ve igual en la barra y en «Selecciona tu usuario», Mesas y
+ * Para llevar; una lectura que falló con el estado «En línea» no dice «Sin conexión».
  */
 @RunWith(AndroidJUnit4::class)
 class ServerLinkScreensTest {
@@ -113,7 +113,7 @@ class ServerLinkScreensTest {
             waitForBar(if (offline) "Sin conexión" else "En línea")
             compose.waitUntil(timeoutMillis = 5_000) { present(TAG_ENTRY_OFFLINE) == offline }
             assertEquals(
-                "la barra y «¿Quién eres?» dicen lo mismo",
+                "la barra y «Selecciona tu usuario» dicen lo mismo",
                 offline,
                 bar() == "Sin conexión" && present(TAG_ENTRY_OFFLINE),
             )
@@ -200,16 +200,14 @@ class ServerLinkScreensTest {
             status = status,
             offline = offline,
             tablesView = TablesView.LIST,
-            search = "",
             now = 0,
-            mapAreaId = null,
+            areaId = null,
         )
 
     private fun tablesActions() =
         TablesActions(
-            onSearchChange = {},
             onTablesViewChange = {},
-            onMapAreaSelect = {},
+            onAreaSelect = {},
             onTableSelect = {},
             onShowingTableChange = {},
             onRefresh = {},

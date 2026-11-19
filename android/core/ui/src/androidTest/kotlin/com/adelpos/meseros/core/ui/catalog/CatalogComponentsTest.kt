@@ -16,6 +16,7 @@ import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.assertWidthIsAtLeast
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -88,8 +89,16 @@ class CatalogComponentsTest {
             .assertHeightIsAtLeast(56.dp)
             .performClick()
         assertEquals(CatalogUiFixtures.SODA, chosen?.id)
-        // Sin imagen se ve el marcador.
+        // Sin imagen, tarjeta compacta de nombre y precio, sin la letra grande (etapa A3, §4.11).
         compose.onNodeWithTag(productTag(CatalogUiFixtures.SODA)).assertIsDisplayed()
+        compose
+            .onAllNodes(hasTestTag(TAG_PRODUCT_WITHOUT_IMAGE), useUnmergedTree = true)
+            .fetchSemanticsNodes()
+            .let { assertTrue("las tarjetas sin imagen son compactas", it.isNotEmpty()) }
+        compose
+            .onAllNodes(hasTestTag(TAG_PRODUCT_IMAGE_PLACEHOLDER), useUnmergedTree = true)
+            .fetchSemanticsNodes()
+            .let { assertTrue("sin la letra grande", it.isEmpty()) }
 
         compose.onNodeWithTag(categoryTag(CatalogUiFixtures.DRINKS)).assertIsSelected()
         compose

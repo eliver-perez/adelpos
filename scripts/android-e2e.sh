@@ -10,7 +10,7 @@
 #   ADELPOS_E2E_NETWORK_URL=https://127.0.0.1:8454 \
 #   ADELPOS_E2E_PROVISIONING_FILE=/ruta/al/provisioning-token \
 #   [ADELPOS_E2E_DATABASE_URL=postgresql://usuario:clave@127.0.0.1:55499/adel_pos_test_…] \
-#   scripts/android-e2e.sh [--suite access|catalog|waiter|field|takeaway|precheck|alerts|connection|all] \
+#   scripts/android-e2e.sh [--suite access|catalog|waiter|field|takeaway|precheck|alerts|adjustments|connection|all] \
 #       [--steps "…"] \
 #       [--no-install] [--out <carpeta>]
 #
@@ -95,26 +95,35 @@
 # explicación de los permisos · r2 aviso con la aplicación cerrada (tarea quitada de recientes), la pantalla apagada y
 # Doze forzado · r3 no llega a otro mesero ni a otro dispositivo (un segundo android emparejado por la API) y
 # transferir la cuenta cambia el destinatario · r4 este guion corta la red, marca «Listo» desde la Mac durante el
-# corte y la devuelve (en Android 8–10, cuando el canal ya vio el corte): llega una sola vez · r5 agrupado por cuenta y resumen · r6 en «¿Quién eres?», al tocarlo pide
+# corte y la devuelve (en Android 8–10, cuando el canal ya vio el corte): llega una sola vez · r5 agrupado por cuenta y resumen · r6 en «Selecciona tu usuario», al tocarlo pide
 # el PIN y abre la cuenta; con la cuenta a la vista, aviso dentro de la aplicación · r7 sonido y vibración apagados
 # desde Terminales y aviso apagado que detiene el servicio · r8 (r8a + r8b) este guion abre la aplicación (con la
 # wifi del emulador apagada en Android 11+: el emulador alcanza 10.0.2.2 por la red móvil y no ve el anuncio real),
 # mata el proceso, espera el reinicio pegajoso, marca «Listo» desde la Mac y busca el aviso con `dumpsys
-# notification --noredact` · r10 (antes de r9) en «¿Quién eres?» la aplicación no usa la sesión del último mesero
+# notification --noredact` · r10 (antes de r9) en «Selecciona tu usuario» la aplicación no usa la sesión del último mesero
 # (Go no renueva su `last_seen_at` en 5,5 minutos con la pantalla encendida y 2 apagada) · r9 al retirar el
 # dispositivo el servicio se detiene. «Listo» desde la Mac usa la sesión
 # del administrador de la terminal principal por la escucha local (127.0.0.1).
 #
+# Suite `adjustments` (etapa A3, §4, AdjustmentsOnGoTest, con un servidor temporal nuevo; en el teléfono y en la
+# tableta): a1 restaurante (dos áreas, mesas, catálogo sin imágenes y una cuenta vacía), emparejar y entrar · a2 Mesas
+# compacta en vertical y horizontal (una fila con «Lista | Mapa», áreas y «Pendientes»; el mapa llena el espacio; tocar
+# la mesa abre su panel; cuentas en dos renglones) · a3 «Imprimir precuenta» y «Descartar cuenta vacía» desde el panel
+# · a4 la captura (título de la mesa, «Buscar producto», tarjetas sin imagen, «Ver la cuenta · 1 por enviar», la flecha
+# con su aviso y «Pendientes») · a5 la entrada («Ingresar», logotipo, «Selecciona tu usuario») · a6 la pantalla inicial
+# Para llevar desde Terminales. Capturas de pantalla de cada paso en <salida>/screens.
+#
 # Suite `connection` (etapa A3, §2 y §6, ConnectionOnGoTest con `readyAlerts=on`, con un servidor temporal nuevo; NO
 # entra en `all` porque dura): c1 empareja, entra un mesero y deja el dispositivo sin uso durante
-# ADELPOS_E2E_CONNECTION_MINUTES minutos con el bloqueo por inactividad de fábrica (Mesas, «¿Quién eres?» a los 2
+# ADELPOS_E2E_CONNECTION_MINUTES minutos con el bloqueo por inactividad de fábrica (Mesas, «Selecciona tu usuario» a los 2
 # minutos y el mesero vuelve a entrar 45 s después, una y otra vez). Exige cero: ningún segundo con «Sin conexión» a
-# la vista (barra, «¿Quién eres?», Mesas, notificación del canal de avisos), ninguna petición sin respuesta y ninguna
+# la vista (barra, «Selecciona tu usuario», Mesas, notificación del canal de avisos), ninguna petición sin respuesta y ninguna
 # lectura repetida por una conexión muerta. El registro de cada cambio queda en <salida>/c1_…-logcat.txt
 # (etiquetas AdelConexion y AdelLink). Con la Mac sin carga y sin Gradle compilando.
 #
 # Suite `all`: con ADELPOS_E2E_NEW_SERVER, un servidor temporal nuevo para cada parte: access 1–5, access 6–7 (otra
-# identidad, sin reinstalar), catalog, waiter, field, takeaway, precheck y alerts. Resultados en <salida>/<suite>.
+# identidad, sin reinstalar), catalog, waiter, field, takeaway, precheck, alerts y adjustments. Resultados en
+# <salida>/<suite>.
 # La suite `connection` se corre aparte.
 #
 # Seguridad: se niega a correr con los puertos del servicio real (8181, 8443), con un host que no sea la propia Mac
@@ -158,8 +167,9 @@ suite_class() {
         takeaway) echo "TakeawayOnGoTest" ;;
         precheck) echo "PrecheckOnGoTest" ;;
         alerts) echo "AlertsOnGoTest" ;;
+        adjustments) echo "AdjustmentsOnGoTest" ;;
         connection) echo "ConnectionOnGoTest" ;;
-        *) fail "suite desconocida: $1 (access, catalog, waiter, field, takeaway, precheck, alerts, connection o all)" ;;
+        *) fail "suite desconocida: $1 (access, catalog, waiter, field, takeaway, precheck, alerts, adjustments, connection o all)" ;;
     esac
 }
 
@@ -172,6 +182,7 @@ suite_steps() {
         takeaway) echo "t1 t2 t3 t4 t5 t6 t7 t8 t9" ;;
         precheck) echo "p1 p2 p3 p4 p5 p6 p7" ;;
         alerts) echo "r1 r2 r3 r4 r5 r6 r7 r8 r10 r9" ;;
+        adjustments) echo "a1 a2 a3 a4 a5 a6" ;;
         connection) echo "c1" ;;
     esac
 }
@@ -808,6 +819,22 @@ alerts_step() {
     esac
 }
 
+# Etapa A3, §4: los ajustes de la aplicación en vertical y horizontal, con sus capturas de pantalla.
+adjustments_step() {
+    case "$1" in
+        a1) run_step a1_prepararEmparejarYEntrar ;;
+        a2) run_step a2_mesasCompactaEnLasDosOrientaciones ;;
+        a3) run_step a3_precuentaYDescartarCuentaVaciaDesdeElPanel ;;
+        a4) run_step a4_capturaConTituloBuscadorFlechaYPendientes ;;
+        a5) run_step a5_entradaConLosTextosNuevos ;;
+        a6) run_step a6_pantallaInicialParaLlevar ;;
+        *) fail "paso desconocido de la suite adjustments: $1" ;;
+    esac
+    mkdir -p "$SUITE_OUT/screens"
+    "$ADB" -s "$ANDROID_SERIAL" pull "/sdcard/Android/data/$APP_ID/files/screens/." \
+        "$SUITE_OUT/screens" >/dev/null 2>&1 || echo "sin capturas que copiar" | tee -a "$SUMMARY"
+}
+
 # Etapa A3: la conexión tolerante, minutos sin uso sin avisos falsos (con el aviso de platillos listos encendido, como
 # en la tableta del restaurante). El registro del emulador se agranda para que quepa la corrida completa.
 connection_step() {
@@ -853,6 +880,7 @@ run_suite() {
             takeaway) takeaway_step "$step" ;;
             precheck) precheck_step "$step" ;;
             alerts) alerts_step "$step" ;;
+            adjustments) adjustments_step "$step" ;;
             connection) connection_step "$step" ;;
         esac
     done
@@ -888,7 +916,7 @@ if [ "$SUITE" = all ]; then
     run_suite access "1 2 3 4 5" 1 "$OUT/access"
     new_server
     run_suite access "6 7" 0 "$OUT/access"
-    for part in catalog waiter field takeaway precheck alerts; do
+    for part in catalog waiter field takeaway precheck alerts adjustments; do
         new_server
         run_suite "$part" "$(suite_steps "$part")" 1 "$OUT/$part"
     done

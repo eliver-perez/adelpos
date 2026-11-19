@@ -94,14 +94,16 @@ class AppContainer(context: Context, private val settings: Settings = Settings()
 
     /**
      * **El estado único de conexión** con la computadora principal (etapa A3, A3-D1): lo leen la
-     * barra, «¿Quién eres?», Mesas, Para llevar, la precuenta, «Entregado» y la notificación del
-     * canal de avisos; lo alimentan la red de Android y cada respuesta de Go del cliente del
-     * servidor emparejado. Lo arranca AdelPosApplication.
+     * barra, «Selecciona tu usuario», Mesas, Para llevar, la precuenta, «Entregado» y la
+     * notificación del canal de avisos; lo alimentan la red de Android y cada respuesta de Go del
+     * cliente del servidor emparejado. Lo arranca AdelPosApplication.
      */
     val serverLink: ServerLinkMonitor by lazy {
         ServerLinkMonitor(
-            network = connectionMonitor.linkState,
-            initialNetwork = connectionMonitor.current(),
+            network = connectionMonitor.reportedLinkState,
+            // Sin red predeterminada al crear el estado, todavía no se sabe (Android puede tardar
+            // en darla al arrancar): el estado duda y se ve «En línea» (ServerLinkTracker).
+            initialNetwork = connectionMonitor.current().takeIf { it == LinkState.ONLINE },
             foreground = appForeground.inForeground,
             // Se arma al recogerse (en start()): el canal de tiempo real necesita la entrada, que
             // necesita este estado; así no se crean en círculo.

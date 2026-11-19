@@ -112,6 +112,8 @@ data class AccountDto(
     @SerialName("payment_state") val paymentState: String? = null,
     @SerialName("delivery_state") val deliveryState: String? = null,
     @SerialName("created_at") val createdAt: String? = null,
+    // Etapa A3 (§4.10): Go dice si es una cuenta vacía que se puede descartar.
+    val discardable: Boolean = false,
 )
 
 /**

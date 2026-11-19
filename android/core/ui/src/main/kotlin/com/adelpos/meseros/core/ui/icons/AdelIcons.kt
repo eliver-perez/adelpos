@@ -47,6 +47,9 @@ object AdelIcons {
     /** Volver al panel anterior. */
     val ChevronLeft: ImageVector by lazy { icon("chevron-left", "m15 5-7 7 7 7") }
 
+    /** La flecha de regreso de la barra superior (etapa A3, `back` de Icon.tsx). */
+    val Back: ImageVector by lazy { icon("back", "M20 12H4m5-5-5 5 5 5") }
+
     /** Abrir un menú (el del mesero activo). */
     val ChevronDown: ImageVector by lazy { icon("chevron-down", "m5 9 7 7 7-7") }
 

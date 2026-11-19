@@ -45,6 +45,30 @@ interface RestaurantSource {
 
     /** La cuenta completa desde Go, con la sesión del mesero activo. */
     suspend fun bill(accountId: String): AppResult<AccountBill>
+
+    /**
+     * «Descartar cuenta vacía» (etapa A3, §4.10) de [account], que Go marcó `discardable`: con
+     * conexión y la sesión del mesero activo (nunca en la cola), con su revisión. Después se vuelve
+     * a leer.
+     */
+    suspend fun discardEmptyAccount(account: AccountSummary): DiscardAccountResult
+}
+
+/** Cómo quedó «Descartar cuenta vacía». */
+sealed interface DiscardAccountResult {
+    data object Discarded : DiscardAccountResult
+
+    /**
+     * La cuenta ya no está vacía o cambió en otra terminal (`ACCOUNT_NOT_EMPTY`,
+     * `ACCOUNT_CONFLICT`): se vuelve a leer y se ve como está.
+     */
+    data object Changed : DiscardAccountResult
+
+    /** Sin conexión o sin sesión de Go: descartar necesita conexión. */
+    data object NoConnection : DiscardAccountResult
+
+    /** Go lo rechazó por otro motivo (su mensaje, si lo dio). */
+    data class Failed(val message: String?) : DiscardAccountResult
 }
 
 /** Resultado de «Enviar a cocina» para la pantalla de captura. */

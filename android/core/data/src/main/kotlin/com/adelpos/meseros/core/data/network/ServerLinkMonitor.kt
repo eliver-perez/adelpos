@@ -41,12 +41,16 @@ fun interface ServerProbing {
  * se salta si hubo otro éxito), cada 5 s mientras duda, cada 10 s con «Sin conexión» y nada en
  * segundo plano ([foreground]).
  *
+ * @param network los avisos de la red de Android (sin la lectura del primer momento si todavía no
+ *   hay red: no es un aviso, `ConnectionMonitor.reportedLinkState`).
+ * @param initialNetwork la red al crear el estado, o null si Android todavía no la informa: el
+ *   estado duda y se ve «En línea» hasta saberlo ([ServerLinkTracker]).
  * @param log una línea por cambio de estado y por falla (el registro `AdelLink` de la aplicación;
  *   lo lee la prueba de una hora sin uso).
  */
 class ServerLinkMonitor(
     private val network: Flow<LinkState>,
-    initialNetwork: LinkState,
+    initialNetwork: LinkState?,
     private val foreground: StateFlow<Boolean>,
     private val channelOpen: Flow<Boolean>,
     private val probing: ServerProbing,
@@ -134,11 +138,17 @@ class ServerLinkMonitor(
 
     private suspend fun reviewLoop() {
         while (true) {
-            val wait = tracker.nextProbeIn(foreground.value, channelIsOpen)
+            // El estado puede cambiar solo con el tiempo (el plazo al arrancar): se vuelve a
+            // publicar en cada vuelta.
+            change {}
+            val probe = tracker.nextProbeIn(foreground.value, channelIsOpen)
+            val decision = tracker.nextDecisionIn()
+            val wait = listOfNotNull(probe, decision).minOrNull()
             when {
                 wait == null -> wakeups.receive()
-                wait > 0 -> withTimeoutOrNull(wait) { wakeups.receive() }
-                else -> probeOnce(relocate = tracker.state == LinkState.OFFLINE, quick = false)
+                probe == 0L ->
+                    probeOnce(relocate = tracker.state == LinkState.OFFLINE, quick = false)
+                else -> withTimeoutOrNull(wait) { wakeups.receive() }
             }
         }
     }

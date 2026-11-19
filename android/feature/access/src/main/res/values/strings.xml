@@ -5,7 +5,7 @@
     <!-- Títulos de la barra superior. -->
     <string name="access_title_loading">AD-EL POS</string>
     <string name="access_title_find_server">Buscar el servidor</string>
-    <string name="access_title_entry">Entrar</string>
+    <string name="access_title_entry">Ingresar</string>
     <string name="access_title_repair">Emparejar de nuevo</string>
     <string name="access_title_update">Actualizar</string>
     <string name="access_title_retired">Dispositivo retirado</string>
@@ -78,16 +78,16 @@
     <string name="permission_try_again">Volver a intentar</string>
 
     <!-- Entrada con PIN (§3.2). -->
-    <string name="entry_heading">¿Quién eres?</string>
-    <string name="entry_help">Toca tu nombre y escribe tu PIN.</string>
+    <string name="entry_heading">Selecciona tu usuario</string>
+    <string name="entry_help">Selecciona tu usuario y escribe tu PIN.</string>
     <string name="entry_offline">Sin conexión con la computadora principal: solo pueden entrar los meseros que ya entraron antes en %1$s.</string>
     <string name="entry_empty_online">No hay meseros con PIN. En la computadora principal, asígnalo en Personal › Usuarios.</string>
     <string name="entry_empty_offline">Sin conexión y nadie ha entrado antes en %1$s. Conecta el dispositivo a la red del restaurante para entrar.</string>
     <string name="entry_refresh">Actualizar</string>
     <string name="entry_locked_until">Bloqueado hasta las %1$s</string>
     <string name="entry_pin_for">PIN de %1$s</string>
-    <string name="entry_enter">Entrar</string>
-    <string name="entry_other_waiter">Elegir otro nombre</string>
+    <string name="entry_enter">Ingresar</string>
+    <string name="entry_other_waiter">Elegir otro usuario</string>
     <string name="entry_checking">Comprobando…</string>
     <string name="entry_wrong_pin">PIN incorrecto. Inténtalo de nuevo.</string>
     <string name="entry_locked">Demasiados intentos. Intenta de nuevo a las %1$s.</string>

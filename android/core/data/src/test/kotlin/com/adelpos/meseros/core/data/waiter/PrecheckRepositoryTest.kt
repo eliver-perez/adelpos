@@ -9,6 +9,7 @@ import com.adelpos.meseros.core.data.waiter.WaiterTestSupport.json
 import com.adelpos.meseros.core.domain.access.ActiveWaiter
 import com.adelpos.meseros.core.domain.access.WaiterProfile
 import com.adelpos.meseros.core.domain.error.AppError
+import com.adelpos.meseros.core.domain.waiter.DeviceHome
 import com.adelpos.meseros.core.domain.waiter.PrecheckFeedback
 import com.adelpos.meseros.core.domain.waiter.PrecheckName
 import com.adelpos.meseros.core.domain.waiter.PrecheckPrinter
@@ -117,14 +118,14 @@ class PrecheckRepositoryTest {
         Json.parseToJsonElement(request.body!!.utf8()).jsonObject
 
     /** `Identity` de `getIdentity` como lo entrega Go (parte C: `terminal.precheck_printer`). */
-    private fun identity(name: String, printer: String?) =
+    private fun identity(name: String, printer: String?, home: String = "restaurant") =
         json(
             200,
             """{"user":{"id":"$ANA","username":"ana","display_name":"Ana López",""" +
                 """"permissions":["payments.tickets.print","accounts.read"]},""" +
                 """"preferences":{"theme":"light","home_screen":"restaurant"},""" +
                 """"terminal":{"id":"d1","name":"Tableta","register_id":null,""" +
-                """"keyboard_mode":"auto","home_screen":"restaurant","idle_lock_seconds":120,""" +
+                """"keyboard_mode":"auto","home_screen":"$home","idle_lock_seconds":120,""" +
                 """"precheck_printer_id":${printer?.let { "\"p1\"" } ?: "null"},""" +
                 """"precheck_printer":${printer ?: "null"}},""" +
                 """"establishment":{"name":"Restaurante","timezone":"America/Monterrey",""" +
@@ -170,6 +171,8 @@ class PrecheckRepositoryTest {
             identity(
                 "sales_ticket",
                 """{"id":"p1","name":"USB Caja 2","terminal_name":"Caja 2"}""",
+                // Etapa A3 (§4.12): la pantalla inicial de Terminales, de la misma lectura.
+                home = "takeaway",
             ),
         )
         val first = repository()
@@ -180,6 +183,7 @@ class PrecheckRepositoryTest {
         assertEquals(PrecheckName.SALES_TICKET, read.name)
         assertEquals(PrecheckPrinter("USB Caja 2", "Caja 2"), read.printer)
         assertEquals("Caja 2", read.printer!!.destination)
+        assertEquals(DeviceHome.TAKEAWAY, read.home)
         val request = requests("GET auth/me").single()
         assertEquals("Bearer sesion-de-ana", request.headers["Authorization"])
 
@@ -191,8 +195,9 @@ class PrecheckRepositoryTest {
         assertEquals(read, saved)
         assertEquals(1, requests("GET auth/me").size)
 
-        // Cambió en la principal: «Cuenta» y sin impresora.
-        respond("GET auth/me", identity("bill", printer = null))
+        // Cambió en la principal: «Cuenta», sin impresora y una pantalla inicial que no es de un
+        // android (un servidor 0.13.0 con «Cocina» guardada): Mesas (A3-D7).
+        respond("GET auth/me", identity("bill", printer = null, home = "kitchen"))
         offline.refreshSetup(ANA)
         assertEquals(
             PrecheckSetup(PrecheckName.BILL, printer = null, read = true),

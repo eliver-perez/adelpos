@@ -5,8 +5,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -53,7 +55,7 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
-/** «Pedidos pendientes» con su ViewModel. */
+/** «Pendientes» con su ViewModel. */
 @Composable
 fun PendingOrdersRoute(
     dependencies: CaptureDependencies,
@@ -97,16 +99,21 @@ fun PendingOrdersScreen(
                 .testTag(TAG_PENDING),
         verticalArrangement = Arrangement.spacedBy(AdelDimens.Gap),
     ) {
+        // Etapa A3, §4.6: «Reintentar ya» solo si hay algo que reintentar (nada deshabilitado).
+        val retryable = orders.any { it.state == OrderState.QUEUED } || others.isNotEmpty()
         item {
-            PrimaryButton(
-                text = stringResource(R.string.pending_retry_now),
-                onClick = onRetryNow,
-                enabled = orders.any { it.state == OrderState.QUEUED } || others.isNotEmpty(),
-                modifier =
-                    Modifier.fillMaxWidth()
-                        .padding(top = AdelDimens.ScreenPadding)
-                        .testTag(TAG_RETRY_NOW),
-            )
+            if (retryable) {
+                PrimaryButton(
+                    text = stringResource(R.string.pending_retry_now),
+                    onClick = onRetryNow,
+                    modifier =
+                        Modifier.fillMaxWidth()
+                            .padding(top = AdelDimens.ScreenPadding)
+                            .testTag(TAG_RETRY_NOW),
+                )
+            } else {
+                Spacer(Modifier.height(AdelDimens.ScreenPadding))
+            }
         }
         if (orders.isEmpty() && captures.isEmpty()) {
             item {

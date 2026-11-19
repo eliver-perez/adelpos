@@ -134,7 +134,7 @@ class PinEntryViewModel(
         message = null
     }
 
-    /** «Elegir otro nombre» o Atrás: de vuelta a la lista. */
+    /** «Elegir otro usuario» o Atrás: de vuelta a la lista. */
     fun back() {
         selectedId = null
         savedState[KEY_SELECTED] = null

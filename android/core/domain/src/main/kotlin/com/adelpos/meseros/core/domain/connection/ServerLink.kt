@@ -6,9 +6,9 @@ import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * **El único estado de conexión con la computadora principal** de toda la aplicación (etapa A3, §2,
- * A3-D1). La barra («En línea» / «Sin conexión»), «¿Quién eres?» y la entrada con PIN, Mesas, Para
- * llevar, la precuenta, «Entregado» y la notificación del canal de avisos leen este estado y nada
- * más: nunca se contradicen.
+ * A3-D1). La barra («En línea» / «Sin conexión»), «Selecciona tu usuario» y la entrada con PIN,
+ * Mesas, Para llevar, la precuenta, «Entregado» y la notificación del canal de avisos leen este
+ * estado y nada más: nunca se contradicen.
  *
  * Lo alimentan la red de Android (sin red: «Sin conexión» al instante) y cada respuesta de Go en un
  * punto único del cliente HTTP ([ServerAnswers]). Las reglas de tolerancia y de revisión viven en

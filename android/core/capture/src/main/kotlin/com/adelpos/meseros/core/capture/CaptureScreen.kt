@@ -13,17 +13,20 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.adelpos.meseros.core.domain.catalog.Catalog
 import com.adelpos.meseros.core.domain.catalog.CatalogImages
 import com.adelpos.meseros.core.domain.catalog.CatalogProduct
 import com.adelpos.meseros.core.domain.catalog.LineSelection
+import com.adelpos.meseros.core.domain.waiter.CaptureTitle
 import com.adelpos.meseros.core.domain.waiter.OfflineOrderPlan
 import com.adelpos.meseros.core.domain.waiter.WaiterAction
 import com.adelpos.meseros.core.ui.catalog.CatalogBrowser
 import com.adelpos.meseros.core.ui.catalog.ProductCustomizer
 import com.adelpos.meseros.core.ui.components.LocalUserActivity
+import com.adelpos.meseros.core.ui.components.SystemBackHandler
 import com.adelpos.meseros.core.ui.components.reportsUserActivity
 import com.adelpos.meseros.core.ui.layout.AdaptivePanes
 import com.adelpos.meseros.core.ui.layout.PaneLayout
@@ -31,12 +34,19 @@ import com.adelpos.meseros.core.ui.layout.PaneLayout
 /**
  * Captura de una cuenta o de un pedido para llevar con su ViewModel; [onDone] vuelve a la lista de
  * donde se entró (Mesas o Para llevar) con el pedido enviado o descartado.
+ *
+ * Etapa A3: [onTitleChange] recibe el título de la barra («Mesa 4», «Para llevar #12», §4.2). Al
+ * salir (flecha o Atrás) con productos propios sin enviar, lo capturado se queda guardado con su
+ * mesero (regla de la A1) y [onLeaveUnsent] recibe la frase que lo dice para mostrarla en la lista
+ * (§4.1); quien llama regresa.
  */
 @Composable
 fun CaptureRoute(
     layout: PaneLayout,
     dependencies: CaptureDependencies,
     onDone: () -> Unit,
+    onTitleChange: (String) -> Unit = {},
+    onLeaveUnsent: (String) -> Unit = {},
     viewModel: CaptureViewModel = viewModel(factory = CaptureViewModel.factory(dependencies)),
 ) {
     val capture by viewModel.capture.collectAsState()
@@ -85,12 +95,27 @@ fun CaptureRoute(
     }
     val current = capture ?: return
     val ownCount = OfflineOrderPlan.of(current).items.sumOf { it.line.quantity }
+    val title = captureTitle(CaptureTitle.of(current, bill))
+    LaunchedEffect(title) { onTitleChange(title) }
+    // Antes que el de AdaptivePanes: con la cuenta abierta en el teléfono, Atrás la cierra primero.
+    val leftNotice =
+        if (current.takeaway) {
+            stringResource(R.string.capture_left_unsent_takeaway, title)
+        } else {
+            stringResource(R.string.capture_left_unsent, title)
+        }
+    SystemBackHandler(enabled = ownCount > 0) { onLeaveUnsent(leftNotice) }
     AdaptivePanes(
         layout = layout,
         showSecondary = viewModel.showingOrder,
         onShowSecondaryChange = viewModel::onShowingOrderChange,
         primaryTitle = stringResource(R.string.capture_catalog),
-        openSecondaryLabel = stringResource(R.string.capture_open_order, ownCount),
+        openSecondaryLabel =
+            if (ownCount > 0) {
+                pluralStringResource(R.plurals.capture_open_order_unsent, ownCount, ownCount)
+            } else {
+                stringResource(R.string.capture_open_order)
+            },
         primary = {
             CatalogPane(
                 catalog = catalog,
@@ -140,17 +165,17 @@ fun CaptureRoute(
                         onEditCustomer = { editingCustomer = true },
                     ),
                 customer = customer,
-                // La precuenta (etapa A2, §5): solo con la cuenta ya en Go y el permiso de Go.
+                // La precuenta (etapa A2, §5): con la cuenta ya en Go. Etapa A3 (§4.9): sin el
+                // permiso de Go se ve el botón con su motivo, no se oculta.
                 precheck =
-                    if (
-                        current.accountId != null && permissions.grants(WaiterAction.PRINT_PRECHECK)
-                    ) {
+                    if (current.accountId != null) {
                         PrecheckSection(
                             setup = precheckSetup,
                             state = precheckState,
                             available = canPrintNow,
                             onPrint = viewModel::onPrintPrecheck,
                             onRetry = viewModel::onRetryPrecheck,
+                            allowed = permissions.allows(WaiterAction.PRINT_PRECHECK),
                         )
                     } else {
                         null
@@ -251,8 +276,15 @@ private fun CatalogPane(
     )
 }
 
-/** Título de la pantalla para la barra superior. */
-@Composable fun captureTitle(): String = stringResource(R.string.capture_screen_title)
+/** El título de la barra superior (etapa A3, §4.2): dónde se está. */
+@Composable
+fun captureTitle(title: CaptureTitle): String =
+    when (title) {
+        is CaptureTitle.Table -> title.name
+        is CaptureTitle.Takeaway -> stringResource(R.string.capture_title_takeaway, title.folio)
+        is CaptureTitle.NamedTakeaway -> stringResource(R.string.takeaway_label_named, title.name)
+        CaptureTitle.NewTakeaway -> stringResource(R.string.capture_title_takeaway_new)
+    }
 
 const val TAG_CAPTURE = "capture"
 const val TAG_DISCARD_CONFIRM = "capture-discard-confirm"

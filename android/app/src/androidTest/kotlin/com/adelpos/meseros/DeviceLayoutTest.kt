@@ -2,24 +2,30 @@ package com.adelpos.meseros
 
 import android.app.UiAutomation
 import android.content.res.Configuration
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.v2.createEmptyComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performTextInput
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.adelpos.meseros.core.capture.pending.TAG_PENDING
+import com.adelpos.meseros.core.ui.components.TAG_TOP_BAR_BACK
 import com.adelpos.meseros.core.ui.layout.PaneLayout
 import com.adelpos.meseros.core.ui.layout.TAG_PANES_DOUBLE
 import com.adelpos.meseros.core.ui.layout.TAG_PANES_SINGLE
 import com.adelpos.meseros.core.ui.layout.TAG_PANE_OPEN_SECONDARY
 import com.adelpos.meseros.core.ui.layout.paneLayoutFor
 import com.adelpos.meseros.feature.waiter.tables.TAG_ACCOUNT_PANE
-import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_SEARCH
+import com.adelpos.meseros.feature.waiter.tables.TAG_OPEN_PENDING
+import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_BAR
+import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_SCREEN
+import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_VIEW
 import org.junit.After
-import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -102,33 +108,51 @@ class DeviceLayoutTest {
     }
 
     @Test
-    fun unoODosPanelesSegunElDispositivoYRotacionSinPerderLoCapturado() {
+    fun unoODosPanelesSegunElDispositivoYRotacionSinPerderLaVista() {
         assertPanes()
-        compose.onNodeWithTag(TAG_TABLES_SEARCH).performTextInput("Terraza 4")
-
+        // Etapa A3 (§4.7): una sola fila con «Lista | Mapa», las áreas y «Pendientes»; sin la
+        // búsqueda de mesa. La vista elegida sobrevive a la rotación.
+        compose.onNodeWithTag(TAG_TABLES_BAR).assertIsDisplayed()
+        compose.onNodeWithTag(TAG_OPEN_PENDING).assertIsDisplayed()
+        compose.onNodeWithTag("$TAG_TABLES_VIEW-map").performClick()
+        compose.waitUntil(timeoutMillis = 10_000) { selected("$TAG_TABLES_VIEW-map") }
         rotate(quarterTurn = true)
         assertPanes()
-        compose.onNodeWithTag(TAG_TABLES_SEARCH).assertTextContains("Terraza 4")
-
+        compose.waitUntil(timeoutMillis = 10_000) { selected("$TAG_TABLES_VIEW-map") }
         rotate(quarterTurn = false)
         assertPanes()
-        compose.onNodeWithTag(TAG_TABLES_SEARCH).assertTextContains("Terraza 4")
+        assertTrue(selected("$TAG_TABLES_VIEW-map"))
+        // De vuelta a la lista (la vista se guarda en el dispositivo para las demás pruebas).
+        compose.onNodeWithTag("$TAG_TABLES_VIEW-list").performClick()
+        compose.waitUntil(timeoutMillis = 10_000) { selected("$TAG_TABLES_VIEW-list") }
     }
 
     @Test
-    fun enUnPanelLaCuentaAbiertaSigueAbiertaAlRotar() {
-        if (currentLayout() == PaneLayout.DOUBLE) {
-            // Tableta: la cuenta siempre está a la vista; no hay panel que abrir.
-            compose.onNodeWithTag(TAG_ACCOUNT_PANE).assertIsDisplayed()
-            return
-        }
-        compose.onNodeWithTag(TAG_PANE_OPEN_SECONDARY).performClick()
-        compose.onNodeWithTag(TAG_ACCOUNT_PANE).assertIsDisplayed()
+    fun laFlechaDeRegresoSaleDePendientesTambienDespuesDeGirar() {
+        // Etapa A3 (§4.1, §4.6 y §4.7): sin «Ver la mesa» (tocar la mesa abre su panel); en Mesas
+        // no hay flecha; en «Pendientes», sí, también al girar, y regresa a Mesas.
+        assertTrue(absent(TAG_PANE_OPEN_SECONDARY))
+        assertTrue(absent(TAG_TOP_BAR_BACK))
+        compose.onNodeWithTag(TAG_OPEN_PENDING).performClick()
+        compose.waitUntil(timeoutMillis = 10_000) { !absent(TAG_PENDING) }
+        compose.onNodeWithTag(TAG_TOP_BAR_BACK).assertIsDisplayed()
         rotate(quarterTurn = true)
-        // Teléfono horizontal: sigue en un panel (muy bajo para dos) y con la cuenta abierta.
-        assertEquals(PaneLayout.SINGLE, currentLayout())
-        compose.onNodeWithTag(TAG_ACCOUNT_PANE).assertIsDisplayed()
+        compose.waitUntil(timeoutMillis = 10_000) { !absent(TAG_TOP_BAR_BACK) }
+        compose.onNodeWithTag(TAG_PENDING).assertIsDisplayed()
+        compose.onNodeWithTag(TAG_TOP_BAR_BACK).performClick()
+        compose.waitUntil(timeoutMillis = 10_000) { !absent(TAG_TABLES_SCREEN) }
+        assertTrue(absent(TAG_TOP_BAR_BACK))
         rotate(quarterTurn = false)
-        compose.onNodeWithTag(TAG_ACCOUNT_PANE).assertIsDisplayed()
     }
+
+    private fun absent(tag: String): Boolean =
+        compose.onAllNodes(hasTestTag(tag)).fetchSemanticsNodes().isEmpty()
+
+    private fun selected(tag: String): Boolean =
+        compose
+            .onAllNodes(hasTestTag(tag))
+            .fetchSemanticsNodes()
+            .firstOrNull()
+            ?.config
+            ?.getOrNull(SemanticsProperties.Selected) == true
 }
