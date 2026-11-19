@@ -1978,3 +1978,213 @@ Fusionada en `beeb183`. Fuera de `android/`, la Fase C solo cambió `docs/ANDROI
 - La guía §4 (que el agente no tocaba) dice ahora «Selecciona tu usuario» en el bloqueo por inactividad; la frase sobre
   el botón de la precuenta sin permiso ya la había reescrito la Fase B.
 - El texto para `CLAUDE.md` de la raíz sobre la 0.3.0 se une en la Fase E con el de la Fase A.
+
+---
+
+## Fase E · Arreglos del escritorio que encontró la regresión
+
+Agente del servidor y el escritorio, en `$SP/wt/fix` (rama `etapa-a3-fix`, desde `etapa-a3` = `2ef6185`, con todas las
+fases fusionadas), 19 de noviembre de 2026. Detalle de los hallazgos en `$SP/verification-server.md`. Sin cambios en
+`android/` ni en Go. Pruebas con el arnés (`ISO_TAG=SV`, Playwright con el Go temporal en 8187 y la vista previa en 1427);
+ninguna contra el servicio real; sin emuladores.
+
+### 1. `workflow-stagea3-roles` en la suite completa (hallazgo 1)
+
+La especificación buscaba la fila del Mesero con `filter({ hasText: /^Mesero/ })`; en la suite completa
+`workflow-stage9d-cancel-account` ya creó el rol «Mesero sin cancelar 9D» y el clic fallaba en el modo estricto (dos
+filas). Ahora las filas se buscan por la **celda con el nombre exacto** (`roleRow`: `filter({ has:
+page.getByRole('cell', { name, exact: true }) })`), también la del Administrador (antes `hasText: 'Administrador'`, que
+coincidiría con un rol propio cuyo nombre lo contenga). Revisé el resto de la especificación contra los nombres que
+crean las demás: los roles nuevos de otras especificaciones son «Mesero sin cancelar 9D», «Cajero sin cancelar unidades
+9F», «Caja emparejada 9G», «Cajero con agotados 9G», «Cocina 9F-C», «Cajera con cancelar unidades 9H-A» y «Mesera 9G-C»;
+ninguno cambia el Mesero de fábrica (nadie hace `PATCH roles/…`), así que la vista previa inicial sigue sin cambios.
+Los encabezados de los grupos ya estaban acotados a la pantalla de permisos (`.permission-editor`), el aviso de
+restablecimiento es de texto exacto con el nombre del rol, y la auditoría se filtra por el identificador del rol.
+
+### 2. Personal › Sesiones con el código de Go a la vista (hallazgo 2, §1)
+
+`SessionsPage.tsx` pintaba `session.revoke_reason ?? 'Expirada'`. Ahora `sessionState` dice «Activa», «Expirada» o por
+qué se cerró, con una frase por cada motivo que escribe Go (los busqué todos en `backend/`):
+
+| Motivo de Go       | Dónde lo escribe Go                                                                      | Texto                                            |
+| ------------------ | ---------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| `logout`           | `administration/routes.go` (cerrar sesión)                                               | Cerró su sesión                                  |
+| `admin_revoked`    | `administration/sessions_audit.go` (revocar desde Sesiones)                              | Cerrada desde Sesiones                           |
+| `device_revoked`   | `administration/devices.go` (revocar la terminal)                                        | Terminal revocada                                |
+| `expired`          | `administration/service.go` (sesión vencida)                                             | Expirada                                         |
+| `user_disabled`    | `administration/users.go` y `legacyimport/write_live.go` (usuario desactivado)           | Usuario desactivado                              |
+| `support_reset`    | `administration/setup.go` (restablecer el acceso de soporte)                             | Cerrada al restablecer el acceso de soporte      |
+| `replaced`         | `administration/auth.go` y `pin_login.go` (otro acceso del mismo usuario en la terminal) | Reemplazada por un acceso nuevo en esta terminal |
+| `password_changed` | `administration/auth.go` (cambiar la contraseña)                                         | Cerrada al cambiar la contraseña                 |
+| `pin_changed`      | `administration/pin.go` (asignar o cambiar el PIN)                                       | Cerrada al cambiar el PIN                        |
+| `pin_removed`      | `administration/pin.go` (quitar el PIN)                                                  | Cerrada al quitar el PIN                         |
+| otro o vacío       | —                                                                                        | Cerrada (nunca el código)                        |
+
+Prueba nueva `desktop/src/pages/stageA3Sessions.test.tsx`: cada motivo con su frase, uno desconocido y uno vacío como
+«Cerrada», la activa y la vencida, y que ninguna celda de «Estado» de la tabla tenga un código.
+
+**Búsqueda de la misma clase en las demás pantallas** (`?? …` y campos `*_reason`, `state`, `kind`, `code`, `action`
+pintados tal cual): no encontré otro motivo o código de Go que se muestre siempre sin traducir. Lo que vi y **no
+corregí**:
+
+- **Mapas con el código como respaldo** (`etiquetas[x] ?? x`): `AuditPage.tsx` (`actorKinds`), `AccountHistory.tsx`
+  (`eventLabels`), `AccountList.tsx` (`paymentStateBadges`, `deliveryStateBadges`, `preparationTags`), `CaptureBill.tsx`
+  (`preparationLabels`, `deliveryStateDescriptions`), `cash/ShiftStatusCard.tsx`, `cash/HistoryView.tsx` y
+  `cash/MovementsView.tsx` (`shiftStateLabels`, `rejectedKindLabels`). Comparé cada mapa con los valores que escribe Go
+  (tipos de autor `user`, `device`, `local_owner`, `process`, `migration`, `pairing`; estados de turno, pago, entrega y
+  preparación; tipos de evento de la cuenta) y hoy están **completos**: el código solo saldría con un valor nuevo de Go.
+  Si se quiere, la misma frase general que en Sesiones como respaldo; no lo cambié para no tocar diez pantallas sin
+  necesidad.
+- **Registro de movimientos, columna «Operación»**: muestra el código de la acción (`session.login`, `role.updated`,
+  `access.denied`…) cuando `actionLabels` no tiene nombre. Es la decisión de la Fase A (§0.2 y A3-D11: «la clave solo si
+  no hay etiqueta»), pero en la práctica muchas acciones frecuentes no tienen nombre: con una búsqueda rápida encontré al
+  menos 30 sin etiqueta (entre ellas `session.login`, `session.logout`, `session.revoked`, `access.denied`,
+  `user.password_changed`, `user.permissions_changed`, `settings.updated`, `setup.completed`). Darles nombre a todas es
+  una lista larga (las acciones están repartidas por los módulos de Go): **para que decida el coordinador**.
+- Los textos libres que llegan de Go con nombre de «motivo» (`reason` de descuentos, devoluciones, ajustes, la causa de
+  un cajón o de una impresora, la de Mantenimiento) ya son frases en español escritas por Go o por el usuario, no
+  códigos.
+
+### Commits (rama `etapa-a3-fix`, sin push ni fusión)
+
+- `86c9b5f` etapa A3 fase E: workflow-stagea3-roles busca las filas de los roles por la celda con el nombre exacto, para
+  no confundir el Mesero con «Mesero sin cancelar 9D» en la suite completa
+- `014fe3f` etapa A3 fase E: Personal › Sesiones dice por qué se cerró una sesión en palabras del restaurante (cada motivo
+  que escribe Go y uno general para uno desconocido, nunca el código), con stageA3Sessions.test.tsx
+
+### Pruebas ejecutadas
+
+Con el arnés `$SP/iso.sh` y `ISO_TAG=SV`, en `$SP/wt/fix`, sobre el código de los commits:
+
+| Qué                                                                                                                   | Resultado                                                     |
+| --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| Vitest con `tsc --noEmit` (suite completa)                                                                            | **101 archivos, 948 pruebas aprobadas** (2 nuevas, Sesiones)  |
+| `npm run build`                                                                                                       | Aprobado                                                      |
+| Playwright Chromium: `workflow-stage9d-cancel-account` y `workflow-stagea3-roles`, en la misma corrida y en ese orden | 2 de 2 (antes, la segunda fallaba en el modo estricto)        |
+| Playwright WebKit: las mismas                                                                                         | 2 de 2                                                        |
+| `format`, `fmt-check`; `md5 -q docs/etapas/*.md \| md5`                                                               | Aprobados; `3555c65b1300ce044695adcc1ec19f0d` antes y después |
+
+No corrí Playwright completo (lo repite el agente de la regresión), Go ni `cargo` (no cambiaron). Sin emuladores.
+
+### 3. Decisión A3-D22: nombre para cada operación del Registro y ningún código como respaldo
+
+**Nombres de todas las acciones que escribe Go.** El mapa sale de `AuditPage.tsx` a
+`desktop/src/services/auditActions.ts` (`auditActionLabels`, `auditActionLabel`, `unknownAuditAction`). A los 51 nombres
+que ya había se suman **203**: sesiones y accesos, usuarios y roles, terminales, configuración, soporte, caja, cobro,
+catálogo, inventario, compras, cocina e impresión, documentos y plantillas, migración del sistema anterior, mesas y
+cuentas. Recorrí `backend/internal` entero (también los módulos de la 9G a la A3); el recorrido encuentra **253
+acciones** y todas tienen nombre. El nombre que sobra, `restaurant.account.void`, es de registros anteriores a la 9F y se
+conserva. Criterios: palabras del restaurante y de las pantallas («computadora principal», «Arqueo», «Corte parcial»,
+«Merma», «Comanda»); «Descuento o cargo cancelado», nunca «anulado» (la regla de la 9D, que `stage9dCancelAdmin.test.tsx`
+comprueba y que me lo marcó); la precuenta con el nombre que eligió el restaurante («Precuenta enviada a imprimir»); y
+dos operaciones distintas nunca comparten nombre («Producto del catálogo modificado» frente a «Producto de una cuenta
+modificado», «Comanda impresa con la plantilla vigente» frente al documento de cobro).
+
+**Comprobación automática:** `desktop/src/services/auditActions.test.ts`. Lee como texto los `.go` de `backend/internal`,
+sin `_test.go` ni `testdata`, y junta las acciones así:
+
+1. las cadenas con forma de acción dentro de las llamadas `audit*(` (también `handler.audit(` de los módulos) y de las
+   cinco funciones que solo pasan la acción: `finishAdjustment`, `changed` de identidad, `activate` de plantillas,
+   `place` de áreas y `countTransition` de conteos;
+2. las asignadas a una variable o un campo con «action» en el nombre;
+3. las de los `INSERT INTO app.audit_events` directos;
+4. los tipos de evento de una cuenta (`handler.event(` en operations, «restaurant.» + tipo) y de la historia de cocina
+   (`handler.history(` en kitchen, «kitchen.» + tipo).
+
+Las acciones que Go arma concatenando o pasa en una variable se declaran en `dynamicActions` con todos sus valores y su
+porqué (12 entradas). Si aparece una concatenación o una variable nueva en esos lugares, la prueba falla hasta que se
+declare; también falla si una declarada ya no está en Go. Hay tres entradas sin valores, cada una con su porqué:
+
+- `"restaurant."+kind` y `"kitchen."+kind` (los cuerpos de `event` e `history`): sus tipos los toma la regla 4.
+- `input.History` de `kitchen/commercial.go`: `EnqueueRendered` arma su `service` sin `audit`, así que solo escribe
+  `app.kitchen_history`. La auditoría la hacen quienes lo llaman.
+
+Son seis pruebas:
+
+- el recorrido encuentra más de 200 acciones, entre ellas `session.login`, `restaurant.account.opened` y
+  `kitchen.printer.saved`, para que no apruebe en vacío;
+- cada acción tiene nombre;
+- las concatenaciones y variables están declaradas y ninguna declarada sobra;
+- ningún nombre tiene forma de código;
+- una acción desconocida dice «Otra operación del sistema»;
+- no hay nombres repetidos.
+
+**Límite:** el recorrido no ve una acción que pase por una función nueva que no se llame `audit*` ni esté declarada, ni
+una que se guarde en una variable sin «action» en el nombre fuera de esas dos familias. En ese caso la pantalla dice
+«Otra operación del sistema», nunca el código.
+
+Al revisar comprobé tres cosas:
+
+- `systemHistory` y `deviceHistory` de kitchen solo escriben `app.kitchen_history`, sin auditoría;
+- el `kind` de `catalog/soldout.go` es el del evento, no el de la auditoría;
+- la única variable que faltaba era la de `operations/transfers.go`: `restaurant.items.transferred` y
+  `restaurant.account.split`, ya declaradas.
+
+**Registro de movimientos.** La columna «Operación» muestra `auditActionLabel(event.action)`. Con una acción
+desconocida dice «Otra operación del sistema», y el código sigue en «Ver cambios» («Código de la operación»), como en la
+Fase A. El tipo de autor desconocido dice «Otro», también en lugar del código.
+
+**Respaldo de los demás mapas** (una función junto a cada mapa; los valores conocidos no cambian):
+
+| Función (servicio)                                        | Texto con un valor desconocido               | Pantallas                                                                                  |
+| --------------------------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `eventLabel` (`restaurant.ts`)                            | Otro movimiento de la cuenta                 | Historial de la cuenta                                                                     |
+| `preparationLabel` (`kitchen.ts`)                         | Otro estado de preparación                   | Lista de cuentas, captura                                                                  |
+| `paymentStateBadge`, `deliveryStateBadge` (`payments.ts`) | «Pago: Otro estado», «Entrega: Otro estado»  | Lista de cuentas y Para llevar                                                             |
+| `paymentStateDescription`, `deliveryStateDescription`     | otro estado de cobro, otro estado de entrega | Captura                                                                                    |
+| `shiftStateLabel` (`cash.ts`)                             | Otro estado del turno                        | Caja: estado del turno, historial, movimientos y selector de caja (este no tenía respaldo) |
+| `cashJobLabel` (`cash.ts`)                                | Otro estado de impresión                     | Caja: documentos                                                                           |
+| `rejectedKindLabels` (`MovementsView.tsx`)                | Otra salida de efectivo                      | Caja: movimientos                                                                          |
+| `documentJobLabels` (`DocumentList.tsx`)                  | Otro estado de impresión                     | Documentos de la cuenta, con el mismo caso                                                 |
+
+Prueba nueva `desktop/src/services/unknownValues.test.ts`. Comprueba las nueve funciones con un valor conocido (su
+nombre de siempre) y con uno desconocido (un texto general, sin el código). Además lee `AuditPage.tsx`,
+`pages/restaurant/**` y `pages/cash/**` y falla si vuelve un `nombres[x] ?? x`. Comprobé que esa lectura encuentra los
+14 casos del commit anterior.
+
+Los 15 tipos de evento que Go escribe en `app.restaurant_events` (su único escritor es `event()` de
+`operations/queries.go`) ya tenían nombre en `eventLabels`.
+
+**Lo que vi y no cambié**, fuera de las pantallas de la decisión, para que decida el coordinador:
+
+- `documents/designer/BlockProperties.tsx` pinta `textSizeLabels[size] ?? size`, con los tamaños de Go
+  (`textSizesFor`).
+- `inventoryPermissionName`, `purchasingPermissionName` y `permissionName` (`payments.ts`) devuelven la clave si no la
+  conocen. Casi siempre reciben claves escritas en el escritorio, pero `inventory/AdjustmentsView.tsx:182` les pasa
+  `required_permission` de Go.
+
+### Commits de A3-D22 (rama `etapa-a3-fix`, sin push ni fusión)
+
+- `403c354` Registro de movimientos: nombre para cada operación que escribe Go (A3-D22)
+- `d473fed` Cuenta y Caja: un estado desconocido se dice en general, nunca con su código (A3-D22)
+
+### Pruebas de A3-D22
+
+Con el arnés y `ISO_TAG=SV`, en `$SP/wt/fix`; Vitest, `fmt-check` y `format` antes del commit, `build` y Playwright
+sobre los commits:
+
+| Qué                                                                                                                                                                                                                                                                  | Resultado                                                                                                                       |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| Vitest con `tsc --noEmit` (suite completa)                                                                                                                                                                                                                           | **103 archivos, 963 pruebas aprobadas**: 15 nuevas en dos archivos. La primera corrida falló: «anulado» en un nombre, corregido |
+| `npm run build`                                                                                                                                                                                                                                                      | Aprobado                                                                                                                        |
+| Playwright Chromium: `workflow-stage9g-terminals` y `workflow-stagea3-roles` (nombres en el Registro), `workflow-stage9c-navigation` (pantalla del Registro), `restaurant.spec` y `workflow-stage9d-accounts` (textos de pago y entrega de la captura y de la lista) | 6 de 6                                                                                                                          |
+| Playwright WebKit: las mismas                                                                                                                                                                                                                                        | 6 de 6                                                                                                                          |
+| `format`, `fmt-check`; `md5 -q docs/etapas/*.md \| md5`                                                                                                                                                                                                              | Aprobados; `3555c65b1300ce044695adcc1ec19f0d` antes y después                                                                   |
+
+No corrí Playwright completo, Go ni `cargo`; Go no cambió. Sin emuladores. Ninguna especificación busca un código de
+operación o de estado en estas pantallas, ni los textos generales nuevos: esos casos los prueba Vitest. Los nombres
+nuevos solo los comprueba Vitest; en el navegador vi los que ya buscaban las especificaciones.
+
+### Decisiones del coordinador sobre las correcciones de la regresión
+
+Fusionadas en `85be71e` (solo `desktop/`).
+
+- **A3-D22 · Ningún código de Go a la vista** (§1, «identificadores internos»): la regresión encontró que Personal ›
+  Sesiones mostraba el motivo de cierre tal cual (`logout`) y el agente vio que el Registro de movimientos mostraba el
+  código de unas 30 operaciones frecuentes sin nombre (`session.login`…). Se corrige en esta etapa: cada operación que
+  escribe Go tiene nombre, con una comprobación automática que lee las fuentes de Go; un valor desconocido se dice con un
+  texto general (en el Registro, el código queda en «Ver cambios»), también en la cuenta, Para llevar y Caja.
+- **A3-D23 · Lo que queda igual**: el diseñador de documentos (`BlockProperties.tsx`, tamaños de letra) y los nombres de
+  permisos de inventario y compras (`inventory/AdjustmentsView.tsx:182`, `required_permission` de Go) muestran la clave
+  solo con un valor que el escritorio no conozca; hoy todos los que escribe Go tienen nombre. No se cambian en esta etapa
+  (limitación).
