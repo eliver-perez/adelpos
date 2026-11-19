@@ -1,6 +1,8 @@
 package com.adelpos.meseros
 
 import android.app.UiAutomation
+import android.content.res.Configuration
+import android.graphics.Bitmap
 import android.util.Log
 import android.view.KeyEvent
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -57,8 +59,10 @@ import com.adelpos.meseros.feature.takeaway.TAG_TAKEAWAY_ENTRY_PREFIX
 import com.adelpos.meseros.feature.takeaway.TAG_TAKEAWAY_NEW
 import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_SEARCH
 import com.adelpos.meseros.navigation.TAG_MAIN_NAVIGATION
+import com.adelpos.meseros.navigation.TAG_NAVIGATION_RAIL
 import com.adelpos.meseros.navigation.TAG_NAV_TAKEAWAY
 import java.io.File
+import java.io.FileOutputStream
 import java.util.UUID
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
@@ -131,6 +135,8 @@ class TakeawayOnGoTest {
 
     @After
     fun close() {
+        automation.setRotation(UiAutomation.ROTATION_FREEZE_0)
+        automation.setRotation(UiAutomation.ROTATION_UNFREEZE)
         scenario?.close()
     }
 
@@ -352,7 +358,65 @@ class TakeawayOnGoTest {
         assertEquals(0, openTakeawayInGo().size)
     }
 
+    /**
+     * Hallazgo de la Fase E: en el teléfono horizontal la barra inferior dejaba la captura sin
+     * espacio. Con poca altura o en horizontal la navegación va en un riel lateral y la captura
+     * muestra los productos; en vertical, la barra inferior. Se guardan capturas de pantalla de las
+     * dos orientaciones (el guion las copia a `<salida>/screens`).
+     */
+    @Test
+    fun t9_navegacionLateralEnHorizontalYProductosALaVista() {
+        val ids = loadIds()
+        // La rotación natural: vertical en el teléfono, horizontal en la tableta.
+        automation.setRotation(UiAutomation.ROTATION_FREEZE_0)
+        Thread.sleep(SETTLE_MILLIS)
+        val natural = orientationNow()
+        launch()
+        enterAna()
+        for (landscape in listOf(true, false)) {
+            val quarterTurn = landscape != (natural == Configuration.ORIENTATION_LANDSCAPE)
+            automation.setRotation(
+                if (quarterTurn) UiAutomation.ROTATION_FREEZE_90
+                else UiAutomation.ROTATION_FREEZE_0,
+            )
+            waitUntil("la orientación pedida") {
+                (orientationNow() == Configuration.ORIENTATION_LANDSCAPE) == landscape
+            }
+            Thread.sleep(SETTLE_MILLIS)
+            val name = if (landscape) "horizontal" else "vertical"
+            openTakeaway()
+            tap(TAG_TAKEAWAY_NEW)
+            val burger = productTag(ids.getValue("burger"))
+            waitFor(burger)
+            // El producto se ve de verdad (no solo existe en la jerarquía).
+            compose.onNodeWithTag(burger).assertIsDisplayed()
+            assertEquals(
+                "riel lateral en $name",
+                landscape,
+                present(TAG_NAVIGATION_RAIL),
+            )
+            compose.onNodeWithTag(TAG_MAIN_NAVIGATION).assertIsDisplayed()
+            screenshot("t9-captura-para-llevar-$name")
+            leaveCapture()
+        }
+    }
+
     // --- Pantallas ---
+
+    private fun orientationNow(): Int = TestDevice.app.resources.configuration.orientation
+
+    /** Captura de pantalla en la carpeta de la aplicación (el guion la copia a la Mac). */
+    private fun screenshot(name: String) {
+        SystemDialogs.dismissNotResponding(automation)
+        compose.waitForIdle()
+        Thread.sleep(SETTLE_MILLIS)
+        val bitmap = automation.takeScreenshot() ?: return
+        val folder = File(TestDevice.app.getExternalFilesDir(null), "screens").apply { mkdirs() }
+        FileOutputStream(File(folder, "$name.png")).use { output ->
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)
+        }
+        log("captura $name")
+    }
 
     private fun launch() {
         scenario = ActivityScenario.launch(MainActivity::class.java)

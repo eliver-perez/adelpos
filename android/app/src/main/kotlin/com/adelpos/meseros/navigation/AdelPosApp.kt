@@ -3,8 +3,11 @@ package com.adelpos.meseros.navigation
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -12,6 +15,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -53,7 +58,9 @@ import com.adelpos.meseros.core.ui.components.ActiveWaiterMenu
 import com.adelpos.meseros.core.ui.components.AdelTopBar
 import com.adelpos.meseros.core.ui.components.LocalUserActivity
 import com.adelpos.meseros.core.ui.icons.AdelIcons
+import com.adelpos.meseros.core.ui.layout.NavigationPlacement
 import com.adelpos.meseros.core.ui.layout.PaneLayout
+import com.adelpos.meseros.core.ui.layout.currentNavigationPlacement
 import com.adelpos.meseros.core.ui.layout.currentPaneLayout
 import com.adelpos.meseros.core.ui.theme.AdelTheme
 import com.adelpos.meseros.feature.access.AccessActions
@@ -169,6 +176,7 @@ fun AdelPosNavigation(
     onSwitchWaiter: () -> Unit,
 ) {
     val paneLayout = currentPaneLayout()
+    val navigationPlacement = currentNavigationPlacement()
     val waiter = activeWaiter?.takeIf { status is DeviceStatus.Ready }
     val readyAlerts = readyAlerts()
     // Un aviso tocado en «¿Quién eres?»: se le pide el PIN a su mesero (etapa A2, §4.4).
@@ -217,7 +225,9 @@ fun AdelPosNavigation(
             )
         },
         bottomBar = {
-            if (takeawayVisible) {
+            // En vertical, abajo; con poca altura o en horizontal, el riel lateral (a un lado del
+            // contenido, más abajo), para no dejar la captura sin espacio (Fase E de la A2).
+            if (takeawayVisible && navigationPlacement == NavigationPlacement.BOTTOM_BAR) {
                 MainNavigationBar(
                     selected = section,
                     onSelect = { chosen -> selectSection(navController, chosen) },
@@ -229,13 +239,21 @@ fun AdelPosNavigation(
     ) { padding ->
         Box(modifier = Modifier.padding(padding).consumeWindowInsets(padding)) {
             if (waiter != null) {
-                Column {
-                    // Etapa A2, Fase D: sin notificaciones, un aviso discreto arriba de Mesas.
-                    if (destination?.hasRoute<TablesDestination>() == true) {
-                        ReadyAlertsOffNotice(readyAlerts)
+                Row {
+                    if (takeawayVisible && navigationPlacement == NavigationPlacement.SIDE_RAIL) {
+                        MainNavigationRail(
+                            selected = section,
+                            onSelect = { chosen -> selectSection(navController, chosen) },
+                        )
                     }
-                    Box(modifier = Modifier.weight(1f)) {
-                        key(waiter.userId) { WaiterNavigation(navController, paneLayout) }
+                    Column(modifier = Modifier.weight(1f)) {
+                        // Etapa A2, Fase D: sin notificaciones, un aviso discreto arriba de Mesas.
+                        if (destination?.hasRoute<TablesDestination>() == true) {
+                            ReadyAlertsOffNotice(readyAlerts)
+                        }
+                        Box(modifier = Modifier.weight(1f)) {
+                            key(waiter.userId) { WaiterNavigation(navController, paneLayout) }
+                        }
                     }
                 }
             } else {
@@ -295,7 +313,39 @@ private fun selectSection(navController: NavHostController, section: MainSection
     }
 }
 
-/** La navegación principal: «Mesas» y «Para llevar» (§3.1 de la A2). */
+/**
+ * La navegación principal con poca altura o en horizontal: los mismos dos destinos, íconos y textos
+ * de [MainNavigationBar] en un riel lateral (`NavigationRail` de Material 3), centrados. Va dentro
+ * del contenido, que ya respeta los bordes del sistema (sin márgenes propios).
+ */
+@Composable
+private fun MainNavigationRail(selected: MainSection, onSelect: (MainSection) -> Unit) {
+    Box(modifier = Modifier.fillMaxHeight().testTag(TAG_MAIN_NAVIGATION)) {
+        NavigationRail(
+            windowInsets = WindowInsets(0, 0, 0, 0),
+            modifier = Modifier.fillMaxHeight().testTag(TAG_NAVIGATION_RAIL),
+        ) {
+            Spacer(modifier = Modifier.weight(1f))
+            NavigationRailItem(
+                selected = selected == MainSection.TABLES,
+                onClick = { onSelect(MainSection.TABLES) },
+                icon = { Icon(AdelIcons.Table, contentDescription = null) },
+                label = { Text(stringResource(R.string.nav_tables)) },
+                modifier = Modifier.testTag(TAG_NAV_TABLES),
+            )
+            NavigationRailItem(
+                selected = selected == MainSection.TAKEAWAY,
+                onClick = { onSelect(MainSection.TAKEAWAY) },
+                icon = { Icon(AdelIcons.Bag, contentDescription = null) },
+                label = { Text(stringResource(R.string.nav_takeaway)) },
+                modifier = Modifier.testTag(TAG_NAV_TAKEAWAY),
+            )
+            Spacer(modifier = Modifier.weight(1f))
+        }
+    }
+}
+
+/** La navegación principal en vertical: «Mesas» y «Para llevar» (§3.1 de la A2). */
 @Composable
 private fun MainNavigationBar(selected: MainSection, onSelect: (MainSection) -> Unit) {
     NavigationBar(modifier = Modifier.testTag(TAG_MAIN_NAVIGATION)) {
@@ -435,5 +485,6 @@ private fun WaiterNavigation(navController: NavHostController, paneLayout: PaneL
 
 const val TAG_APP_ROOT = "app-root"
 const val TAG_MAIN_NAVIGATION = "main-navigation"
+const val TAG_NAVIGATION_RAIL = "main-navigation-rail"
 const val TAG_NAV_TABLES = "nav-tables"
 const val TAG_NAV_TAKEAWAY = "nav-takeaway"

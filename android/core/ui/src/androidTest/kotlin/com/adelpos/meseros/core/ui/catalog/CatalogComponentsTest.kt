@@ -1,9 +1,13 @@
 package com.adelpos.meseros.core.ui.catalog
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
@@ -95,6 +99,48 @@ class CatalogComponentsTest {
         assertEquals(CatalogUiFixtures.BURGERS, category)
         compose.onNodeWithTag(TAG_CATALOG_SEARCH).performTextInput("cafe")
         assertEquals("cafe", search)
+    }
+
+    /**
+     * Con poca altura (el teléfono en horizontal; Fase E de la A2), la búsqueda y las categorías
+     * van en una fila y las tarjetas son bajas: en 220 dp de alto se ve una tarjeta completa, con
+     * su nombre y su precio, y se puede elegir.
+     */
+    @Test
+    fun conPocaAlturaLasTarjetasCabenConSuNombre() {
+        var chosen: CatalogProduct? = null
+        val first = catalog.productsIn(CatalogUiFixtures.BURGERS).first()
+        compose.setContent {
+            AdelTheme {
+                Box(modifier = Modifier.width(800.dp).height(220.dp)) {
+                    CatalogBrowser(
+                        categories = catalog.categories,
+                        selectedCategoryId = CatalogUiFixtures.BURGERS,
+                        searchText = "",
+                        products = catalog.productsIn(CatalogUiFixtures.BURGERS),
+                        images = null,
+                        onSearchTextChange = {},
+                        onCategorySelect = {},
+                        onProductSelect = { chosen = it },
+                        compactHeight = true,
+                    )
+                }
+            }
+        }
+        val search = compose.onNodeWithTag(TAG_CATALOG_SEARCH).fetchSemanticsNode().boundsInRoot
+        val categories = compose.onNodeWithTag(TAG_CATEGORY_BAR).fetchSemanticsNode().boundsInRoot
+        assertTrue("la búsqueda y las categorías en una fila", categories.left >= search.right)
+        // La primera fila completa, con el nombre a la vista (la siguiente, desplazando).
+        compose
+            .onNodeWithTag(productTag(first.id))
+            .assertIsDisplayed()
+            .assertTextContains(first.name, substring = true)
+            .assertHeightIsAtLeast(48.dp)
+            .performClick()
+        val card = compose.onNodeWithTag(productTag(first.id)).fetchSemanticsNode()
+        val grid = compose.onNodeWithTag(TAG_PRODUCT_GRID).fetchSemanticsNode().boundsInRoot
+        assertTrue("la tarjeta completa a la vista", card.boundsInRoot.bottom <= grid.bottom)
+        assertEquals(first.id, chosen?.id)
     }
 
     @Test
