@@ -18,6 +18,12 @@ async function login(page: Page) {
   await page.getByRole('button', { name: 'Entrar', exact: true }).click();
 }
 
+// Fila de un rol por el nombre exacto de su celda: en la suite completa otras especificaciones crean roles cuyo nombre
+// empieza igual (por ejemplo «Mesero sin cancelar 9D», de workflow-stage9d-cancel-account).
+function roleRow(page: Page, name: string): Locator {
+  return page.locator('tbody tr').filter({ has: page.getByRole('cell', { name, exact: true }) });
+}
+
 // Encabezado de la sección de un grupo, dentro de la pantalla de permisos (la barra superior también tiene «Para
 // llevar»).
 function groupHeader(page: Page, name: string): Locator {
@@ -61,7 +67,7 @@ test('Roles: permisos agrupados, vista sencilla, dependencias y «Restablecer pe
 
   await openAdministration(page, 'Roles');
   // El Administrador no tiene el botón (siempre tiene todo).
-  const adminRow = page.locator('tbody tr').filter({ hasText: 'Administrador' });
+  const adminRow = roleRow(page, 'Administrador');
   await adminRow.getByRole('button', { name: 'Editar permisos', exact: true }).click();
   await expect(page.getByRole('tab', { name: 'Vista sencilla' })).toHaveAttribute(
     'aria-selected',
@@ -73,7 +79,7 @@ test('Roles: permisos agrupados, vista sencilla, dependencias y «Restablecer pe
   await page.getByRole('button', { name: 'Cerrar editor', exact: true }).click();
 
   // 2. Vista sencilla del Mesero: «Atender mesas» y «Para llevar» completas; «Cobrar», sin marcar; «Manejar caja», no.
-  const waiterRow = page.locator('tbody tr').filter({ hasText: /^Mesero/ });
+  const waiterRow = roleRow(page, 'Mesero');
   await waiterRow.getByRole('button', { name: 'Editar permisos', exact: true }).click();
   const tables = page.getByRole('checkbox', { name: 'Atender mesas', exact: true });
   await expect(tables).toBeChecked();
