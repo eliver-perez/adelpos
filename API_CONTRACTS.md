@@ -3110,10 +3110,11 @@ de otra terminal (`agent`). Si no, Go responde **antes de encolar** (no se crea 
 `error.details = {document: "precheck" | "receipt" | "cash_document", problem: "missing" | "inactive" |
 "unsupported", printer_name?}`. Mensajes: «No hay impresora configurada para precuentas.» (con el nombre visible:
 «…para tickets de venta.»), «No hay impresora configurada para tickets de pago.», «…para los documentos de caja.»,
-«La impresora X está desactivada.», «Esta impresora todavía no puede usarse para imprimir.». Las comandas no cambian:
+«La impresora X está desactivada.», «Esta impresora no se puede usar para imprimir.». Las comandas no cambian:
 una impresora inactiva bloquea la liberación como antes y la de otra terminal deja el trabajo en «Requiere
-intervención», ahora con el texto «Esta impresora todavía no puede usarse para imprimir.» (antes «El destino está
-inactivo o requiere un agente de impresión aún no implementado»).
+intervención», ahora con el texto «Esta impresora no se puede usar para imprimir.» (antes «El destino está
+inactivo o requiere un agente de impresión aún no implementado»; hasta la etapa A3, «Esta impresora todavía no puede
+usarse para imprimir.», reescrito por la regla de textos de la A3).
 
 ### Rutas nuevas
 
