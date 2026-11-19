@@ -89,7 +89,6 @@ fun CatalogBrowser(
                     text = searchText,
                     onTextChange = onSearchTextChange,
                     modifier = Modifier.weight(1f).padding(start = AdelDimens.ScreenPadding),
-                    singleLineLabel = true,
                 )
                 CategoryBar(
                     categories = categories,
@@ -133,30 +132,25 @@ fun CatalogBrowser(
 }
 
 /**
- * Búsqueda de productos por nombre o código, con el teclado del sistema. Con [singleLineLabel] (la
- * forma compacta, a media anchura) la etiqueta no pasa de una línea: si se partiera, el campo
- * crecería y le quitaría altura a la cuadrícula.
+ * Búsqueda de productos por nombre o código, con el teclado del sistema. Etapa A3 (§4.3): una sola
+ * línea con «Buscar producto» en todas las formas; si la etiqueta se partiera, el campo crecería y
+ * le quitaría altura a la cuadrícula.
  */
 @Composable
 fun CatalogSearchField(
     text: String,
     onTextChange: (String) -> Unit,
     modifier: Modifier = Modifier,
-    singleLineLabel: Boolean = false,
 ) {
     OutlinedTextField(
         value = text,
         onValueChange = onTextChange,
         label = {
-            if (singleLineLabel) {
-                Text(
-                    stringResource(R.string.catalog_search_label),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            } else {
-                Text(stringResource(R.string.catalog_search_label))
-            }
+            Text(
+                stringResource(R.string.catalog_search_label),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         },
         leadingIcon = { Icon(CatalogIcons.Search, contentDescription = null) },
         trailingIcon = {
@@ -245,6 +239,10 @@ fun ProductGrid(
  * agotado o no disponible se ve atenuado con «Agotado», «Agotado hasta nuevo aviso» o el motivo de
  * Go, y no se puede elegir. Con [compact] (poca altura), la imagen va a la izquierda, pequeña, y el
  * texto a la derecha: la tarjeta mide lo de una fila de texto, no lo de la imagen.
+ *
+ * Etapa A3 (§4.11): un producto **sin imagen** es una tarjeta compacta de nombre y precio, sin el
+ * marcador con la letra grande, en el teléfono y en la tableta (la imagen solo ocupa lugar cuando
+ * hay una que mostrar).
  */
 @Composable
 fun ProductCard(
@@ -273,7 +271,9 @@ fun ProductCard(
                 .testTag(productTag(product.id))
                 .semantics(mergeDescendants = true) { contentDescription = description },
     ) {
-        if (compact) {
+        if (product.imageId == null) {
+            ProductText(product, price, status, Modifier.testTag(TAG_PRODUCT_WITHOUT_IMAGE))
+        } else if (compact) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 ProductImage(
                     imageId = product.imageId,
@@ -375,4 +375,5 @@ const val TAG_CATALOG_SEARCH_CLEAR = "catalog-search-clear"
 const val TAG_CATEGORY_BAR = "category-bar"
 const val TAG_PRODUCT_GRID = "product-grid"
 const val TAG_PRODUCT_STATUS = "product-status"
+const val TAG_PRODUCT_WITHOUT_IMAGE = "product-without-image"
 const val TAG_CATALOG_EMPTY = "catalog-empty"

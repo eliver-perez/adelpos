@@ -30,8 +30,8 @@ import kotlinx.coroutines.launch
  *
  * @param idleLock el del proceso (lo vigila `AppContainer`; `MainActivity` y los diálogos le avisan
  *   de cada toque). Las pantallas no lo vigilan: volver a crearlas nunca reinicia el plazo.
- * @param serverLink el estado único de conexión (etapa A3, A3-D1): el aviso de «¿Quién eres?» lo
- *   lee, igual que la barra.
+ * @param serverLink el estado único de conexión (etapa A3, A3-D1): el aviso de «Selecciona tu
+ *   usuario» lo lee, igual que la barra.
  * @param wallClock hora del dispositivo, para mostrar «Intenta de nuevo a las 14:35».
  */
 class AccessDependencies(

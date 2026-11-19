@@ -46,7 +46,7 @@ import com.adelpos.meseros.feature.access.status.TAG_REPAIR_ACTION
 import com.adelpos.meseros.feature.access.status.TAG_REPAIR_CONFIRM
 import com.adelpos.meseros.feature.access.status.TAG_REPAIR_ERASES
 import com.adelpos.meseros.feature.access.status.TAG_REPAIR_PENDING
-import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_SEARCH
+import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_SCREEN
 import com.adelpos.meseros.navigation.AdelPosNavigation
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -151,14 +151,14 @@ class AccessScreensTest {
         waitFor("${TAG_WAITER_PREFIX}ana")
         compose.onNodeWithTag("${TAG_WAITER_PREFIX}ana").performClick()
         type("4829")
-        waitFor(TAG_TABLES_SEARCH)
+        waitFor(TAG_TABLES_SCREEN)
         compose.onNodeWithText("Ana", useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithTag(TAG_WAITER_MENU).performClick()
         compose.onNodeWithTag(TAG_WAITER_SWITCH).performClick()
         waitFor("${TAG_WAITER_PREFIX}dora")
         compose.onNodeWithTag("${TAG_WAITER_PREFIX}dora").performClick()
         type("4829")
-        waitFor(TAG_TABLES_SEARCH)
+        waitFor(TAG_TABLES_SCREEN)
         compose.onNodeWithText("Dora Elena", useUnmergedTree = true).assertIsDisplayed()
     }
 

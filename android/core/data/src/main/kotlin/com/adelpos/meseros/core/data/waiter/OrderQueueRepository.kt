@@ -441,7 +441,7 @@ class OrderQueueRepository(
         val UNSENT_STATES: List<String> =
             OrderState.entries.filter { it.unsent }.map { it.storedName }
 
-        /** Cuánto tiempo se muestran los recibidos en «Pedidos pendientes». */
+        /** Cuánto tiempo se muestran los recibidos en «Pendientes». */
         const val RECEIVED_KEPT_MILLIS: Long = 12L * 60 * 60 * 1000
 
         private const val UNKNOWN_PRODUCT = "Producto"

@@ -26,7 +26,7 @@ import com.adelpos.meseros.feature.access.findserver.TAG_PAIRING_CODE
 import com.adelpos.meseros.feature.access.pin.TAG_ENTRY
 import com.adelpos.meseros.feature.access.pin.TAG_ENTRY_OFFLINE
 import com.adelpos.meseros.feature.access.pin.TAG_WAITER_PREFIX
-import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_SEARCH
+import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_SCREEN
 import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_STATUS
 import java.util.UUID
 import kotlinx.coroutines.runBlocking
@@ -162,7 +162,7 @@ class ConnectionOnGoTest {
                 if (lockedAt == 0L) {
                     lockedAt = SystemClock.elapsedRealtime()
                     locks += 1
-                    log("bloqueo por inactividad #$locks: «¿Quién eres?»")
+                    log("bloqueo por inactividad #$locks: «Selecciona tu usuario»")
                 } else if (SystemClock.elapsedRealtime() - lockedAt > REENTER_AFTER_MILLIS) {
                     enter(waiter)
                     entries += 1
@@ -176,7 +176,7 @@ class ConnectionOnGoTest {
             }
             Thread.sleep(SAMPLE_MILLIS)
             // El reloj de Compose de la prueba no avanza solo: sin esto, los LaunchedEffect con
-            // espera (la lista de «¿Quién eres?» cada 60 s) no correrían en tiempo real.
+            // espera (la lista de «Selecciona tu usuario» cada 60 s) no correrían en tiempo real.
             compose.mainClock.advanceTimeBy(SAMPLE_MILLIS)
         }
         return Result(
@@ -216,7 +216,7 @@ class ConnectionOnGoTest {
             compose.onNodeWithTag("$TAG_PIN_KEY_PREFIX$digit").performClick()
         }
         compose.onNodeWithTag(TAG_PIN_SUBMIT).performClick()
-        waitFor(TAG_TABLES_SEARCH)
+        waitFor(TAG_TABLES_SCREEN)
     }
 
     // Lo que necesita un mesero en Mesas con su canal de eventos (events.read) y la precuenta.

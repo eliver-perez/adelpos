@@ -5,6 +5,7 @@ import com.adelpos.meseros.core.data.api.ApiJson
 import com.adelpos.meseros.core.data.api.ApiOutcome
 import com.adelpos.meseros.core.data.waiter.db.RestaurantSnapshotEntity
 import com.adelpos.meseros.core.data.waiter.db.WaiterDao
+import com.adelpos.meseros.core.domain.waiter.DeviceHome
 import com.adelpos.meseros.core.domain.waiter.PrecheckName
 import com.adelpos.meseros.core.domain.waiter.PrecheckPrinter
 import com.adelpos.meseros.core.domain.waiter.PrecheckService
@@ -39,6 +40,8 @@ data class IdentityDto(
 @Serializable
 data class IdentityTerminalDto(
     @SerialName("precheck_printer") val precheckPrinter: PrecheckPrinterDto? = null,
+    // Etapa A3 (§4.12): la pantalla inicial del dispositivo que se guarda en Terminales.
+    @SerialName("home_screen") val homeScreen: String? = null,
 )
 
 /** `Terminal.precheck_printer`: la impresora de precuentas del dispositivo, o null. */
@@ -90,6 +93,8 @@ data class DocumentStatusDto(
 data class SavedPrecheckSetup(
     @SerialName("precheck_name") val precheckName: String,
     val printer: PrecheckPrinterDto? = null,
+    // Etapa A3: lo guardado antes no lo tiene (Mesas).
+    @SerialName("home_screen") val homeScreen: String? = null,
 )
 
 /**
@@ -149,6 +154,7 @@ class PrecheckRepository(
                         precheckName =
                             outcome.value.establishment?.precheckName ?: PrecheckName.PRECHECK.key,
                         printer = outcome.value.terminal?.precheckPrinter,
+                        homeScreen = outcome.value.terminal?.homeScreen,
                     )
                 // Primero se guarda (para verlo sin conexión) y después se muestra.
                 dao.saveSnapshot(
@@ -295,6 +301,7 @@ class PrecheckRepository(
             name = PrecheckName.fromKey(precheckName),
             printer = printer?.let { PrecheckPrinter(it.name, it.terminalName) },
             read = true,
+            home = DeviceHome.fromWire(homeScreen),
         )
 
     companion object {

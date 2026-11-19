@@ -11,6 +11,12 @@ enum class WaiterAction(val requiredPermissions: Set<String>) {
     /** Empezar una cuenta nueva en una mesa (nace con el primer producto). */
     OPEN_ACCOUNT(setOf("accounts.open", "orders.capture")),
 
+    /**
+     * «Descartar cuenta vacía» desde el panel de la mesa (etapa A3, §4.10): lo que exige Go en
+     * `POST restaurant/accounts/{id}/discard` (además `takeaway.manage` si es para llevar).
+     */
+    DISCARD_EMPTY_ACCOUNT(setOf("accounts.open", "accounts.read")),
+
     /** Capturar y modificar lo no enviado (el borrador). */
     CAPTURE(setOf("orders.capture", "catalog.read", "catalog.prices.read")),
 

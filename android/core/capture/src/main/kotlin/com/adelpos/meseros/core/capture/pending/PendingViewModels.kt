@@ -27,10 +27,10 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 /**
- * «Pedidos pendientes» (§7): lo que el mesero activo tiene sin enviar (sus capturas y sus pedidos
- * de la cola con su estado) y lo recibido hace poco; «Reintentar ya». De los demás meseros solo se
- * dice cuántos pedidos tienen por enviar en este dispositivo y por qué no salen (credencial que ya
- * no vale, revisión pendiente; revisión R6, B3), nunca cuáles.
+ * «Pendientes» (§7): lo que el mesero activo tiene sin enviar (sus capturas y sus pedidos de la
+ * cola con su estado) y lo recibido hace poco; «Reintentar ya». De los demás meseros solo se dice
+ * cuántos pedidos tienen por enviar en este dispositivo y por qué no salen (credencial que ya no
+ * vale, revisión pendiente; revisión R6, B3), nunca cuáles.
  */
 class PendingOrdersViewModel(private val dependencies: CaptureDependencies) : ViewModel() {
     private val userId: String? = dependencies.activeWaiter.value?.userId

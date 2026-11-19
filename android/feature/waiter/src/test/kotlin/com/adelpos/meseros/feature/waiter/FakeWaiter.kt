@@ -21,6 +21,7 @@ import com.adelpos.meseros.core.domain.waiter.CaptureService
 import com.adelpos.meseros.core.domain.waiter.CustomerEdit
 import com.adelpos.meseros.core.domain.waiter.CustomerTarget
 import com.adelpos.meseros.core.domain.waiter.DeliveryResult
+import com.adelpos.meseros.core.domain.waiter.DiscardAccountResult
 import com.adelpos.meseros.core.domain.waiter.DiscardResult
 import com.adelpos.meseros.core.domain.waiter.DraftOperation
 import com.adelpos.meseros.core.domain.waiter.DraftQuote
@@ -87,7 +88,18 @@ class FakeWaiter(catalog: Catalog = Catalog.EMPTY) {
 
             override suspend fun bill(accountId: String): AppResult<AccountBill> =
                 AppResult.Failure(AppError.Unreachable)
+
+            override suspend fun discardEmptyAccount(
+                account: AccountSummary,
+            ): DiscardAccountResult {
+                discarded.add(account.id)
+                return discardAnswer
+            }
         }
+
+    /** «Descartar cuenta vacía» que pidió la pantalla (etapa A3) y lo que responde Go. */
+    val discarded = mutableListOf<String>()
+    var discardAnswer: DiscardAccountResult = DiscardAccountResult.Discarded
 
     val captures =
         object : CaptureService {

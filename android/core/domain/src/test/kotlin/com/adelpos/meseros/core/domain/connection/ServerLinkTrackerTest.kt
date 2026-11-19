@@ -153,7 +153,7 @@ class ServerLinkTrackerTest {
             tracker.nextProbeIn(foreground = true, channelOpen = false),
         )
         advance(40_000)
-        // La lista de «¿Quién eres?» respondió: la revisión se corre 60 s desde ese éxito.
+        // La lista de «Selecciona tu usuario» respondió: la revisión se corre 60 s desde ese éxito.
         tracker.onAnswer()
         advance(30_000)
         assertEquals(30_000L, tracker.nextProbeIn(foreground = true, channelOpen = false))

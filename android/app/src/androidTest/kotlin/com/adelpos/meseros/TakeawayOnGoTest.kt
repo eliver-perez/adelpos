@@ -57,7 +57,7 @@ import com.adelpos.meseros.feature.takeaway.TAG_TAKEAWAY_EDIT_PREFIX
 import com.adelpos.meseros.feature.takeaway.TAG_TAKEAWAY_EMPTY
 import com.adelpos.meseros.feature.takeaway.TAG_TAKEAWAY_ENTRY_PREFIX
 import com.adelpos.meseros.feature.takeaway.TAG_TAKEAWAY_NEW
-import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_SEARCH
+import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_SCREEN
 import com.adelpos.meseros.navigation.TAG_MAIN_NAVIGATION
 import com.adelpos.meseros.navigation.TAG_NAVIGATION_RAIL
 import com.adelpos.meseros.navigation.TAG_NAV_TAKEAWAY
@@ -446,7 +446,7 @@ class TakeawayOnGoTest {
             compose.onNodeWithTag("$TAG_PIN_KEY_PREFIX$digit").performClick()
         }
         compose.onNodeWithTag(TAG_PIN_SUBMIT).performClick()
-        waitFor(TAG_TABLES_SEARCH)
+        waitFor(TAG_TABLES_SCREEN)
     }
 
     private fun openTakeaway() {

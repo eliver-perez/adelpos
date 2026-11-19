@@ -1,6 +1,6 @@
 // Captura compartida de los modos Mesero y Para llevar (etapa A2): catálogo con la búsqueda y el
 // personalizador, la cuenta visible con lo enviado y lo por enviar, «Enviar a cocina», modificar o
-// cancelar lo enviado, «Pedidos pendientes» y «Requiere tu revisión». Los módulos feature solo
+// cancelar lo enviado, «Pendientes» y «Requiere tu revisión». Los módulos feature solo
 // aportan su entrada (la mesa o «Nuevo pedido») y su lista.
 plugins {
     alias(libs.plugins.android.library)

@@ -55,7 +55,7 @@ import com.adelpos.meseros.feature.access.status.TAG_RETIRED
 import com.adelpos.meseros.feature.waiter.tables.TAG_ACCOUNT_PANE
 import com.adelpos.meseros.feature.waiter.tables.TAG_NEW_ACCOUNT
 import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_LIST
-import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_SEARCH
+import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_SCREEN
 import com.adelpos.meseros.feature.waiter.tables.TAG_TABLE_PREFIX
 import com.adelpos.meseros.ready.ReadyAlertNotifications
 import com.adelpos.meseros.ready.ReadyAlertsService
@@ -107,16 +107,17 @@ import org.junit.runner.RunWith
  * - `r4` **el guion corta la red** del dispositivo, cocina marca «Listo» durante el corte (desde la
  *   Mac) y devuelve la red: el aviso llega **una sola vez**.
  * - `r5` agrupado por cuenta (una notificación con el acumulado) y el resumen con dos cuentas.
- * - `r6` en «¿Quién eres?» llega el aviso; al tocarlo pide el PIN de Ana y abre la cuenta; con la
- *   cuenta a la vista, el siguiente «Listo» es un aviso dentro de la aplicación.
+ * - `r6` en «Selecciona tu usuario» llega el aviso; al tocarlo pide el PIN de Ana y abre la cuenta;
+ *   con la cuenta a la vista, el siguiente «Listo» es un aviso dentro de la aplicación.
  * - `r7` sonido y vibración apagados desde Terminales (canal «listos_silencio») y «Avisar platillos
  *   listos» apagado detiene el servicio.
  * - `r8` deja el servicio corriendo con una cuenta enviada a cocina: **el guion** abre la
  *   aplicación, mata el proceso, espera el reinicio pegajoso, marca «Listo» desde la Mac y busca el
  *   aviso con `dumpsys notification --noredact`.
- * - `r10` (antes de `r9`) en «¿Quién eres?», sin mesero activo, con la pantalla encendida (más que
- *   el periodo de 5 minutos del catálogo) y apagada, la aplicación **no** usa la sesión del último
- *   mesero: Go no renueva su `last_seen_at` (A2-D12: así, de noche, Go responde `active: false`).
+ * - `r10` (antes de `r9`) en «Selecciona tu usuario», sin mesero activo, con la pantalla encendida
+ *   (más que el periodo de 5 minutos del catálogo) y apagada, la aplicación **no** usa la sesión
+ *   del último mesero: Go no renueva su `last_seen_at` (A2-D12: así, de noche, Go responde `active:
+ *   false`).
  * - `r9` al retirar el dispositivo el servicio se detiene y se borran sus datos.
  *
  * Argumentos: `local`, `address`, `net`, `pin`, `mainDevice` y `mainToken` (los arma el guion). Sin
@@ -386,7 +387,8 @@ class AlertsOnGoTest {
         val tasks = kitchenTasksByProduct(accountId)
         // La aplicación abierta como desde el lanzador (en su propia tarea, como en el dispositivo:
         // el
-        // toque en el aviso vuelve a esa misma actividad) en «¿Quién eres?»: el servicio arranca
+        // toque en el aviso vuelve a esa misma actividad) en «Selecciona tu usuario»: el servicio
+        // arranca
         // con
         // lo que dijo Go.
         startFromLauncher()
@@ -483,7 +485,7 @@ class AlertsOnGoTest {
         Thread.sleep(QUIET_MILLIS)
         val deviceId = container.deviceAccess.deviceCredentials()!!.deviceId
         val before = lastSeen(deviceId)
-        log("r10: última actividad de la sesión de Ana al pasar a «¿Quién eres?»: $before")
+        log("r10: última actividad de la sesión de Ana al pasar a «Selecciona tu usuario»: $before")
         Thread.sleep(WHO_SCREEN_ON_MILLIS)
         val screenOn = lastSeen(deviceId)
         shell("input keyevent ${KeyEvent.KEYCODE_SLEEP}")
@@ -666,7 +668,7 @@ class AlertsOnGoTest {
         waitFor("$TAG_WAITER_PREFIX$userId")
         compose.onNodeWithTag("$TAG_WAITER_PREFIX$userId").performClick()
         typePin(pin)
-        waitFor(TAG_TABLES_SEARCH)
+        waitFor(TAG_TABLES_SCREEN)
     }
 
     private fun newAccountOn(tableId: String) {

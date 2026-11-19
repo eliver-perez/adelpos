@@ -94,9 +94,9 @@ class AppContainer(context: Context, private val settings: Settings = Settings()
 
     /**
      * **El estado único de conexión** con la computadora principal (etapa A3, A3-D1): lo leen la
-     * barra, «¿Quién eres?», Mesas, Para llevar, la precuenta, «Entregado» y la notificación del
-     * canal de avisos; lo alimentan la red de Android y cada respuesta de Go del cliente del
-     * servidor emparejado. Lo arranca AdelPosApplication.
+     * barra, «Selecciona tu usuario», Mesas, Para llevar, la precuenta, «Entregado» y la
+     * notificación del canal de avisos; lo alimentan la red de Android y cada respuesta de Go del
+     * cliente del servidor emparejado. Lo arranca AdelPosApplication.
      */
     val serverLink: ServerLinkMonitor by lazy {
         ServerLinkMonitor(

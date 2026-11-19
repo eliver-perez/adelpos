@@ -137,7 +137,10 @@ class PrecheckScreensTest {
             set(message = null, printer = null)
             compose
                 .onNodeWithTag(TAG_PRECHECK_DESTINATION, useUnmergedTree = true)
-                .assertTextEquals("Este dispositivo no tiene impresora asignada.")
+                .assertTextEquals(
+                    "Este dispositivo no tiene impresora asignada. Asígnala en la computadora " +
+                        "principal, en Terminales.",
+                )
             compose.onNodeWithTag(TAG_PRECHECK_PRINT).assertIsEnabled()
             // Nunca leído: no se dice nada antes de tocar.
             set(message = null, printer = null, read = false)

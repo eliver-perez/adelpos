@@ -1,5 +1,6 @@
 package com.adelpos.meseros.navigation
 
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,13 +19,18 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -44,7 +50,6 @@ import com.adelpos.meseros.AdelPosApplication
 import com.adelpos.meseros.R
 import com.adelpos.meseros.ShellViewModel
 import com.adelpos.meseros.core.capture.CaptureRoute
-import com.adelpos.meseros.core.capture.captureTitle
 import com.adelpos.meseros.core.capture.pending.PendingOrdersRoute
 import com.adelpos.meseros.core.capture.pending.ReviewRoute
 import com.adelpos.meseros.core.capture.pending.pendingTitle
@@ -52,14 +57,19 @@ import com.adelpos.meseros.core.capture.pending.reviewTitle
 import com.adelpos.meseros.core.domain.access.ActiveWaiter
 import com.adelpos.meseros.core.domain.access.DeviceStatus
 import com.adelpos.meseros.core.domain.connection.ConnectionSummary
+import com.adelpos.meseros.core.domain.waiter.DeviceHome
 import com.adelpos.meseros.core.domain.waiter.OrderState
 import com.adelpos.meseros.core.domain.waiter.WaiterAction
 import com.adelpos.meseros.core.ui.components.ActiveWaiterMenu
 import com.adelpos.meseros.core.ui.components.AdelTopBar
+import com.adelpos.meseros.core.ui.components.LocalTopBarBack
 import com.adelpos.meseros.core.ui.components.LocalUserActivity
+import com.adelpos.meseros.core.ui.components.TAG_TOP_BAR_BACK
+import com.adelpos.meseros.core.ui.components.TopBarBack
 import com.adelpos.meseros.core.ui.icons.AdelIcons
 import com.adelpos.meseros.core.ui.layout.NavigationPlacement
 import com.adelpos.meseros.core.ui.layout.PaneLayout
+import com.adelpos.meseros.core.ui.layout.TAG_PANE_BACK
 import com.adelpos.meseros.core.ui.layout.currentNavigationPlacement
 import com.adelpos.meseros.core.ui.layout.currentPaneLayout
 import com.adelpos.meseros.core.ui.theme.AdelTheme
@@ -79,6 +89,9 @@ import com.adelpos.meseros.ready.ReadyAlertsController
 import com.adelpos.meseros.ready.ReadyAlertsNavigationEffects
 import com.adelpos.meseros.ready.ReadyAlertsOffNotice
 import com.adelpos.meseros.ready.ReadyAlertsOverlay
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.Serializable
 
 /** Destinos del modo Mesero (rutas con tipo de navigation-compose). */
@@ -93,7 +106,7 @@ import kotlinx.serialization.Serializable
  */
 @Serializable data class CaptureDestination(val captureId: String, val takeaway: Boolean = false)
 
-/** «Pedidos pendientes» del mesero. */
+/** «Pendientes» del mesero. */
 @Serializable data object PendingDestination
 
 /** «Requiere tu revisión» de un pedido de la cola (desde Para llevar, con [takeaway]). */
@@ -179,20 +192,56 @@ fun AdelPosNavigation(
     val navigationPlacement = currentNavigationPlacement()
     val waiter = activeWaiter?.takeIf { status is DeviceStatus.Ready }
     val readyAlerts = readyAlerts()
-    // Un aviso tocado en «¿Quién eres?»: se le pide el PIN a su mesero (etapa A2, §4.4).
+    // Un aviso tocado en «Selecciona tu usuario»: se le pide el PIN a su mesero (etapa A2, §4.4).
     val pendingOpen by readyAlerts.pendingOpen.collectAsStateWithLifecycle()
     // Cada mesero empieza su propia navegación: lo que capturó otro no se ve aquí.
     val navController = key(waiter?.userId) { rememberNavController() }
     val backStackEntry by navController.currentBackStackEntryAsState()
     val destination = backStackEntry?.destination
+    // Etapa A3 (§4.2): la captura dice dónde se está («Mesa 4», «Para llevar #12»); la informa
+    // CaptureRoute al leer su captura.
+    var captureTitle by remember(waiter?.userId) { mutableStateOf<String?>(null) }
+    val inCapture = destination?.hasRoute<CaptureDestination>() == true
+    val captureFromTakeaway =
+        inCapture && backStackEntry?.toRoute<CaptureDestination>()?.takeaway == true
     val title =
         when {
             waiter == null -> accessTitle(status)
-            destination?.hasRoute<CaptureDestination>() == true -> captureTitle()
+            inCapture -> captureTitle ?: if (captureFromTakeaway) takeawayTitle() else tablesTitle()
             destination?.hasRoute<PendingDestination>() == true -> pendingTitle()
             destination?.hasRoute<ReviewDestination>() == true -> reviewTitle()
             destination?.hasRoute<TakeawayDestination>() == true -> takeawayTitle()
             else -> tablesTitle()
+        }
+    // Etapa A3 (§4.1): la flecha de regreso en toda pantalla que no sea la principal (captura,
+    // pendientes, revisión, Para llevar encima de Mesas) y con un panel «a un toque» abierto en el
+    // teléfono (la mesa o la cuenta). Llama al Atrás del sistema: pasa por los mismos BackHandler
+    // (primero el del panel; al salir de una captura con productos sin enviar, el que lo avisa).
+    val topBarBack = remember { TopBarBack() }
+    val notices = remember { SnackbarHostState() }
+    // Un aviso es de la pantalla a la que se vuelve (al salir de una captura con productos sin
+    // enviar): se muestra al llegar a ella y se quita al pasar a otra, para que nunca tape los
+    // botones de abajo de la siguiente (en el teléfono, «Ver la cuenta» y «Enviar a cocina»).
+    var arrivalNotice by remember { mutableStateOf<String?>(null) }
+    val showNotice: (String) -> Unit = { text -> arrivalNotice = text }
+    LaunchedEffect(backStackEntry?.id) {
+        val text = arrivalNotice ?: return@LaunchedEffect
+        arrivalNotice = null
+        // Al cambiar de pantalla esta espera se cancela y el aviso se quita con ella.
+        notices.showSnackbar(text)
+    }
+    val backDispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
+    val notMain =
+        inCapture ||
+            destination?.hasRoute<PendingDestination>() == true ||
+            destination?.hasRoute<ReviewDestination>() == true ||
+            destination?.hasRoute<TakeawayDestination>() == true &&
+                navController.previousBackStackEntry != null
+    val onBack: (() -> Unit)? =
+        if (waiter != null && backDispatcher != null && (notMain || topBarBack.panelOpen)) {
+            { backDispatcher.onBackPressed() }
+        } else {
+            null
         }
     // §3.1 de la A2: «Mesas» y «Para llevar» siempre a la vista, si Go le da al mesero activo
     // permiso de ver los pedidos para llevar.
@@ -210,6 +259,12 @@ fun AdelPosNavigation(
             AdelTopBar(
                 title = title,
                 connection = connection,
+                onBack = onBack,
+                // Con un panel abierto en el teléfono la flecha hace lo que hacía su «Volver a …»
+                // (las pruebas de punta a punta lo buscan por esa etiqueta).
+                backTag = if (topBarBack.panelOpen) TAG_PANE_BACK else TAG_TOP_BAR_BACK,
+                // Etapa A3 (§4.5): el logotipo junto al título en la pantalla de entrada.
+                logo = waiter == null && status is DeviceStatus.Ready,
                 actions = {
                     if (waiter != null) {
                         ActiveWaiterMenu(
@@ -234,6 +289,7 @@ fun AdelPosNavigation(
                 )
             }
         },
+        snackbarHost = { SnackbarHost(notices, modifier = Modifier.testTag(TAG_APP_NOTICE)) },
         containerColor = MaterialTheme.colorScheme.background,
         contentWindowInsets = WindowInsets.safeDrawing,
     ) { padding ->
@@ -252,7 +308,16 @@ fun AdelPosNavigation(
                             ReadyAlertsOffNotice(readyAlerts)
                         }
                         Box(modifier = Modifier.weight(1f)) {
-                            key(waiter.userId) { WaiterNavigation(navController, paneLayout) }
+                            CompositionLocalProvider(LocalTopBarBack provides topBarBack) {
+                                key(waiter.userId) {
+                                    WaiterNavigation(
+                                        navController = navController,
+                                        paneLayout = paneLayout,
+                                        onCaptureTitle = { captureTitle = it },
+                                        onNotice = showNotice,
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -367,13 +432,18 @@ private fun MainNavigationBar(selected: MainSection, onSelect: (MainSection) -> 
 }
 
 /**
- * El modo Mesero (Fase E): Mesas → la captura de una cuenta; «Pedidos pendientes» y «Requiere tu
- * revisión». Después de «Enviar a cocina» se vuelve a Mesas (el pedido sigue en la cola con su
- * estado). Desde la A2, «Para llevar» → la misma captura (compartida en `core:capture`), y al
- * terminar se vuelve a Para llevar.
+ * El modo Mesero (Fase E): Mesas → la captura de una cuenta; «Pendientes» y «Requiere tu revisión».
+ * Después de «Enviar a cocina» se vuelve a Mesas (el pedido sigue en la cola con su estado). Desde
+ * la A2, «Para llevar» → la misma captura (compartida en `core:capture`), y al terminar se vuelve a
+ * Para llevar.
  */
 @Composable
-private fun WaiterNavigation(navController: NavHostController, paneLayout: PaneLayout) {
+private fun WaiterNavigation(
+    navController: NavHostController,
+    paneLayout: PaneLayout,
+    onCaptureTitle: (String) -> Unit,
+    onNotice: (String) -> Unit,
+) {
     val application = LocalContext.current.applicationContext as AdelPosApplication
     val waiter = application.container.waiterDependencies
     val takeaway = application.container.takeawayDependencies
@@ -419,6 +489,33 @@ private fun WaiterNavigation(navController: NavHostController, paneLayout: PaneL
         },
         onOpenTakeawayList = { selectSection(navController, MainSection.TAKEAWAY) },
     )
+    // Etapa A3 (§4.12): al entrar el mesero, la pantalla inicial que guarda Terminales para este
+    // dispositivo (Mesas o Para llevar; cualquier otro valor es Mesas, A3-D7). Lo guardado vale
+    // enseguida (también sin conexión) y, unos segundos, lo que Go diga al entrar con conexión (la
+    // pantalla y los permisos se leen al entrar). Solo si el mesero sigue en Mesas sin haber
+    // tocado nada, y una sola vez por entrada (no al girar la pantalla).
+    var homeApplied by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(homeApplied) {
+        if (homeApplied) {
+            return@LaunchedEffect
+        }
+        val setup = waiter.capture.precheck.setup
+        val permissions = waiter.restaurant.permissions
+        val takeaway =
+            withTimeoutOrNull(HOME_WAIT_MILLIS) {
+                combine(setup, permissions) { read, granted ->
+                        DeviceHome.startsInTakeaway(read.home, granted)
+                    }
+                    .first { it }
+            }
+        homeApplied = true
+        val untouched =
+            navController.currentDestination?.hasRoute<TablesDestination>() == true &&
+                navController.previousBackStackEntry == null
+        if (takeaway == true && untouched) {
+            selectSection(navController, MainSection.TAKEAWAY)
+        }
+    }
     NavHost(navController = navController, startDestination = TablesDestination) {
         composable<TablesDestination> {
             TablesRoute(
@@ -456,6 +553,11 @@ private fun WaiterNavigation(navController: NavHostController, paneLayout: PaneL
                         navController.popBackStack(TablesDestination, inclusive = false)
                     }
                 },
+                onTitleChange = onCaptureTitle,
+                onLeaveUnsent = { notice ->
+                    onNotice(notice)
+                    navController.popBackStack()
+                },
             )
         }
         composable<PendingDestination> {
@@ -483,7 +585,11 @@ private fun WaiterNavigation(navController: NavHostController, paneLayout: PaneL
     }
 }
 
+/** Cuánto se espera al entrar a que Go diga la pantalla inicial y los permisos del mesero. */
+private const val HOME_WAIT_MILLIS = 5_000L
+
 const val TAG_APP_ROOT = "app-root"
+const val TAG_APP_NOTICE = "app-notice"
 const val TAG_MAIN_NAVIGATION = "main-navigation"
 const val TAG_NAVIGATION_RAIL = "main-navigation-rail"
 const val TAG_NAV_TABLES = "nav-tables"

@@ -76,7 +76,7 @@ import com.adelpos.meseros.feature.waiter.tables.TAG_ACCOUNT_PANE
 import com.adelpos.meseros.feature.waiter.tables.TAG_NEW_ACCOUNT
 import com.adelpos.meseros.feature.waiter.tables.TAG_OPEN_PENDING
 import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_LIST
-import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_SEARCH
+import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_SCREEN
 import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_VIEW
 import com.adelpos.meseros.feature.waiter.tables.TAG_TABLE_CAPTURE_PREFIX
 import com.adelpos.meseros.feature.waiter.tables.TAG_TABLE_PREFIX
@@ -627,7 +627,7 @@ class FieldOnGoTest {
             waitFor("${TAG_PIN_KEY_PREFIX}1")
             shot("03-pin", problems)
             typePin(ANA_PIN)
-            waitFor(TAG_TABLES_SEARCH)
+            waitFor(TAG_TABLES_SCREEN)
             shot("04-mesas-lista", problems)
             tap("$TAG_TABLES_VIEW-map")
             Thread.sleep(SETTLE_MILLIS)
@@ -875,7 +875,7 @@ class FieldOnGoTest {
         waitFor("$TAG_WAITER_PREFIX$userId")
         compose.onNodeWithTag("$TAG_WAITER_PREFIX$userId").performClick()
         typePin(pin)
-        waitFor(TAG_TABLES_SEARCH)
+        waitFor(TAG_TABLES_SCREEN)
     }
 
     /** «Cambiar de mesero» desde el menú visible (lleva a la lista de meseros). */
@@ -890,7 +890,7 @@ class FieldOnGoTest {
 
     private fun waitForTables() {
         try {
-            waitUntil("Mesas") { present(TAG_TABLES_SEARCH) || present(TAG_ACCOUNT_PANE) }
+            waitUntil("Mesas") { present(TAG_TABLES_SCREEN) || present(TAG_ACCOUNT_PANE) }
         } catch (failure: Throwable) {
             printTree()
             throw failure
@@ -906,7 +906,7 @@ class FieldOnGoTest {
     private fun showTables() {
         repeat(4) {
             compose.waitForIdle()
-            val list = present(TAG_TABLES_SEARCH)
+            val list = present(TAG_TABLES_SCREEN)
             val tableOnPhone = present(TAG_ACCOUNT_PANE) && present(TAG_PANE_BACK)
             val capture = present(TAG_ORDER_PANEL) || present(TAG_PRODUCT_GRID)
             val pending = present(TAG_PENDING)

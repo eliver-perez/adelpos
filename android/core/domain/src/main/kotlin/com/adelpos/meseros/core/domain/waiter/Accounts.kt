@@ -47,6 +47,8 @@ data class Totals(val subtotal: Money, val discount: Money, val total: Money) {
  * @param customer nombre y teléfono del cliente (vacíos en salón).
  * @param paymentState y [deliveryState]: como los da Go (`payment_state`, `delivery_state`); la
  *   aplicación nunca los calcula ([TakeawayStates]).
+ * @param discardable Go dice que es una cuenta vacía que se puede descartar (`discardable`: sin
+ *   nada enviado ni cobrado); la aplicación nunca lo decide (etapa A3, §4.10).
  */
 data class AccountSummary(
     val id: String,
@@ -68,6 +70,7 @@ data class AccountSummary(
     val customer: TakeawayCustomer = TakeawayCustomer.NONE,
     val paymentState: String? = null,
     val deliveryState: String? = null,
+    val discardable: Boolean = false,
 ) {
     val isOpen: Boolean
         get() = state == STATE_OPEN

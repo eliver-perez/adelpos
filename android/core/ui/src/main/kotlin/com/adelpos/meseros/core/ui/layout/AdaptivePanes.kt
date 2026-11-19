@@ -19,11 +19,13 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.adelpos.meseros.core.ui.R
+import com.adelpos.meseros.core.ui.components.LocalTopBarBack
 import com.adelpos.meseros.core.ui.components.SecondaryButton
 import com.adelpos.meseros.core.ui.icons.AdelIcons
 import com.adelpos.meseros.core.ui.theme.AdelDimens
@@ -38,6 +40,11 @@ import com.adelpos.meseros.core.ui.theme.AdelDimens
  *
  * El estado [showSecondary] lo guarda quien llama (en su ViewModel con SavedStateHandle) para
  * sobrevivir a la rotación y a que el sistema cierre la aplicación en segundo plano.
+ *
+ * Etapa A3 (§4.1): si la raíz provee la flecha de la barra superior ([LocalTopBarBack]), el panel
+ * abierto se registra ahí y no dibuja su propio «Volver a …» (una sola flecha). Con
+ * [openSecondaryLabel] en null no hay botón para abrirlo: quien llama lo abre al tocar algo (Mesas:
+ * tocar la mesa abre su panel, §4.7).
  */
 @Composable
 fun AdaptivePanes(
@@ -45,7 +52,7 @@ fun AdaptivePanes(
     showSecondary: Boolean,
     onShowSecondaryChange: (Boolean) -> Unit,
     primaryTitle: String,
-    openSecondaryLabel: String,
+    openSecondaryLabel: String?,
     primary: @Composable () -> Unit,
     secondary: @Composable () -> Unit,
     modifier: Modifier = Modifier,
@@ -67,23 +74,32 @@ fun AdaptivePanes(
         PaneLayout.SINGLE -> {
             if (showSecondary) {
                 BackHandler { onShowSecondaryChange(false) }
-                Column(modifier = modifier.fillMaxSize().testTag(TAG_PANES_SINGLE)) {
-                    TextButton(
-                        onClick = { onShowSecondaryChange(false) },
-                        modifier =
-                            Modifier.padding(horizontal = 8.dp)
-                                .heightIn(min = AdelDimens.MinTouchTarget)
-                                .testTag(TAG_PANE_BACK),
-                    ) {
-                        Icon(
-                            AdelIcons.ChevronLeft,
-                            contentDescription = null,
-                            modifier = Modifier.size(22.dp),
-                        )
-                        Spacer(Modifier.width(4.dp))
-                        Text(stringResource(R.string.panes_back, primaryTitle))
+                val topBarBack = LocalTopBarBack.current
+                if (topBarBack != null) {
+                    DisposableEffect(topBarBack) {
+                        topBarBack.panelOpened()
+                        onDispose { topBarBack.panelClosed() }
                     }
-                    HorizontalDivider()
+                }
+                Column(modifier = modifier.fillMaxSize().testTag(TAG_PANES_SINGLE)) {
+                    if (topBarBack == null) {
+                        TextButton(
+                            onClick = { onShowSecondaryChange(false) },
+                            modifier =
+                                Modifier.padding(horizontal = 8.dp)
+                                    .heightIn(min = AdelDimens.MinTouchTarget)
+                                    .testTag(TAG_PANE_BACK),
+                        ) {
+                            Icon(
+                                AdelIcons.ChevronLeft,
+                                contentDescription = null,
+                                modifier = Modifier.size(22.dp),
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(stringResource(R.string.panes_back, primaryTitle))
+                        }
+                        HorizontalDivider()
+                    }
                     Box(modifier = Modifier.weight(1f).fillMaxWidth().testTag(TAG_PANE_SECONDARY)) {
                         secondary()
                     }
@@ -93,14 +109,16 @@ fun AdaptivePanes(
                     Box(modifier = Modifier.weight(1f).fillMaxWidth().testTag(TAG_PANE_PRIMARY)) {
                         primary()
                     }
-                    SecondaryButton(
-                        text = openSecondaryLabel,
-                        onClick = { onShowSecondaryChange(true) },
-                        modifier =
-                            Modifier.fillMaxWidth()
-                                .padding(AdelDimens.ScreenPadding)
-                                .testTag(TAG_PANE_OPEN_SECONDARY),
-                    )
+                    if (openSecondaryLabel != null) {
+                        SecondaryButton(
+                            text = openSecondaryLabel,
+                            onClick = { onShowSecondaryChange(true) },
+                            modifier =
+                                Modifier.fillMaxWidth()
+                                    .padding(AdelDimens.ScreenPadding)
+                                    .testTag(TAG_PANE_OPEN_SECONDARY),
+                        )
+                    }
                 }
             }
         }

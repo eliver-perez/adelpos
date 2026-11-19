@@ -3,8 +3,19 @@
      En español del restaurante, sin tecnicismos. -->
 <resources xmlns:tools="http://schemas.android.com/tools" tools:locale="es">
     <!-- Captura (§6.3). -->
-    <string name="capture_screen_title">Captura</string>
-    <string name="capture_open_order">Ver la cuenta (%1$d)</string>
+    <!-- Etapa A3, §4.2: la barra dice dónde se está. -->
+    <string name="capture_title_takeaway">Para llevar #%1$d</string>
+    <string name="capture_title_takeaway_new">Nuevo pedido para llevar</string>
+    <!-- Etapa A3, §4.4: sin número; con productos nuevos sin enviar, cuántos. -->
+    <string name="capture_open_order">Ver la cuenta</string>
+    <plurals name="capture_open_order_unsent">
+        <item quantity="one">Ver la cuenta · %d por enviar</item>
+        <item quantity="many">Ver la cuenta · %d por enviar</item>
+        <item quantity="other">Ver la cuenta · %d por enviar</item>
+    </plurals>
+    <!-- Etapa A3, §4.1: al salir con productos sin enviar (regla de la A1: se quedan con el mesero). -->
+    <string name="capture_left_unsent">Lo capturado en %1$s quedó guardado sin enviar a cocina. Lo encuentras en la mesa o en Pendientes.</string>
+    <string name="capture_left_unsent_takeaway">Lo capturado en %1$s quedó guardado sin enviar a cocina. Lo encuentras en Para llevar o en Pendientes.</string>
     <string name="capture_catalog">Catálogo</string>
     <string name="capture_new_account">Cuenta nueva</string>
     <string name="capture_account">%1$s · folio %2$d</string>
@@ -29,7 +40,7 @@
     <string name="capture_discard_text">Se quitan los productos tuyos que no se han enviado a cocina, también de la cuenta en la computadora principal. Si la cuenta se abrió con esta captura y queda vacía, también se descarta. Lo enviado no cambia.</string>
     <string name="capture_still_saving">Todavía se está guardando lo último que capturaste. Toca «Enviar a cocina» de nuevo en un momento.</string>
     <string name="discard_pending_title">Falta quitarlo de la cuenta</string>
-    <string name="discard_pending_text">No hay conexión con la computadora principal: lo que descartaste todavía está guardado en la cuenta y se quitará en cuanto vuelva la conexión. Lo ves en Pedidos pendientes.</string>
+    <string name="discard_pending_text">No hay conexión con la computadora principal: lo que descartaste todavía está guardado en la cuenta y se quitará en cuanto vuelva la conexión. Lo ves en Pendientes.</string>
     <string name="discard_pending_ok">Entendido</string>
     <string name="capture_discard_confirm">Descartar</string>
     <string name="capture_cancel">Cancelar</string>
@@ -71,8 +82,8 @@
     <string name="sent_close">Cerrar</string>
     <string name="sent_error">%1$s</string>
 
-    <!-- Pedidos pendientes (§7). -->
-    <string name="pending_title">Pedidos pendientes</string>
+    <!-- Pendientes (§7; título corto desde la etapa A3, §4.6). -->
+    <string name="pending_title">Pendientes</string>
     <string name="pending_retry_now">Reintentar ya</string>
     <string name="pending_empty">No tienes pedidos pendientes.</string>
     <string name="pending_others_title">De otros meseros en este dispositivo</string>
@@ -138,7 +149,9 @@
     <string name="precheck_print_bill">Imprimir cuenta</string>
     <string name="precheck_sending">Enviando…</string>
     <string name="precheck_destination">Se imprime en %1$s.</string>
-    <string name="precheck_no_printer_known">Este dispositivo no tiene impresora asignada.</string>
+    <string name="precheck_no_printer_known">Este dispositivo no tiene impresora asignada. Asígnala en la computadora principal, en Terminales.</string>
+    <!-- Etapa A3, §4.9: sin el permiso se ve el botón con el motivo. -->
+    <string name="precheck_not_allowed">Tu usuario no tiene permiso para imprimir la precuenta. Pídelo en la computadora principal.</string>
     <string name="precheck_sent">Enviada a %1$s</string>
     <string name="precheck_sent_masculine">Enviado a %1$s</string>
     <string name="precheck_sent_any">Enviada a la impresora</string>

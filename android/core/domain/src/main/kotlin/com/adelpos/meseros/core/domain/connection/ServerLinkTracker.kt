@@ -16,8 +16,9 @@ package com.adelpos.meseros.core.domain.connection
  * - Dudando: una sonda cada [DOUBT_PROBE_MILLIS] para confirmarlo pronto.
  * - «Sin conexión» con red de Android: una cada [OFFLINE_PROBE_MILLIS] para volver pronto.
  * - En línea con el canal de eventos abierto: ninguna (el canal es la revisión).
- * - En línea sin canal (en «¿Quién eres?», sin sesión o sin uso): una cada [IDLE_CHECK_MILLIS], que
- *   se salta si hubo otro éxito en ese lapso (la lista de «¿Quién eres?» cuenta).
+ * - En línea sin canal (en «Selecciona tu usuario», sin sesión o sin uso): una cada
+ *   [IDLE_CHECK_MILLIS], que se salta si hubo otro éxito en ese lapso (la lista de «Selecciona tu
+ *   usuario» cuenta).
  * - En segundo plano o sin red de Android: ninguna (la batería; al volver a primer plano o la red
  *   se revisa enseguida).
  *

@@ -15,11 +15,13 @@ import com.adelpos.meseros.core.domain.realtime.events
 import com.adelpos.meseros.core.domain.realtime.rebuilds
 import com.adelpos.meseros.core.domain.waiter.AccountBill
 import com.adelpos.meseros.core.domain.waiter.AccountSummary
+import com.adelpos.meseros.core.domain.waiter.DiscardAccountResult
 import com.adelpos.meseros.core.domain.waiter.RestaurantSource
 import com.adelpos.meseros.core.domain.waiter.RestaurantStatus
 import com.adelpos.meseros.core.domain.waiter.RestaurantView
 import com.adelpos.meseros.core.domain.waiter.TakeawayRead
 import com.adelpos.meseros.core.domain.waiter.WaiterPermissions
+import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -64,6 +66,7 @@ class RestaurantRepository(
     private val wallClock: () -> Long = System::currentTimeMillis,
     private val link: StateFlow<LinkState>? = null,
     private val retryMillis: Long = RETRY_AFTER_NO_ANSWER_MILLIS,
+    private val newId: () -> String = { UUID.randomUUID().toString() },
 ) : RestaurantSource {
     private val mutableView = MutableStateFlow(RestaurantView.EMPTY)
     private val mutablePermissions = MutableStateFlow(WaiterPermissions.UNKNOWN)
@@ -194,6 +197,37 @@ class RestaurantRepository(
         }
     }
 
+    override suspend fun discardEmptyAccount(account: AccountSummary): DiscardAccountResult {
+        val userId = server.activeWaiter.value?.userId ?: return DiscardAccountResult.NoConnection
+        val transport = server.transport() ?: return DiscardAccountResult.NoConnection
+        val headers = server.sessionHeaders(userId) ?: return DiscardAccountResult.NoConnection
+        val body = MutationBody(operationId = newId(), revision = account.revision)
+        var outcome = api.discardAccount(transport, headers, account.id, body)
+        if (outcome is ApiOutcome.NoAnswer && outcome.requestSent) {
+            // Pudo haber entrado: se repite **igual** (misma clave) y Go no descarta dos veces.
+            delay(DISCARD_RETRY_MILLIS)
+            outcome = api.discardAccount(transport, headers, account.id, body)
+        }
+        val result =
+            when (outcome) {
+                is ApiOutcome.Success -> DiscardAccountResult.Discarded
+                is ApiOutcome.Rejected ->
+                    when (outcome.problem.code) {
+                        ACCOUNT_NOT_EMPTY,
+                        ACCOUNT_CONFLICT -> DiscardAccountResult.Changed
+                        else -> {
+                            failure(outcome, userId)
+                            DiscardAccountResult.Failed(outcome.problem.message)
+                        }
+                    }
+                is ApiOutcome.NoAnswer -> DiscardAccountResult.NoConnection
+                is ApiOutcome.Malformed -> DiscardAccountResult.Failed(null)
+            }
+        // La lista se vuelve a leer en cualquier caso (el canal también avisa).
+        refresh()
+        return result
+    }
+
     /** El error de una lectura; los de acceso (sesión, dispositivo, versión) van al punto único. */
     private fun failure(outcome: ApiOutcome<*>, userId: String): AppError {
         val error = outcome.toAppResult().let { (it as AppResult.Failure).error }
@@ -297,6 +331,11 @@ class RestaurantRepository(
          * la sonda mientras el estado duda (`ServerLinkTracker.DOUBT_PROBE_MILLIS`).
          */
         private const val RETRY_AFTER_NO_ANSWER_MILLIS = 5_000L
+
+        /** Pausa antes de repetir con la misma clave un descarte sin respuesta. */
+        private const val DISCARD_RETRY_MILLIS = 1_500L
+        private const val ACCOUNT_NOT_EMPTY = "ACCOUNT_NOT_EMPTY"
+        private const val ACCOUNT_CONFLICT = "ACCOUNT_CONFLICT"
         private const val CHANGES_BUFFER = 64
         private val ACCOUNTS = ListSerializer(AccountDto.serializer())
     }

@@ -42,12 +42,14 @@ data class PrecheckPrinter(val name: String, val terminalName: String?) {
 /**
  * Lo último que se leyó de Go para imprimir, guardado para verse también sin conexión: el nombre
  * visible y la impresora de este dispositivo (null si no tiene). Con [read] en false nunca se leyó:
- * no se avisa nada antes de tocar (la respuesta de Go manda siempre).
+ * no se avisa nada antes de tocar (la respuesta de Go manda siempre). Desde la etapa A3 también la
+ * pantalla inicial del dispositivo ([home], de la misma lectura de `getIdentity`).
  */
 data class PrecheckSetup(
     val name: PrecheckName,
     val printer: PrecheckPrinter?,
     val read: Boolean,
+    val home: DeviceHome = DeviceHome.TABLES,
 ) {
     companion object {
         val UNKNOWN = PrecheckSetup(PrecheckName.PRECHECK, printer = null, read = false)

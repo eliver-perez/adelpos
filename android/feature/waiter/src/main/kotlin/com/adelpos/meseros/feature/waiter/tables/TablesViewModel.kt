@@ -15,16 +15,22 @@ import com.adelpos.meseros.core.domain.preferences.TablesView
 import com.adelpos.meseros.core.domain.waiter.AccountSummary
 import com.adelpos.meseros.core.domain.waiter.Capture
 import com.adelpos.meseros.core.domain.waiter.DiningTable
+import com.adelpos.meseros.core.domain.waiter.DiscardAccountResult
 import com.adelpos.meseros.core.domain.waiter.PendingOrder
+import com.adelpos.meseros.core.domain.waiter.PrecheckPrintState
+import com.adelpos.meseros.core.domain.waiter.PrecheckPrinting
+import com.adelpos.meseros.core.domain.waiter.PrecheckSetup
 import com.adelpos.meseros.core.domain.waiter.RestaurantStatus
 import com.adelpos.meseros.core.domain.waiter.RestaurantView
 import com.adelpos.meseros.core.domain.waiter.WaiterAction
 import com.adelpos.meseros.core.domain.waiter.WaiterPermissions
 import com.adelpos.meseros.feature.waiter.WaiterDependencies
+import java.util.UUID
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
@@ -87,25 +93,94 @@ class TablesViewModel(
             dependencies.elapsedClock(),
         )
 
-    var search: String by mutableStateOf(savedState[KEY_SEARCH] ?: "")
-        private set
-
     var showingAccount: Boolean by mutableStateOf(savedState[KEY_SHOWING_ACCOUNT] ?: false)
         private set
 
     var selectedTableId: String? by mutableStateOf(savedState[KEY_SELECTED_TABLE])
         private set
 
-    var mapAreaId: String? by mutableStateOf(savedState[KEY_MAP_AREA])
+    /** El área elegida en la fila de arriba (lista y mapa, etapa A3, §4.7). */
+    var areaId: String? by mutableStateOf(savedState[KEY_AREA])
         private set
 
     /** Mientras se abre una captura (la cuenta se lee de Go): evita tocar dos veces. */
     var opening: Boolean by mutableStateOf(false)
         private set
 
+    // --- La precuenta desde el panel de la mesa (etapa A3, §4.9) ---
+
+    private val printing =
+        PrecheckPrinting(dependencies.capture.precheck, viewModelScope, newId = ::newId)
+
+    /** La cuenta cuya precuenta se está imprimiendo o se imprimió por última vez (una a la vez). */
+    var printingAccountId: String? by mutableStateOf(null)
+        private set
+
+    val precheckSetup: StateFlow<PrecheckSetup> = dependencies.capture.precheck.setup
+
+    /** Cómo va la impresión de [printingAccountId]. */
+    val precheckState: StateFlow<PrecheckPrintState> = printing.state
+
+    /**
+     * Hay sesión de Go y conexión (el estado único): imprimir y descartar nunca entran en la cola.
+     */
+    val canWriteNow: StateFlow<Boolean> =
+        combine(dependencies.activeWaiter, dependencies.capture.precheck.connected) {
+                waiter,
+                connected ->
+                waiter?.hasServerSession == true && !waiter.mustReenterPin && connected
+            }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    // --- «Descartar cuenta vacía» (etapa A3, §4.10) ---
+
+    /** La cuenta que se está descartando (el botón espera la respuesta). */
+    var discardingAccountId: String? by mutableStateOf(null)
+        private set
+
+    /** Lo que respondió Go al último descarte (se muestra en el panel hasta otro). */
+    var discardResult: DiscardAccountResult? by mutableStateOf(null)
+        private set
+
     init {
         dependencies.restaurant.refresh()
     }
+
+    /** «Imprimir precuenta» de una cuenta del panel: la anterior que se seguía se olvida. */
+    fun onPrintPrecheck(account: AccountSummary) {
+        val waiter = userId ?: return
+        if (printingAccountId != account.id) {
+            printing.reset()
+            printingAccountId = account.id
+        }
+        printing.print(waiter, account.id)
+    }
+
+    /** «Reintentar» la precuenta que nunca salió en papel (regla de la 9F). */
+    fun onRetryPrecheck(account: AccountSummary) {
+        val waiter = userId ?: return
+        if (printingAccountId == account.id) {
+            printing.retry(waiter, account.id)
+        }
+    }
+
+    /** «Descartar cuenta vacía» confirmado: con conexión y la sesión del mesero. */
+    fun onDiscardEmpty(account: AccountSummary) {
+        if (discardingAccountId != null || !account.discardable) {
+            return
+        }
+        discardingAccountId = account.id
+        discardResult = null
+        viewModelScope.launch {
+            try {
+                discardResult = dependencies.restaurant.discardEmptyAccount(account)
+            } finally {
+                discardingAccountId = null
+            }
+        }
+    }
+
+    private fun newId(): String = UUID.randomUUID().toString()
 
     private fun <T> flowOfUser(block: (String) -> Flow<List<T>>): Flow<List<T>> =
         if (userId == null) {
@@ -113,11 +188,6 @@ class TablesViewModel(
         } else {
             block(userId)
         }
-
-    fun onSearchChange(text: String) {
-        search = text
-        savedState[KEY_SEARCH] = text
-    }
 
     fun onShowingAccountChange(showing: Boolean) {
         showingAccount = showing
@@ -130,9 +200,9 @@ class TablesViewModel(
         onShowingAccountChange(true)
     }
 
-    fun onMapAreaSelect(areaId: String) {
-        mapAreaId = areaId
-        savedState[KEY_MAP_AREA] = areaId
+    fun onAreaSelect(areaId: String) {
+        this.areaId = areaId
+        savedState[KEY_AREA] = areaId
     }
 
     fun onTablesViewChange(view: TablesView) {
@@ -181,10 +251,11 @@ class TablesViewModel(
     }
 
     companion object {
-        const val KEY_SEARCH = "tables.search"
         const val KEY_SHOWING_ACCOUNT = "tables.showingAccount"
         const val KEY_SELECTED_TABLE = "tables.selected"
-        const val KEY_MAP_AREA = "tables.mapArea"
+
+        /** La misma clave de la A2 (el área del mapa): ahora vale para la lista y el mapa. */
+        const val KEY_AREA = "tables.mapArea"
 
         private const val STOP_TIMEOUT_MILLIS = 5_000L
         private const val TICK_MILLIS = 30_000L

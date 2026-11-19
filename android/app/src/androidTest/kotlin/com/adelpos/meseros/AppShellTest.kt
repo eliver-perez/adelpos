@@ -33,7 +33,7 @@ import com.adelpos.meseros.feature.access.status.TAG_REPAIR
 import com.adelpos.meseros.feature.access.status.TAG_RETIRED
 import com.adelpos.meseros.feature.access.status.TAG_UPDATE_APP
 import com.adelpos.meseros.feature.access.status.TAG_UPDATE_SERVER
-import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_SEARCH
+import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_SCREEN
 import com.adelpos.meseros.navigation.AdelPosNavigation
 import com.adelpos.meseros.navigation.TAG_APP_ROOT
 import org.junit.Assert.assertEquals
@@ -90,7 +90,7 @@ class AppShellTest {
                 {
                     status = DeviceStatus.Retired(listOf(UnsentOrder("Ana", "Mesa 4: 2 tacos", 0)))
                 },
-            TAG_TABLES_SEARCH to
+            TAG_TABLES_SCREEN to
                 {
                     status = DeviceStatus.Ready("Fonda", "Tableta 1", 120)
                     waiter = ActiveWaiter(FakeAccess.SAMPLE_WAITERS[0], hasServerSession = false)

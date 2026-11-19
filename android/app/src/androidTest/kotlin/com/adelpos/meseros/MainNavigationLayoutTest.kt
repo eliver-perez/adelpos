@@ -22,7 +22,7 @@ import com.adelpos.meseros.core.ui.components.TAG_TOP_BAR
 import com.adelpos.meseros.core.ui.layout.NavigationPlacement
 import com.adelpos.meseros.core.ui.layout.navigationPlacementFor
 import com.adelpos.meseros.feature.takeaway.TAG_TAKEAWAY_NEW
-import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_SEARCH
+import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_SCREEN
 import com.adelpos.meseros.navigation.TAG_MAIN_NAVIGATION
 import com.adelpos.meseros.navigation.TAG_NAVIGATION_RAIL
 import com.adelpos.meseros.navigation.TAG_NAV_TABLES
@@ -110,13 +110,13 @@ class MainNavigationLayoutTest {
             waitForTitle("Para llevar")
             waitForTag(TAG_TAKEAWAY_NEW)
             compose.onNodeWithTag(TAG_TAKEAWAY_NEW).performClick()
-            waitForTitle("Captura")
+            waitForTitle("Nuevo pedido para llevar")
             waitForTag(TAG_CAPTURE)
             // También en la captura (siempre a la vista, §3.1) y en el mismo lugar.
             assertPlacement(placement)
             compose.onNodeWithTag(TAG_NAV_TABLES).performClick()
             waitForTitle("Mesas")
-            compose.onNodeWithTag(TAG_TABLES_SEARCH).assertIsDisplayed()
+            compose.onNodeWithTag(TAG_TABLES_SCREEN).assertIsDisplayed()
         }
         // Un «Nuevo pedido» sin productos no deja nada, también al cambiar de sección.
         compose.waitUntil(timeoutMillis = 10_000) { runBlocking { waiter.allCaptures().isEmpty() } }

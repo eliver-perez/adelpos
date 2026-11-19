@@ -69,8 +69,8 @@ import org.junit.runner.RunWith
 
 /**
  * Las pantallas del modo Mesero con datos fijos, en tema claro y oscuro: los cinco estados de un
- * pedido siempre distintos, «Pedidos pendientes» con «Reintentar ya», «Requiere tu revisión» que
- * solo se acepta con cambios aceptables, y Mesas con la mesa en uno o dos paneles.
+ * pedido siempre distintos, «Pendientes» con «Reintentar ya», «Requiere tu revisión» que solo se
+ * acepta con cambios aceptables, y Mesas con la mesa en uno o dos paneles.
  */
 @RunWith(AndroidJUnit4::class)
 class WaiterScreensTest {
@@ -146,7 +146,7 @@ class WaiterScreensTest {
         compose.onNodeWithTag(TAG_PENDING).performScrollToNode(hasTestTag(TAG_RETRY_NOW))
         compose.onNodeWithTag(TAG_RETRY_NOW).assertIsEnabled().performClick()
         assertEquals(1, retried)
-        // Sin nada «Por enviar», no hay qué reintentar.
+        // Sin nada «Por enviar», no hay qué reintentar: ni siquiera el botón (etapa A3, §4.6).
         show(dark = false) {
             PendingOrdersScreen(
                 orders = listOf(order("op-3", OrderState.RECEIVED)),
@@ -157,7 +157,7 @@ class WaiterScreensTest {
                 onOpenReview = {},
             )
         }
-        compose.onNodeWithTag(TAG_RETRY_NOW).assertIsNotEnabled()
+        compose.onNodeWithTag(TAG_RETRY_NOW).assertDoesNotExist()
     }
 
     @Test
@@ -253,7 +253,9 @@ class WaiterScreensTest {
                 compose.onNodeWithTag(TAG_NEW_ACCOUNT_NOTE).assertExists()
             } else {
                 compose.onNodeWithTag(TAG_ACCOUNT_PANE).assertDoesNotExist()
-                compose.onNodeWithTag(TAG_PANE_OPEN_SECONDARY).performClick()
+                // Etapa A3 (§4.7): sin «Ver la mesa»; tocar la mesa la abre.
+                compose.onNodeWithTag(TAG_PANE_OPEN_SECONDARY).assertDoesNotExist()
+                compose.onNodeWithTag("${TAG_TABLE_PREFIX}t1").performClick()
                 assertTrue(showing)
             }
         }
@@ -384,17 +386,16 @@ class WaiterScreensTest {
             status = RestaurantStatus(loading = false, live = true, lastError = null),
             offline = false,
             tablesView = TablesView.LIST,
-            search = "",
             now = 0,
-            mapAreaId = null,
+            areaId = null,
         )
 
     private fun actions(onShowing: (Boolean) -> Unit) =
         TablesActions(
-            onSearchChange = {},
             onTablesViewChange = {},
-            onMapAreaSelect = {},
-            onTableSelect = {},
+            onAreaSelect = {},
+            // Como TablesViewModel: tocar la mesa la elige y abre su panel (etapa A3, §4.7).
+            onTableSelect = { onShowing(true) },
             onShowingTableChange = onShowing,
             onRefresh = {},
             onOpenPending = {},
