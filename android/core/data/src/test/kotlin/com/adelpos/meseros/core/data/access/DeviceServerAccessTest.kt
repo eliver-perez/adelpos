@@ -12,6 +12,7 @@ import com.adelpos.meseros.core.data.session.DeviceServerAccess
 import com.adelpos.meseros.core.domain.access.DeviceStatus
 import com.adelpos.meseros.core.domain.access.EntryResult
 import com.adelpos.meseros.core.domain.access.NoUnsentOrders
+import com.adelpos.meseros.core.domain.connection.FixedServerLink
 import com.adelpos.meseros.core.domain.realtime.AccessInterruption
 import com.adelpos.meseros.core.domain.server.ServerRelocator
 import com.adelpos.meseros.core.domain.text.Hex
@@ -62,7 +63,7 @@ class DeviceServerAccessTest {
                 destroyKey = {},
                 identity = ClientIdentity("0.1.0"),
                 relocator = ServerRelocator({ emptyList() }, { _, _ -> false }, { 0L }),
-                isOnline = { true },
+                link = FixedServerLink(),
                 unsentOrders = NoUnsentOrders,
                 scope = scope,
                 verifierIterations = 1_000,
@@ -162,28 +163,30 @@ class DeviceServerAccessTest {
     @Test
     fun unMeseroQueEntroSinConexionNoTieneConexionAutorizada() =
         runBlocking<Unit> {
-            var reachable = true
+            val link = TestServerLink(scope)
             access =
                 AccessRepository(
-                    dao = database.access(),
-                    sealer = sealer,
-                    destroyKey = {},
-                    identity = ClientIdentity("0.1.0"),
-                    relocator = ServerRelocator({ emptyList() }, { _, _ -> false }, { 0L }),
-                    isOnline = { reachable },
-                    unsentOrders = NoUnsentOrders,
-                    scope = scope,
-                    verifierIterations = 1_000,
-                )
+                        dao = database.access(),
+                        sealer = sealer,
+                        destroyKey = {},
+                        identity = ClientIdentity("0.1.0"),
+                        relocator = ServerRelocator({ emptyList() }, { _, _ -> false }, { 0L }),
+                        link = link.monitor,
+                        unsentOrders = NoUnsentOrders,
+                        scope = scope,
+                        verifierIterations = 1_000,
+                        answers = link.monitor,
+                    )
+                    .also { link.access = it }
             val adapter = DeviceServerAccess(access, scope)
             pair()
             access.enter(ana, "4829")
             adapter.awaitCurrent { it?.userId == ana }
             access.leave()
             adapter.awaitCurrent { it == null }
-            reachable = false
+            link.online = false
             assertTrue(access.enter(ana, "4829") is EntryResult.Entered)
-            reachable = true
+            link.online = true
             delay(200)
             assertNull("la sesión anterior de Ana no se reutiliza", adapter.current.value)
         }

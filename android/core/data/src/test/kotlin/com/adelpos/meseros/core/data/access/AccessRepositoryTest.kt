@@ -14,6 +14,7 @@ import com.adelpos.meseros.core.domain.access.EntryResult
 import com.adelpos.meseros.core.domain.access.OfflineAttemptPolicy
 import com.adelpos.meseros.core.domain.access.RepairReason
 import com.adelpos.meseros.core.domain.access.UnsentOrder
+import com.adelpos.meseros.core.domain.connection.LinkState
 import com.adelpos.meseros.core.domain.error.AppError
 import com.adelpos.meseros.core.domain.server.FoundServer
 import com.adelpos.meseros.core.domain.server.ServerAnnouncements
@@ -49,13 +50,21 @@ class AccessRepositoryTest {
     private lateinit var database: AppDatabase
     private var sealer = FakeSecretSealer()
     private var keyDestroyed = false
-    private var online = true
     private var now = 1_700_000_000_000L
     private val unsent = mutableListOf<UnsentOrder>()
 
     // Lo que borró el registro de «borrar los datos de este dispositivo».
     private val erased = mutableListOf<String>()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    // El estado único de conexión (A3-D1) con la red de Android que pone cada prueba.
+    private val link = TestServerLink(scope)
+    private var online: Boolean
+        get() = link.online
+        set(value) {
+            link.online = value
+        }
+
     private val identity = ClientIdentity("0.1.0")
     private val ana = "aaaaaaaa-0000-4000-8000-000000000001"
     private val beto = "bbbbbbbb-0000-4000-8000-000000000002"
@@ -79,18 +88,20 @@ class AccessRepositoryTest {
         relocator: ServerRelocator = ServerRelocator({ emptyList() }, { _, _ -> false }, { 0L }),
     ) =
         AccessRepository(
-            dao = database.access(),
-            sealer = sealer,
-            destroyKey = { keyDestroyed = true },
-            identity = identity,
-            relocator = relocator,
-            isOnline = { online },
-            unsentOrders = { unsent.toList() },
-            scope = scope,
-            wipe = DeviceDataWipe().apply { register("catálogo") { erased.add("catálogo") } },
-            wallClock = { now },
-            verifierIterations = 1_000,
-        )
+                dao = database.access(),
+                sealer = sealer,
+                destroyKey = { keyDestroyed = true },
+                identity = identity,
+                relocator = relocator,
+                link = link.monitor,
+                unsentOrders = { unsent.toList() },
+                scope = scope,
+                wipe = DeviceDataWipe().apply { register("catálogo") { erased.add("catálogo") } },
+                wallClock = { now },
+                verifierIterations = 1_000,
+                answers = link.monitor,
+            )
+            .also { link.access = it }
 
     private suspend fun AccessRepository.pair(
         base: String = go.base,
@@ -125,7 +136,7 @@ class AccessRepositoryTest {
         val access = repository()
         access.pair()
         assertEquals(
-            DeviceStatus.Ready("Fonda Doña Ñeli", "Tableta de la terraza", 300, online = true),
+            DeviceStatus.Ready("Fonda Doña Ñeli", "Tableta de la terraza", 300),
             access.status.value,
         )
         val roster = access.roster()
@@ -159,6 +170,56 @@ class AccessRepositoryTest {
         access.leave()
         access.enter(ana, "4829")
         assertEquals("c".repeat(42) + "2", access.offlineCredential(ana))
+    }
+
+    @Test
+    fun unaLecturaQueSePierdeSeRepiteYNoCambiaNada() = runBlocking {
+        val access = repository()
+        access.pair()
+        // La conexión se cae una vez (como la que Go cerró a los 60 s): la lectura se repite.
+        go.dropNext = 1
+        access.recheck()
+        assertEquals(1L, link.monitor.repeats)
+        assertEquals(0L, link.monitor.noAnswers)
+        assertEquals(LinkState.ONLINE, link.monitor.state.value)
+        assertTrue(access.roster().online)
+    }
+
+    @Test
+    fun conUnaFallaAisladaLaEntradaConPinSigueSiendoConConexion() = runBlocking {
+        val access = repository()
+        access.pair()
+        // La comprobación no recibe respuesta ni al repetirla: una falla para el estado único.
+        go.dropNext = 2
+        access.recheck()
+        assertEquals(1L, link.monitor.noAnswers)
+        assertEquals(
+            "una falla aislada no muestra «Sin conexión»",
+            LinkState.ONLINE,
+            link.monitor.state.value,
+        )
+        // Antes (A2) el dispositivo quedaba «sin conexión» y el mesero entraba sin sesión de Go.
+        assertTrue("la lista sigue siendo la de Go", access.roster().online)
+        val entered = access.enter(ana, "4829")
+        assertTrue("$entered", entered is EntryResult.Entered)
+        assertTrue((entered as EntryResult.Entered).waiter.hasServerSession)
+        assertNotNull(access.sessionToken(ana))
+    }
+
+    @Test
+    fun conSinConexionLaSondaDelMomentoVuelveAEntrarConConexion() = runBlocking {
+        val access = repository()
+        access.pair()
+        assertTrue(access.enter(ana, "4829") is EntryResult.Entered)
+        access.leave()
+        // Se fue la red y volvió: el estado sigue «Sin conexión» hasta que Go responda.
+        online = false
+        online = true
+        assertEquals(LinkState.OFFLINE, link.monitor.state.value)
+        // Al escribir el PIN se pregunta a Go en ese momento (no se entra directo sin conexión).
+        val entered = access.enter(ana, "4829")
+        assertTrue((entered as EntryResult.Entered).waiter.hasServerSession)
+        assertEquals(LinkState.ONLINE, link.monitor.state.value)
     }
 
     @Test
@@ -364,7 +425,8 @@ class AccessRepositoryTest {
             ServerRelocator({ listOf(announcement) }, HttpsServerProbe(identity), { 0L })
         val access = repository(relocator)
         access.pair(base = oldBase)
-        assertTrue(access.status.value.let { it is DeviceStatus.Ready && it.online })
+        assertTrue(access.status.value is DeviceStatus.Ready)
+        assertTrue(access.roster().online)
         assertEquals(go.base, database.access().pairedServer()?.baseUrl)
         assertTrue(access.enter(ana, "4829") is EntryResult.Entered)
     }

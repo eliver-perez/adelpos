@@ -26,6 +26,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -38,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.adelpos.meseros.core.domain.access.WaiterProfile
 import com.adelpos.meseros.core.domain.access.WaiterRoster
+import com.adelpos.meseros.core.domain.connection.LinkState
 import com.adelpos.meseros.core.ui.components.PinPad
 import com.adelpos.meseros.core.ui.components.SecondaryButton
 import com.adelpos.meseros.core.ui.components.WaiterBadge
@@ -53,9 +56,11 @@ import com.adelpos.meseros.feature.access.findserver.ProblemNotice
 import kotlinx.coroutines.delay
 
 /**
- * Entrada con PIN con su ViewModel: pide la lista al mostrarse y cada [refreshMillis] mientras está
- * a la vista (aparecen los meseros a los que se les acaba de asignar un PIN). Con
- * [requestedWaiter], ese mesero queda elegido para escribir su PIN.
+ * Entrada con PIN con su ViewModel: pide la lista al mostrarse, cada [refreshMillis] mientras está
+ * a la vista (aparecen los meseros a los que se les acaba de asignar un PIN) y cada vez que cambia
+ * el estado único de conexión; mientras Go no ha dado su lista y el estado sigue «En línea», la
+ * vuelve a pedir a los [retryMillis]. El aviso «Sin conexión» sale del mismo estado que la barra
+ * (etapa A3, A3-D1). Con [requestedWaiter], ese mesero queda elegido para escribir su PIN.
  */
 @Composable
 fun PinEntryRoute(
@@ -64,12 +69,22 @@ fun PinEntryRoute(
     viewModel: PinEntryViewModel =
         viewModel(factory = PinEntryViewModel.factory(dependencies.access)),
     refreshMillis: Long = REFRESH_MILLIS,
+    retryMillis: Long = RETRY_MILLIS,
     requestedWaiter: String? = null,
 ) {
-    LaunchedEffect(viewModel) {
+    val link by dependencies.serverLink.state.collectAsState()
+    val offline = link == LinkState.OFFLINE
+    LaunchedEffect(viewModel, link) {
         while (true) {
             viewModel.refresh()
             delay(refreshMillis)
+        }
+    }
+    val waitingForGo = !offline && viewModel.roster?.online == false
+    LaunchedEffect(viewModel, waitingForGo) {
+        if (waitingForGo) {
+            delay(retryMillis)
+            viewModel.refresh()
         }
     }
     // Etapa A2: se tocó un aviso de platillos listos en «¿Quién eres?»: se le pide el PIN a su
@@ -84,6 +99,7 @@ fun PinEntryRoute(
     PinEntryScreen(
         layout = layout,
         roster = viewModel.roster,
+        offline = offline,
         loading = viewModel.loading,
         selected = viewModel.selected,
         pinLength = viewModel.pinLength,
@@ -99,16 +115,26 @@ fun PinEntryRoute(
     )
 }
 
-private const val REFRESH_MILLIS = 30_000L
+/**
+ * La lista de «¿Quién eres?» con la pantalla a la vista (A3-D1: la revisión se espacia con el
+ * dispositivo sin uso; cada respuesta cuenta también como la revisión de la conexión).
+ */
+private const val REFRESH_MILLIS = 60_000L
+
+/** Volver a pedir la lista de Go mientras no llega y el estado sigue «En línea». */
+private const val RETRY_MILLIS = 5_000L
 
 /**
  * Lista de meseros en botones grandes y el teclado del PIN del elegido. En la tableta, lado a lado;
- * en el teléfono, primero la lista y después el teclado (Atrás regresa a la lista).
+ * en el teléfono, primero la lista y después el teclado (Atrás regresa a la lista). Con [offline]
+ * (el estado único de conexión, el mismo de la barra), el aviso de que solo entran los meseros que
+ * ya entraron antes aquí.
  */
 @Composable
 fun PinEntryScreen(
     layout: PaneLayout,
     roster: WaiterRoster?,
+    offline: Boolean,
     loading: Boolean,
     selected: WaiterProfile?,
     pinLength: Int,
@@ -126,6 +152,7 @@ fun PinEntryScreen(
     val list: @Composable () -> Unit = {
         WaiterList(
             roster = roster,
+            offline = offline,
             loading = loading,
             selected = selected,
             now = now,
@@ -167,6 +194,7 @@ fun PinEntryScreen(
 @Composable
 private fun WaiterList(
     roster: WaiterRoster?,
+    offline: Boolean,
     loading: Boolean,
     selected: WaiterProfile?,
     now: Long,
@@ -191,7 +219,7 @@ private fun WaiterList(
                     text = stringResource(R.string.entry_help),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                if (roster != null && !roster.online) {
+                if (offline) {
                     Text(
                         text = stringResource(R.string.entry_offline, words.thisDevice),
                         color = AdelTheme.colors.amber,
@@ -201,7 +229,10 @@ private fun WaiterList(
                 }
             }
         }
-        if (roster == null) {
+        // Sin la lista de Go y sin «Sin conexión» todavía se está preguntando: nada que contradiga
+        // a la barra.
+        val waitingForGo = roster != null && !roster.online && !offline
+        if (roster == null || (roster.waiters.isEmpty() && waitingForGo)) {
             item(span = { GridItemSpan(maxLineSpan) }) {
                 CircularProgressIndicator(modifier = Modifier.padding(16.dp))
             }
@@ -210,8 +241,9 @@ private fun WaiterList(
                 Column(verticalArrangement = Arrangement.spacedBy(AdelDimens.Gap)) {
                     Text(
                         text =
-                            if (roster.online) stringResource(R.string.entry_empty_online)
-                            else stringResource(R.string.entry_empty_offline, words.thisDevice),
+                            if (offline)
+                                stringResource(R.string.entry_empty_offline, words.thisDevice)
+                            else stringResource(R.string.entry_empty_online),
                         style = MaterialTheme.typography.bodyLarge,
                         modifier = Modifier.testTag(TAG_ENTRY_EMPTY),
                     )

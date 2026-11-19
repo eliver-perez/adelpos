@@ -82,7 +82,9 @@ class AppNavigationTest {
         TestDevice.seedOfflineWaiter()
         scenario = ActivityScenario.launch(MainActivity::class.java)
         assertTitle("Entrar")
-        compose.waitUntil(timeoutMillis = 30_000) {
+        // El servidor de prueba no responde: «Sin conexión» llega con la tolerancia del estado
+        // único (etapa A3: 3 fallas seguidas y 20 s), no con la primera falla.
+        compose.waitUntil(timeoutMillis = 60_000) {
             compose.onAllNodes(hasTestTag(TAG_ENTRY_OFFLINE)).fetchSemanticsNodes().isNotEmpty()
         }
         TestDevice.enter(compose)

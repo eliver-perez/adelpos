@@ -83,7 +83,7 @@ class AccessScreensTest {
         compose.setContent {
             AdelTheme(darkTheme = dark) {
                 AccessContent(
-                    status = DeviceStatus.Ready("Fonda", "Teléfono 1", 120, online = false),
+                    status = DeviceStatus.Ready("Fonda", "Teléfono 1", 120),
                     dependencies = fake.dependencies(),
                     actions = NoActions,
                     layout = PaneLayout.SINGLE,
@@ -115,7 +115,7 @@ class AccessScreensTest {
         compose.setContent {
             AdelTheme(darkTheme = true) {
                 AccessContent(
-                    status = DeviceStatus.Ready("Fonda", "Tableta 1", 120, online = true),
+                    status = DeviceStatus.Ready("Fonda", "Tableta 1", 120),
                     dependencies = fake.dependencies(),
                     actions = NoActions,
                     layout = PaneLayout.DOUBLE,

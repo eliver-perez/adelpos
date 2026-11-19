@@ -25,8 +25,10 @@ data class WaiterProfile(
 )
 
 /**
- * Lista de la pantalla de entrada. Con conexión, la de Go; sin ella, solo los meseros que ya
- * entraron con conexión en **este** dispositivo y conservan su verificador local (§3.2).
+ * Lista de la pantalla de entrada. Con conexión, la de Go ([online]); sin ella (o mientras Go
+ * todavía no da su lista), solo los meseros que ya entraron con conexión en **este** dispositivo y
+ * conservan su verificador local (§3.2). El aviso «Sin conexión» de la pantalla no sale de aquí
+ * sino del estado único de conexión (`ServerLink`, etapa A3).
  */
 data class WaiterRoster(val waiters: List<WaiterProfile>, val online: Boolean)
 
@@ -110,14 +112,13 @@ sealed interface DeviceStatus {
     data class Unpaired(val deviceLog: List<UnsentOrder> = emptyList()) : DeviceStatus
 
     /**
-     * Emparejado y listo para la entrada con PIN. [online] dice si el servidor respondió en la
-     * última comprobación (sin respuesta, solo entran los meseros conocidos).
+     * Emparejado y listo para la entrada con PIN. Si hay conexión con la computadora principal no
+     * lo dice este estado sino el estado único de conexión (`ServerLink`, etapa A3, A3-D1).
      */
     data class Ready(
         val serverName: String,
         val deviceName: String,
         val idleLockSeconds: Int,
-        val online: Boolean,
     ) : DeviceStatus
 
     /** «Esta tableta necesita emparejarse de nuevo». */

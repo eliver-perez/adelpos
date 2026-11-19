@@ -8,6 +8,7 @@ import com.adelpos.meseros.core.domain.catalog.CatalogQuery
 import com.adelpos.meseros.core.domain.catalog.CatalogSource
 import com.adelpos.meseros.core.domain.catalog.CatalogSyncStatus
 import com.adelpos.meseros.core.domain.catalog.LineSelection
+import com.adelpos.meseros.core.domain.connection.LinkState
 import com.adelpos.meseros.core.domain.error.AppError
 import com.adelpos.meseros.core.domain.error.AppResult
 import com.adelpos.meseros.core.domain.money.Money
@@ -286,6 +287,9 @@ class FakeWaiter(catalog: Catalog = Catalog.EMPTY) {
             ),
         )
 
+    /** El estado único de conexión que ven las pantallas (A3-D1). */
+    val link = MutableStateFlow(LinkState.ONLINE)
+
     fun captureDependencies(): CaptureDependencies =
         CaptureDependencies(
             restaurant = restaurant,
@@ -297,6 +301,7 @@ class FakeWaiter(catalog: Catalog = Catalog.EMPTY) {
             activeWaiter = active,
             takeaway = takeaway,
             precheck = precheck,
+            link = link,
         )
 
     fun dependencies(): WaiterDependencies =

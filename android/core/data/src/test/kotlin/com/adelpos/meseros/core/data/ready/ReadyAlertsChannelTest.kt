@@ -2,6 +2,7 @@ package com.adelpos.meseros.core.data.ready
 
 import com.adelpos.meseros.core.data.catalog.CatalogTestSupport
 import com.adelpos.meseros.core.data.session.AuthorizedServer
+import com.adelpos.meseros.core.domain.connection.LinkState
 import com.adelpos.meseros.core.domain.error.AppError
 import com.adelpos.meseros.core.domain.ready.ReadyAlert
 import com.adelpos.meseros.core.domain.ready.ReadyAlertPresenter
@@ -403,26 +404,19 @@ class ReadyAlertsChannelTest {
 
     @Test
     fun elTextoPermanenteSoloDiceRecibiendoConElCanalAbierto() {
-        // RD5: al abrir, «Conectando…»; tras una falla, el de sin conexión se queda mientras
-        // reintenta (no se vuelve a publicar en cada intento).
+        // RD5: al abrir, «Conectando…»; «Recibiendo avisos» solo con el canal abierto.
         val waiting = ReadyChannelState.Waiting(1, 2_000)
-        assertEquals(
-            ReadyOngoing.CONNECTING,
-            ReadyOngoing.after(ReadyOngoing.CONNECTING, ReadyChannelState.Connecting),
-        )
-        assertEquals(
-            ReadyOngoing.CONNECTED,
-            ReadyOngoing.after(ReadyOngoing.CONNECTING, ReadyChannelState.Connected),
-        )
-        assertEquals(ReadyOngoing.WAITING, ReadyOngoing.after(ReadyOngoing.CONNECTED, waiting))
-        assertEquals(
-            ReadyOngoing.WAITING,
-            ReadyOngoing.after(ReadyOngoing.WAITING, ReadyChannelState.Connecting),
-        )
-        assertEquals(
-            ReadyOngoing.CONNECTING,
-            ReadyOngoing.after(ReadyOngoing.CONNECTED, ReadyChannelState.Connecting),
-        )
+        val online = LinkState.ONLINE
+        assertEquals(ReadyOngoing.CONNECTING, ReadyOngoing.of(ReadyChannelState.Connecting, online))
+        assertEquals(ReadyOngoing.CONNECTED, ReadyOngoing.of(ReadyChannelState.Connected, online))
+        // Etapa A3: una falla del canal no basta para decir «Sin conexión» mientras la barra dice
+        // «En línea» (el estado único de conexión); el canal se reconecta solo.
+        assertEquals(ReadyOngoing.CONNECTING, ReadyOngoing.of(waiting, online))
+        // Con «Sin conexión» en el estado único, lo dice también la notificación, en cada intento.
+        val offline = LinkState.OFFLINE
+        assertEquals(ReadyOngoing.WAITING, ReadyOngoing.of(waiting, offline))
+        assertEquals(ReadyOngoing.WAITING, ReadyOngoing.of(ReadyChannelState.Connecting, offline))
+        assertEquals(ReadyOngoing.WAITING, ReadyOngoing.of(ReadyChannelState.Connected, offline))
     }
 
     @Test

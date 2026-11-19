@@ -8,7 +8,6 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.adelpos.meseros.core.domain.connection.ConnectionSummary
 import com.adelpos.meseros.core.domain.connection.LinkState
 import com.adelpos.meseros.core.domain.connection.PendingOrdersSource
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -16,11 +15,11 @@ import kotlinx.coroutines.flow.stateIn
 
 /**
  * Estado común a todas las pantallas: el indicador de conexión y de pedidos por enviar de la barra
- * superior.
+ * superior. La conexión es el estado único (`ServerLink`, etapa A3, A3-D1), el mismo que leen los
+ * avisos de cada pantalla: nunca se contradicen.
  */
 class ShellViewModel(
-    linkState: Flow<LinkState>,
-    initialLink: LinkState,
+    linkState: StateFlow<LinkState>,
     pendingOrders: PendingOrdersSource,
 ) : ViewModel() {
     val connection: StateFlow<ConnectionSummary> =
@@ -30,7 +29,7 @@ class ShellViewModel(
             .stateIn(
                 scope = viewModelScope,
                 started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
-                initialValue = ConnectionSummary(initialLink, 0),
+                initialValue = ConnectionSummary(linkState.value, 0),
             )
 
     companion object {
@@ -42,8 +41,7 @@ class ShellViewModel(
             initializer {
                 val container = (this[APPLICATION_KEY] as AdelPosApplication).container
                 ShellViewModel(
-                    linkState = container.connectionMonitor.linkState,
-                    initialLink = container.connectionMonitor.current(),
+                    linkState = container.serverLink.state,
                     pendingOrders = container.pendingOrders,
                 )
             }

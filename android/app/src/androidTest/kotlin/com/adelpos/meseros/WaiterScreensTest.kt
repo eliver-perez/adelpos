@@ -382,6 +382,7 @@ class WaiterScreensTest {
                     setOf("restaurant.tables.read", "restaurant.areas.read", "accounts.read"),
                 ),
             status = RestaurantStatus(loading = false, live = true, lastError = null),
+            offline = false,
             tablesView = TablesView.LIST,
             search = "",
             now = 0,

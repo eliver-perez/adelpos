@@ -198,7 +198,7 @@ class PrecheckOnGoTest {
         openAccount(ids.getValue("table"), ids.getValue("account"))
         // Ya se sabe (getIdentity) que no tiene: se avisa antes de tocar, pero Go manda.
         showPrecheck()
-        waitForText("Este dispositivo todavía no tiene impresora asignada.")
+        waitForText("Este dispositivo no tiene impresora asignada.")
         tapWhenShown(TAG_PRECHECK_PRINT, "Imprimir precuenta")
         waitFor("${TAG_PRECHECK_MESSAGE_PREFIX}no-printer")
         waitForText("Este dispositivo no tiene impresora asignada.")

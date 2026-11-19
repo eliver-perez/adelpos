@@ -88,8 +88,18 @@ sealed interface PrintAnswer {
         val message: String?,
     ) : PrintAnswer
 
-    /** Sin conexión con la computadora principal (sin sesión de Go, sin red o sin respuesta). */
+    /**
+     * Sin conexión con la computadora principal: sin sesión de Go, o el estado único de conexión
+     * dice «Sin conexión» (etapa A3, A3-D1).
+     */
     data object NoConnection : PrintAnswer
+
+    /**
+     * Con el estado único de conexión en «En línea», Go no respondió a esta petición (ya repetida
+     * con la misma clave): «No se pudo imprimir», sin decir «necesitas conexión» mientras la barra
+     * dice «En línea» (etapa A3, §2: nunca se contradicen).
+     */
+    data object NoAnswer : PrintAnswer
 }
 
 /**

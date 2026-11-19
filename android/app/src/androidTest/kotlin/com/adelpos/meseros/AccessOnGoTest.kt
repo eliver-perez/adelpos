@@ -204,7 +204,8 @@ class AccessOnGoTest {
         waitFor("$TAG_WAITER_PREFIX${userIdOf("Ana")}")
         waitFor("$TAG_WAITER_PREFIX${userIdOf("Beto")}")
         val status = container.deviceAccess.status.value
-        assertTrue("$status", status is DeviceStatus.Ready && status.online)
+        assertTrue("$status", status is DeviceStatus.Ready)
+        assertEquals(LinkState.ONLINE, container.serverLink.state.value)
     }
 
     // GET restaurant/state con las cabeceras del mesero [owner] (revisión R3, M5): Go responde a

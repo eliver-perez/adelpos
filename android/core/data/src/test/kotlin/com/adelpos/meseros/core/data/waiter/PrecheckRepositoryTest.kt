@@ -314,14 +314,15 @@ class PrecheckRepositoryTest {
         server.paired = false
         assertEquals(PrintAnswer.NoConnection, precheck.print(ANA, "c1", "op-4"))
         assertTrue(received.isEmpty())
-        // Sin respuesta dos veces: sin conexión (y nada queda en la cola).
+        // Sin respuesta dos veces con el estado «En línea»: no se pudo, sin decir «necesitas
+        // conexión» mientras la barra dice «En línea» (etapa A3); nada queda en la cola.
         server.paired = true
         repeat(2) {
             respond("POST payments/accounts/c1/precheck/print") {
                 MockResponse.Builder().onResponseStart(SocketEffect.ShutdownConnection).build()
             }
         }
-        assertEquals(PrintAnswer.NoConnection, precheck.print(ANA, "c1", "op-5"))
+        assertEquals(PrintAnswer.NoAnswer, precheck.print(ANA, "c1", "op-5"))
         assertTrue(database.waiter().ordersOf(ANA).isEmpty())
     }
 

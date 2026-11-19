@@ -9,6 +9,7 @@ import com.adelpos.meseros.core.data.db.AppDatabase
 import com.adelpos.meseros.core.data.discovery.NsdServerBrowser
 import com.adelpos.meseros.core.domain.access.DeviceStatus
 import com.adelpos.meseros.core.domain.access.NoUnsentOrders
+import com.adelpos.meseros.core.domain.connection.FixedServerLink
 import com.adelpos.meseros.core.domain.error.AppError
 import com.adelpos.meseros.core.domain.pairing.FoundServerChoice
 import com.adelpos.meseros.core.domain.pairing.PairingProblem
@@ -62,7 +63,7 @@ class PairingRepositoryTest {
                 destroyKey = {},
                 identity = identity,
                 relocator = ServerRelocator({ emptyList() }, { _, _ -> false }, { 0L }),
-                isOnline = { true },
+                link = FixedServerLink(),
                 unsentOrders = NoUnsentOrders,
                 scope = scope,
                 verifierIterations = 1_000,

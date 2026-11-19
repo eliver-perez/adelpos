@@ -94,8 +94,10 @@ class ReadyAlertsOnDeviceTest {
             "Recibiendo avisos de platillos listos",
             ongoing.notification.extras.getCharSequence("android.text")?.toString(),
         )
-        // Sin servidor que responda, sigue en primer plano reintentando y lo dice.
-        waitUntil("el texto de sin conexión") {
+        // Sin servidor que responda, sigue en primer plano reintentando y lo dice cuando el estado
+        // único de conexión (el de la barra) dice «Sin conexión»: tras la tolerancia de la etapa
+        // A3 (3 fallas seguidas y 20 s, con la espera creciente del canal: unos 30 s).
+        waitUntil("el texto de sin conexión", timeout = 60_000) {
             ongoing()?.notification?.extras?.getCharSequence("android.text")?.toString() ==
                 "Sin conexión con la computadora principal. Reintentando…"
         }

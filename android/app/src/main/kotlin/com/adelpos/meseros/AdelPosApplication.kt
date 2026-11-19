@@ -24,6 +24,8 @@ class AdelPosApplication : Application(), Configuration.Provider {
         // ajustes antes de este punto.
         ProcessLifecycleOwner.get().lifecycle.addObserver(container.appForeground)
         container.catalogRealtime.start()
+        // Etapa A3: el estado único de conexión y su revisión según el uso (A3-D1).
+        container.serverLink.start()
         // Bloqueo por inactividad de todo el proceso (revisión R3, A2 y B4).
         container.startIdleLock()
         // Fase E: la cola sin conexión (recuperación tras reiniciar y envío periódico de respaldo)
