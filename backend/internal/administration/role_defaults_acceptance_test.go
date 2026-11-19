@@ -174,6 +174,10 @@ func TestStageA3FactoryRoles(t *testing.T) {
 			t.Fatalf("catálogo: %d permisos, %d grupos, %d capacidades, %d roles de fábrica", len(catalog["permissions"].([]any)),
 				len(catalog["groups"].([]any)), len(catalog["capabilities"].([]any)), len(catalog["factory_roles"].([]any)))
 		}
+		// Revisión R2 (A3-D17): el conjunto de cada rol de fábrica, para que la pantalla no ofrezca lo que Go rechaza.
+		if got := stringsOf(catalog["factory_permissions"].(map[string]any)["waiter"]); !slices.Equal(got, administration.FactoryRolePermissions("waiter")) {
+			t.Fatalf("conjunto de fábrica del Mesero en el catálogo: %v", got)
+		}
 		first := catalog["groups"].([]any)[0].(map[string]any)
 		if first["name"] != "Mesas y cuentas" {
 			t.Fatalf("primer grupo: %v", first["name"])
@@ -252,6 +256,33 @@ func TestStageA3FactoryRoles(t *testing.T) {
 		env.call(admin, "POST", "roles/"+cashierRole+"/defaults", map[string]any{"expected": fresh["current"]}, 200)
 		if !slices.Equal(rolePermissions(cashierRole), factory) {
 			t.Fatal("con la vista previa nueva sí se restablece")
+		}
+	})
+
+	run("A3_supervisor_cierra_sesiones_solo_de_quien_puede_administrar", func(t *testing.T) {
+		// Revisión R1 (A3-D16): el Supervisor de fábrica conserva «Revocar sesiones», con la regla de delegación: cierra
+		// la sesión de un cajero (sus permisos están dentro de los del supervisor), no la del Administrador.
+		newUser("supervisor.a3", roleID("supervisor"))
+		supervisor := login("supervisor.a3", "clave-supervisor.a3")
+		newUser("cajero.a3", roleID("cashier"))
+		cashier := login("cajero.a3", "clave-cajero.a3")
+		sessionOf := func(username string) string {
+			var id string
+			if err := pool.QueryRow(ctx, `SELECT s.id FROM app.sessions s JOIN app.users u ON u.id=s.user_id
+                WHERE u.username=$1 AND s.revoked_at IS NULL ORDER BY s.created_at DESC LIMIT 1`, username).Scan(&id); err != nil {
+				t.Fatal(err)
+			}
+			return id
+		}
+		problem := env.fails(supervisor, "POST", "sessions/"+sessionOf("admin")+"/revoke", map[string]any{}, 403, "PERMISSION_DENIED")
+		if problem["message"] != "No puedes cerrar la sesión de un usuario con permisos que tú no tienes." {
+			t.Fatalf("cerrar la sesión del Administrador: %v", problem)
+		}
+		env.call(admin, "GET", "auth/me", nil, 200)
+		env.call(supervisor, "POST", "sessions/"+sessionOf("cajero.a3")+"/revoke", map[string]any{}, 200)
+		env.fails(cashier, "GET", "auth/me", nil, 401, "SESSION_REVOKED")
+		if env.scalar("SELECT count(*) FROM app.audit_events WHERE action='session.revoked' AND actor_username='supervisor.a3'") != 1 {
+			t.Fatal("el cierre de la sesión del cajero no quedó en el Registro de movimientos")
 		}
 	})
 

@@ -82,6 +82,10 @@ type PermissionCatalog struct {
 	Capabilities []PermissionCapability `json:"capabilities"`
 	// FactoryRoles son los códigos de los roles que tienen «Restablecer permisos predeterminados» (A3-D6).
 	FactoryRoles []string `json:"factory_roles"`
+	// FactoryPermissions es el conjunto de fábrica de cada uno (revisión R2, A3-D17): la pantalla no ofrece restablecer
+	// un rol cuyo conjunto tiene permisos que quien edita no tiene, porque Go lo rechazaría. Son datos fijos del
+	// producto, como el resto del catálogo; Go sigue validando al restablecer.
+	FactoryPermissions map[string][]string `json:"factory_permissions"`
 }
 
 // permissionCapabilities son las opciones de la vista sencilla (§3.2 y A3-D5): las nueve de la especificación más
@@ -236,8 +240,10 @@ var factoryRolePermissions = map[string][]string{
 		"kitchen.states.read", "kitchen.stations.read", "kitchen.tickets.read",
 	},
 	// Supervisor: lo del cajero y la cocina más modificar y cancelar lo enviado, las cuentas, las autorizaciones de
-	// cobro y de caja, la cola de impresión, la disponibilidad del catálogo, la consulta de personal y terminales, el
-	// Registro de movimientos y los reportes de la operación. Sin administrar catálogo, personal ni sistema.
+	// cobro y de caja, la cola de impresión, lo del catálogo que es de la operación (agotados y excepciones de
+	// disponibilidad al calcular), la consulta de personal y terminales, cerrar sesiones de quien puede administrar, el
+	// Registro de movimientos y los reportes de la operación. Sin administrar catálogo (tampoco los horarios de
+	// disponibilidad: revisión R4, A3-D19), personal ni sistema.
 	"supervisor": {
 		"accounts.cancel", "accounts.manage", "accounts.merge", "accounts.move", "accounts.open", "accounts.read",
 		"accounts.split", "accounts.transfer", "accounts.transfer_items", "audit.read", "cash.closing.cancel_any",
@@ -245,8 +251,8 @@ var factoryRolePermissions = map[string][]string{
 		"cash.drawer.open", "cash.expected.read", "cash.expenses.record", "cash.history.read", "cash.income.record",
 		"cash.movements.read", "cash.outflows.authorize", "cash.partial_cuts.create", "cash.reports.print",
 		"cash.reports.reprint", "cash.shifts.close", "cash.shifts.open", "cash.shifts.read", "cash.shifts.read_all",
-		"cash.withdrawals.record", "catalog.availability.manage", "catalog.availability.override",
-		"catalog.prices.read", "catalog.read", "catalog.sold_out.manage", "devices.read", "events.read",
+		"cash.withdrawals.record", "catalog.availability.override", "catalog.prices.read", "catalog.read",
+		"catalog.sold_out.manage", "devices.read", "events.read",
 		"kitchen.history.read", "kitchen.kds.ack", "kitchen.printers.test", "kitchen.queue.read",
 		"kitchen.queue.resolve", "kitchen.queue.retry", "kitchen.release", "kitchen.release_early", "kitchen.reprint",
 		"kitchen.states.manage", "kitchen.states.read", "kitchen.stations.read", "kitchen.tickets.read",
@@ -316,10 +322,14 @@ func permissionNames() map[string]string {
 func buildPermissionCatalog() PermissionCatalog {
 	names := permissionNames()
 	catalog := PermissionCatalog{
-		Groups:       []PermissionGroup{},
-		Permissions:  []CatalogPermission{},
-		Capabilities: permissionCapabilities,
-		FactoryRoles: factoryRoleCodes,
+		Groups:             []PermissionGroup{},
+		Permissions:        []CatalogPermission{},
+		Capabilities:       permissionCapabilities,
+		FactoryRoles:       factoryRoleCodes,
+		FactoryPermissions: map[string][]string{},
+	}
+	for _, code := range factoryRoleCodes {
+		catalog.FactoryPermissions[code] = FactoryRolePermissions(code)
 	}
 	byGroup := map[string][]string{}
 	for _, entry := range permissionCatalogEntries {

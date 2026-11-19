@@ -65,6 +65,15 @@ func TestPermissionCatalogCoversEveryRegisteredPermission(t *testing.T) {
 	if total != len(Permissions) {
 		t.Fatalf("los grupos suman %d permisos y hay %d", total, len(Permissions))
 	}
+	// Revisión R2 (A3-D17): el catálogo informa el conjunto de cada rol de fábrica, el mismo que concede Go.
+	if len(catalog.FactoryPermissions) != len(factoryRoleCodes) {
+		t.Fatalf("conjuntos de fábrica del catálogo: %v", catalog.FactoryPermissions)
+	}
+	for _, code := range factoryRoleCodes {
+		if !slices.Equal(catalog.FactoryPermissions[code], FactoryRolePermissions(code)) {
+			t.Fatalf("el catálogo informa otro conjunto de %s", code)
+		}
+	}
 	// Nombres visibles en lenguaje del restaurante (§1 de la A3): sin la sigla de la pantalla de cocina.
 	for _, permission := range catalog.Permissions {
 		if strings.Contains(permission.Name, "KDS") || strings.Contains(permission.Description, "KDS") {
@@ -123,7 +132,7 @@ func TestPermissionDependenciesAreKnownAndAcyclic(t *testing.T) {
 }
 
 func TestFactoryRolesAreClosedUnderDependencies(t *testing.T) {
-	expectedSizes := map[string]int{"waiter": 14, "cashier": 36, "kitchen": 8, "supervisor": 89, "inventory": 20, "finance": 28}
+	expectedSizes := map[string]int{"waiter": 14, "cashier": 36, "kitchen": 8, "supervisor": 88, "inventory": 20, "finance": 28}
 	if len(factoryRoleCodes) != len(expectedSizes) || len(factoryRolePermissions) != len(expectedSizes) {
 		t.Fatalf("roles de fábrica: %v", factoryRoleCodes)
 	}
