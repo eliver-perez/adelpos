@@ -49,7 +49,8 @@ sin conexión y el cursor de eventos de la recuperación (ver «Modo Mesero»). 
    `client-versions-by-kind`, `waiter-pin-v1` (entrada con PIN, credencial de envío y su administración) y
    `waiter-mode-v1` (lo del modo Mesero de la sección «Modo Mesero»); desde la etapa A2, `takeaway-v1` (lo de la
    sección «Para llevar»), `device-precheck-printer-v1` (lo de «Imprimir la precuenta») y `ready-alerts-v1` (lo de
-   «Avisos de platillos listos»)). La aplicación Android 0.1.0 exige un servidor 0.12.0 o posterior; el escritorio 0.12.0 sigue
+   «Avisos de platillos listos»); desde la etapa A3, `permission-groups-v1`, que solo usa el escritorio (permisos
+   agrupados y roles de fábrica, `API_CONTRACTS.md`)). La aplicación Android 0.1.0 exige un servidor 0.12.0 o posterior; el escritorio 0.12.0 sigue
    funcionando con un servidor 0.11.0 y solo muestra lo del PIN si el servidor anuncia `waiter-pin-v1`.
 4. **Credenciales**: la terminal (o el teléfono) emparejada envía `X-Device-ID` y `X-Device-Token`; con sesión,
    además `Authorization: Bearer <token>` (desde la etapa A1, en `submitOfflineOrder` el teléfono puede enviar en su

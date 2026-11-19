@@ -1138,6 +1138,26 @@ tr:last-child td {
   border-radius: 10px;
   font-size: 12px;
 }
+/* Etapa A3 (§3.2): aviso de la pantalla de permisos de un rol (lo que se marcó solo porque se necesita
+   o lo que dejará de funcionar al quitar algo) y la capacidad parcial de la vista sencilla. */
+.permission-change {
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--info-soft);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.6;
+  margin-bottom: 12px;
+}
+.permission-change.warning {
+  border-color: var(--warning-mark);
+  background: var(--warning-soft);
+}
+.permission-partial {
+  color: var(--text);
+  font-weight: 650;
+}
 .password-warning {
   display: flex;
   flex-wrap: wrap;

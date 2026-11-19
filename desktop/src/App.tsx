@@ -552,7 +552,14 @@ function ApplicationContent({
       case 'users':
         return <UsersPage can={can} onChanged={session.refresh} currentUserID={identity.user.id} />;
       case 'roles':
-        return <RolesPage can={can} onChanged={session.refresh} />;
+        return (
+          <RolesPage
+            can={can}
+            onChanged={session.refresh}
+            currentRoleID={identity.user.role_id}
+            support={identity.user.support}
+          />
+        );
       case 'devices':
         return <DevicesPage can={can} onSaved={session.refresh} />;
       case 'registers':

@@ -120,35 +120,10 @@ func (env *pinEnvironment) waiterDevice(name string) pinActor {
 	return pinActor{device: id, secret: secret}
 }
 
-// TestStageA1WaiterPIN cubre la fase B de la etapa A1 por HTTP real (httpapi + administration) y PostgreSQL: PIN
-// válido, inválido y trivial; bloqueo al quinto fallo y desbloqueo; solo dispositivos android; permiso
-// waiter_devices.use; pin_version; la credencial de envío (acepta pedidos sin sesión, solo en esa ruta, con los
-// permisos vigentes, inválida tras cambiar o quitar el PIN, desactivar al usuario o revocar el dispositivo); cierre de
-// las sesiones android al cambiar el PIN; «Mi PIN»; el bloqueo por inactividad; y que ningún registro guarda el PIN,
-// su hash ni la credencial.
-func TestStageA1WaiterPIN(t *testing.T) {
-	dsn := os.Getenv("ADEL_TEST_DATABASE_URL")
-	parsed, err := url.Parse(dsn)
-	if err != nil || !strings.HasPrefix(parsed.Path, "/adel_pos_test_") {
-		t.Fatal("Se requiere una base temporal exclusiva")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer pool.Close()
-	reset := func() {
-		if _, err := pool.Exec(context.Background(), "DROP SCHEMA IF EXISTS app CASCADE; DROP TABLE IF EXISTS public.schema_migrations"); err != nil {
-			t.Fatal(err)
-		}
-	}
-	reset()
-	defer reset()
-	if _, err := database.Migrate(ctx, pool); err != nil {
-		t.Fatal(err)
-	}
+// newPinEnvironment arma el servidor real (httpapi + administration) sobre la base temporal ya migrada, con las
+// cabeceras de cada cliente: los dispositivos android como la aplicación 0.1.0 y los demás como el escritorio. Lo
+// comparten esta prueba y la de los roles de fábrica de la etapa A3 (role_defaults_acceptance_test.go).
+func newPinEnvironment(t *testing.T, ctx context.Context, pool *pgxpool.Pool) (*pinEnvironment, *administration.Service) {
 	provisioning := administration.NewToken()
 	tokenFile := filepath.Join(t.TempDir(), "provisioning-token")
 	if err := os.WriteFile(tokenFile, []byte(provisioning), 0600); err != nil {
@@ -195,6 +170,39 @@ func TestStageA1WaiterPIN(t *testing.T) {
 		handler.ServeHTTP(response, request)
 		return response
 	}
+	return env, service
+}
+
+// TestStageA1WaiterPIN cubre la fase B de la etapa A1 por HTTP real (httpapi + administration) y PostgreSQL: PIN
+// válido, inválido y trivial; bloqueo al quinto fallo y desbloqueo; solo dispositivos android; permiso
+// waiter_devices.use; pin_version; la credencial de envío (acepta pedidos sin sesión, solo en esa ruta, con los
+// permisos vigentes, inválida tras cambiar o quitar el PIN, desactivar al usuario o revocar el dispositivo); cierre de
+// las sesiones android al cambiar el PIN; «Mi PIN»; el bloqueo por inactividad; y que ningún registro guarda el PIN,
+// su hash ni la credencial.
+func TestStageA1WaiterPIN(t *testing.T) {
+	dsn := os.Getenv("ADEL_TEST_DATABASE_URL")
+	parsed, err := url.Parse(dsn)
+	if err != nil || !strings.HasPrefix(parsed.Path, "/adel_pos_test_") {
+		t.Fatal("Se requiere una base temporal exclusiva")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	reset := func() {
+		if _, err := pool.Exec(context.Background(), "DROP SCHEMA IF EXISTS app CASCADE; DROP TABLE IF EXISTS public.schema_migrations"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reset()
+	defer reset()
+	if _, err := database.Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	env, _ := newPinEnvironment(t, ctx, pool)
 
 	// Cada subprueba usa su propio *testing.T en los ayudantes (un fallo no detiene a la prueba principal desde otra).
 	run := func(name string, test func(t *testing.T)) {
@@ -208,7 +216,8 @@ func TestStageA1WaiterPIN(t *testing.T) {
 		})
 	}
 
-	// Instalación nueva: el asistente concede waiter_devices.use al administrador y al rol Mesero (A1-D2).
+	// Instalación nueva: el asistente concede waiter_devices.use al administrador y al rol Mesero (A1-D2); desde la
+	// etapa A3 el Mesero recibe todo su conjunto de fábrica (A3-D2).
 	created := env.call(pinActor{}, "POST", "setup", map[string]any{"name": "Restaurante PIN", "timezone": "America/Monterrey",
 		"currency": "MXN", "theme": "light", "terminal_name": "Caja principal"}, 200)
 	desktop := pinActor{device: fmt.Sprint(created["device_id"]), secret: fmt.Sprint(created["device_token"])}
@@ -219,8 +228,8 @@ func TestStageA1WaiterPIN(t *testing.T) {
 		t.Fatalf("waiter_devices.use en una instalación nueva: %d roles", holders)
 	}
 	if others := env.scalar(`SELECT count(*) FROM app.role_permissions rp JOIN app.roles r ON r.id=rp.role_id
-        WHERE r.code='waiter'`); others != 1 {
-		t.Fatalf("el rol Mesero solo debe recibir waiter_devices.use: %d permisos", others)
+        WHERE r.code='waiter'`); others != len(administration.FactoryRolePermissions("waiter")) {
+		t.Fatalf("el rol Mesero debe recibir su conjunto de fábrica: %d permisos", others)
 	}
 
 	// Meseros con los permisos del pedido sin conexión, y una cajera sin el permiso del PIN.

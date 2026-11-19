@@ -135,55 +135,54 @@ solo aparecen en la computadora principal con la 0.13.0 (o en una terminal que t
 ## 4. Dar permiso y PIN a los meseros
 
 Hazlo en la computadora principal (o en una terminal que ya tenga la 0.12.0: en una versión anterior estas opciones no
-aparecen).
+aparecen). La pantalla de permisos agrupada y «Restablecer permisos predeterminados» son de la 0.14.0; con una terminal
+anterior se ve la lista de permisos de siempre.
 
 ### Permisos del rol Mesero
 
-Desde la 0.12.0, el rol **Mesero** ya trae el permiso de entrar con PIN; los demás los das tú (en una instalación
-nueva no trae ningún otro). Abre **Administración › Personal › Roles**, toca **«Editar permisos»** en el rol Mesero,
-revisa que tenga marcados estos y toca **«Guardar rol»**:
+Desde la **0.14.0**, una **instalación nueva** trae el rol **Mesero** con sus permisos ya marcados: **no hay que marcar
+nada a mano**. Un mesero nuevo con su PIN entra, ve las mesas, abre cuentas, captura y envía a cocina, toma pedidos
+para llevar, marca «Entregado» un pedido ya pagado e imprime la precuenta. Lo trae así:
 
-| Para que el mesero pueda…                  | Marca                                                                                 |
-| ------------------------------------------ | ------------------------------------------------------------------------------------- |
-| Entrar con su PIN                          | «Entrar con PIN en teléfonos y tabletas de meseros» (ya viene marcado)                |
-| Ver las áreas y las mesas                  | «Consultar áreas del restaurante» y «Consultar mesas y ocupación real»                |
-| Ver las cuentas de una mesa                | «Consultar cuentas e importes»                                                        |
-| Empezar una cuenta nueva                   | «Abrir cuentas»                                                                       |
-| Capturar y cambiar lo que no se ha enviado | «Capturar y editar borradores de pedidos»                                             |
-| Ver el catálogo y los precios              | «Consultar catálogo y configuraciones» y «Consultar precios y previsualizar cálculos» |
-| Mandar a cocina                            | «Confirmar pedidos»                                                                   |
-| Ver al momento los cambios de otras cajas  | «Recibir eventos autenticados»                                                        |
-| Modificar lo ya enviado (opcional)         | «Modificar partidas confirmadas sin aprobación adicional»                             |
-| Cancelar unidades ya enviadas (opcional)   | «Cancelar partidas o cantidades confirmadas»                                          |
+| Para que el mesero pueda…                           | Permiso (ya viene marcado)                                                                           |
+| --------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Entrar con su PIN                                   | «Entrar con PIN en teléfonos y tabletas de meseros»                                                  |
+| Ver las áreas y las mesas                           | «Consultar áreas del restaurante» y «Consultar mesas y ocupación real»                               |
+| Ver las cuentas de una mesa                         | «Consultar cuentas e importes»                                                                       |
+| Empezar una cuenta nueva                            | «Abrir cuentas»                                                                                      |
+| Capturar y mandar a cocina                          | «Capturar y editar borradores de pedidos» y «Confirmar pedidos»                                      |
+| Ver el catálogo y los precios                       | «Consultar catálogo y configuraciones» y «Consultar precios y previsualizar cálculos»                |
+| Ver al momento los cambios de otras cajas           | «Ver al momento los cambios de otras terminales»                                                     |
+| Para llevar: ver, tomar pedidos y anotar el cliente | «Consultar tablero de pedidos para llevar y ventanilla» y «Administrar datos de pedidos para llevar» |
+| Marcar «Entregado» un pedido para llevar ya pagado  | «Registrar entrega de pedidos para llevar»                                                           |
+| Imprimir la precuenta (sección 7)                   | «Imprimir tickets y precuentas»                                                                      |
 
-Para bajar la cantidad de algo ya enviado hacen falta los dos últimos.
+El mesero **nunca cobra** y no se entrega un pedido sin pagar: si no está pagado, el teléfono dice «Cobrar en caja
+antes de entregar». Imprimir desde el dispositivo necesita además una impresora asignada a ese dispositivo (sección 7).
 
-Para **Para llevar** (sección 6), marca además:
+**Opcional**: «Modificar partidas confirmadas sin aprobación adicional» (cambiar lo ya enviado) y «Cancelar partidas o
+cantidades confirmadas» (cancelar unidades ya enviadas o bajar su cantidad) **no vienen marcados**. Para darlos: abre
+**Administración › Personal › Roles**, toca **«Editar permisos»** en el rol Mesero, pasa a la **«Vista detallada»**,
+abre **«Captura y pedidos»**, marca el que quieras (al marcar «Cancelar…» se marca solo «Modificar…», que hace falta) y
+toca **«Guardar rol»**.
 
-| Para que el mesero pueda…                                          | Marca                                                   |
-| ------------------------------------------------------------------ | ------------------------------------------------------- |
-| Ver los pedidos para llevar y sus estados (y la opción en el menú) | «Consultar tablero de pedidos para llevar y ventanilla» |
-| Tomar pedidos para llevar y anotar el nombre y el teléfono         | «Administrar datos de pedidos para llevar»              |
-| Marcar «Entregado» un pedido ya pagado (opcional)                  | «Registrar entrega de pedidos para llevar»              |
+La pantalla de permisos de un rol abre en la **«Vista sencilla»**, con lo que el rol puede hacer («Atender mesas»,
+«Para llevar», «Cobrar», «Manejar caja»…; «Parcial» si tiene solo una parte), y la **«Vista detallada»** muestra cada
+permiso por área con su descripción, un buscador y «Marcar todo el grupo» o «Quitar todo el grupo». Al marcar un
+permiso se marca solo lo que necesita, y al quitar uno del que dependen otros, la pantalla avisa cuáles dejarán de
+funcionar.
 
-Las dos primeras van juntas (sin la segunda solo ve la lista). Para capturar hacen falta además los de arriba («Abrir
-cuentas», «Capturar y editar borradores de pedidos», «Confirmar pedidos», catálogo y precios). Sin la tercera, el
-mesero ve si el pedido está pagado y entregado, pero la entrega se marca en la caja. El mesero **nunca cobra** y no se
-entrega un pedido sin pagar: si no está pagado, el teléfono dice «Cobrar en caja antes de entregar». Para llevar
-necesita la computadora principal en la versión **0.13.0**. Si a un mesero le falta un permiso, el
-dispositivo lo dice («No tienes permiso para ver las mesas…», «Sin permiso para enviar a cocina.») y la computadora
-principal rechaza lo que no tenga permitido. El permiso de marcar productos como agotados no hace falta: desde el
-teléfono no se marcan.
+**Si la computadora principal ya estaba instalada** (0.12.0 o 0.13.0), la actualización **no cambia los roles**: el
+Mesero conserva lo que le marcaste. Para dejarlo como en una instalación nueva, en **«Editar permisos»** del rol toca
+**«Restablecer permisos predeterminados»**: la computadora muestra qué se agregará y qué se quitará, pide confirmación y
+lo deja en el Registro de movimientos. No cambia el límite de descuento del rol ni los permisos propios de cada usuario.
+Si le habías dado «Modificar» o «Cancelar unidades», el restablecimiento los quita: márcalos otra vez si los usa. El
+botón lo tienen los roles que trae el sistema (Mesero, Cajero, Cocina, Supervisor, Inventarios y Finanzas); los roles
+que creaste y el Administrador, no.
 
-Para **imprimir la precuenta** desde el teléfono o la tableta (sección 7), marca además:
-
-| Para que el mesero pueda…                                 | Marca                           |
-| --------------------------------------------------------- | ------------------------------- |
-| Imprimir la precuenta (o el ticket de venta, o la cuenta) | «Imprimir tickets y precuentas» |
-
-No hace falta «Reimprimir tickets»: volver a imprimir arma otra precuenta con lo que tenga la cuenta en ese momento,
-como en la caja. Sin el permiso, el botón no aparece. Imprimir desde el dispositivo necesita la computadora principal
-en la versión **0.13.0** y una impresora asignada a ese dispositivo (sección 7).
+Si a un mesero le falta un permiso, el dispositivo lo dice («No tienes permiso para ver las mesas…», «Sin permiso para
+enviar a cocina.») y la computadora principal rechaza lo que no tenga permitido, aunque una pantalla lo muestre. El
+permiso de marcar productos como agotados no hace falta: desde el teléfono no se marcan.
 
 **Una sesión con PIN solo permite lo del mesero**, aunque la persona sea administrador o supervisor: lo
 administrativo se sigue haciendo en la computadora con su contraseña.

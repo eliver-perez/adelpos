@@ -4121,3 +4121,52 @@ home_screen IN ('tables', 'takeaway'))`. Ninguna otra fila cambia (`TestStageA3U
   su caja es «—». La tabla ya no muestra el identificador de ninguna terminal: «Ver configuración» lo dice como
   «Identificador», y el filtro del Registro de movimientos se llama «Identificador de la terminal». Sin operaciones
   nuevas en Rust.
+
+## Etapa A3 · permisos agrupados y roles de fábrica (Fase B, sin migración; servidor 0.14.0)
+
+Especificación: [docs/etapas/ETAPA_A3_AJUSTES.md](docs/etapas/ETAPA_A3_AJUSTES.md) §3 y decisiones A3-D2 a A3-D6 de
+[docs/ETAPA_A3_AVANCE.md](docs/ETAPA_A3_AVANCE.md). Rutas del escritorio (no están en el contrato v1), escondidas sin la
+capacidad nueva **`permission-groups-v1`** de `GET version`. `GET permissions` no cambia (escritorios anteriores).
+
+- **Catálogo** (`administration/permission_catalog.go` y `permission_catalog_entries.go`, el único lugar): por permiso,
+  el grupo (uno de diez: `tables` «Mesas y cuentas», `orders` «Captura y pedidos», `takeaway` «Para llevar», `kitchen`
+  «Cocina e impresión», `cash` «Caja y cobros», `catalog`, `inventory`, `reports`, `staff` «Personal» y `system`
+  «Terminales y sistema»), la descripción corta y `requires` (lo que exige la ruta o la pantalla que usa); las once
+  capacidades de la vista sencilla (las nueve de §3.2 más «Manejar inventario» y «Autorizar y corregir», A3-D5); y los
+  conjuntos de fábrica (A3-D2: Mesero 14, Cajero 36, Cocina 8, Supervisor 88 desde la revisión, A3-D19, Inventarios 20 y Finanzas 28, cerrados bajo
+  `requires`; el Administrador, todos). El nombre visible es el que registra cada módulo, salvo `events.read` («Ver al
+  momento los cambios de otras terminales») y `kitchen.kds.ack` («Confirmar que la cocina recibió la comanda»). Go **no
+  impone** `requires` al guardar un rol (A3-D4): solo lo informa; cada ruta sigue validando sus permisos.
+- **`GET permissions/catalog`** (`permissions.read`) → `{groups: [{code, name, permissions: [clave]}], permissions:
+[{key, name, description, group, requires: [clave]}], capabilities: [{code, name, description, permissions:
+[clave]}], factory_roles: [código], factory_permissions: {código: [clave]}}`, en el orden de la pantalla.
+  `factory_permissions` (revisión R2, A3-D17) deja a la pantalla no ofrecer «Restablecer» donde Go lo rechazaría.
+- **Asistente** (`POST setup`): cada rol de fábrica recibe su conjunto (sustituye lo que concedía hasta la A2: algunos de
+  consulta al supervisor, al cajero y a finanzas, y `waiter_devices.use` al mesero, que ya están dentro). En una
+  instalación existente **nada cambia** (la `0027` no toca roles).
+- **`GET roles/{id}/defaults`** (`roles.manage`, `permissions.manage` y `permissions.read`) → `{role: {id, code, name},
+current, factory, add, remove}` (listas de claves ordenadas), sin escribir. **`POST roles/{id}/defaults`** con
+  `{expected: [clave]}` (lo `current` que mostró la vista previa; sin él, `400 VALIDATION_ERROR`) → `{role, changed,
+added, removed}`. Reglas, las de `PATCH roles/{id}`: `lockAdministration`; rol reservado `403`; rol sin conjunto (del
+  usuario, el Administrador) `400 VALIDATION_ERROR` «Solo los roles de fábrica (…) tienen permisos predeterminados.»;
+  el propio rol `403` «No puedes modificar tu propio rol.»; `requireWithin` sobre los permisos actuales («No puedes editar
+  un rol con permisos que tú no tienes.») y los de fábrica («No puedes conceder a un rol permisos que tú no tienes.»),
+  `403`; `requireLimitWithin`; `preserveAdministration` (`400` si dejaría el sistema sin un administrador completo); rol
+  inexistente `404`. Si el rol ya tiene exactamente los de fábrica, `200` con `changed: false` sin escribir ni auditar
+  (el reintento de una confirmación cuya respuesta se perdió); si no y `expected` no coincide con los actuales, **`409
+ROLE_CHANGED`** sin escribir. Solo cambia `role_permissions`: el límite de descuento y `user_permissions` quedan igual.
+  Auditoría `role.defaults_restored` (antes: el rol; después: `{role, added, removed}`).
+- **Puente nativo** (`desktop/src-tauri/src/api.rs`): `permission_catalog` (`GET permissions/catalog`), `role_defaults`
+  (`GET roles/{id}/defaults`) y `restore_role_defaults` (`POST roles/{id}/defaults`), con identificador validado y su
+  prueba de `cargo`.
+- **`POST sessions/{id}/revoke`** (`sessions.manage`; revisión R1, A3-D16): cerrar la sesión de **otro** usuario aplica
+  la regla de delegación (`requireManageableUser`: sus permisos efectivos y su límite de descuento dentro de los del
+  actor); si no, `403 PERMISSION_DENIED` «No puedes cerrar la sesión de un usuario con permisos que tú no tienes.». La
+  propia se cierra siempre; la del soporte reservado, como antes, solo el soporte. Es la única ruta de `sessions.*` que
+  cierra sesiones (las demás que lo hacen —desactivar un usuario, cambiar su PIN— ya aplicaban la regla).
+- **Escritorio**: Roles › «Editar permisos» con la vista sencilla y la detallada y «Restablecer permisos
+  predeterminados» en los roles de `factory_roles` (ver `CLAUDE.md`, «Permisos agrupados y roles de fábrica»); sin la
+  capacidad, la lista de siempre. Desde la revisión: el botón no se ofrece donde Go lo rechazaría (rol propio, rol o
+  conjunto de fábrica con permisos que quien edita no tiene, límite de descuento mayor; se dice por qué, R2); con una
+  búsqueda, los botones del grupo actúan solo sobre lo que se ve («Marcar los 3 que se ven», R3); y tras `409
+ROLE_CHANGED` la pantalla carga los permisos que el rol tiene ahora y lo avisa (R5).

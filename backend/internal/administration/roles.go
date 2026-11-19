@@ -21,6 +21,10 @@ func roles(ctx context.Context, tx pgx.Tx, request Request, principal Principal,
 		}
 		return list(ctx, tx, rolesQuery+" ORDER BY r.name")
 	}
+	// Etapa A3: «Restablecer permisos predeterminados» de un rol de fábrica (role_defaults.go), con las mismas reglas.
+	if len(parts) == 3 && parts[2] == "defaults" {
+		return roleDefaults(ctx, tx, request, principal, parts[1])
+	}
 	if err := principal.require("roles.manage"); err != nil {
 		return nil, err
 	}

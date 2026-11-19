@@ -101,6 +101,8 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         "roles" => Some((Method::GET, "roles")),
         "create_role" => Some((Method::POST, "roles")),
         "permissions" => Some((Method::GET, "permissions")),
+        // Etapa A3 (§3): catálogo agrupado de permisos (grupos, descripciones, dependencias y capacidades).
+        "permission_catalog" => Some((Method::GET, "permissions/catalog")),
         "settings" => Some((Method::GET, "settings")),
         "save_settings" => Some((Method::PUT, "settings")),
         "settings_features" => Some((Method::GET, "settings/features")),
@@ -666,6 +668,9 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
             (Method::PUT, format!("users/{identifier}/kitchen-stations"))
         }
         "update_role" => (Method::PATCH, format!("roles/{identifier}")),
+        // Etapa A3 (§3.1): «Restablecer permisos predeterminados» de un rol de fábrica: vista previa y confirmación.
+        "role_defaults" => (Method::GET, format!("roles/{identifier}/defaults")),
+        "restore_role_defaults" => (Method::POST, format!("roles/{identifier}/defaults")),
         "update_register" => (Method::PATCH, format!("registers/{identifier}")),
         "update_device" => (Method::PATCH, format!("devices/{identifier}")),
         "revoke_device" => (Method::POST, format!("devices/{identifier}/revoke")),
@@ -2540,6 +2545,28 @@ mod tests {
         );
         // La entrada con PIN es solo de los dispositivos android: el escritorio no la tiene en su lista cerrada.
         for operation in ["pin_login", "pin_users"] {
+            assert!(route(operation, None).is_err(), "{operation}");
+        }
+    }
+
+    #[test]
+    fn stage_a3_permission_routes_are_closed() {
+        // Etapa A3 (§3): el catálogo no lleva identificador; la vista previa y el restablecimiento, el del rol.
+        assert_eq!(
+            route("permission_catalog", None).unwrap(),
+            (Method::GET, "permissions/catalog".to_string())
+        );
+        let identifier = "00000000-0000-4000-8000-0000000000f1";
+        for (operation, method) in [
+            ("role_defaults", Method::GET),
+            ("restore_role_defaults", Method::POST),
+        ] {
+            assert_eq!(
+                route(operation, Some(identifier)).unwrap(),
+                (method, format!("roles/{identifier}/defaults")),
+                "{operation}"
+            );
+            assert!(route(operation, Some("../x")).is_err(), "{operation}");
             assert!(route(operation, None).is_err(), "{operation}");
         }
     }

@@ -88,6 +88,8 @@ const actionLabels: Record<string, string> = {
   'user.pin_unlocked': 'PIN desbloqueado',
   'session.pin_login': 'Entrada con PIN',
   'session.pin_login_failed': 'Entrada con PIN fallida',
+  // Etapa A3 (§3.1): «Restablecer permisos predeterminados» de un rol de fábrica.
+  'role.defaults_restored': 'Permisos predeterminados del rol restablecidos',
 };
 
 export function AuditPage() {

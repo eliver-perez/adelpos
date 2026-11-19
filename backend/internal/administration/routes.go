@@ -188,6 +188,10 @@ func (service *Service) protected(ctx context.Context, tx pgx.Tx, request Reques
 	if route == "devices/sessions-summary" && request.Method == "GET" {
 		return sessionsSummary(ctx, tx, principal)
 	}
+	// Catálogo agrupado de permisos (etapa A3, §3; permission_catalog.go).
+	if route == "permissions/catalog" && request.Method == "GET" {
+		return permissionCatalogRoute(principal)
+	}
 	// Paleta del distintivo de los meseros (etapa A1, fase B; pin.go).
 	if route == "users/badge-colors" && request.Method == "GET" {
 		return badgeColors(principal)
