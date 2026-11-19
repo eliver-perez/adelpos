@@ -221,7 +221,9 @@ export function DocumentList({
               <div className="payment-history-heading">
                 <strong>{label}</strong>
                 <span className="document-state">
-                  {state ? (documentJobLabels[state] ?? state) : 'Sin trabajo de impresión'}
+                  {state
+                    ? (documentJobLabels[state] ?? 'Otro estado de impresión')
+                    : 'Sin trabajo de impresión'}
                 </span>
               </div>
               <p className="muted text-xs">

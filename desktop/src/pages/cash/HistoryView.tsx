@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Field, Notice } from '../../components/Forms';
 import { OptionalDateField } from '../../components/catalog/DateField';
 import { useLiveResource } from '../../hooks/useLiveResource';
-import { cashDifferenceLabels, shiftStateLabels } from '../../services/cash';
+import { cashDifferenceLabels, shiftStateLabel } from '../../services/cash';
 import type {
   ClosureSummary,
   RegisterShift,
@@ -125,7 +125,7 @@ function HistoryTable({
                   <span className="muted text-xs"> · {shift.closed_by_name}</span>
                 )}
               </td>
-              <td>{shiftStateLabels[shift.state] ?? shift.state}</td>
+              <td>{shiftStateLabel(shift.state)}</td>
               <td>{closure ? formatMoney(closure.counted_mxn) : '—'}</td>
               <td>{differenceText(closure) || '—'}</td>
               <td>

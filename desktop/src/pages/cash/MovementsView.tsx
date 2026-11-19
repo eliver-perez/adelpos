@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Field, Notice } from '../../components/Forms';
 import { useLiveResource } from '../../hooks/useLiveResource';
 import { formatMoney } from '../../services/money';
-import { shiftStateLabels } from '../../services/cash';
+import { shiftStateLabel } from '../../services/cash';
 import type {
   CashOperation,
   RejectedOutflow,
@@ -132,7 +132,7 @@ function ShiftChooser({
           value: shift.id,
           label: `${businessDate(shift.business_date)} · ${serverDateTime(shift.opened_at, timezone)} · ${
             shift.opened_by_name
-          } · ${shiftStateLabels[shift.state] ?? shift.state}`,
+          } · ${shiftStateLabel(shift.state)}`,
         }))}
         onChange={onChange}
       />
@@ -250,7 +250,7 @@ export function RejectedOutflowsTable({
               <tr key={item.id}>
                 <td>{serverDate(item.occurred_at, timezone)}</td>
                 <td>{serverTime(item.occurred_at, timezone)}</td>
-                <td>{rejectedKindLabels[item.kind] ?? item.kind}</td>
+                <td>{rejectedKindLabels[item.kind] ?? 'Otra salida de efectivo'}</td>
                 <td>
                   <strong>{formatMoney(item.attempted_amount, item.currency)}</strong>
                 </td>

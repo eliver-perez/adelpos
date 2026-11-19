@@ -1,4 +1,4 @@
-import { shiftStateLabels } from '../../services/cash';
+import { shiftStateLabel } from '../../services/cash';
 import { formatDollars, formatMoney } from '../../services/payments';
 import type { Shift } from '../../services/payments';
 import { serverDateTime } from '../../services/restaurant';
@@ -31,7 +31,7 @@ export function ShiftStatusCard({ shift, timezone }: { shift: Shift; timezone: s
       <div>
         Estado
         <strong className={`cash-state cash-state-${shift.state}`}>
-          {shiftStateLabels[shift.state] ?? shift.state}
+          {shiftStateLabel(shift.state)}
         </strong>
       </div>
       <div>
