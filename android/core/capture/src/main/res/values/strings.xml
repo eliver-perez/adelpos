@@ -36,7 +36,7 @@
 
     <!-- Cómo va el guardado del borrador. -->
     <string name="sync_saved">Guardado en la computadora principal.</string>
-    <string name="sync_pending">Se guarda en esta tableta y se enviará en cuanto haya conexión.</string>
+    <string name="sync_pending">Se guarda en este dispositivo y se enviará en cuanto haya conexión.</string>
     <string name="sync_saving">Guardando…</string>
     <string name="sync_uncertain">No llegó la respuesta del guardado. Se vuelve a intentar sin duplicar nada.</string>
     <string name="sync_retry">Reintentar</string>
@@ -75,7 +75,7 @@
     <string name="pending_title">Pedidos pendientes</string>
     <string name="pending_retry_now">Reintentar ya</string>
     <string name="pending_empty">No tienes pedidos pendientes.</string>
-    <string name="pending_others_title">De otros meseros en esta tableta</string>
+    <string name="pending_others_title">De otros meseros en este dispositivo</string>
     <plurals name="pending_others_count">
         <item quantity="one">%1$s: %2$d pedido por enviar</item>
         <item quantity="many">%1$s: %2$d pedidos por enviar</item>

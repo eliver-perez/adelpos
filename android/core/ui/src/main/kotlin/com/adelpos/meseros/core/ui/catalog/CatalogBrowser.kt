@@ -3,11 +3,13 @@ package com.adelpos.meseros.core.ui.catalog
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -23,6 +25,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -38,6 +41,7 @@ import com.adelpos.meseros.core.domain.catalog.CatalogProduct
 import com.adelpos.meseros.core.domain.catalog.ProductKind
 import com.adelpos.meseros.core.ui.R
 import com.adelpos.meseros.core.ui.icons.CatalogIcons
+import com.adelpos.meseros.core.ui.layout.currentHeightCompact
 import com.adelpos.meseros.core.ui.theme.AdelDimens
 import com.adelpos.meseros.core.ui.theme.AdelTheme
 import com.adelpos.meseros.core.ui.theme.AmountTextStyle
@@ -52,6 +56,10 @@ import com.adelpos.meseros.core.ui.theme.AmountTextStyle
  *   catálogo y ninguna categoría aparece elegida.
  * @param emptyMessage texto cuando no hay productos que mostrar (catálogo sin descargar, categoría
  *   vacía o búsqueda sin resultados).
+ * @param compactHeight con poca altura (el teléfono en horizontal, [currentHeightCompact]): la
+ *   búsqueda y las categorías van en una sola fila y las tarjetas son bajas (imagen a la izquierda,
+ *   nombre y precio a la derecha), para que la cuadrícula muestre productos con su nombre (Fase E
+ *   de la A2: con la forma normal no cabía ninguna tarjeta completa).
  */
 @Composable
 fun CatalogBrowser(
@@ -65,25 +73,46 @@ fun CatalogBrowser(
     onProductSelect: (CatalogProduct) -> Unit,
     modifier: Modifier = Modifier,
     emptyMessage: String? = null,
+    compactHeight: Boolean = currentHeightCompact(),
 ) {
     val searching = searchText.isNotBlank()
     Column(
         modifier = modifier.fillMaxSize().testTag(TAG_CATALOG_BROWSER),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        CatalogSearchField(
-            text = searchText,
-            onTextChange = onSearchTextChange,
-            modifier =
-                Modifier.fillMaxWidth()
-                    .padding(horizontal = AdelDimens.ScreenPadding)
-                    .padding(top = AdelDimens.ScreenPadding),
-        )
-        CategoryBar(
-            categories = categories,
-            selectedId = if (searching) null else selectedCategoryId,
-            onSelect = onCategorySelect,
-        )
+        if (compactHeight) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = AdelDimens.ScreenPadding),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                CatalogSearchField(
+                    text = searchText,
+                    onTextChange = onSearchTextChange,
+                    modifier = Modifier.weight(1f).padding(start = AdelDimens.ScreenPadding),
+                    singleLineLabel = true,
+                )
+                CategoryBar(
+                    categories = categories,
+                    selectedId = if (searching) null else selectedCategoryId,
+                    onSelect = onCategorySelect,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        } else {
+            CatalogSearchField(
+                text = searchText,
+                onTextChange = onSearchTextChange,
+                modifier =
+                    Modifier.fillMaxWidth()
+                        .padding(horizontal = AdelDimens.ScreenPadding)
+                        .padding(top = AdelDimens.ScreenPadding),
+            )
+            CategoryBar(
+                categories = categories,
+                selectedId = if (searching) null else selectedCategoryId,
+                onSelect = onCategorySelect,
+            )
+        }
         if (products.isEmpty() && emptyMessage != null) {
             Text(
                 text = emptyMessage,
@@ -97,22 +126,38 @@ fun CatalogBrowser(
                 images = images,
                 onProductSelect = onProductSelect,
                 modifier = Modifier.weight(1f),
+                compact = compactHeight,
             )
         }
     }
 }
 
-/** Búsqueda de productos por nombre o código, con el teclado del sistema. */
+/**
+ * Búsqueda de productos por nombre o código, con el teclado del sistema. Con [singleLineLabel] (la
+ * forma compacta, a media anchura) la etiqueta no pasa de una línea: si se partiera, el campo
+ * crecería y le quitaría altura a la cuadrícula.
+ */
 @Composable
 fun CatalogSearchField(
     text: String,
     onTextChange: (String) -> Unit,
     modifier: Modifier = Modifier,
+    singleLineLabel: Boolean = false,
 ) {
     OutlinedTextField(
         value = text,
         onValueChange = onTextChange,
-        label = { Text(stringResource(R.string.catalog_search_label)) },
+        label = {
+            if (singleLineLabel) {
+                Text(
+                    stringResource(R.string.catalog_search_label),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            } else {
+                Text(stringResource(R.string.catalog_search_label))
+            }
+        },
         leadingIcon = { Icon(CatalogIcons.Search, contentDescription = null) },
         trailingIcon = {
             if (text.isNotEmpty()) {
@@ -165,23 +210,32 @@ fun CategoryBar(
     }
 }
 
-/** Cuadrícula de productos: tantas columnas como quepan (teléfono 2, tableta 4–6). */
+/**
+ * Cuadrícula de productos: tantas columnas como quepan (teléfono 2, tableta 4–6); con [compact]
+ * (poca altura), tarjetas bajas y más anchas.
+ */
 @Composable
 fun ProductGrid(
     products: List<CatalogProduct>,
     images: CatalogImages?,
     onProductSelect: (CatalogProduct) -> Unit,
     modifier: Modifier = Modifier,
+    compact: Boolean = false,
 ) {
     LazyVerticalGrid(
-        columns = GridCells.Adaptive(minSize = 152.dp),
+        columns = GridCells.Adaptive(minSize = if (compact) 240.dp else 152.dp),
         modifier = modifier.fillMaxWidth().testTag(TAG_PRODUCT_GRID),
         contentPadding = PaddingValues(AdelDimens.ScreenPadding),
         horizontalArrangement = Arrangement.spacedBy(AdelDimens.Gap),
         verticalArrangement = Arrangement.spacedBy(AdelDimens.Gap),
     ) {
         items(products, key = { it.id }) { product ->
-            ProductCard(product = product, images = images, onClick = { onProductSelect(product) })
+            ProductCard(
+                product = product,
+                images = images,
+                onClick = { onProductSelect(product) },
+                compact = compact,
+            )
         }
     }
 }
@@ -189,7 +243,8 @@ fun ProductGrid(
 /**
  * Tarjeta de un producto: imagen (o marcador), nombre, precio de referencia y su marca. Un producto
  * agotado o no disponible se ve atenuado con «Agotado», «Agotado hasta nuevo aviso» o el motivo de
- * Go, y no se puede elegir.
+ * Go, y no se puede elegir. Con [compact] (poca altura), la imagen va a la izquierda, pequeña, y el
+ * texto a la derecha: la tarjeta mide lo de una fila de texto, no lo de la imagen.
  */
 @Composable
 fun ProductCard(
@@ -197,6 +252,7 @@ fun ProductCard(
     images: CatalogImages?,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    compact: Boolean = false,
 ) {
     val price = priceText(product)
     val status = statusText(product)
@@ -217,42 +273,68 @@ fun ProductCard(
                 .testTag(productTag(product.id))
                 .semantics(mergeDescendants = true) { contentDescription = description },
     ) {
-        ProductImage(
-            imageId = product.imageId,
-            name = product.name,
-            images = images,
-            modifier = Modifier.fillMaxWidth().aspectRatio(4f / 3f),
-        )
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            Text(
-                text = product.name,
-                style = MaterialTheme.typography.titleMedium,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(text = price, style = AmountTextStyle)
-            if (status != null) {
-                Text(
-                    text = status,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = AdelTheme.colors.red,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.testTag(TAG_PRODUCT_STATUS),
+        if (compact) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                ProductImage(
+                    imageId = product.imageId,
+                    name = product.name,
+                    images = images,
+                    modifier = Modifier.size(COMPACT_IMAGE_SIZE),
                 )
-            } else if (product.kind == ProductKind.COMBO) {
-                Text(
-                    text = stringResource(R.string.product_combo),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                ProductText(product, price, status, Modifier.weight(1f))
             }
+        } else {
+            ProductImage(
+                imageId = product.imageId,
+                name = product.name,
+                images = images,
+                modifier = Modifier.fillMaxWidth().aspectRatio(4f / 3f),
+            )
+            ProductText(product, price, status, Modifier)
         }
     }
 }
+
+/** Nombre, precio de referencia y marca de disponibilidad (o «Combo») de una tarjeta. */
+@Composable
+private fun ProductText(
+    product: CatalogProduct,
+    price: String,
+    status: String?,
+    modifier: Modifier,
+) {
+    Column(
+        modifier = modifier.padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            text = product.name,
+            style = MaterialTheme.typography.titleMedium,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(text = price, style = AmountTextStyle)
+        if (status != null) {
+            Text(
+                text = status,
+                style = MaterialTheme.typography.labelLarge,
+                color = AdelTheme.colors.red,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.testTag(TAG_PRODUCT_STATUS),
+            )
+        } else if (product.kind == ProductKind.COMBO) {
+            Text(
+                text = stringResource(R.string.product_combo),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/** Imagen de la tarjeta baja (poca altura). */
+private val COMPACT_IMAGE_SIZE = 72.dp
 
 /** Precio de referencia de Go, «Elige presentación» o «Sin precio». */
 @Composable

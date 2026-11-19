@@ -32,4 +32,43 @@ class PaneLayoutTest {
         assertEquals(PaneLayout.SINGLE, paneLayoutFor(widthDp = 599, heightDp = 1000))
         assertEquals(PaneLayout.SINGLE, paneLayoutFor(widthDp = 1000, heightDp = 479))
     }
+
+    /**
+     * Navegación principal (Fase E de la A2): riel lateral con poca altura (el mismo límite de 480
+     * dp) o en horizontal; barra inferior en vertical.
+     */
+    @Test
+    fun navegacionPrincipalSinQuitarleAlturaALaCaptura() {
+        // Teléfono: vertical con barra; horizontal (muy bajo) con riel.
+        assertEquals(
+            NavigationPlacement.BOTTOM_BAR,
+            navigationPlacementFor(widthDp = 411, heightDp = 914),
+        )
+        assertEquals(
+            NavigationPlacement.SIDE_RAIL,
+            navigationPlacementFor(widthDp = 914, heightDp = 411),
+        )
+        // Tableta: horizontal con riel (lo escaso es la altura), vertical con barra.
+        assertEquals(
+            NavigationPlacement.SIDE_RAIL,
+            navigationPlacementFor(widthDp = 1280, heightDp = 800),
+        )
+        assertEquals(
+            NavigationPlacement.BOTTOM_BAR,
+            navigationPlacementFor(widthDp = 800, heightDp = 1280),
+        )
+        // Una ventana baja (multiventana) aunque no sea horizontal, y el límite de 480 dp.
+        assertEquals(
+            NavigationPlacement.SIDE_RAIL,
+            navigationPlacementFor(widthDp = 400, heightDp = 400),
+        )
+        assertEquals(
+            NavigationPlacement.SIDE_RAIL,
+            navigationPlacementFor(widthDp = 479, heightDp = 479),
+        )
+        assertEquals(
+            NavigationPlacement.BOTTOM_BAR,
+            navigationPlacementFor(widthDp = 480, heightDp = 480),
+        )
+    }
 }

@@ -11,7 +11,7 @@
     <string name="tables_pending">Pedidos pendientes</string>
     <string name="tables_offline">Sin conexión: se ven las mesas de la última vez que hubo conexión.</string>
     <string name="tables_loading">Leyendo las mesas…</string>
-    <string name="tables_empty">Todavía no hay mesas guardadas en esta tableta. Con conexión aparecen aquí.</string>
+    <string name="tables_empty">Todavía no hay mesas guardadas en este dispositivo. Con conexión aparecen aquí.</string>
     <string name="tables_no_results">Ninguna mesa se llama «%1$s».</string>
     <string name="tables_no_permission">No tienes permiso para ver las mesas. Pide a un administrador que te lo dé en Personal › Roles.</string>
     <string name="tables_seats">%1$d lugares</string>

@@ -318,7 +318,10 @@ class AlertsOnGoTest {
         shell("rm -f $CUT_DONE_FILE")
         // El guion espera esta línea para cortar la red, marcar «Listo» desde la Mac y devolverla.
         log("r4 listo para cortar cuenta=$accountId")
-        waitUntil("el canal nota el corte", timeout = 60_000) {
+        // En Android 8–10, `svc … disable` no siempre corta la conexión abierta y el canal la da
+        // por
+        // muerta tras 45 s sin un byte (el guion mantiene el corte hasta que se ve): hasta 90 s.
+        waitUntil("el canal nota el corte", timeout = 90_000) {
             controller.connection.value is ReadyChannelState.Waiting
         }
         log("r4 corte visto por el canal: ${controller.connection.value}")
