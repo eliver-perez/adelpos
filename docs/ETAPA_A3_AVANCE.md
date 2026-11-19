@@ -1286,3 +1286,173 @@ Fase E).
   especificación nueva (un emparejamiento menos, por el límite de 5 cada 10 minutos).
 - `TestStageA1WaiterPIN` falló por tiempo en las dos corridas completas de `administration` con la Mac muy cargada por
   los emuladores del otro agente (carga 17–55) y pasó sola: se vigila en la regresión de la Fase E.
+
+---
+
+## Fase A · Android (regla de textos y conexión tolerante)
+
+Agente de Android en `$SP/wt/and` (rama `etapa-a3-and`, desde `etapa-a3` = `4c7231b`). Sin cambios en `backend/`,
+`desktop/`, `CLAUDE.md` de la raíz, `docs/ETAPA_A3_AVANCE.md` ni el contrato. Pruebas en copias aisladas: Go temporal
+`ISO_TAG=AN` (8193/8453, base `adel_pos_test_an_…`), `Pixel_Tablet` (5580) y `ADEL_A1_Phone_API33` (5582) de solo
+lectura, siempre con `AdelTestRunner` y emparejando por la dirección escrita `10.0.2.2:8453`; nunca la red real.
+
+### Qué se hizo
+
+**Conexión tolerante (A3-D1, §2).**
+
+- **La causa, corregida en el cliente** (`core/data/…/api/PinnedHttpClient.kt`): el pool guarda las conexiones libres
+  **30 s** (`IDLE_CONNECTION_SECONDS`, con su porqué: Go las cierra a los 60 s y OkHttp no revisa una conexión
+  reutilizada antes de un `GET`). Un interceptor único, `ServerAnswersInterceptor` (`core/data/…/api/`), **repite una
+  vez** con una conexión nueva (suelta antes las libres del pool) una lectura que falló sin respuesta; nunca una
+  escritura (llevan su `operation_id`), ni un canal (`Accept: text/event-stream`: su protocolo no cambia), ni un plazo
+  vencido (duplicaría la espera), ni otro certificado. `retryOnConnectionFailure` sigue en `false`. Go no cambia.
+- **El estado único** `ServerLink` (`core/domain/…/connection/ServerLink.kt`) con sus reglas puras en
+  `ServerLinkTracker` (reloj inyectado) y su implementación `ServerLinkMonitor` (`core/data/…/network/`), **una
+  instancia en `AppContainer.serverLink`** (arranca en `AdelPosApplication`). Lo alimentan la red de Android
+  (`ConnectionMonitor`: sin red, «Sin conexión» al instante) y **cada respuesta de Go** del cliente del servidor
+  emparejado (`PairedConnection` crea su cliente con el interceptor, que informa `answered`/`noAnswer`/`repeated`:
+  entrada, catálogo e imágenes, modo Mesero, canal de eventos y canal de avisos pasan por él). Cualquier respuesta HTTP
+  es un éxito; una cancelación propia no cuenta.
+- **Tolerancia y revisión** (constantes con su porqué en `ServerLinkTracker`): «Sin conexión» con **3 fallas seguidas
+  y 20 s desde la primera sin ningún éxito**; «En línea» con el primer éxito; al volver la red, sigue «Sin conexión»
+  hasta que Go responda y se sondea enseguida. Sonda `GET health/live` cada **5 s** mientras duda, cada **10 s** con
+  «Sin conexión» (buscando el servidor en otra dirección, como el cambio de IP), **ninguna** con el canal de eventos
+  abierto, cada **60 s** sin él (se salta si hubo otro éxito en ese lapso) y nada en segundo plano. Sin servidor
+  emparejado el estado sigue a la red de Android. La comprobación de versiones y lista (`AccessViewModel`) pasa de 60 s
+  a **5 minutos** (y al volver la conexión); la lista de «¿Quién eres?» de 30 s a **60 s** (y al cambiar el estado).
+- **Reintento en el momento** (`ServerLink.confirm`): con «Sin conexión» y red de Android, la entrada con PIN, la
+  lista, la comprobación y la precuenta preguntan a Go en ese momento (sonda con plazo de conexión de 2 s, sin buscar en
+  otra dirección) antes de decir que falta conexión.
+- **Lo leen todos** (nadie decide «sin conexión» por su cuenta):
+  - la barra (`ShellViewModel`);
+  - la entrada (`AccessRepository`): se quitó el `online` de `DeviceStatus.Ready` y `markOffline`; la lista sin
+    conexión y la entrada **directa** sin conexión solo con «Sin conexión» tras la sonda del momento; si Go no
+    responde al PIN, sigue el verificador local como antes (A1-D1); una falla aislada ya no deja al mesero sin sesión
+    de Go;
+  - «¿Quién eres?» (`PinEntryScreen`): el aviso «Sin conexión…» sale del estado único; sin la lista de Go y con «En
+    línea», un indicador de espera (nunca «Sin conexión») y se vuelve a pedir a los 5 s;
+  - Mesas y Para llevar (`TablesScreen`, `TakeawayScreen`): «Sin conexión…» solo con el estado único; una lectura sin
+    respuesta con «En línea» se repite sola a los 5 s (`RestaurantRepository`) y al volver la conexión se vuelve a leer;
+  - la precuenta (`PrecheckRepository.connected` y `confirmConnection`) y «Entregado»: sin respuesta con «En línea»
+    dicen «No se pudo imprimir…» / «No se pudo marcar entregado…» (`PrintAnswer.NoAnswer`), nunca «necesitas
+    conexión» con la barra en «En línea»;
+  - la notificación permanente del canal de avisos (`ReadyOngoing.of(canal, estado)`): «Sin conexión…» solo con el
+    estado único; el protocolo del canal (cursor, `Last-Event-ID`, espera creciente, A2-D12) no cambia.
+- **No cambian**: el canal de eventos, el canal de avisos, la regla de la cola sin conexión (regla 18, WorkManager sin
+  restricción de red, sus disparadores siguen con la red de Android) y la entrada sin conexión (A1-D1, A1-D16).
+
+**Textos (§1, A3-D11, A3-D10).** Las filas de Android de §0.2: «%1$s no está conectada…», «No hay meseros con
+PIN…», «Estos pedidos no se han enviado…», «No hay mesas guardadas…», «Sin conexión: no hay pedidos para llevar
+guardados…», «Este dispositivo no tiene impresora asignada.» y, en la bitácora, «(descartado, falta quitarlo de la
+cuenta)». Se quitó la pantalla de muestra `CatalogSample*` con sus textos y sus dos pruebas. La comprobación
+automática es `PlainLanguageTest` (`core/ui/src/test/…/PlainLanguageTest.kt`): recorre los recursos de las carpetas
+`values` de **todos** los módulos (cada `<string>`, `<plurals>` y `<string-array>`, sin comentarios XML) y las cadenas
+literales de Kotlin de `src/main` (con un lector propio que quita comentarios, también anidados, y plantillas `${…}`;
+sin las líneas de `require`, `check`, `error(`, `Log.` y `…Exception(`) y falla con «todavía no», «aún no», «etapa»,
+«fase X», «próximamente», «provisional», «por ahora», «más adelante», «en desarrollo», «versión de prueba» y
+«(muestra)». Excepciones: una lista `allowed` con archivo, patrón y porqué (hoy vacía); una excepción que ya no
+encuentra nada también falla. Una segunda prueba comprueba el lector (comentarios ignorados, textos encontrados).
+
+**Reglas** (`android/CLAUDE.md`): regla 2 ampliada con la regla de textos y su prueba; regla 13 con el estado único,
+la tolerancia, la revisión, el reintento en el momento y la causa; «Estructura», «Pruebas» (las nuevas, la suite
+`connection`, los servidores falsos en HTTP/1.1), «Precuenta», «Para llevar» y «Aviso de platillos listos» al día.
+`docs/ANDROID_INSTALAR.md` fuera de su §4: «No hay meseros con PIN» (§3), la tolerancia en §5 y la notificación en §8.
+
+### Archivos principales
+
+- `android/core/domain/src/main/kotlin/com/adelpos/meseros/core/domain/connection/ServerLink.kt` y
+  `ServerLinkTracker.kt` (reglas y constantes).
+- `android/core/data/src/main/kotlin/com/adelpos/meseros/core/data/api/PinnedHttpClient.kt`,
+  `ServerAnswersInterceptor.kt`; `…/network/ServerLinkMonitor.kt`; `…/access/AccessRepository.kt`,
+  `PairedConnection.kt` (`live`); `…/waiter/RestaurantRepository.kt`, `PrecheckRepository.kt`;
+  `…/ready/ReadyAlertsChannel.kt` (`ReadyOngoing.of`).
+- `android/app/src/main/kotlin/com/adelpos/meseros/AppContainer.kt` (`serverLink`), `ShellViewModel.kt`,
+  `WaiterModeContainer.kt`, `ready/ReadyAlertsController.kt`.
+- `android/feature/access/…/AccessViewModel.kt`, `pin/PinEntryScreen.kt`; `android/feature/waiter/…/tables/`;
+  `android/feature/takeaway/…/TakeawayScreen.kt`, `TakeawayViewModel.kt`; `android/core/capture/…/CaptureDependencies.kt`
+  (`link`).
+- Pruebas: `ServerLinkTrackerTest`, `PinnedHttpClientTest`, `AccessRepositoryTest` (3 casos nuevos), `TestServerLink`,
+  `PlainLanguageTest`, `ServerLinkScreensTest`, `ConnectionOnGoTest`; `scripts/android-e2e.sh --suite connection`.
+
+### Decisiones propuestas
+
+- **Decisión propuesta · Entrada con PIN ante una falla de `pin-login`**: con el estado «En línea», si Go no responde al
+  PIN se sigue con el verificador local (entrada sin conexión), como en la A1 (A1-D1: el mesero no espera). Lo que la
+  A3 quita es la entrada **directa** sin conexión por una falla aislada anterior. Alternativa no tomada: mostrar «No se
+  pudo conectar…» hasta que el estado diga «Sin conexión» (hasta 20 s sin poder entrar).
+- **Decisión propuesta · Sin respuesta tras intentar con «En línea»**: la precuenta y «Entregado» dicen «No se pudo…
+  Inténtalo de nuevo» en lugar de «necesitas conexión» (que solo sale con «Sin conexión»): así nunca contradicen a la
+  barra. Es la única diferencia visible en esos dos textos.
+- **Decisión propuesta · La comprobación de texto va en `core:ui`** (junto a `ColorsOnlyInPaletteTest`, que ya recorre
+  todos los módulos con sus entradas declaradas en Gradle) y no en `app` como proponía §0.2: `app` no tiene pruebas de
+  la JVM ni esas entradas.
+- **Decisión propuesta · Los servidores falsos de las pruebas de la JVM hablan HTTP/1.1 sin ALPN**
+  (`protocolNegotiationEnabled = false` en `FakeGoServer` y `PinnedHttpClientTest`), como la escucha de red de Go: con
+  HTTP/2 (lo que MockWebServer negocia por omisión con TLS) una conexión cerrada por el servidor se ve como un plazo
+  vencido y no como «unexpected end of stream».
+- **Sin cambio (observación de §0.2)**: «Buscar el servidor» y «servidor del restaurante» se quedan; no los pide §1 y
+  el coordinador no lo decidió. Los textos de la Fase C («Ingresar», «Selecciona tu usuario»…) no se tocaron.
+
+### Commits (rama `etapa-a3-and`, desde `4c7231b`)
+
+| Commit    | Título                                                                                                      |
+| --------- | ----------------------------------------------------------------------------------------------------------- |
+| `3f22e55` | etapa A3 fase A (Android): se quita la pantalla de muestra del catálogo (A3-D10)                            |
+| `365e74f` | etapa A3 fase A (Android): textos sin notas de desarrollo y su comprobación automática (§1, A3-D11)         |
+| `458d38d` | etapa A3 fase A (Android): estado único de conexión y punto único del cliente (A3-D1)                       |
+| `fe4ff51` | etapa A3 fase A (Android): todos leen el estado único de conexión (A3-D1)                                   |
+| `52a0b42` | etapa A3 fase A (Android): ConnectionOnGoTest y scripts/android-e2e.sh --suite connection (§6)              |
+| `93b767c` | etapa A3 fase A (Android): android/CLAUDE.md y la guía con la regla de textos y el estado único de conexión |
+
+### Pruebas (lo que realmente se ejecutó)
+
+| Qué                                                                                                                       | Dónde                                                                                                                                      | Resultado                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| JVM y Robolectric SDK 36: `:core:domain:test testDebugUnitTest`                                                           | Mac, `iso.sh wt/and gradle` (JBR de Android Studio)                                                                                        | **369/369**: `core:domain` 162 (`ServerLinkTrackerTest` 14 nuevas), `core:data` 178 (`PinnedHttpClientTest` 6 nuevas, `AccessRepositoryTest` 16 con 3 nuevas, `AccessSafetyTest` 13, `PrecheckRepositoryTest` 5, `ReadyAlertsChannelTest` 18), `core:ui` 12 (`PlainLanguageTest` 2 nuevas), `feature:access` 7, `feature:takeaway` 5, `feature:waiter` 5                                                                              |
+| Android Lint (`lintDebug`, los 7 módulos) y `ktfmtCheck`                                                                  | Mac                                                                                                                                        | Sin problemas                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `fmt-check` del repositorio (Prettier, gofmt, cargo fmt) y md5 de `docs/etapas/*.md`                                      | Mac                                                                                                                                        | Sin cambios pendientes; especificaciones intactas (`3555c65b…` antes y después)                                                                                                                                                                                                                                                                                                                                                       |
+| Instrumentadas `:app:connectedDebugAndroidTest :core:data:connectedDebugAndroidTest`                                      | `Pixel_Tablet` (Android 17, 5580), con las aplicaciones de prueba desinstaladas antes                                                      | **1 XML por módulo**. `app`: 106 pruebas, **37 corridas, 0 fallas**, 69 omitidas (las `*OnGoTest`, sin argumentos); entre ellas `ServerLinkScreensTest` 3, `AccessScreensTest` 5, `AppShellTest` 2, `AppNavigationTest` 4, `ConnectionOnDeviceTest` 1 (modo avión real), `ReadyAlertsOnDeviceTest` 6, `WaiterScreensTest` 4, `TakeawayScreensTest` 4, `PrecheckScreensTest` 3. `core:data`: 20, **18 corridas, 0 fallas**, 2 omitidas |
+| Las mismas                                                                                                                | `ADEL_A1_Phone_API33` (Android 13, 5582)                                                                                                   | **1 XML por módulo**. `app`: 106, **37 corridas, 0 fallas**, 69 omitidas; `core:data`: 20, **18 corridas, 0 fallas**, 2 omitidas                                                                                                                                                                                                                                                                                                      |
+| `ConnectionOnGoTest` de **10 minutos** (`scripts/android-e2e.sh --suite connection`, `ADELPOS_E2E_CONNECTION_MINUTES=10`) | `Pixel_Tablet` solo (el teléfono apagado), Go temporal `ISO_TAG=AN` (8193/8453), Mac sin otra carga, avisos de platillos listos encendidos | **APROBADA**: «0 de 557 s con «Sin conexión» a la vista; sin respuesta 0, lecturas repetidas 0, respuestas de Go 60; bloqueos 3, entradas 3 (sin sesión 0)». Bloqueos a los 120 s exactos y cada vuelta con sesión de Go (registro en `$SP/and-e2e-connection/`)                                                                                                                                                                      |
+
+Comparación con la Fase 0 (corrida C, mismo guion, sin arreglo): 12 fallas y el aviso falso en 4 de 5 bloqueos; ahora
+0 fallas, 0 repeticiones y 0 segundos con aviso. Las 60 respuestas de Go en 10 minutos (una cada 10 s en promedio,
+contando las lecturas al volver a entrar, la lista de «¿Quién eres?» y el canal de avisos) muestran la revisión
+espaciada.
+
+### No verificado
+
+- La hora sin uso de §6 (60 minutos): la hace la Fase E con la misma suite (`ADELPOS_E2E_CONNECTION_MINUTES=60`).
+- `ConnectionOnGoTest` solo en `Pixel_Tablet` (lo pedido); no en el teléfono ni en Android 8 (`ADEL_A1_Tablet_API26`,
+  Fase E).
+- Las demás suites de punta a punta (`access`, `catalog`, `waiter`, `field`, `takeaway`, `precheck`, `alerts`) no se
+  volvieron a correr en esta fase; cambian por esta fase: `AccessOnGoTest` paso 1 (ahora comprueba el estado único) y
+  los tiempos con un servidor que no responde (la tolerancia de 20 s). Quedan para la regresión de la Fase E.
+- `core:ui` instrumentada no se corrió (su código no cambió; `PlainLanguageTest` es de la JVM).
+- Un equipo físico y una wifi real (pérdida de paquetes, cambio de punto de acceso): la tolerancia lo cubre en teoría.
+- Observación: en `ConnectionOnGoTest` el estado arrancó en «Sin conexión» y pasó a «En línea» 2 s después de abrir el
+  proceso (`AdelLink`, antes de emparejar): `ConnectivityManager.activeNetwork` dio null al crear el estado. Antes de la
+  A3 la barra también tomaba ese primer valor; ahora sigue en «Sin conexión» hasta la primera respuesta de Go (o hasta
+  la red, sin servidor emparejado). No se investigó más.
+
+### Para el coordinador
+
+- Unir el texto propuesto de arriba a `CLAUDE.md` de la raíz y este resumen al avance.
+- Decidir (opcional) si «Buscar el servidor» / «servidor del restaurante» se unifican a «computadora principal»
+  (observación de §0.2 sin cambio).
+- Nada del servidor hizo falta en esta fase.
+
+### Decisiones del coordinador sobre la Fase A (Android)
+
+- **A3-D14**: se aceptan las cuatro decisiones propuestas del agente (con «En línea», un PIN sin respuesta de Go sigue
+  con el verificador local de A1-D1; «No se pudo… Inténtalo de nuevo» en la precuenta y «Entregado» sin respuesta;
+  `PlainLanguageTest` en `core:ui`; servidores falsos con HTTP/1.1 sin ALPN, como Go).
+- **A3-D15 · «Buscar el servidor» y «Servidor del restaurante» se quedan**: son nombres reales y vigentes del producto
+  (la pantalla «Buscar el servidor» y la modalidad «Servidor del restaurante» del escritorio y del instalador, 9G), no
+  textos provisionales; §1 no los pide y unificarlos sería un cambio de terminología fuera de esta etapa.
+- **Estado al arrancar**: el agente vio que, al crearse el proceso, el estado empezaba en «Sin conexión» unos 2 s porque
+  Android todavía no había informado ninguna red. Un estado aún no conocido no debe mostrar «Sin conexión» (§2: el
+  indicador y los avisos nunca dicen algo falso): se corrige al empezar la Fase C (el estado inicial es «dudando», que
+  se ve «En línea», hasta la primera respuesta de Go, el primer aviso de red de Android o el plazo de la tolerancia).
+- El texto para `CLAUDE.md` de la raíz sobre Android (y el nombre `PlainLanguageTest` en la regla de la A3) se une en
+  la Fase E, para no pisar los cambios del agente del servidor en la Fase B.
