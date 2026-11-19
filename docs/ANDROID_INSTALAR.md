@@ -242,7 +242,7 @@ administrativo se sigue haciendo en la computadora con su contraseña.
 ### Bloqueo por inactividad y cambio de mesero
 
 - Tras **2 minutos sin uso** (lo puedes cambiar por dispositivo en **Administración › Sistema › Terminales ›
-  «Editar»** del teléfono o la tableta, en «Bloqueo por inactividad»), el dispositivo vuelve a «¿Quién eres?». **No se
+  «Editar»** del teléfono o la tableta, en «Bloqueo por inactividad»), el dispositivo vuelve a «Selecciona tu usuario». **No se
   bloquea** mientras el mesero tiene una captura a medias o pedidos sin enviar.
 - Para pasarle el dispositivo a otro mesero: toca el nombre del mesero arriba y **«Cambiar de mesero»**. No se puede
   mientras ese mesero tenga **pedidos sin enviar**; una captura a medias sí se queda guardada con él y el siguiente no

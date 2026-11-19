@@ -1802,3 +1802,179 @@ Ningún hallazgo alto; ninguno obligó a cambiar la especificación. Correccione
   `catalog.sold_out.manage`. Sustituye la fila del Supervisor del anexo de la Fase 0.
 - **A3-D20 (R5)**: tras un 409 `ROLE_CHANGED` la pantalla vuelve a leer el rol y avisa, para que guardar no pise sin aviso
   el cambio de otra persona.
+
+---
+
+## Fase C · Android (los 12 ajustes de §4)
+
+Agente de Android en `$SP/wt/and` (rama `etapa-a3-and`, con `etapa-a3` unida después de la Fase A). Sin cambios en
+`backend/`, `desktop/`, `CLAUDE.md` de la raíz, `docs/ETAPA_A3_AVANCE.md`, el contrato ni la §4 de
+`docs/ANDROID_INSTALAR.md`. Pruebas en copias aisladas: Go temporal `ISO_TAG=AN` (8193/8453, base `adel_pos_test_an_…`,
+una nueva por dispositivo), `Pixel_Tablet` (5580, Android 17) y `ADEL_A1_Phone_API33` (5582, Android 13) de solo
+lectura, siempre con `AdelTestRunner` y emparejando por la dirección escrita; nunca la red real. Sin servidor Go nuevo:
+todo lo que usa la Fase C ya lo da Go 0.13.0 (`discardable` y `draft_quantity` en `restaurant/state`,
+`POST restaurant/accounts/{id}/discard` de la 9D, `terminal.home_screen` de `getIdentity`).
+
+### Antes de los 12 puntos: el estado al arrancar (pedido del coordinador)
+
+Commit `4fa6331`. Un estado todavía no conocido ya no dice «Sin conexión»: al arrancar el estado único **duda** (la
+barra dice «En línea») hasta la primera respuesta de Go, el primer aviso de red de Android que diga que no hay red, o el
+plazo de la tolerancia (20 s); con eso decide. `ServerLinkTracker(initialNetwork: LinkState?)` (null = sin saber),
+`startingUp()`/`startupExpired()`/`nextDecisionIn()`; `ConnectionMonitor.reportedLinkState` ya no manda el
+«sin red» inicial que Android da antes de conocer la red; `ServerLinkMonitor` vuelve a decidir solo al vencer el plazo.
+JVM: 5 pruebas nuevas en `ServerLinkTrackerTest` (19 en total).
+
+### Commits (rama `etapa-a3-and`, sin push ni merge)
+
+- `4fa6331` etapa A3 fase C (Android): un estado todavía no conocido no dice «Sin conexión» al arrancar
+- `d835155` etapa A3 fase C (Android): los 12 ajustes de §4 en teléfono y tableta
+- `cec2486` etapa A3 fase C (Android): versión 0.3.0 (versionCode 3)
+- `1726e09` etapa A3 fase C (Android): android/CLAUDE.md y la guía con los ajustes de pantallas y la 0.3.0
+
+### Qué se hizo (§4)
+
+1. **Flecha de regreso** (`AdelTopBar(onBack)`, 48 dp, ícono `AdelIcons.Back`, «Volver»): en Captura, la cuenta a un
+   toque del teléfono, Pendientes, Revisión y Para llevar (cuando está encima de Mesas). Llama a
+   `onBackPressedDispatcher.onBackPressed()`: pasa por los mismos `BackHandler` que la tecla Atrás (primero cierra el
+   panel a un toque, después la captura). **Una sola flecha**: el panel a un toque de `AdaptivePanes` se registra en
+   `LocalTopBarBack` (`TopBarBack`, `core:ui`) y ya no dibuja su «Volver a …» propio. Al salir de una captura con
+   productos sin enviar (regla A1: queda guardada con su mesero), la raíz muestra «Lo capturado en Mesa 4 quedó guardado
+   sin enviar a cocina. Lo encuentras en la mesa o en Pendientes.» (o «…en Para llevar o en Pendientes.»;
+   `CaptureRoute(onLeaveUnsent)`, `SystemBackHandler` de `core:ui` porque `core:capture` no tiene `activity-compose`).
+   El aviso se muestra al llegar a la pantalla a la que se vuelve y se quita al pasar a otra: en el teléfono tapaba
+   «Ver la cuenta» de la captura siguiente (lo encontró la prueba de punta a punta `a4`).
+2. **Título** (`CaptureTitle.of`, `core:domain`): «Mesa 4», «Para llevar #12» (el folio de Go solo si es de esa cuenta),
+   «Para llevar · Nombre» o «Nuevo pedido para llevar»; `CaptureRoute(onTitleChange)` lo da a la barra.
+3. **«Buscar producto»** en un renglón siempre (`CatalogSearchField`, `maxLines = 1` con elipsis).
+4. **«Ver la cuenta»** y, con productos sin enviar, «Ver la cuenta · 2 por enviar» (plurales).
+5. **Entrada**: título «Ingresar» con el logotipo (PNG de `assets/brand/` reducidos a 384 × 128 en
+   `core/ui/src/main/res/drawable-nodpi/`, claro u oscuro según el tema, 28 dp de alto; ≈ 53 KB los dos), «Selecciona tu
+   usuario», «Selecciona tu usuario y escribe tu PIN.», botón «Ingresar», «Elegir otro usuario».
+6. **Pendientes**: título «Pendientes» (también el botón de Mesas), flecha y «Reintentar ya» solo si hay algo que
+   reintentar.
+7. **Mesas compacta** (`TablesScreen`, `TablesMap`): sin «Buscar mesa» (se quitaron `TableSearch` y
+   `TableCanvas.scaleToFit`); una fila con «Lista | Mapa» (un interruptor propio y compacto: el `SegmentedButton` de
+   Material reserva 26 dp para un ícono en cada opción y en el teléfono vertical las áreas no cabían), las áreas como
+   pestañas (`FilterChip`, desplazables si no
+   caben, la elegida siempre traída completa a la vista; el área elegida en `SavedStateHandle`, `tables.mapArea`) y
+   «Pendientes»; la lista muestra solo el área elegida
+   («Esta área no tiene mesas.» si no tiene); sin «Ver la mesa» (tocar la mesa abre su panel). El mapa llena su espacio
+   con `TableMapFit` (`core:domain`, puerto de `fitTables` del escritorio: escala por el rectángulo de las mesas del área,
+   lado menor ≥ 64, escala ≤ 2, margen 16, centrado si sobra y desplazamiento horizontal y vertical si no caben).
+8. **Tarjetas de cuenta** (`AccountCard`, pública para su prueba): dos renglones, «Mesa 6 · folio 12 · $755.00» en una
+   línea con elipsis y abajo la etiqueta; todas las etiquetas de estado (`StateBadge`, `TableStateBadge`) con
+   `maxLines = 1`; las capturas y pedidos del panel (`WorkRow`) también en dos renglones.
+9. **«Imprimir precuenta» en cada cuenta del panel**: el mismo `PrecheckPrintBar` de `core:capture` (`framed = false`)
+   con un `PrecheckPrinting` en `TablesViewModel` (una impresión siguiéndose a la vez). Sin permiso: el botón
+   deshabilitado con «Tu usuario no tiene permiso para imprimir la precuenta. Pídelo en la computadora principal.»
+   (`PrecheckSection(allowed = false)`, también en la cuenta, donde antes se ocultaba); sin impresora conocida: «Este
+   dispositivo no tiene impresora asignada. Asígnala en la computadora principal, en Terminales.»; sin conexión, «Para
+   imprimir necesitas conexión…». Go manda igual (si no hay impresora, su respuesta lo dice).
+10. **«Descartar cuenta vacía»** en cada cuenta que Go marca `discardable` (`AccountDto.discardable`, sin el campo = no):
+    confirmación, `POST restaurant/accounts/{id}/discard` con `operation_id` y `revision`, con conexión y la sesión del
+    mesero, nunca en la cola (`RestaurantRepository.discardEmptyAccount`, `DiscardAccountResult`); sin respuesta se
+    repite una vez con la misma clave; `ACCOUNT_NOT_EMPTY`/`ACCOUNT_CONFLICT` → se vuelve a leer y se dice «La cuenta
+    cambió en otra terminal…». Permiso: `accounts.open` + `accounts.read` (`WaiterAction.DISCARD_EMPTY_ACCOUNT`); sin él,
+    el botón deshabilitado con su porqué. La confirmación dice, como el escritorio, que no tiene productos enviados a
+    cocina, pagos ni registros de cocina, cuántos productos sin enviar se borran (`draft_quantity`) y que no es una
+    cancelación.
+11. **Producto sin imagen**: la tarjeta compacta (nombre y precio, sin la letra grande) en teléfono y tableta.
+12. **Pantalla inicial** (A3-D7): `terminal.home_screen` de `getIdentity` (`IdentityTerminalDto.homeScreen`), guardado
+    con la precuenta (`PrecheckSetup.home`, sin cambiar Room); `DeviceHome.fromWire`: solo `takeaway` abre Para llevar y
+    solo con `takeaway.read`; cualquier otro valor o ninguno, Mesas. La raíz lo aplica una vez por entrada (espera hasta
+    5 s la lectura de Go al entrar con conexión) y solo si el mesero sigue en Mesas sin haber tocado nada.
+
+**Sin duplicar (regla 20)**: la flecha, el título, el aviso al salir, «Ver la cuenta», Pendientes y la precuenta viven en
+`core:ui`/`core:capture`/`core:domain`; `feature:waiter` solo agrega lo del panel de la mesa. **Textos (§1)**: todos
+nuevos sin notas de desarrollo; `PlainLanguageTest` pasa. Comentarios del código con los nombres viejos de pantalla
+(«¿Quién eres?», «Pedidos pendientes», «Elegir otro nombre») actualizados.
+
+**Versión**: `android/gradle.properties` → `adelpos.versionName=0.3.0`, `adelpos.versionCode=3`.
+
+**Documentación**: `android/CLAUDE.md` (encabezado, regla 11 con la flecha única, los nombres nuevos, estructura,
+versión, pruebas, la suite `adjustments` y la sección nueva «Ajustes de pantallas (etapa A3, §4)»; la precuenta sin
+permiso); `docs/ANDROID_INSTALAR.md` fuera de su §4 (0.3.0 y su archivo, «Selecciona tu usuario», «Pendientes», la
+subsección nueva «Entrar y moverse en la aplicación» al final de la §3 —entrada, pantalla inicial, Mesas, las cuentas
+de una mesa con la precuenta y «Descartar cuenta vacía», la captura, la flecha y el aviso—, la precuenta desde el
+panel y sin permiso en la §7). `scripts/android-e2e.sh`: suite `adjustments` (`a1`–`a6`, con capturas), también en
+`all`.
+
+### Decisiones que propongo (el coordinador las numera)
+
+1. **Flecha en Para llevar**: Para llevar siempre va encima de Mesas en la pila (Mesas es el inicio), así que su flecha
+   regresa a Mesas, también cuando la pantalla inicial del dispositivo es Para llevar (hace lo mismo que la tecla
+   Atrás). Mesas no tiene flecha.
+2. **«Descartar cuenta vacía» espera a lo de este dispositivo**: si el mesero activo tiene en este dispositivo una
+   captura o un pedido de la cola de esa cuenta, el botón se ve deshabilitado con «Tienes una captura de esta cuenta en
+   este dispositivo: ábrela para enviarla o descartarla.» (descartarla en Go dejaría esa captura sin cuenta). Las
+   capturas de otro mesero en el mismo dispositivo no se ven (regla de la A1) y no se revisan: si alguien descarta esa
+   cuenta, esa captura termina en «Requiere tu revisión» como cualquier cuenta cerrada. Go decide si se puede.
+3. **La confirmación del descarte** sigue el texto del escritorio (`OperationalPage.discardAccount`): Go marca
+   `discardable` también una cuenta con productos sin enviar (borrador guardado), así que el diálogo dice cuántos se
+   borran.
+4. **Pantalla inicial**: una vez por entrada y solo si el mesero no se movió; si Go responde después de 5 s, se queda
+   en Mesas (la siguiente entrada ya usa lo guardado).
+5. **Precuenta en el panel**: un seguimiento a la vez; imprimir otra cuenta deja de seguir la anterior (como al cambiar
+   de cuenta en la captura).
+6. **Áreas desplazables**: junto a «Lista | Mapa» y «Pendientes» caben pocas pestañas (en el teléfono vertical de
+   411 dp, una completa y parte de la siguiente; un teléfono más angosto no lo probé); la fila se desliza, la pestaña cortada indica que hay
+   más y la elegida siempre se trae completa a la vista. Si un restaurante tiene muchas áreas y se prefiere otra cosa:
+   «Lista | Mapa» solo con íconos en anchos chicos (no hay íconos de lista y mapa en `Icon.tsx` del escritorio) o las
+   áreas en un segundo renglón (contradice «una sola fila» de §4.7). No hice ninguna de las dos.
+7. **Tableta, dos paneles en la entrada**: el panel derecho repite «Selecciona tu usuario y escribe tu PIN.» (ya repetía
+   el texto viejo, `entry_help` en los dos). Lo dejé igual; se puede cambiar por otro texto si el coordinador lo pide.
+
+### Pruebas ejecutadas (resultado real)
+
+Todas con el código final (`1726e09`), salvo donde se dice. Las instrumentadas con la aplicación y sus pruebas
+desinstaladas antes y contando los XML (`$SP/and-count-xml.py`); copias en `$SP/and-results/`.
+
+| Prueba                                                                                            | Dónde                        | Resultado                                                                                                                                                                                                                                                                                                         |
+| ------------------------------------------------------------------------------------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| JVM `core:domain:test` + `testDebugUnitTest` (todos los módulos), con `--rerun-tasks`             | Mac                          | 381 pruebas, 0 fallas: domain 172 (incluye `StageA3PanelRulesTest` y los 19 de `ServerLinkTrackerTest`), data 179 (incluye `TablePanelAccountsTest`), ui 12 (`PlainLanguageTest`, `ColorsOnlyInPaletteTest`), access 7, waiter 6, takeaway 5. `core:ui` vuelto a correr con `--rerun` tras el último cambio: 12/0 |
+| `lintDebug` (todos), `ktfmtCheck`, `fmt-check` (Prettier)                                         | Mac                          | sin errores (lint encontró y se corrigió la cantidad `many` que faltaba en un plural nuevo)                                                                                                                                                                                                                       |
+| Instrumentadas `:app` (final, `C7`)                                                               | `ADEL_A1_Phone_API33` (5582) | 119 pruebas, 44 corridas, 75 omitidas (las de Go sin argumentos), 0 fallas; `StageA3ScreensTest` 7/7, `DeviceLayoutTest` 2/2                                                                                                                                                                                      |
+| Instrumentadas `:app` (final, `C7`)                                                               | `Pixel_Tablet` (5580)        | 119 / 44 corridas / 75 omitidas / 0 fallas; `StageA3ScreensTest` 7/7, `DeviceLayoutTest` 2/2                                                                                                                                                                                                                      |
+| Instrumentadas `:core:ui` y `:core:data` (código de `core:ui` igual desde entonces)               | 5582 y 5580                  | ui 14/14, data 18 corridas + 2 omitidas, 0 fallas en los dos                                                                                                                                                                                                                                                      |
+| `scripts/android-e2e.sh --suite adjustments` (`a1`–`a6`), servidor temporal nuevo por dispositivo | 5582                         | 6/6 aprobados                                                                                                                                                                                                                                                                                                     |
+| `scripts/android-e2e.sh --suite adjustments`                                                      | 5580                         | 6/6 aprobados                                                                                                                                                                                                                                                                                                     |
+| Capturas de pantalla (vertical y horizontal)                                                      | los dos                      | 44 en `$SP/shots-C/telefono-ADEL_A1_Phone_API33/` y `$SP/shots-C/tableta-Pixel_Tablet/`                                                                                                                                                                                                                           |
+
+Lo que fallaba en el camino y se corrigió (todo vuelto a correr después):
+
+- `StageA3ScreensTest` en la tableta: el título de la cuenta se buscaba en el árbol junto (el encabezado que se toca
+  junta sus textos) y la pestaña de Terraza estaba fuera de la vista; y la flecha medía **40 dp** (`TopAppBar` deja
+  así su `IconButton`): ahora se fija en 48 dp (regla 12).
+- `a2` (mismo motivo del árbol junto) y `a4` en el teléfono: el aviso «Lo capturado…» (4 s) **tapaba «Ver la cuenta»**
+  de la captura siguiente y el toque no llegaba al botón. Corregido en la aplicación (el aviso es de la pantalla a la
+  que se vuelve y se quita al pasar a otra) y la prueba lo comprueba en Pendientes.
+- Las capturas del teléfono vertical mostraban la pestaña del área cortada («alón A3»): no cabía ni una junto a
+  «Lista | Mapa» y «Pendientes». Ahora la elegida se trae a la vista y «Lista | Mapa» es un interruptor compacto;
+  `StageA3ScreensTest` comprueba a 400 dp que la pestaña elegida se ve completa.
+- Una vuelta de las instrumentadas en la tableta (`C3`) falló en `AppNavigationTest` y `MainNavigationLayoutTest`
+  porque **no desinstalé** la aplicación que dejó la prueba de punta a punta (con «pantalla inicial: Para llevar»
+  guardada, entraba a Para llevar como debe). Con la aplicación desinstalada pasaron (dos vueltas de esas dos clases
+  y la vuelta completa `C5`, y después `C7`).
+
+### No verificado
+
+- Dispositivo físico (ningún teléfono ni tableta reales), papel de una impresora real.
+- `ADEL_A1_Tablet_API26` (Android 8) y `Pixel_8` no se corrieron en esta fase (solo los dos emuladores del encargo).
+- Las suites de punta a punta anteriores (`access`, `catalog`, `waiter`, `field`, `takeaway`, `precheck`, `alerts`,
+  `connection`) no se volvieron a correr en esta fase. Usan las mismas etiquetas (con un panel abierto en el teléfono la flecha
+  conserva la etiqueta `pane-back` y «Ver la cuenta» la de `pane-open-secondary`), pero Mesas cambió (sin búsqueda ni
+  «Ver la mesa») y el aviso al salir es nuevo: conviene correr `--suite all` en la Fase E.
+- La prueba «Descartar cuenta vacía» con `ACCOUNT_NOT_EMPTY` de verdad (otra terminal que llena la cuenta) solo está en
+  la JVM (`TablePanelAccountsTest`), no contra el Go temporal.
+
+### Decisiones del coordinador sobre la Fase C
+
+Fusionada en `beeb183`. Fuera de `android/`, la Fase C solo cambió `docs/ANDROID_INSTALAR.md` y `scripts/android-e2e.sh`.
+
+- **A3-D21**: se aceptan las siete decisiones propuestas del agente. Sobre la primera: en la aplicación, Mesas es la base
+  de la navegación y Para llevar va encima, así que la flecha de Para llevar regresa a Mesas también cuando la pantalla
+  inicial del dispositivo es Para llevar (lo mismo que la tecla Atrás); la barra «Mesas | Para llevar» sigue siempre a
+  la vista y §4.12 se cumple porque el mesero entra directo en Para llevar.
+- La guía §4 (que el agente no tocaba) dice ahora «Selecciona tu usuario» en el bloqueo por inactividad; la frase sobre
+  el botón de la precuenta sin permiso ya la había reescrito la Fase B.
+- El texto para `CLAUDE.md` de la raíz sobre la 0.3.0 se une en la Fase E con el de la Fase A.
