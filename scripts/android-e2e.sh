@@ -72,7 +72,8 @@
 # red) lo último que se vio con su hora, pedido nuevo «Por enviar» y nombre y teléfono editados sin conexión · t5 (con
 # red) sale el pedido (`destination.takeaway`) y después las ediciones del cliente · t6 nombre y teléfono en línea ·
 # t7 preparación de cocina y pago de la caja al momento · t8 entrega bloqueada sin pago y permitida pagado; entregado
-# y pagado sale de la lista.
+# y pagado sale de la lista · t9 en horizontal la navegación va en un riel lateral y la captura muestra los productos
+# (capturas de pantalla de las dos orientaciones en <salida>/screens).
 #
 # Suite `precheck` (etapa A2, Fase C, PrecheckOnGoTest, con un servidor temporal nuevo; la prueba hace de principal y
 # del agente de impresión de una terminal de prueba «Caja 2»): p1 restaurante, la terminal con su impresora USB y una
@@ -83,14 +84,15 @@
 # red no responde y «Reintentar» sin motivo. La impresora de red usa el puerto 9106 de la Mac: nada debe escuchar ahí.
 #
 # La red la corta y la devuelve este guion entre pasos (modo avión desde la Mac en Android 11+; `adb root` + `svc
-# wifi/data` en Android 8–10).
+# wifi/data` en Android 8–10). Si no se puede cortar (por ejemplo, `adb root` no responde tras tres intentos), el
+# guion lo dice y ese paso sale como FALLA; nunca termina en silencio ni corre «sin red» con red.
 #
 # Suite `alerts` (etapa A2, Fase D, AlertsOnGoTest con `readyAlerts=on`, con un servidor temporal nuevo): r1 preparar
 # (Ana y Beto, cocina en pantalla, mesas), emparejar y entrar: arranca el servicio con «AD-EL POS conectado» y la
 # explicación de los permisos · r2 aviso con la aplicación cerrada (tarea quitada de recientes), la pantalla apagada y
 # Doze forzado · r3 no llega a otro mesero ni a otro dispositivo (un segundo android emparejado por la API) y
 # transferir la cuenta cambia el destinatario · r4 este guion corta la red, marca «Listo» desde la Mac durante el
-# corte y la devuelve: llega una sola vez · r5 agrupado por cuenta y resumen · r6 en «¿Quién eres?», al tocarlo pide
+# corte y la devuelve (en Android 8–10, cuando el canal ya vio el corte): llega una sola vez · r5 agrupado por cuenta y resumen · r6 en «¿Quién eres?», al tocarlo pide
 # el PIN y abre la cuenta; con la cuenta a la vista, aviso dentro de la aplicación · r7 sonido y vibración apagados
 # desde Terminales y aviso apagado que detiene el servicio · r8 (r8a + r8b) este guion abre la aplicación (con la
 # wifi del emulador apagada en Android 11+: el emulador alcanza 10.0.2.2 por la red móvil y no ve el anuncio real),
@@ -154,7 +156,7 @@ suite_steps() {
         catalog) echo "a b c" ;;
         waiter) echo "w1 w2 w3 w4 w5 w6 w7a w7b w7c w8 w9 w10 w11 w12a w12b w12c w13a w13b w13c" ;;
         field) echo "f1 f2 f3 f4 f5a f5b f6 f7 f8 f9 f10" ;;
-        takeaway) echo "t1 t2 t3 t4 t5 t6 t7 t8" ;;
+        takeaway) echo "t1 t2 t3 t4 t5 t6 t7 t8 t9" ;;
         precheck) echo "p1 p2 p3 p4 p5 p6 p7" ;;
         alerts) echo "r1 r2 r3 r4 r5 r6 r7 r8 r10 r9" ;;
     esac
@@ -376,34 +378,72 @@ skip_step() {
     FAILED=1
 }
 
-# Android 8 a 10: el modo avión no existe como orden de shell; la red se corta desde la Mac con root.
+# `adb root` (Android 8 a 10, imágenes google_apis) con hasta tres intentos: adbd se reinicia y, con la Mac cargada,
+# puede no volver a la primera. Comprueba que de verdad sea root. Si no se puede, lo dice (nunca corta el guion en
+# silencio) y devuelve un código distinto de cero: el paso que lo necesitaba falla con ese motivo.
+take_root() {
+    local attempt
+    for attempt in 1 2 3; do
+        if "$ADB" -s "$ANDROID_SERIAL" root >/dev/null 2>&1 &&
+            "$ADB" -s "$ANDROID_SERIAL" wait-for-device &&
+            [ "$("$ADB" -s "$ANDROID_SERIAL" shell id -u 2>/dev/null | tr -d '\r')" = "0" ]; then
+            return 0
+        fi
+        sleep 3
+    done
+    echo "android-e2e: no se pudo tomar root en $ANDROID_SERIAL («adb root», 3 intentos);" \
+        "sin root no se corta ni se devuelve la red en Android 8–10" | tee -a "$SUMMARY" >&2
+    return 1
+}
+
+# Android 8 a 10: el modo avión no existe como orden de shell; la red se corta desde la Mac con root. Cada orden que
+# falla se informa con un código distinto de cero (quien llama decide; nunca se corta el guion en silencio).
 host_network() {
-    "$ADB" -s "$ANDROID_SERIAL" root >/dev/null 2>&1
-    "$ADB" -s "$ANDROID_SERIAL" wait-for-device
-    "$ADB" -s "$ANDROID_SERIAL" shell svc wifi "$1"
-    "$ADB" -s "$ANDROID_SERIAL" shell svc data "$1"
+    take_root || return 1
+    "$ADB" -s "$ANDROID_SERIAL" shell svc wifi "$1" || return 1
+    "$ADB" -s "$ANDROID_SERIAL" shell svc data "$1" || return 1
     sleep 3
     "$ADB" -s "$ANDROID_SERIAL" shell dumpsys connectivity | grep -m1 'Active default network' | tee -a "$SUMMARY" || true
 }
 
-# Corta (off) o devuelve (on) la red del dispositivo desde la Mac, según su versión.
+# Corta (off) o devuelve (on) la red del dispositivo desde la Mac, según su versión; código distinto de cero si no pudo.
 device_network() {
     if [ "$SDK" -lt 30 ]; then
         if [ "$1" = off ]; then
-            host_network disable
+            host_network disable || return 1
         else
-            host_network enable
+            host_network enable || return 1
             "$ADB" -s "$ANDROID_SERIAL" unroot >/dev/null 2>&1 || true
-            "$ADB" -s "$ANDROID_SERIAL" wait-for-device
+            "$ADB" -s "$ANDROID_SERIAL" wait-for-device || true
         fi
     else
         if [ "$1" = off ]; then
-            "$ADB" -s "$ANDROID_SERIAL" shell cmd connectivity airplane-mode enable
+            "$ADB" -s "$ANDROID_SERIAL" shell cmd connectivity airplane-mode enable || return 1
         else
-            "$ADB" -s "$ANDROID_SERIAL" shell cmd connectivity airplane-mode disable
+            "$ADB" -s "$ANDROID_SERIAL" shell cmd connectivity airplane-mode disable || return 1
         fi
         sleep 5
         "$ADB" -s "$ANDROID_SERIAL" shell dumpsys connectivity | grep -m1 'Active default network' | tee -a "$SUMMARY" || true
+    fi
+}
+
+# Un paso SIN red: la corta, corre el paso y la devuelve. Si no se pudo cortar, el paso falla con su motivo (nunca corre
+# «sin red» con red ni el guion se corta en silencio) y se sigue con el siguiente; si no se pudo devolver, se dice.
+offline_step() {
+    local method="$1"
+    shift
+    if ! device_network off; then
+        echo "$SUITE_NAME $method: FALLA (no se pudo cortar la red del dispositivo; ver el mensaje de arriba)" |
+            tee -a "$SUMMARY"
+        FAILED=1
+        device_network on || true
+        return 0
+    fi
+    run_step "$method" "$@"
+    if ! device_network on; then
+        echo "$SUITE_NAME $method: no se pudo devolver la red del dispositivo; los pasos siguientes pueden fallar" |
+            tee -a "$SUMMARY"
+        FAILED=1
     fi
 }
 
@@ -413,11 +453,7 @@ access_step() {
         2) run_step paso2_pinIncorrectoBloqueoALosCincoYEntrada ;;
         3)
             if [ "$SDK" -lt 30 ]; then
-                host_network disable
-                run_step paso3_entradaSinConexion -e hostNetworkCut true
-                host_network enable
-                "$ADB" -s "$ANDROID_SERIAL" unroot >/dev/null 2>&1 || true
-                "$ADB" -s "$ANDROID_SERIAL" wait-for-device
+                offline_step paso3_entradaSinConexion -e hostNetworkCut true
             else
                 run_step paso3_entradaSinConexion
             fi
@@ -452,22 +488,22 @@ waiter_step() {
     case "$1" in
         w1) run_step w1_prepararEmparejarYEntrar ;;
         w2) run_step w2_capturaEnLineaRotacionYEnvioACocina ;;
-        w3) device_network off; run_step w3_capturaSinConexion; device_network on ;;
+        w3) offline_step w3_capturaSinConexion ;;
         w4) run_step w4_alVolverLaRedSeEnviaSinEntrarYSinDuplicar -e lostOfflineResponses 1 ;;
         w5) run_step w5_precioCambiadoYAgotadoConLaConfirmacionDelMesero ;;
         w6) run_step w6_mesaCobradaMientrasTanto ;;
         w7a) run_step w7a_borradorGuardadoEnGo ;;
-        w7b) device_network off; run_step w7b_sinConexionSeAgregaYSeEnvia; device_network on ;;
+        w7b) offline_step w7b_sinConexionSeAgregaYSeEnvia ;;
         w7c) run_step w7c_elPedidoSustituyeElBorradorSinDuplicar ;;
         w8) run_step w8_cancelarYModificarLoEnviado ;;
         w9) run_step w9_guardadoSinRespuestaAntesDeEnviar -e lostDraftResponses 1 ;;
         w10) run_step w10_confirmacionAplicadaSinRespuestaNoDuplica -e lostConfirmResponses 2 ;;
         w11) run_step w11_descartarConConexionQuitaDeLaCuenta ;;
         w12a) run_step w12a_capturaGuardadaParaDescartar ;;
-        w12b) device_network off; run_step w12b_descartarSinConexionQuedaPendiente; device_network on ;;
+        w12b) offline_step w12b_descartarSinConexionQuedaPendiente ;;
         w12c) run_step w12c_alVolverSeQuitaDeLaCuenta ;;
         w13a) run_step w13a_capturaEnLaCuentaQueSeCombinara ;;
-        w13b) device_network off; run_step w13b_sinConexionSeEnviaALaCuenta; device_network on ;;
+        w13b) offline_step w13b_sinConexionSeEnviaALaCuenta ;;
         w13c) run_step w13c_cuentaCombinadaSeEnviaALaCuentaEnQueSeCombino ;;
         *) fail "paso desconocido de la suite waiter: $1" ;;
     esac
@@ -490,16 +526,14 @@ field_step() {
         f2) run_step f2_rendimiento ;;
         f3) run_step f3_preparacionYListoAlMomento ;;
         f4) run_step f4_dosMeserosConCapturaEnCurso ;;
-        f5a) device_network off; run_step f5a_sinConexionLosPedidosDeBetoImpidenCambiar; device_network on ;;
+        f5a) offline_step f5a_sinConexionLosPedidosDeBetoImpidenCambiar ;;
         f5b) run_step f5b_cadaPedidoSaleConLaCredencialDeSuMesero ;;
         f6) run_step f6_transferirYCombinarConLaCuentaAbierta ;;
         f7)
             if database_allowed; then
                 advance_pin_series
                 run_step f7a_bloqueoLargoDelPin
-                device_network off
-                run_step f7b_bloqueoLargoCierraLaEntradaSinConexion
-                device_network on
+                offline_step f7b_bloqueoLargoCierraLaEntradaSinConexion
                 run_step f7c_unAdministradorLoDesbloquea
             else
                 skip_step f7 "sin ADELPOS_E2E_DATABASE_URL: la serie de bloqueos solo se adelanta en la base"
@@ -523,11 +557,17 @@ takeaway_step() {
         t1) run_step t1_prepararEmparejarYEntrar ;;
         t2) run_step t2_nuevoPedidoSinProductosNoDejaNada ;;
         t3) run_step t3_capturaYEnvioEnLinea ;;
-        t4) device_network off; run_step t4_sinConexionNaceAlEnviarseYElClienteSeEditaSinConexion; device_network on ;;
+        t4) offline_step t4_sinConexionNaceAlEnviarseYElClienteSeEditaSinConexion ;;
         t5) run_step t5_alVolverLaRedSaleElPedidoYDespuesElCliente ;;
         t6) run_step t6_nombreYTelefonoDespuesEnLinea ;;
         t7) run_step t7_listaConPreparacionYPagoAlMomento ;;
         t8) run_step t8_entregaBloqueadaSinPagoYPermitidaPagado ;;
+        t9)
+            run_step t9_navegacionLateralEnHorizontalYProductosALaVista
+            mkdir -p "$SUITE_OUT/screens"
+            "$ADB" -s "$ANDROID_SERIAL" pull "/sdcard/Android/data/$APP_ID/files/screens/." \
+                "$SUITE_OUT/screens" >/dev/null 2>&1 || echo "sin capturas que copiar" | tee -a "$SUMMARY"
+            ;;
         *) fail "paso desconocido de la suite takeaway: $1" ;;
     esac
 }
@@ -540,7 +580,7 @@ precheck_step() {
         p3) run_step p3_terminalDesconectadaYLosBytesEscPos ;;
         p4) run_step p4_elNombreVisibleEnElBotonYEnElImpreso ;;
         p5) run_step p5_unPedidoParaLlevarConSuFolio ;;
-        p6) device_network off; run_step p6_sinConexionElBotonLoDice; device_network on ;;
+        p6) offline_step p6_sinConexionElBotonLoDice ;;
         p7) run_step p7_laImpresoraNoRespondeYReintentarSinMotivo ;;
         *) fail "paso desconocido de la suite precheck: $1" ;;
     esac
@@ -603,7 +643,24 @@ alerts_cut_during_ready() {
     else
         echo "r4: no se pudo marcar «Listo»" >>"$log"
     fi
-    sleep 6
+    if [ "$SDK" -lt 30 ]; then
+        # Android 8–10 (Fase E de la A2): `svc … disable` no siempre corta la conexión ya abierta (el modo avión de 11+
+        # sí), y entonces el canal de avisos solo la da por muerta tras 45 s sin un byte. El corte dura hasta que la
+        # prueba anota que el canal lo vio (75 s como mucho desde el «Listo»): el «Listo» ocurre de verdad sin red y la
+        # reconexión posterior es la que se prueba.
+        local seen_deadline=$((SECONDS + 75))
+        until grep -q "r4 corte visto por el canal" "$logcat" 2>/dev/null || [ "$SECONDS" -ge "$seen_deadline" ]; do
+            sleep 2
+            "$ADB" -s "$ANDROID_SERIAL" logcat -d -s AdelOnGo:V >"$logcat" 2>/dev/null || true
+        done
+        if grep -q "r4 corte visto por el canal" "$logcat" 2>/dev/null; then
+            echo "r4: el canal vio el corte" >>"$log"
+        else
+            echo "r4: el canal no vio el corte en 75 s; se devuelve la red" >>"$log"
+        fi
+    else
+        sleep 6
+    fi
     if [ "$SDK" -lt 30 ]; then
         host_network enable >>"$log" 2>&1 || true
     else
@@ -700,9 +757,11 @@ alerts_step() {
         r2) run_step r2_llegaConLaPantallaApagadaYLaAplicacionCerrada -e readyAlerts on ;;
         r3) run_step r3_noLlegaAOtroMeseroNiAOtroDispositivoYTransferirCambiaElDestinatario -e readyAlerts on ;;
         r4)
-            if [ "$SDK" -lt 30 ]; then
-                "$ADB" -s "$ANDROID_SERIAL" root >/dev/null 2>&1
-                "$ADB" -s "$ANDROID_SERIAL" wait-for-device
+            if [ "$SDK" -lt 30 ] && ! take_root; then
+                echo "$SUITE_NAME r4_corteDeRedDuranteElListoLlegaUnaSolaVez: FALLA (sin root no se corta la red)" |
+                    tee -a "$SUMMARY"
+                FAILED=1
+                return 0
             fi
             alerts_cut_during_ready &
             local helper=$!
