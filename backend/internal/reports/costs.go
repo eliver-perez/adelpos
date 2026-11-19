@@ -51,7 +51,7 @@ var costReasonLabels = map[string]string{
 	"provisional":  "Costo provisional (existencia negativa o en cero, o costo pendiente)",
 	"incomplete":   "Configuración incompleta (ingrediente o complemento sin porción o receta)",
 	"pending":      "Consumo pendiente de procesar o con error",
-	"not_released": "Sin consumo registrado (liberada sin control de inventario o aún no liberada)",
+	"not_released": "Sin consumo registrado (liberada sin control de inventario o sin liberar)",
 	"no_recipe":    "Sin receta: la liberación no generó consumo",
 }
 

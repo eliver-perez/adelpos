@@ -283,7 +283,7 @@ func (manager *Manager) claimUpload(actor Actor, id string) (UploadView, string,
 		return UploadView{}, "", err
 	}
 	if entry.view.Status != UploadComplete {
-		return UploadView{}, "", uploadError(CodeUploadInvalid, "El paquete todavía no termina de subirse.")
+		return UploadView{}, "", uploadError(CodeUploadInvalid, "El paquete no ha terminado de subirse.")
 	}
 	entry.busy++
 	return entry.view, manager.completePath(entry.view.ID), nil

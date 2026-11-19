@@ -534,7 +534,7 @@ func (collector *alertCollector) countsDue() error {
 		if !countDue(settings.CountFrequency, settings.CountIntervalDays, lastDay, today.Date) {
 			continue
 		}
-		message := "Conteo pendiente en «" + entry.warehouse.Name + "»: aún no se ha aplicado ningún conteo (frecuencia " + frequency + ")."
+		message := "Conteo pendiente en «" + entry.warehouse.Name + "»: no se ha aplicado ningún conteo (frecuencia " + frequency + ")."
 		if entry.last != nil {
 			message = "Conteo pendiente en «" + entry.warehouse.Name + "»: venció la frecuencia de conteo (" + frequency + ")."
 		}

@@ -203,7 +203,7 @@ func (manager *Manager) completedUpload(actor Actor, id string) (UploadView, err
 		return UploadView{}, err
 	}
 	if view.Status != UploadComplete {
-		return UploadView{}, uploadError(CodeUploadInvalid, "El paquete todavía no termina de subirse.")
+		return UploadView{}, uploadError(CodeUploadInvalid, "El paquete no ha terminado de subirse.")
 	}
 	return view, nil
 }
