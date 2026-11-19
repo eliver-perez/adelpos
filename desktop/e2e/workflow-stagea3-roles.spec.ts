@@ -128,6 +128,14 @@ test('Roles: permisos agrupados, vista sencilla, dependencias y «Restablecer pe
     page.getByRole('checkbox', { name: 'Abrir el cajón de dinero manualmente', exact: true }),
   ).toBeVisible();
   await expect(groupHeader(page, 'Mesas y cuentas')).toHaveCount(0);
+  // Revisión R3 (A3-D18): mientras se busca, los botones del grupo dicen que actúan solo sobre lo que se ve.
+  const cash = await openGroup(page, 'Caja y cobros');
+  await expect(
+    cash.getByRole('button', { name: 'Marcar el que se ve', exact: true }),
+  ).toBeVisible();
+  await expect(cash.getByRole('button', { name: 'Marcar todo el grupo', exact: true })).toHaveCount(
+    0,
+  );
   await page.getByRole('searchbox', { name: /^Buscar permiso/ }).fill('');
 
   // 4. Guardar: Go recibe el conjunto nuevo (modificar y cancelar lo enviado, y el umbral de Para llevar).

@@ -32,6 +32,9 @@ export interface PermissionCatalog {
   capabilities: PermissionCapability[];
   // Roles de fábrica (por código) que tienen «Restablecer permisos predeterminados».
   factory_roles: string[];
+  // Conjunto de fábrica de cada uno (revisión R2): la pantalla no ofrece restablecer lo que Go
+  // rechazaría. Si no llega, decide Go.
+  factory_permissions?: Record<string, string[]>;
 }
 
 // Vista previa de «Restablecer permisos predeterminados» (GET roles/{id}/defaults).

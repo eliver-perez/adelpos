@@ -6,7 +6,7 @@ import { useResource } from '../hooks/useResource';
 import { api, APIError } from '../services/api';
 import { acceptAmountText, toWireAmount } from '../services/amountInput';
 import type { Permission, Role } from '../services/models';
-import { notifyError, notifyInfo, notifySuccess } from '../services/notify';
+import { notifyError, notifyInfo, notifySuccess, notifyWarning } from '../services/notify';
 import { catalogPermissionName } from '../services/permissionCatalog';
 import type {
   PermissionCatalog,
@@ -83,6 +83,17 @@ function useRoleDefaults(role: Role, catalog: PermissionCatalog) {
   const { confirm, dialog } = useConfirmDialog();
   const [busy, setBusy] = useState(false);
 
+  // Revisión R5 (A3-D20): tras ROLE_CHANGED, los permisos que Go tiene ahora, para que un «Guardar
+  // rol» posterior no pise sin aviso el cambio de la otra persona.
+  async function currentPermissions(): Promise<string[] | null> {
+    try {
+      const roles = await api<Role[]>('roles');
+      return roles.find((candidate) => candidate.id === role.id)?.permissions ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   async function restore(unsaved: boolean): Promise<string[] | null> {
     setBusy(true);
     try {
@@ -121,6 +132,13 @@ function useRoleDefaults(role: Role, catalog: PermissionCatalog) {
       return result.role.permissions;
     } catch (error) {
       if (error instanceof APIError && error.code === 'ROLE_CHANGED') {
+        const current = await currentPermissions();
+        if (current) {
+          notifyWarning(
+            `Otra persona cambió los permisos de ${role.name}: se cargaron los que tiene ahora y se descartaron los cambios sin guardar de esta pantalla.`,
+          );
+          return current;
+        }
         notifyError(error, 'Los permisos del rol cambiaron. Vuelve a intentarlo.');
         return null;
       }
@@ -132,6 +150,39 @@ function useRoleDefaults(role: Role, catalog: PermissionCatalog) {
   }
 
   return { restore, busy, dialog };
+}
+
+// Revisión R2 (A3-D17): la pantalla no ofrece «Restablecer permisos predeterminados» donde Go lo
+// rechazaría (las reglas de role_defaults.go): el rol propio, un rol o un conjunto de fábrica con
+// permisos que quien edita no tiene, o un límite de descuento mayor que el suyo. En su lugar dice por
+// qué. Go sigue validando todo al restablecer.
+export function roleDefaultsBlocker({
+  role,
+  catalog,
+  can,
+  currentRoleID,
+  actorLimit,
+}: {
+  role: Role;
+  catalog: PermissionCatalog;
+  can: (key: string) => boolean;
+  currentRoleID?: string;
+  actorLimit: number;
+}): string | null {
+  if (currentRoleID && role.id === currentRoleID) {
+    return 'Tu propio rol no se restablece desde tu usuario: pídeselo a otro administrador.';
+  }
+  if (role.permissions.some((key) => !can(key))) {
+    return 'Este rol tiene permisos que tu usuario no tiene: solo un administrador con esos permisos puede restablecerlo.';
+  }
+  const factory = role.code ? (catalog.factory_permissions?.[role.code] ?? []) : [];
+  if (factory.some((key) => !can(key))) {
+    return 'Los permisos predeterminados de este rol incluyen permisos que tu usuario no tiene: solo un administrador con esos permisos puede restablecerlo.';
+  }
+  if (Number(role.discount_limit ?? 0) > actorLimit) {
+    return 'Este rol tiene un límite de descuento mayor que el tuyo: solo un administrador con un límite igual o mayor puede restablecerlo.';
+  }
+  return null;
 }
 
 function RoleDefaultsButton({
@@ -171,12 +222,15 @@ function RoleEditor({
   role,
   registry,
   catalog,
+  defaultsBlocker,
   onSaved,
   onCancel,
 }: {
   role: Role | null;
   registry: Permission[];
   catalog: PermissionCatalog | null;
+  // Por qué no se ofrece «Restablecer permisos predeterminados» (null: se ofrece).
+  defaultsBlocker: string | null;
   onSaved: () => Promise<void>;
   onCancel: () => void;
 }) {
@@ -192,7 +246,7 @@ function RoleEditor({
       <div className="section-heading">
         <h2>{role ? 'Editar rol' : 'Nuevo rol'}</h2>
         <div className="button-row">
-          {factory && catalog && (
+          {factory && catalog && !defaultsBlocker && (
             <RoleDefaultsButton
               role={factory}
               catalog={catalog}
@@ -209,6 +263,9 @@ function RoleEditor({
           </button>
         </div>
       </div>
+      {factory && catalog && defaultsBlocker && (
+        <p className="muted mb-4 text-sm">{defaultsBlocker}</p>
+      )}
       <Form
         label="Guardar rol"
         successMessage="Rol guardado."
@@ -218,6 +275,7 @@ function RoleEditor({
             // La cadena vacía elimina el límite; enviar el valor vigente lo conserva.
             body: { name, permissions: selected, discount_limit: toWireAmount(discountLimit) },
           });
+          setSaved(selected);
           await onSaved();
         }}
       >
@@ -243,9 +301,15 @@ function RoleEditor({
 export function RolesPage({
   can,
   onChanged,
+  currentRoleID,
+  support = false,
 }: {
   can: (key: string) => boolean;
   onChanged: () => Promise<void>;
+  // El rol de la sesión y si es el soporte reservado (auth/me): Go no deja restablecer el propio rol, y
+  // el límite de descuento de quien edita es el de su rol (el soporte, 100 %).
+  currentRoleID?: string;
+  support?: boolean;
 }) {
   const roles = useResource<Role[]>('roles');
   // Etapa A3: con un servidor que tiene el catálogo agrupado, la pantalla nueva; con uno anterior, la
@@ -259,6 +323,25 @@ export function RolesPage({
   });
   const [editing, setEditing] = useState<Role | null | undefined>(undefined);
   const editable = can('roles.manage') && can('permissions.manage') && can('permissions.read');
+  // Límite de descuento de quien edita: el de su rol (el soporte, 100 %). Sin saber su rol, decide Go.
+  const ownRole = roles.data?.find((role) => role.id === currentRoleID);
+  const actorLimit = support
+    ? 100
+    : currentRoleID
+      ? Number(ownRole?.discount_limit ?? 0)
+      : Number.POSITIVE_INFINITY;
+  // El rol en edición como está ahora en la lista (después de guardar o restablecer).
+  const current = editing ? (roles.data?.find((role) => role.id === editing.id) ?? editing) : null;
+  const defaultsBlocker =
+    current && catalog.data
+      ? roleDefaultsBlocker({
+          role: current,
+          catalog: catalog.data,
+          can,
+          currentRoleID,
+          actorLimit,
+        })
+      : null;
   return (
     <>
       <PageTitle
@@ -278,6 +361,7 @@ export function RolesPage({
           role={editing}
           registry={registry.data ?? []}
           catalog={grouped ? catalog.data : null}
+          defaultsBlocker={defaultsBlocker}
           onCancel={() => setEditing(undefined)}
           onSaved={async () => {
             await roles.reload();

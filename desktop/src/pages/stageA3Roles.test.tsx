@@ -88,6 +88,7 @@ const catalog: PermissionCatalog = {
     },
   ],
   factory_roles: ['waiter'],
+  factory_permissions: { waiter: ['accounts.open', 'accounts.read', 'waiter_devices.use'] },
 };
 
 const waiterRole = {
@@ -114,6 +115,8 @@ const customRole = {
 
 let requests: Request[];
 let restoreReply: { status: number; body: unknown };
+// Lo que devuelve la lista de roles (otra persona puede cambiarla entre una consulta y otra).
+let listedRoles: (typeof waiterRole | typeof adminRole | typeof customRole)[];
 
 function sent(operation: string) {
   return requests.filter((request) => request.operation === operation);
@@ -122,6 +125,7 @@ function sent(operation: string) {
 beforeEach(() => {
   rememberServerCapabilities(['restaurant-operations', permissionGroupsCapability]);
   requests = [];
+  listedRoles = [adminRole, customRole, waiterRole];
   restoreReply = {
     status: 200,
     body: {
@@ -141,7 +145,7 @@ beforeEach(() => {
     requests.push(args);
     switch (args.operation) {
       case 'roles':
-        return { status: 200, body: [adminRole, customRole, waiterRole] };
+        return { status: 200, body: listedRoles };
       case 'permission_catalog':
         return { status: 200, body: catalog };
       case 'permissions':
@@ -375,7 +379,7 @@ describe('Roles y permisos agrupados (etapa A3, §3.2)', () => {
     expect(changed).toHaveBeenCalled();
   });
 
-  it('si el rol cambió entre la vista previa y la confirmación, lo dice y no cambia nada', async () => {
+  it('si el rol cambió entre la vista previa y la confirmación, lo dice y carga lo de ahora (revisión R5)', async () => {
     restoreReply = {
       status: 409,
       body: {
@@ -388,13 +392,113 @@ describe('Roles y permisos agrupados (etapa A3, §3.2)', () => {
     };
     render(<RolesPage can={() => true} onChanged={async () => undefined} />);
     await editRole('Mesero');
+    // Mientras tanto otra persona le dio al Mesero «Abrir cuentas» desde otra terminal.
+    listedRoles = [
+      adminRole,
+      customRole,
+      { ...waiterRole, permissions: ['waiter_devices.use', 'accounts.read', 'accounts.open'] },
+    ];
     fireEvent.click(screen.getByRole('button', { name: 'Restablecer permisos predeterminados' }));
     const dialog = await screen.findByRole('alertdialog');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Restablecer permisos' }));
-    await screen.findByText(/cambiaron mientras revisabas los cambios/);
+    await screen.findByText(/Otra persona cambió los permisos de Mesero/);
+    // La pantalla ya tiene lo que Go tiene ahora: un «Guardar rol» no pisa el cambio sin aviso.
+    await waitFor(() =>
+      expect(
+        screen.getByRole('checkbox', { name: 'Atender mesas' }).getAttribute('aria-checked'),
+      ).toBe('true'),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar rol' }));
+    await screen.findByText('Rol guardado.');
+    expect([...(sent('update_role')[0]?.body?.permissions as string[])].sort()).toEqual([
+      'accounts.open',
+      'accounts.read',
+      'waiter_devices.use',
+    ]);
+  });
+
+  it('no ofrece restablecer donde Go lo rechazaría y dice por qué (revisión R2)', async () => {
+    // El rol propio de quien edita.
+    render(
+      <RolesPage
+        can={() => true}
+        onChanged={async () => undefined}
+        currentRoleID={waiterRole.id}
+      />,
+    );
+    await editRole('Mesero');
     expect(
-      screen.getByRole('checkbox', { name: 'Atender mesas' }).getAttribute('aria-checked'),
-    ).toBe('mixed');
+      screen.queryByRole('button', { name: 'Restablecer permisos predeterminados' }),
+    ).toBeNull();
+    expect(screen.getByText(/Tu propio rol no se restablece desde tu usuario/)).toBeTruthy();
+    cleanup();
+    // Un conjunto de fábrica con un permiso que quien edita no tiene (el Mesero de hoy no lo trae).
+    const withoutOpen = (key: string) => key !== 'accounts.open';
+    render(
+      <RolesPage
+        can={withoutOpen}
+        onChanged={async () => undefined}
+        currentRoleID={adminRole.id}
+      />,
+    );
+    await editRole('Mesero');
+    expect(
+      screen.getByText(/Los permisos predeterminados de este rol incluyen permisos/),
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole('button', { name: 'Restablecer permisos predeterminados' }),
+    ).toBeNull();
+    cleanup();
+    // Un rol con un límite de descuento mayor que el de quien edita (el rol Barra, sin límite).
+    listedRoles = [adminRole, customRole, { ...waiterRole, discount_limit: '10.00' }];
+    render(
+      <RolesPage
+        can={() => true}
+        onChanged={async () => undefined}
+        currentRoleID={customRole.id}
+      />,
+    );
+    await editRole('Mesero');
+    expect(screen.getByText(/límite de descuento mayor que el tuyo/)).toBeTruthy();
+    cleanup();
+    // El soporte reservado tiene el 100 %: sí se ofrece, y ninguno de estos casos llama a Go.
+    render(<RolesPage can={() => true} onChanged={async () => undefined} support />);
+    await editRole('Mesero');
+    expect(
+      screen.getByRole('button', { name: 'Restablecer permisos predeterminados' }),
+    ).toBeTruthy();
+    expect(sent('role_defaults')).toHaveLength(0);
+  });
+
+  it('con una búsqueda, los botones del grupo actúan solo sobre lo que se ve (revisión R3)', async () => {
+    render(<RolesPage can={() => true} onChanged={async () => undefined} />);
+    await editRole('Barra');
+    openDetailed();
+    fireEvent.change(searchBox(), { target: { value: 'cobr' } });
+    const cash = section('Caja y cobros');
+    // «Registrar cobros» y la descripción de «Consultar información financiera…» («…por cobrar…»).
+    fireEvent.click(within(cash).getByRole('button', { name: 'Marcar los 2 que se ven' }));
+    expect(section('Caja y cobros').textContent).toContain('2 de 2');
+    fireEvent.change(searchBox(), { target: { value: 'pin' } });
+    const tables = section('Mesas y cuentas');
+    fireEvent.click(within(tables).getByRole('button', { name: 'Marcar el que se ve' }));
+    // Solo «Entrar con PIN…»: «Abrir cuentas», que no se ve, sigue sin marcar.
+    expect(section('Mesas y cuentas').textContent).toContain('2 de 3');
+    fireEvent.change(searchBox(), { target: { value: '' } });
+    expect(
+      (screen.getByRole('button', { name: /^Mesas y cuentas/ }) as HTMLElement).textContent,
+    ).toContain('2 de 3');
+    fireEvent.change(searchBox(), { target: { value: 'cobros' } });
+    fireEvent.click(
+      within(section('Caja y cobros')).getByRole('button', { name: 'Quitar el que se ve' }),
+    );
+    expect(section('Caja y cobros').textContent).toContain('1 de 2');
+    // Sin búsqueda, los botones vuelven a ser de todo el grupo.
+    fireEvent.change(searchBox(), { target: { value: '' } });
+    openSection('Caja y cobros');
+    expect(
+      within(section('Caja y cobros')).getByRole('button', { name: 'Marcar todo el grupo' }),
+    ).toBeTruthy();
   });
 
   it('con un servidor anterior, la lista de siempre', async () => {

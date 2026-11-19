@@ -200,6 +200,11 @@ function CapabilityList({
   );
 }
 
+// visibleLabel es el texto de un botón del grupo mientras se busca: «Marcar los 3 que se ven».
+function visibleLabel(verb: 'Marcar' | 'Quitar', count: number) {
+  return count === 1 ? `${verb} el que se ve` : `${verb} los ${count} que se ven`;
+}
+
 function DetailedPermissions({
   catalog,
   selected,
@@ -211,6 +216,9 @@ function DetailedPermissions({
 }) {
   const [search, setSearch] = useState('');
   const searching = search.trim() !== '';
+  // Revisión R3 (A3-D18): con una búsqueda escrita, los botones del grupo actúan solo sobre lo que se
+  // ve (y lo dicen); lo que eso necesita se sigue marcando solo, con su aviso.
+  const targets = (visible: CatalogPermission[]) => visible.map((permission) => permission.key);
   const byKey = new Map(catalog.permissions.map((permission) => [permission.key, permission]));
   const sections = catalog.groups
     .map((group) => {
@@ -242,16 +250,16 @@ function DetailedPermissions({
             <button
               type="button"
               className="secondary-button"
-              onClick={() => onApply(withRequirements(catalog, selected, group.permissions))}
+              onClick={() => onApply(withRequirements(catalog, selected, targets(visible)))}
             >
-              Marcar todo el grupo
+              {searching ? visibleLabel('Marcar', visible.length) : 'Marcar todo el grupo'}
             </button>
             <button
               type="button"
               className="secondary-button"
-              onClick={() => onApply(withoutPermissions(catalog, selected, group.permissions))}
+              onClick={() => onApply(withoutPermissions(catalog, selected, targets(visible)))}
             >
-              Quitar todo el grupo
+              {searching ? visibleLabel('Quitar', visible.length) : 'Quitar todo el grupo'}
             </button>
           </div>
           <div className="permission-grid">
