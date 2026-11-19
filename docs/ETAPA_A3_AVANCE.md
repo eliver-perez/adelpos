@@ -959,3 +959,158 @@ cada fase en `etapa-a3` con su resumen en este avance:
 | `reports.purchases.read`        | Consultar reportes de compras y proveedores                             | Reportes (requieren `reports.read`)                                                       |
 | `reports.read`                  | Consultar el módulo Reportes y el resumen ejecutivo                     | Reportes (requieren `reports.read`)                                                       |
 | `reports.sales.read`            | Consultar reportes de ventas, productos, categorías, cocina y operación | Reportes (requieren `reports.read`)                                                       |
+
+---
+
+## Fase A · Escritorio y Go: regla de textos (§1)
+
+Agente del servidor y el escritorio, en `$SP/wt/srv` (rama `etapa-a3-srv`, desde `etapa-a3` = `4c7231b`), 19 de
+noviembre de 2026. Sin cambios en `android/`, `scripts/android-e2e.sh` ni en este avance. Pruebas en copias aisladas
+(`ISO_TAG=SV`: clúster temporal 55499, Go temporal en 8187 y vista previa en 1427 para Playwright); ninguna contra el
+servicio real. Commits: ver «Commits» al final.
+
+### Qué se hizo
+
+**Textos reescritos o quitados.** Todos los de §0.2 del escritorio y de Go (A3-D11: los «todavía no»/«aún no» que
+describen un estado real se reescriben, no se exceptúan), más los que §0.2 no listó y encontraron las comprobaciones
+nuevas:
+
+| Dónde                                                                                                                                                                    | Antes                                                                                                                                                                 | Ahora                                                                                                                                                                                     |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Sesiones activas (`DevicesPage.tsx`, `SessionsSummaryPanel`)                                                                                                             | «Solo se cuentan; todavía no se limita ninguna.»                                                                                                                      | Se quitó: quedan el título y las cifras por tipo                                                                                                                                          |
+| Terminales nuevas (`DevicesPage.tsx`)                                                                                                                                    | «Esta computadora todavía no recibe terminales de la red.»                                                                                                            | «Esta computadora no recibe terminales de la red.»                                                                                                                                        |
+| Tope de solicitudes (`DevicesPage.tsx`)                                                                                                                                  | «…en los últimos 10 minutos: por ahora no se aceptan más solicitudes.»                                                                                                | «…en los últimos 10 minutos. Espera un poco antes de pedir otro.» (§0.2 proponía «Espera unos minutos…»; así no se repite «minutos»)                                                      |
+| Impresora de precuentas y de tickets, avisos de impresión (`DevicesPage.tsx`, `PaymentPoliciesForm.tsx`, `services/printProblems.ts`) y Go (`kitchen/print_problems.go`) | «…todavía no puede usarse para imprimir»                                                                                                                              | «…no se puede usar para imprimir»                                                                                                                                                         |
+| Impresoras de la computadora (`DevicesPage.tsx`, `kitchen/PrintersAdmin.tsx`)                                                                                            | «Todavía no informó sus impresoras.»                                                                                                                                  | «No ha informado sus impresoras.»                                                                                                                                                         |
+| Corrección de un método con el turno cerrado (`checkout/useCorrectionFlow.ts`)                                                                                           | «Usa una regularización posterior (etapa 7)…»                                                                                                                         | «Usa una regularización en Caja…» (en Caja › Movimientos se llama «Corrección o regularización»)                                                                                          |
+| Cobro sin tipo de cambio (`checkout/CheckoutPanel.tsx`)                                                                                                                  | «…por ahora solo acepta pesos.»                                                                                                                                       | «…solo acepta pesos.»                                                                                                                                                                     |
+| Previsualización de precios (`catalog/PreviewPage.tsx`)                                                                                                                  | «Retirar de prueba»                                                                                                                                                   | «Quitar producto» (sigue en rojo, como decidió la 9D; `stage9dStyles.test.tsx` al día)                                                                                                    |
+| Registro de movimientos (`AuditPage.tsx`)                                                                                                                                | El código crudo (`device.updated`) y `entity_type` bajo el nombre de la operación                                                                                     | El nombre; el código solo si la operación no tiene nombre. El código y el «Tipo de registro» pasan a «Ver cambios», con los identificadores; las ayudas de los filtros dicen dónde verlos |
+| 28 textos más del escritorio («Aún no hay…», «Todavía no hay…», «…cambios que aún no se guardan…», «La cuenta aún no tiene productos.», «Todavía no tienes PIN.», etc.)  | Los de la segunda tabla de §0.2                                                                                                                                       | Las reescrituras de §0.2 («No hay…», «…cambios sin guardar…», «La cuenta no tiene productos.», «No tienes PIN.»…)                                                                         |
+| Puente nativo (Rust; §0.2 no lo revisó): `src-tauri/src/main.rs:113` y `installation.rs:299`                                                                             | «Esta terminal todavía no está conectada a un servidor.», «…la modalidad todavía no se puede cambiar desde aquí.»                                                     | Sin «todavía»                                                                                                                                                                             |
+| Go, emparejamiento (`administration/pairing.go`)                                                                                                                         | «…todavía no está preparado…», «…todavía no puede emparejar terminales.», «…todavía no se aprueba…», «…todavía no termina de pedir su código…»                        | «…no está preparado…», «…no puede emparejar terminales ahora.», «…no se ha aprobado…», «…no ha terminado de pedir su código…»                                                             |
+| Go, caja (`payments/cash_closing.go:423` y `:435`; la `:423` no estaba en §0.2)                                                                                          | «El turno de X aún no está cerrado.», «El turno se cerró antes de la etapa 7 y no tiene arqueo registrado.»                                                           | «El turno de X no está cerrado.», «Este turno no tiene arqueo registrado.»                                                                                                                |
+| Go, otros                                                                                                                                                                | `httpapi/router.go:131`, `inventory/alerts.go:537`, `legacyimport/uploads.go:286` y `manager.go:206`, `reports/costs.go:54` («…o aún no liberada», no estaba en §0.2) | «Los avisos al momento no están disponibles en este servidor.», «…no se ha aplicado ningún conteo…», «El paquete no ha terminado de subirse.», «…o sin liberar»                           |
+| Go, mensajes que no llegan a la interfaz (`config/config.go:99`, `licensing/licensing.go:10`)                                                                            | «…aún no habilitada», «…no está implementado en etapa 1»                                                                                                              | Reescritos en lugar de exceptuarlos (cambio trivial; así la lista de excepciones queda corta)                                                                                             |
+
+Las pruebas que buscaban los textos viejos se actualizaron (Vitest: `stage9gPairing`, `stage9gPrintAgent`,
+`stage9gModality`, `stage9gBackups`, `stageA1Pin`, `tablePanel`, `formsPhaseB`, `catalog`, `catalogFixes`,
+`inventoryRecipes`, `printingStage9f`, `stage9dStyles`; Playwright: `workflow-stage9g-terminals`, que ahora comprueba que
+Sesiones activas **no** tiene la frase, y `workflow-stage9g-modality`; Go: `kitchen/paper_cut_test.go` y
+`operations/printing_stage9f_test.go`). Documentación que citaba los textos: `API_CONTRACTS.md`,
+`docs/KITCHEN_AND_PRINTING.md`, `docs/NOTAS_WINDOWS.md` y `CLAUDE.md` (la descripción de Terminales y la lista de botones
+rojos). Los avances de etapas anteriores no se tocan (son historia). `openapi.json` y `docs/API_V1.md` no citan ninguno
+de los mensajes cambiados.
+
+**«Código: …» de la tabla de Terminales** (`DevicesPage.tsx:873`): se queda para la Fase D, como dice el encargo (§5.3:
+quitarlo y, si hace falta, «Identificador» en «Ver configuración»). La comprobación del escritorio ya busca ese patrón y
+lo tiene como **única excepción temporal** escrita con su porqué; la Fase D quita la línea y la excepción (si no, la
+prueba falla porque la excepción sobra). La ayuda del filtro «Código de la terminal» del Registro de movimientos ya no
+remite a esa columna (ahora: «El que aparece como «Terminal» en «Ver cambios» de sus movimientos»).
+
+### Comprobaciones automáticas
+
+- **Escritorio** (`desktop/src/pages/plainLanguage.test.tsx`, segundo `describe` «textos sin notas de desarrollo (etapa
+  A3, §1)»): recorre todas las fuentes de `desktop/src` (sin `*.test.*`, `testing/` ni `*TestData.ts`) **y las del
+  puente nativo `desktop/src-tauri/src/*.rs`** (sin su módulo `#[cfg(test)]`, porque sus mensajes también llegan a la
+  pantalla), sin comentarios, y busca sin distinguir mayúsculas: «todavía no», «aún no»/«aun no», «etapa», «fase X»,
+  «próximamente», «provisional», «por ahora», «más adelante», «en desarrollo», «versión de prueba», «(muestra)», y dos
+  patrones de identificadores a la vista (`Código: <` y un `{….id}`/`{…_id}` como texto de una etiqueta). Las
+  excepciones son una lista `{ file, line, reason }` en la propia prueba: `services/inventory.ts` (`'provisional'`, el
+  código de la base del costo que manda Go, nunca se muestra crudo) y la temporal de `DevicesPage.tsx` (Fase D). Una
+  excepción que ya no hace falta hace fallar la prueba. El recorrido y la limpieza de comentarios se comparten con la
+  prueba de la 9C (`interfaceSources`, `forEachCodeLine`), que ahora también excluye `*TestData.ts`.
+- **Go** (`backend/internal/apicontract/plain_language_test.go`, `TestPlainLanguageMessages`, prueba unitaria: corre en
+  `go-unit`): recorre todo `backend/internal` sin `_test.go` ni `testdata/`, lee cada cadena con `go/parser` (los
+  comentarios no forman parte del árbol), y busca las mismas frases. Excepciones `{file, phrase, reason}`:
+  `inventory/costing.go`, `inventory/movements.go` y `reports/costs.go` («provisional», el término del costo estimado de
+  inventario y sus códigos en las consultas) y `standalone/adopt.go` («en desarrollo», mensaje de la orden `adopt-legacy`
+  en la terminal de la Mac, que nombra el entorno de desarrollo). También falla si una excepción sobra, y si lee menos de
+  300 archivos (para no aprobar en vacío).
+- **Que detectan de verdad**: antes de las reescrituras, la prueba de Go encontró exactamente las 14 cadenas de la tabla;
+  con una línea plantada en `services/backups.ts` (`'Esto todavía no funciona (etapa 9).'`) y otra en
+  `src-tauri/src/vault.rs` (`"Próximamente en la etapa 10"`), la del escritorio falló con `archivo:línea (frase)`; las
+  dos líneas se quitaron después (el árbol no las tiene).
+
+### Regla en `CLAUDE.md`
+
+Sección nueva **«Reglas permanentes desde la etapa A3»** (antes de «13–14»): ningún texto provisional o de desarrollo en
+la interfaz ni en los mensajes de Go que llegan a la pantalla, qué frases, cómo decir un estado real, dónde van los
+datos técnicos (Información para soporte y «Ver cambios» del Registro de movimientos), las tres comprobaciones (la del
+escritorio con el puente nativo, `TestPlainLanguageMessages` y la prueba de textos de Android, citada de forma genérica:
+«ver `android/CLAUDE.md`»; **el coordinador ajusta el nombre al unir**) y la regla de las excepciones (cada una con su
+porqué; una frase nueva se agrega en las tres).
+
+### Decisiones propuestas
+
+- **Registro de movimientos**: el nombre de la operación en la columna y el código solo si no tiene nombre (como
+  proponía §0.2); el código y el tipo de registro no se quitan, pasan a «Ver cambios», que ya era la parte técnica de
+  cada movimiento (identificadores y estado antes/después), porque el filtro «Código de la operación» los necesita.
+  `entity_type` no se tradujo a nombres: los tipos están repartidos por todos los paquetes de Go y un diccionario
+  completo sería una función nueva; en «Ver cambios» se muestra como dato técnico.
+- **Rust** entra en la comprobación del escritorio: §1 pide revisar la aplicación completa y el puente devuelve mensajes
+  que la interfaz muestra tal cual.
+- **Mensajes de Go que no llegan a la interfaz** (`config.go`, `licensing.go`): reescritos en lugar de exceptuados;
+  `adopt.go` sí queda como excepción porque «en desarrollo» ahí es correcto (nombra el entorno y su orden).
+
+### Para que decida el coordinador
+
+1. **Textos con nota de etapa guardados por migraciones** (no son cadenas de Go ni del escritorio; ninguna comprobación
+   los ve):
+   - `0018_document_templates.sql:118` guarda en cada instalación la nota de la versión 1 de las 10 plantillas del
+     sistema: «Formato predeterminado, igual al anterior a la etapa 9B». **Se ve en la interfaz**: Administración ›
+     Documentos (`templates/KindTemplates.tsx:102`, «… · Formato predeterminado, igual al anterior a la etapa 9B») y en
+     el historial del diseñador (`HistoryDialog.tsx:118`). Propuesta: en la `0027` (Fase D), una sección «Fase A» con
+     `UPDATE app.document_template_versions SET note = 'Formato predeterminado' WHERE note = 'Formato predeterminado, igual al anterior a la etapa 9B';`
+     (no es un dato de operación: es la nota de una versión de plantilla) y su caso en la prueba de subida del esquema.
+     Sin tu visto bueno no lo hago (el plan decía que la Fase A no tenía migración).
+   - `0005_kitchen_and_printing.sql:232`: los pedidos anteriores a la etapa 5 quedaron con la advertencia «Pedido
+     anterior a etapa 5: revisar y liberar expresamente.» (`kitchen_releases.warnings`, que Preparación muestra en una
+     liberación pendiente). Es un dato de operación de pedidos viejos (en una instalación nueva no existe); propuesta: no
+     tocarlo (reescribir datos de operación pide autorización del propietario).
+2. **«Código: …» de Terminales** sigue en la Fase D (con su excepción temporal en la prueba), como dice el encargo.
+
+### Pruebas ejecutadas
+
+Todas con el arnés `$SP/iso.sh` y `ISO_TAG=SV`, en `$SP/wt/srv`, sobre el código de los commits (la única corrección
+posterior a la primera corrida, `financial.test.tsx`, es de Vitest y Vitest se repitió completo después).
+
+| Qué                                                                                                                                | Resultado                                                                                                                                              |
+| ---------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `TestPlainLanguageMessages` antes de reescribir los mensajes de Go                                                                 | Falló con las 14 cadenas esperadas (comprueba que detecta)                                                                                             |
+| `go-unit` (vet normal e `integration`, `go test -race` de todo, `GOOS=windows` build y vet)                                        | Aprobado: 35 paquetes `ok` (5 sin pruebas), `TestPlainLanguageMessages` incluida                                                                       |
+| `go-int ./internal/operations` con `ISO_RUN=TestRestaurantAcceptance` (contiene `9F_D4`, que comprueba el mensaje de la impresora) | `ok` (238 s)                                                                                                                                           |
+| Vitest con `tsc --noEmit` (`iso.sh vitest`, suite completa), primera corrida                                                       | 925 de 926: fallaba `financial.test.tsx` (buscaba «regularización posterior \(etapa 7\)» con la expresión escapada, que mi búsqueda no vio); corregida |
+| Vitest con `tsc --noEmit`, segunda corrida                                                                                         | **97 archivos, 926 pruebas aprobadas**                                                                                                                 |
+| Comprobación del escritorio con frases plantadas en `services/backups.ts` y `src-tauri/src/vault.rs`                               | Falló con `archivo:línea (frase)` en ambos (comprueba que detecta, también en Rust); líneas quitadas                                                   |
+| `cargo test --locked --offline` (cambiaron dos mensajes de Rust)                                                                   | 107 aprobadas, 3 ignoradas                                                                                                                             |
+| Playwright Chromium: `workflow-stage9g-terminals` y `workflow-stage9g-modality` (las que buscan textos que cambiaron)              | 3 de 3                                                                                                                                                 |
+| Playwright WebKit: las mismas                                                                                                      | 3 de 3                                                                                                                                                 |
+| `format`, `fmt-check`, `sync-check`                                                                                                | Aprobados («Metadatos coherentes.»)                                                                                                                    |
+| `md5 -q docs/etapas/*.md \| md5` antes y después de formatear                                                                      | `3555c65b1300ce044695adcc1ec19f0d` las dos veces (igual al de `$SP/etapas-md5-before.txt`)                                                             |
+
+No ejecutado (no lo pide la fase): la regresión completa, `build`, el resto de las especificaciones de Playwright y
+`go-int` de otros paquetes (ninguna otra prueba de integración compara los mensajes cambiados: las de emparejamiento
+comparan códigos, y `host_unix_network_integration_test` busca «identidad» en el otro mensaje de `PAIRING_UNAVAILABLE`,
+que no cambió). **No verificado**: cómo se ven los textos nuevos en pantalla (las capturas son de la Fase E).
+
+### Commits (rama `etapa-a3-srv`, sin push ni fusión)
+
+- `2b5c6fb` etapa A3 fase A: mensajes de Go sin frases provisionales ni notas de etapas … y la comprobación
+  TestPlainLanguageMessages …
+- `bad4985` etapa A3 fase A: textos del escritorio y del puente nativo sin frases provisionales, notas de etapas ni
+  códigos internos a la vista … y la comprobación «textos sin notas de desarrollo» en plainLanguage.test.tsx …
+- `a7208f1` etapa A3 fase A: regla permanente de textos en CLAUDE.md … y los mensajes reescritos en API_CONTRACTS.md,
+  KITCHEN_AND_PRINTING.md y NOTAS_WINDOWS.md
+
+### Decisiones del coordinador sobre la Fase A (escritorio y servidor)
+
+- **A3-D12 · Nota de la plantilla predeterminada**: la nota «Formato predeterminado, igual al anterior a la etapa 9B»
+  que la `0018` dejó en la primera versión de cada plantilla se ve en Administración › Documentos y en el historial del
+  diseñador. Es configuración, no un dato de operación: la `0027` agrega una sección «Fase A» que la cambia a «Formato
+  predeterminado» **solo donde el texto es exactamente ese**, con su caso en la prueba de subida del esquema. La hace el
+  agente del servidor en la Fase D (donde nace la `0027`).
+- **A3-D13 · Advertencia de pedidos anteriores a la etapa 5** (`0005`: «Pedido anterior a etapa 5: revisar y liberar
+  expresamente.» en las liberaciones de cocina que existían al aplicarla): es un dato de operación, así que **no se
+  reescribe** sin autorización del propietario (`CLAUDE.md` §0). Queda como limitación en la entrega final.
+- **«Espera un poco antes de pedir otro.»** en el tope de emparejamientos: aceptado.
