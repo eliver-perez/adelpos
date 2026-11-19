@@ -1114,3 +1114,175 @@ que no cambió). **No verificado**: cómo se ven los textos nuevos en pantalla (
   expresamente.» en las liberaciones de cocina que existían al aplicarla): es un dato de operación, así que **no se
   reescribe** sin autorización del propietario (`CLAUDE.md` §0). Queda como limitación en la entrega final.
 - **«Espera un poco antes de pedir otro.»** en el tope de emparejamientos: aceptado.
+
+---
+
+## Fase D · Terminales en el escritorio (§5), migración 0027, A3-D8 y versión 0.14.0
+
+Agente del servidor y el escritorio, en `$SP/wt/srv` (rama `etapa-a3-srv`, desde `a7208f1`, la cabeza de la Fase A que se
+fusionó en `etapa-a3` con `ac50dc9`), 19 de noviembre de 2026. Sin cambios en `android/`, `scripts/android-e2e.sh` ni en este avance. Pruebas
+en copias aisladas (`ISO_TAG=SV`: clúster temporal 55499, Go temporal en 8187 y vista previa en 1427 para Playwright);
+ninguna contra el servicio real. Commits: ver «Commits» al final.
+
+### Qué se hizo
+
+**Terminales por tipo** (`desktop/src/pages/DevicesPage.tsx`, §5.1–§5.3 y la tabla de §0.6):
+
+- Un `android` (teléfono o tableta de meseros, `isWaiterDevice`): «Pantalla inicial» ofrece solo **Mesas** y **Para
+  llevar** (`terminalHomeOptions`); un valor guardado que no le aplica (un servidor 0.13.0 que todavía tuviera «Cocina»)
+  abre el editor en Mesas (`editableHome`). «Editar» ya no muestra «Caja física», «Teclado virtual» ni la nota «Con
+  «Cocina» abre en Preparación…». «Ver configuración» ya no muestra la caja, el teclado, las estaciones que muestra en
+  Cocina, el aviso sonoro, las impresoras de la terminal, «Impresoras de la computadora» ni la ayuda de Terminales de
+  cocina. Siguen el bloqueo por inactividad, la impresora de precuentas y los avisos (A1/A2).
+- Las terminales de escritorio (`desktop`) y de cocina (`kitchen`) conservan todo (las cuatro pantallas, caja, teclado,
+  estaciones, aviso sonoro e impresoras).
+- Tabla: la columna «Caja» de un `android` es «—» (§5.2); **ninguna fila muestra el identificador** («Código: …» se
+  quitó, §5.3). «Ver configuración» de cualquier terminal termina con **«Identificador»** (el `id`), porque soporte y el
+  filtro por terminal del Registro de movimientos lo necesitan («si hace falta» de §5.3). En el Registro de
+  movimientos el filtro pasa a «Identificador de la terminal», con la ayuda «El que aparece en «Ver configuración» de
+  Sistema › Terminales, o como «Terminal» en «Ver cambios» de sus movimientos.».
+- La comprobación de textos (`plainLanguage.test.tsx`) pierde la excepción temporal de «Código» de la Fase A y gana una
+  para la línea del «Identificador» de «Ver configuración», con su porqué (§5.3 lo pide ahí).
+
+**Go** (sin ruta nueva ni capacidad nueva):
+
+- `PATCH devices/{id}` (`administration/devices.go`): en un `android`, un `home_screen` que no sea `tables` o `takeaway`
+  responde **`400 VALIDATION_ERROR` «En un teléfono o tableta de meseros la pantalla inicial es Mesas o Para llevar.»**
+  sin escribir ni auditar (`androidTerminalHomeScreens`, `validAndroidHome`). Sin el campo, se conserva lo guardado,
+  como siempre.
+- `GET kitchen/access` (`kitchen/reads.go`, Cocina › Estaciones › Terminales de cocina) ya no lista los `android`: eran
+  justo los campos que §0.6 quita a un `android` (estaciones y aviso sonoro) y su ayuda decía «elige «Cocina» como
+  pantalla inicial en Sistema › Terminales», que ya no se puede. `PUT kitchen/access` no cambia. Ver «Decisiones».
+
+**Migración** `backend/migrations/0027_android_a3_adjustments.sql`, la única de la etapa, con dos secciones:
+
+- **«Fase A»** (A3-D12): `UPDATE` de la nota de las versiones de plantilla de «Formato predeterminado, igual al anterior a
+  la etapa 9B» a «Formato predeterminado», **solo donde el texto es exactamente ese** (las diez versiones 1 de las
+  plantillas del sistema que sembró la 0018). Las versiones son inmutables por el disparador
+  `document_template_versions_insert_only` de la 0018, que rechaza todo `UPDATE`: la sección lo desactiva **solo para esa
+  sentencia** y lo vuelve a activar enseguida, dentro de la misma transacción (`ALTER TABLE` toma un bloqueo exclusivo de
+  la tabla hasta el final; si algo falla, se deshace con el disparador activo). Ver «Para el coordinador».
+- **«Fase D»** (A3-D7): `UPDATE app.devices SET home_screen='tables' WHERE kind='android' AND home_screen IN
+('kitchen','cash')` y `CHECK devices_android_home_check (kind <> 'android' OR home_screen IN ('tables','takeaway'))`.
+- No toca roles ni permisos (A3-D2). Comentarios en español con el porqué de cada sentencia.
+
+**A3-D8** (sin cambiar el comportamiento): `discardAccount` (`POST /restaurant/accounts/{id}/discard`, `{operation_id,
+revision}` → `Bill`) y los campos `discardable` y `releasable` de `Account` (obligatorios: Go los manda en toda cuenta;
+`TestContractV1` lo confirma con cada respuesta que trae una cuenta) en `backend/internal/apicontract/openapi.json` y
+`docs/API_V1.md` (tabla de operaciones y sección «Descartar una cuenta vacía»). `TestContractV1` ahora usa la ruta como
+parte del contrato (antes la llamaba como preparación, sin validar): la cuenta con solo borrador es `discardable` y no
+`releasable`, la que tiene productos enviados responde `409 ACCOUNT_NOT_EMPTY`, y el descarte deja la cuenta `voided` y
+sin borrador.
+
+**Versión** 0.14.0 y esquema 27 en `config/product.json` con `node scripts/sync-metadata.mjs` (lo que hace `./scripts/dev.sh
+sync`), más `desktop/package-lock.json` y `desktop/src-tauri/Cargo.lock` a mano (el script no los toca y `cargo --locked`
+los exige al día). `min_client_versions` sin cambio (A3-D9).
+
+**Documentación**: `API_CONTRACTS.md` (sección «Etapa A3 · Terminales por tipo de dispositivo»), `CLAUDE.md` (sección
+«Terminales por tipo de dispositivo (etapa A3)» y la regla permanente «Cada tipo de terminal solo ve lo que le aplica»)
+y `docs/API_V1.md`.
+
+### Pruebas nuevas o ampliadas
+
+- **Go, unidad**: `TestAndroidTerminalHomeIsTablesOrTakeaway` (`administration/terminal_home_test.go`).
+- **Go, integración** (`administration`): `A3_android_solo_mesas_o_para_llevar` dentro de `testTerminalHome`
+  (`TestStageTwoAcceptance`): un `android` nuevo inicia en Mesas; «Cocina» y «Caja» dan `400` con el mensaje exacto, sin
+  cambiar ni auditar; Para llevar y Mesas se aceptan y se auditan; una edición sin el campo conserva la guardada; la base
+  rechaza Cocina y Caja con `devices_android_home_check`; `GET kitchen/access` lista la terminal de escritorio y no el
+  `android`.
+- **Go, subida del esquema** (`database`): `TestStageA3Upgrade`, de 26 a 27 con datos de la A1 y la A2 más un `android`
+  con cada pantalla, una terminal de escritorio con Caja, una de cocina con Cocina y una plantilla propia con dos notas
+  parecidas pero no exactas: ninguna fila de ninguna tabla cambia salvo las dos columnas esperadas; solo las diez notas
+  exactas cambian; el disparador queda activo (`tgenabled = 'O'`) y un `UPDATE`/`DELETE` de una versión se sigue
+  rechazando; los dos `android` con Cocina y Caja pasan a Mesas y los demás conservan la suya; el `CHECK` rechaza Cocina y
+  Caja en un `android` (también al insertar) y no toca escritorio ni cocina. La instantánea compartida de las pruebas de
+  la A1 y la A2 (`stageA1Snapshot`) excluye ahora la nota de `document_template_versions` (la 0027 la reescribe a
+  propósito y las dos pruebas suben hasta el esquema vigente), como ya excluía el permiso de la 0025.
+- **Contrato**: `TestContractV1` con `discardAccount` (arriba).
+- **Vitest**: `pages/stageA3Terminals.test.tsx` (6 pruebas: opciones del `android` y lo que envía, un `android` con Cocina
+  guardada abre en Mesas, escritorio y cocina con las cuatro, «—» y sin identificador en la tabla, «Ver configuración»
+  del `android` y del escritorio).
+- **Playwright**: `workflow-stagea2-terminals.spec.ts` ampliada con los pasos 6 a 8 (mismo teléfono emparejado, para no
+  pedir otro código: límite de 5 por origen cada 10 minutos): el escritorio conserva las cuatro pantallas y la caja; en
+  la tabla la caja del teléfono es «—» y no hay «Código» ni su identificador; el teléfono ofrece solo Mesas y Para
+  llevar, sin caja ni teclado, y Go guarda Para llevar; un `PATCH` con Cocina da `400` con el mensaje; «Ver
+  configuración» dice el identificador y no la caja ni las estaciones. No hizo falta una especificación nueva.
+
+### Decisiones propuestas
+
+- **La caja y el teclado de un `android` se envían sin cambio** en lugar de `null` (lo que proponía §0.6): con `null`,
+  editar un teléfono que tuviera una caja con un turno abierto daría `409 SHIFT_OPEN` y no se podría guardar nada durante
+  el servicio. Go sigue sin rechazar esos campos en un `android` (un escritorio 0.13.0 los manda).
+- **Terminales de cocina sin los `android`** (`GET kitchen/access`): aplica la fila de §0.6 (estaciones y aviso sonoro:
+  «No» en un `android») en la otra pantalla donde se editan, y quita una ayuda que remitía a una opción que ya no existe.
+  Es una línea de SQL, compatible (la lista solo tiene menos elementos), con su prueba de integración. Si prefieres no
+  tocar Cocina, se revierte sin afectar lo demás.
+- **«Identificador» en «Ver configuración»**: §5.3 lo deja a criterio («si hace falta»); hace falta para el filtro del
+  Registro de movimientos y para soporte.
+
+### Para el coordinador
+
+- **A3-D12 y la inmutabilidad de las versiones**: el `UPDATE` que decidiste choca con el disparador de la 0018 que hace
+  inmutables las versiones de plantilla. Lo resolví desactivándolo solo para esa sentencia dentro de la migración (con
+  la prueba de que vuelve a quedar activo y sigue rechazando cambios). Requiere que quien migra sea el dueño de la
+  tabla, como en el clúster aislado. En la instalación real debería serlo: `standalone` restaura con `--no-owner
+--role=<usuario de la aplicación>` (`standalone/backup.go:171`) y la 0026 ya hizo `ALTER TABLE app.devices` con ese
+  rol al instalar el `.pkg` 0.13.0; pero para esta tabla **no está verificado** en la instalación real (se verá cuando
+  el `host` aplique la 0027 con el `.pkg` 0.14.0, después de su respaldo `…-antes-de-migrar.dump`; si fallara, la
+  migración se deshace entera, porque el migrador aplica todo en una sola transacción). Si prefieres no tocar la inmutabilidad,
+  la alternativa es quitar la sección «Fase A» y dejar la nota como limitación (como A3-D13).
+
+### Pruebas ejecutadas
+
+Todas con el arnés `$SP/iso.sh` y `ISO_TAG=SV`, en `$SP/wt/srv`, sobre el código de los commits (después de las corridas
+solo se escribió este resumen).
+
+| Qué                                                                                                                                                                                 | Resultado                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `go-int ./internal/database` (todas las pruebas de subida del esquema, con la 0027)                                                                                                 | `ok` (18 s); `TestStageA3Upgrade` sola: `ok`                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `go-int ./internal/apicontract` (`TestContractV1` con `discardAccount` y `discardable`/`releasable` obligatorios en `Account`)                                                      | `ok` (40 s)                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `go-int ./internal/administration`, completo                                                                                                                                        | Dos corridas: todo aprobado **salvo `TestStageA1WaiterPIN`**, que falló las dos veces por tiempo con la Mac cargada (carga media de 55 y de 17; dos emuladores y Android Studio del otro agente): la primera con `context deadline exceeded` (su plazo es de 3 minutos) y la segunda con un `503` en `PUT auth/pin` dentro de su prueba de bloqueo largo y las siguientes en cascada. Esa prueba no envía `home_screen` ni lee `kitchen/access`. |
+| `go-int ./internal/administration` con `ISO_RUN=TestStageA1WaiterPIN`, sola, con carga 8–15                                                                                         | `ok` (126 s)                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `go-int ./internal/operations` con `ISO_RUN=TestStage9FKitchenStations` (lee `GET kitchen/access`)                                                                                  | `ok` (18 s)                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `go-unit` (vet normal e `integration`, `go test -race` de todo, `GOOS=windows` build y vet)                                                                                         | Aprobado: 35 paquetes `ok`                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Vitest con `tsc --noEmit` (suite completa)                                                                                                                                          | **98 archivos, 932 pruebas aprobadas** (6 nuevas en `stageA3Terminals.test.tsx`)                                                                                                                                                                                                                                                                                                                                                                 |
+| `cargo test --locked --offline` (versión 0.14.0 en `Cargo.toml` y `Cargo.lock`)                                                                                                     | 107 aprobadas, 3 ignoradas                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Playwright Chromium: `workflow-stagea2-terminals` sola (con los pasos nuevos)                                                                                                       | 1 de 1                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Playwright Chromium: `workflow-stage9f-kitchen-stations`, `workflow-stage9g-print-agent`, `workflow-stage9g-terminals` y `workflow-stagea1-pin` (Terminales y Terminales de cocina) | 5 de 5                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Playwright WebKit: las mismas dos corridas                                                                                                                                          | 1 de 1 y 5 de 5                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `format`, `fmt-check`, `sync-check`                                                                                                                                                 | Aprobados («Metadatos coherentes.»)                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `md5 -q docs/etapas/*.md \| md5` antes y después de formatear                                                                                                                       | `3555c65b1300ce044695adcc1ec19f0d` las dos veces                                                                                                                                                                                                                                                                                                                                                                                                 |
+
+La especificación de la A2 se corrió sola, en su propia corrida (Go y base nuevos), para no ser la sexta solicitud de
+emparejamiento desde `127.0.0.1` en 10 minutos (en la suite completa sigue esperando el límite, como en la A2). **No
+ejecutado** (no lo pide la fase): la regresión completa de Playwright, `build`, `go-int` de los demás paquetes y Android.
+**No verificado**: la 0027 en la instalación real (ver «Para el coordinador») y cómo se ven las pantallas (capturas de la
+Fase E).
+
+### Commits (rama `etapa-a3-srv`, sin push ni fusión)
+
+- `838562d` etapa A3 fase D: migración 0027 (sección «Fase A» … A3-D12 …; sección «Fase D» … A3-D7), versión 0.14.0 y
+  esquema 27 con metadatos sincronizados (min_client_versions sin cambio) y TestStageA3Upgrade
+- `3d7f9b0` etapa A3 fase D: PATCH devices/{id} rechaza en un android una pantalla inicial que no sea Mesas o Para llevar
+  (400 con mensaje claro) y Terminales de cocina (GET kitchen/access) sin los android, con sus pruebas
+- `2d3c7a7` etapa A3 fase D: discardAccount y los campos discardable y releasable de Account en el contrato v1
+  (openapi.json, docs/API_V1.md y TestContractV1), sin cambiar el comportamiento (A3-D8)
+- `6460a9f` etapa A3 fase D: Terminales por tipo de dispositivo (…), con stageA3Terminals.test.tsx y los pasos nuevos de
+  workflow-stagea2-terminals
+- `7e9a957` etapa A3 fase D: Terminales por tipo de dispositivo, la 0027 y discardAccount en CLAUDE.md (con la regla
+  permanente «Cada tipo de terminal solo ve lo que le aplica») y API_CONTRACTS.md
+
+### Decisiones del coordinador sobre la Fase D
+
+- **A3-D12 (forma final)**: la sección «Fase A» de la `0027` desactiva el disparador de inmutabilidad
+  `document_template_versions_insert_only` solo para su `UPDATE` y lo vuelve a activar en la misma transacción
+  (`TestStageA3Upgrade` comprueba que queda activo y que sigue rechazando `UPDATE` y `DELETE`). Exige que el rol que
+  migra sea dueño de la tabla. En la instalación real lo es: la base del servicio se restauró con `pg_restore --no-owner
+--no-acl --role=<usuario de la aplicación>` (`internal/standalone/backup.go:170-171`, usado por `adopt-legacy`), así
+  que todas las tablas son de ese rol, y la `0026` ya hizo `ALTER TABLE app.devices` con él en la instalación real.
+- Aceptadas las tres decisiones del agente: el escritorio envía sin cambio la caja y el teclado guardados de un
+  `android` (con `null`, una caja con turno abierto daría `SHIFT_OPEN`); Cocina › Estaciones › Terminales de cocina ya no
+  lista los `android` (§5.1: cada tipo solo ve lo que le aplica); `workflow-stagea2-terminals` se amplió en lugar de una
+  especificación nueva (un emparejamiento menos, por el límite de 5 cada 10 minutos).
+- `TestStageA1WaiterPIN` falló por tiempo en las dos corridas completas de `administration` con la Mac muy cargada por
+  los emuladores del otro agente (carga 17–55) y pasó sola: se vigila en la regresión de la Fase E.
