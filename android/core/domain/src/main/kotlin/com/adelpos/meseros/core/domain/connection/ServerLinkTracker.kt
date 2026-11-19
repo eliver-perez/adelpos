@@ -20,9 +20,18 @@ package com.adelpos.meseros.core.domain.connection
  *   se salta si hubo otro éxito en ese lapso (la lista de «¿Quién eres?» cuenta).
  * - En segundo plano o sin red de Android: ninguna (la batería; al volver a primer plano o la red
  *   se revisa enseguida).
+ *
+ * **Al arrancar** (etapa A3, decisión del coordinador en la Fase C: el indicador nunca dice algo
+ * falso), con la red de Android todavía desconocida ([initialNetwork] null: Android aún no la
+ * informó), el estado **duda** y se ve «En línea» hasta la primera respuesta de Go («En línea»), el
+ * primer aviso de Android de que no hay red («Sin conexión» al instante) o el plazo de la
+ * tolerancia sin ninguna de las dos ([MIN_OFFLINE_MILLIS]: «Sin conexión»). Un estado que todavía
+ * no se conoce nunca se muestra como «Sin conexión».
  */
-class ServerLinkTracker(initialNetwork: LinkState, private val clock: () -> Long) {
-    private var network = initialNetwork
+class ServerLinkTracker(initialNetwork: LinkState?, private val clock: () -> Long) {
+    // La red de Android: null mientras Android no la informa (al arrancar).
+    private var network: LinkState? = initialNetwork
+    private val startedAt = clock()
 
     // «Sin conexión» declarado por la tolerancia o por la red de Android; solo un éxito con red lo
     // quita.
@@ -37,23 +46,37 @@ class ServerLinkTracker(initialNetwork: LinkState, private val clock: () -> Long
     val state: LinkState
         @Synchronized
         get() =
-            if (network == LinkState.OFFLINE || declaredOffline) {
+            if (network == LinkState.OFFLINE || declaredOffline || startupExpired()) {
                 LinkState.OFFLINE
             } else {
                 LinkState.ONLINE
             }
 
-    /** Hay red de Android (aunque Go no responda). */
+    /** Puede haber red de Android (la hay, o al arrancar todavía no se sabe). */
     val hasNetwork: Boolean
-        @Synchronized get() = network == LinkState.ONLINE
+        @Synchronized get() = network != LinkState.OFFLINE
 
-    /** Hubo fallas seguidas sin declarar todavía «Sin conexión» (se sigue mostrando «En línea»). */
+    /**
+     * Se sigue mostrando «En línea» sin haberlo confirmado: hubo fallas seguidas o, al arrancar,
+     * todavía no responde Go ni informa Android.
+     */
     val doubting: Boolean
-        @Synchronized get() = state == LinkState.ONLINE && failures > 0
+        @Synchronized get() = state == LinkState.ONLINE && (failures > 0 || startingUp())
+
+    // Al arrancar: sin aviso de Android ni respuesta de Go todavía.
+    private fun startingUp(): Boolean = network == null && lastSuccessAt == null
+
+    // Pasó el plazo de la tolerancia al arrancar sin aviso de Android ni respuesta de Go.
+    private fun startupExpired(): Boolean =
+        startingUp() && clock() - startedAt >= MIN_OFFLINE_MILLIS
 
     /** La red de Android cambió. Al volver, el estado sigue igual hasta el primer éxito. */
     @Synchronized
     fun onNetwork(link: LinkState): LinkState {
+        // Ya se mostraba «Sin conexión» por el plazo al arrancar: se queda hasta el primer éxito.
+        if (startupExpired()) {
+            declaredOffline = true
+        }
         network = link
         if (link == LinkState.OFFLINE) {
             declaredOffline = true
@@ -71,6 +94,10 @@ class ServerLinkTracker(initialNetwork: LinkState, private val clock: () -> Long
     @Synchronized
     fun onAnswer(): LinkState {
         lastSuccessAt = clock()
+        if (network == null) {
+            // Si Go respondió, hay red, aunque Android no lo haya informado todavía.
+            network = LinkState.ONLINE
+        }
         failures = 0
         streakStartedAt = null
         lastFailureAt = null
@@ -120,6 +147,19 @@ class ServerLinkTracker(initialNetwork: LinkState, private val clock: () -> Long
     }
 
     /**
+     * Cuánto falta para que el estado cambie solo con el tiempo (el plazo de la tolerancia al
+     * arrancar), o null si nada cambia solo. Quien publica el estado lo vuelve a leer entonces.
+     */
+    @Synchronized
+    fun nextDecisionIn(): Long? {
+        if (!startingUp() || declaredOffline) {
+            return null
+        }
+        val remaining = startedAt + MIN_OFFLINE_MILLIS - clock()
+        return if (remaining > 0) remaining else null
+    }
+
+    /**
      * Cuánto falta para la siguiente sonda (0: ya), o null si no hace falta ninguna hasta que algo
      * cambie (la red, el primer plano, el canal de eventos o una falla).
      */
@@ -131,8 +171,10 @@ class ServerLinkTracker(initialNetwork: LinkState, private val clock: () -> Long
         val now = clock()
         val (interval, since) =
             when {
-                declaredOffline -> OFFLINE_PROBE_MILLIS to latest(lastProbeAt, lastFailureAt)
-                failures > 0 -> DOUBT_PROBE_MILLIS to latest(lastProbeAt, lastFailureAt)
+                declaredOffline || startupExpired() ->
+                    OFFLINE_PROBE_MILLIS to latest(lastProbeAt, lastFailureAt)
+                failures > 0 || startingUp() ->
+                    DOUBT_PROBE_MILLIS to latest(lastProbeAt, lastFailureAt)
                 channelOpen -> return null
                 else -> IDLE_CHECK_MILLIS to latest(lastProbeAt, lastSuccessAt)
             }

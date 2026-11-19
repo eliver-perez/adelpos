@@ -179,6 +179,69 @@ class ServerLinkTrackerTest {
         assertEquals(LinkState.ONLINE, offline.onAnswer())
     }
 
+    @Test
+    fun alArrancarSinSaberDeLaRedSeVeEnLineaHastaLaPrimeraRespuesta() {
+        // Android todavía no informa la red (al crear el proceso): nunca «Sin conexión» por eso.
+        val starting = ServerLinkTracker(initialNetwork = null) { now }
+        assertEquals(LinkState.ONLINE, starting.state)
+        assertTrue("duda", starting.doubting)
+        assertTrue("puede haber red: se sondea", starting.hasNetwork)
+        assertEquals(0L, starting.nextProbeIn(foreground = true, channelOpen = false))
+        starting.onProbe()
+        assertEquals(
+            DOUBT_PROBE_MILLIS,
+            starting.nextProbeIn(foreground = true, channelOpen = true),
+        )
+        advance(MIN_OFFLINE_MILLIS / 2)
+        assertEquals(LinkState.ONLINE, starting.onAnswer())
+        assertFalse(starting.doubting)
+        assertNull("ya no cambia solo", starting.nextDecisionIn())
+        advance(10 * MIN_OFFLINE_MILLIS)
+        assertEquals(LinkState.ONLINE, starting.state)
+    }
+
+    @Test
+    fun alArrancarElPrimerAvisoDeQueNoHayRedEsSinConexionAlInstante() {
+        val starting = ServerLinkTracker(initialNetwork = null) { now }
+        assertEquals(LinkState.OFFLINE, starting.onNetwork(LinkState.OFFLINE))
+        assertNull(starting.nextDecisionIn())
+        // Y al volver la red, «En línea» con el primer éxito.
+        assertEquals(LinkState.OFFLINE, starting.onNetwork(LinkState.ONLINE))
+        assertEquals(LinkState.ONLINE, starting.onAnswer())
+    }
+
+    @Test
+    fun alArrancarElAvisoDeRedSigueEnLineaYSeQuedaAsiSinFallas() {
+        val starting = ServerLinkTracker(initialNetwork = null) { now }
+        assertEquals(LinkState.ONLINE, starting.onNetwork(LinkState.ONLINE))
+        assertFalse("Android ya informó la red", starting.doubting)
+        advance(10 * MIN_OFFLINE_MILLIS)
+        assertEquals(LinkState.ONLINE, starting.state)
+    }
+
+    @Test
+    fun alArrancarSinRespuestaNiAvisoPasaASinConexionAlVencerLaTolerancia() {
+        val starting = ServerLinkTracker(initialNetwork = null) { now }
+        assertEquals(MIN_OFFLINE_MILLIS, starting.nextDecisionIn())
+        advance(MIN_OFFLINE_MILLIS - 1)
+        assertEquals(LinkState.ONLINE, starting.state)
+        assertEquals(1L, starting.nextDecisionIn())
+        advance(1)
+        assertEquals(LinkState.OFFLINE, starting.state)
+        assertNull("el cambio ya ocurrió", starting.nextDecisionIn())
+        // Ya se mostraba «Sin conexión»: el aviso de red no lo quita, el primer éxito sí.
+        assertEquals(LinkState.OFFLINE, starting.onNetwork(LinkState.ONLINE))
+        assertEquals(LinkState.ONLINE, starting.onAnswer())
+    }
+
+    @Test
+    fun alArrancarSinServidorEmparejadoTambienEsperaElAvisoDeAndroid() {
+        val starting = ServerLinkTracker(initialNetwork = null) { now }
+        assertEquals(LinkState.ONLINE, starting.onNothingToProbe())
+        assertEquals(LinkState.ONLINE, starting.onNetwork(LinkState.ONLINE))
+        assertEquals(LinkState.ONLINE, starting.onNothingToProbe())
+    }
+
     private fun goOffline() {
         tracker.onNoAnswer()
         repeat(4) {

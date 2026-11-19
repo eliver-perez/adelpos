@@ -34,12 +34,24 @@ class ConnectionMonitor(context: Context) {
      * Cambios del estado mientras alguien lo observa; se deja de escuchar al sistema al dejar de
      * observarlo.
      */
-    val linkState: Flow<LinkState> = callbackFlow {
+    val linkState: Flow<LinkState> = states(initialEvenIfOffline = true)
+
+    /**
+     * Lo mismo, pero solo con lo que Android **informa** (etapa A3): si al empezar todavía no hay
+     * red predeterminada, esa primera lectura no se manda (no es un aviso de que no haya red; al
+     * arrancar el proceso Android puede tardar en dar la red a la aplicación). Lo usa el estado
+     * único de conexión, que mientras tanto duda y se ve «En línea».
+     */
+    val reportedLinkState: Flow<LinkState> = states(initialEvenIfOffline = false)
+
+    private fun states(initialEvenIfOffline: Boolean): Flow<LinkState> = callbackFlow {
         val tracker = DefaultNetworkTracker()
         // activeNetwork es null sin red predeterminada o si el sistema la bloquea para la
         // aplicación.
         manager.activeNetwork?.let { network -> tracker.onAvailable(network.networkHandle) }
-        trySend(tracker.state)
+        if (initialEvenIfOffline || tracker.state == LinkState.ONLINE) {
+            trySend(tracker.state)
+        }
         val callback =
             object : ConnectivityManager.NetworkCallback() {
                 override fun onAvailable(network: Network) {
