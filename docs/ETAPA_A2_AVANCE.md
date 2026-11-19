@@ -3006,3 +3006,132 @@ y 0 fallas (68 omitidas a propósito) y 14 y 0; en `ADEL_A1_Tablet_API26` (Andro
 falla en la primera corrida cuyo nombre no quedó registrado (el guion del coordinador borró el XML al pasar al siguiente
 emulador: error del guion, no de la prueba) y, repetida sola con el emulador recién encendido, 103 pruebas y 0 fallas
 (70 omitidas). Se anota como falla intermitente sin identificar.
+
+## Fase F · Cierre y entrega final
+
+18/11/2026. Regresión completa (un agente para el servidor y el escritorio; la parte de Android es la Fase E),
+documentación (un agente, árboles `$SP/wt/fdoc` y `$SP/wt/fdoc2`, solo Markdown), APK 0.2.0 y `.pkg` 0.13.0 (el
+coordinador). Evidencia completa en [VERIFICATION_STAGEA2.md](VERIFICATION_STAGEA2.md). Entrega final de §7 de la
+especificación:
+
+### Cambios por fase
+
+| Fase o parte                  | Commits                                                                                                      | Qué                                                                                                                                                                                                          |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 0 · verificación              | — (sobre `1198148`)                                                                                          | Verificación de §1 y prueba de humo del servicio en primer plano fuera del repositorio; decisiones A2-D1 a A2-D9                                                                                             |
+| A · identificador             | `4091429`, `825d1f1`, `387441c`                                                                              | `com.adelpos.meseros` en el `applicationId`, los espacios de nombres y los paquetes (A2-D5); 0.2.0 con `versionCode` 2; ejecutor, guion y guía del paso de la 0.1.0 a la 0.2.0; la misma llave de desarrollo |
+| B · Para llevar               | `0534dfc`, `ed833c7`, `e767701`, `b434e5b`, `6671404`, `8264d46`                                             | `core:capture` (la captura compartida), `feature:takeaway`, Room v6, la cola con el destino para llevar, nombre y teléfono, la lista y «Entregado»; suite `takeaway`                                         |
+| C · precuenta                 | `01c53aa`, `7b4903f`, `9b9ca6c`, `0cd678a`, `60d6228`                                                        | «Imprimir [nombre visible]» con sus respuestas y su seguimiento, solo con conexión; suite `precheck` con los bytes ESC/POS                                                                                   |
+| D · aviso de platillos listos | `ceee5b9`, `1d705fa`, `ce0f36b`, `7f10c5f`, `c4de974`, `80e8ea9` (fusión con C, `0357705`)                   | Servicio en primer plano `specialUse`, el único canal de avisos del proceso, Room v6, notificaciones por cuenta, canales (A2-D7), permisos y ayuda; suite `alerts`                                           |
+| Revisión independiente de §4  | `82bf1a7` (servidor), `882a3fa` (dispositivo)                                                                | Reproducciones de R1–R4 y RD1, que quedaron como pruebas de regresión                                                                                                                                        |
+| Correcciones de la revisión   | Servidor `70d3165`, `e3a3a88` y A2-D12 `b91ae66`; dispositivo `0c0bbf4`, `b3f6377`, `6059890`, `27e430c`     | El protocolo acordado de `ready-alerts` (`key`, `: ping`, reemplazo del canal, `interrupted` con código), A2-D12, RD1 y RD3–RD7; paso `r10`                                                                  |
+| E · cuatro emuladores         | — (avance `fdeb3b9`, sobre `03a90e6`)                                                                        | La parte de Android de la regresión; ningún cambio                                                                                                                                                           |
+| Arreglo de la navegación      | `485b8d7`, `bdbcb57`, `cf1e3e3`, `5a01ba2` (fusión `08d4d05`)                                                | Riel lateral con poca altura o en horizontal y catálogo compacto (hallazgo de la Fase E); «en este dispositivo»; el guion con `take_root`/`offline_step` y el corte de `r4` en Android 8–10                  |
+| F · regresión y documentación | Pruebas `a4bd335` y `5f0bf3e`; documentación `b7950b1` a `a062850` y los commits de cierre de `$SP/wt/fdoc2` | La prueba de Terminales con el límite de emparejamiento; `CLAUDE.md`, `VERIFICATION_STAGEA2.md`, la guía, `README.md`, `DEPENDENCIES.md` y `android/CLAUDE.md`                                               |
+
+### Cambios en el servidor (0.13.0, esquema 26)
+
+| Parte                                | Commits                                            | Qué                                                                                                                                                                                                                                                                    |
+| ------------------------------------ | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| B · Para llevar (sin migración)      | `cb9b77f`, `5f52e73`                               | Versión 0.13.0; `destination.takeaway` en `offline-orders`; `POST restaurant/accounts/{id}/customer` (A2-D1); `finance` de la entrega solo con `payments.read` (A2-D11); `takeaway.read`, `takeaway.manage` y `takeaway.deliver` en `WaiterPermissions`; `takeaway-v1` |
+| C · impresora de precuentas          | `cc9bf57`, `8d2ebfd`, `6c2fcdd`                    | `0026` sección C (`devices.precheck_printer_id`); Terminales › Editar; un `android` imprime solo en su impresora (A2-D3); `documents/status`; `payments.tickets.print` en `WaiterPermissions`; `device-precheck-printer-v1`                                            |
+| D · avisos de platillos listos       | `b17f56f`, `c988d16`, `a2c2812` (prueba `084f46a`) | `0026` sección D (`app.ready_notices` y los tres booleanos del dispositivo); `GET ready-alerts` y su canal con solo la credencial del dispositivo (A2-D9); Terminales › Editar; `ready-alerts-v1`                                                                      |
+| Correcciones de la revisión y A2-D12 | `70d3165`, `e3a3a88`, `b91ae66`                    | R1–R12 (con `alert_key` y los índices parciales en la `0026`, que no se había entregado) y las sesiones de antes del inicio del día (30 minutos)                                                                                                                       |
+
+Ninguno cambió una regla de negocio; `min_client_versions` sigue igual (A2-D6), sin locks consultivos nuevos ni
+dependencias nuevas.
+
+### Pruebas (resumen)
+
+- **Servidor y escritorio** (copia exacta de `61b8ba1`): `go-unit` (35 paquetes con `-race`, `GOOS=windows`),
+  integración **14 de 14** paquetes (con `TestStageA2Upgrade`, `TestStageA2Takeaway`, `TestStageA2PrecheckPrinter`,
+  `TestStageA2ReadyAlerts`, `TestStageA2ReadyReview` y `TestContractV1` con 39 operaciones, antes 32), Vitest **97
+  archivos y 925 pruebas** (antes 916), `build`, Rust **107** y 3 ignoradas, scripts del instalador (31
+  comprobaciones). **Playwright completo sobre `40ca93d`: Chromium 44 de 44 y WebKit 44 de 44 a la primera** (antes 43),
+  y `workflow-stagea2-terminals` sola 1 de 1 en cada motor. Hallazgo de la regresión, de la prueba: era la sexta
+  solicitud de emparejamiento desde `127.0.0.1` en 10 minutos (`429`); corregida en `a4bd335` y `5f0bf3e`.
+- **Android** (Fase E, sobre `03a90e6`): **344 pruebas de la JVM** (antes 256), lint sin avisos; en los **cuatro
+  emuladores**, **134 instrumentadas sin fallas** (antes 94) y `--suite all` **68 de 68** en `Pixel_8`, `Pixel_Tablet`
+  y `ADEL_A1_Phone_API33`, y en `ADEL_A1_Tablet_API26` 67 de 68 (`alerts r4` de la prueba, aprobado al repetirlo y con
+  un corte largo; antes, un corte del guion lo terminó sin mensaje). Además: el paso de la 0.1.0 a la 0.2.0 siguiendo la
+  guía, `BOOT_COMPLETED` con un reinicio real (Android 17 y 8), el diálogo real del permiso de notificaciones (Android 13) y el aviso en Android 8.
+- **Arreglo de la navegación** (`08d4d05`): JVM 345; `:app` 103 y `:core:ui` 14 instrumentadas sin fallas en los cuatro
+  emuladores (en Android 8, tras repetir una falla sin identificar); `takeaway` `t1`–`t9` y `waiter` en
+  `ADEL_A1_Phone_API33`, `t1 t9` en `Pixel_Tablet` y `alerts r1 r4` dos veces en Android 8.
+- Ninguna prueba usó el servicio real, la red real ni `.local`; ninguna lista mostró un servidor real.
+
+### Tipo de servicio en primer plano elegido y por qué (A2-D8)
+
+**`specialUse`**, con su subtipo descriptivo en el manifiesto y los permisos `FOREGROUND_SERVICE`,
+`FOREGROUND_SERVICE_SPECIAL_USE`, `POST_NOTIFICATIONS` y `RECEIVE_BOOT_COMPLETED` (y la petición de excluirse de la
+optimización de batería, con su explicación). Por qué:
+
+- **`dataSync` no sirve**: desde Android 15 vence a las 6 horas al día (un turno dura más) y se rechaza al arrancar
+  tras reiniciar; las dos cosas se comprobaron en Android 17 en la Fase 0 (con el límite acortado a 60 s).
+- Los demás tipos (`remoteMessaging`, `connectedDevice`, `shortService`…) no describen el uso: mantener la conexión con
+  la computadora principal del restaurante para recibir avisos durante todo el turno.
+- Con el servicio, **Doze no corta la red**: en la Fase 0 y en la E llegaron los avisos con la pantalla apagada y Doze
+  profundo forzado, con la aplicación quitada de recientes, tras `kill -9` (reinicio pegajoso), en Android 17, 13 y 8, y
+  tras reiniciar el equipo (`BOOT_COMPLETED`), en Android 17 y 8.
+- Arranca desde primer plano (entrada con conexión, apertura de la aplicación) o con una exención (`BOOT_COMPLETED`,
+  `MY_PACKAGE_REPLACED`); el tipo se pasa a `startForeground` desde Android 14, en Android 10–13 se pasa 0 y antes no hay
+  tipo. Se detiene con `active: false`, el fin del día comercial (A2-D12), el retiro del dispositivo o «Emparejar de
+  nuevo».
+
+### Consumo aproximado de batería (referencia, **no es una medición real**)
+
+El perfil de energía del emulador es ficticio («Computed drain: 0», todas las frecuencias de la CPU con 0 mA) y el
+emulador no suspende la CPU como un equipo real: los mAh no valen; sirven el tráfico, la CPU, los _wake locks_ y los
+despertares, para comparar.
+
+- **Una hora en `Pixel_8` (Android 17), Fase E**: servicio en primer plano todo el tiempo, pantalla apagada, sin
+  cargador, Doze profundo el 99,7 % del tiempo y la wifi apagada (red móvil simulada), con seis «Listo» (los seis
+  avisos llegaron): **118,20 KB recibidos y 64,09 KB enviados (≈ 182 KB por hora)**, 183 despertares de la radio, CPU
+  2,4 s de usuario y 0,5 s de sistema, ninguna alarma ni trabajo de la aplicación y solo los _wake locks_ del sistema
+  al publicar notificaciones (2,2 s en 10 veces); 0,0232 mAh estimados con el perfil ficticio.
+- **Canal en silencio, 10 minutos en `Pixel_Tablet`, Fase D** (con el protocolo corregido): 19,56 KB / 11,33 KB, 29
+  despertares, CPU 400 / 50 ms; **≈ 185 KB por hora**. Lo marcan el `: ping` cada 15 s y la reapertura del canal cada
+  5 minutos, no los avisos. Con el protocolo anterior a la revisión (un mensaje cada 750 ms) eran ≈ 1,55 MB por hora.
+
+### Limitaciones
+
+- **Sin dispositivo físico**: todo se probó en los cuatro emuladores. No verificados: **Doze real y la suspensión de la
+  CPU** (los temporizadores del canal no toman _wake lock_, RD8: en un equipo real pueden alargarse hasta la siguiente
+  ventana de mantenimiento o el siguiente paquete), los **gestores de batería de cada marca**, la **wifi del
+  restaurante**, el sonido real del canal y el consumo real de batería.
+- **Papel real**: ninguna precuenta salió en una impresora física (agente de impresión simulado y bytes ESC/POS
+  revisados en la prueba).
+- **Las de la guía** ([ANDROID_INSTALAR.md](ANDROID_INSTALAR.md)): un mesero que entró **sin conexión** no recibe
+  avisos en ese dispositivo hasta su primera entrada con conexión; el día comercial no se «cierra» con ninguna acción
+  (termina a la «Hora de inicio del día»; lo que cocina terminó antes y no llegó por un corte que cruza esa hora ya no
+  se avisa); **«Forzar detención»** o «Detener» del Administrador de tareas paran los avisos hasta abrir la aplicación;
+  un nombre o teléfono cambiado sin conexión sale cuando ese mesero vuelve a tener conexión con su sesión; los avisos
+  solo existen si la cocina marca «Listo» en el KDS; en Android 8.0, el sistema agrega su propia notificación de que la
+  aplicación corre en segundo plano.
+- Sin «Cerrar sesión» explícito (A2-D4): el destinatario lo resuelve Go con la sesión de uso más reciente y A2-D12.
+- Windows no se tocó (Go con `GOOS=windows`); el lector con Docker real no corrió (Docker Desktop apagado).
+
+### Entregables
+
+| Archivo                                                                  | Bytes      | SHA-256                                                            |
+| ------------------------------------------------------------------------ | ---------- | ------------------------------------------------------------------ |
+| `android/app/build/outputs/apk/release/AD-EL-POS-Android-0.2.0.apk`      | 2 589 899  | `38d687ce61e8053b82680a4399ba7b2bb0a8da201372f2559ab636b505e6b824` |
+| `desktop/src-tauri/target/release/bundle/macos-pkg/AD-EL POS_0.13.0.pkg` | 23 106 611 | `8e86573ac6ad64d5ef573fd4870351d390e23109f77e7cf73ae1c07f06e20b0f` |
+
+El APK es `com.adelpos.meseros` 0.2.0 (`versionCode` 2, `targetSdk` 36), compilado sobre `08d4d05` y firmado con la
+llave de desarrollo de `~/.android/adel-pos-dev/` (el mismo certificado que la 0.1.0, SHA-256
+`fb6a4bac93052ca9051342ea122ed90469340a3685de14243bdab288d71c7c86`). El `.pkg` lleva la aplicación y el servidor
+0.13.0 con firma ad hoc verificada por el script; se compiló sobre `fdeb3b9` (servidor y escritorio iguales a la
+cabeza). El APK 0.1.0 de la A1 ya no está en su carpeta (lo borró un `clean`); se puede volver a compilar desde
+`be6115a` con la misma llave.
+
+### Paradas
+
+1. **Instalar el `.pkg` 0.13.0** en la Mac: lo instala el propietario con «Servidor del restaurante» marcada
+   (contraseña de administrador). Al arrancar, el `host` respalda la base (`…-antes-de-migrar.dump`) y aplica la 0026.
+   Después, en cada dispositivo con la 0.1.0, seguir «Pasar de la 0.1.0 a la 0.2.0» de la guía, y elegir en Terminales
+   › Editar la impresora de precuentas y los avisos de cada teléfono o tableta.
+2. **Conectar un dispositivo físico**, si el propietario tiene uno: es lo que falta para Doze real, los gestores de
+   batería, la wifi del restaurante y el papel.
+
+**Fusión**: `etapa-a2-android` en `main` y push al terminar la Fase F (los hace el coordinador).
