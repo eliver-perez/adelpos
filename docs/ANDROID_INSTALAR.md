@@ -125,7 +125,7 @@ versión de cada una): envía lo pendiente desde ella y sigue desde el paso 2.
    - Solo se aprueba desde la computadora principal: desde otra terminal no se puede.
    - Tras 5 códigos incorrectos la solicitud se rechaza sola y hay que pedir otro código.
 6. El dispositivo dice **«Emparejamiento listo.»** y pasa a la pantalla de entrada, **«¿Quién eres?»**. Si dice
-   «Todavía no hay meseros con PIN», sigue con la sección 4.
+   «No hay meseros con PIN», sigue con la sección 4.
 
 Después, en **Administración › Sistema › Terminales**, el dispositivo aparece con su tipo («Teléfono o tableta»), el
 mesero que lo usa y si está **en línea**. Con **«Editar»** cambias su nombre, su bloqueo por inactividad (sección 4),
@@ -225,6 +225,12 @@ administrativo se sigue haciendo en la computadora con su contraseña.
 ## 5. Sin conexión
 
 Arriba, siempre se ve si el dispositivo está **«En línea»**, **«Sin conexión»** y cuántos pedidos hay **por enviar**.
+La barra y los avisos de cada pantalla («¿Quién eres?», Mesas, Para llevar, la precuenta, «Entregado» y la notificación
+«AD-EL POS conectado») dicen siempre lo mismo. Dice **«Sin conexión»** en cuanto el teléfono o la tableta se queda sin
+red, o si la computadora principal deja de responder unos **20 segundos** seguidos; una falla aislada (un instante sin
+respuesta) no la cambia. En cuanto la computadora principal vuelve a responder, dice **«En línea»** otra vez. Con el
+dispositivo sin uso, la aplicación pregunta a la computadora principal como mucho una vez por minuto.
+
 Cada pedido tiene uno de estos estados:
 
 | Estado                        | Qué significa                                                      |
@@ -358,7 +364,8 @@ resumen. Se ve también en «¿Quién eres?» y en la pantalla de bloqueo.
 
 **«AD-EL POS conectado».** Para que los avisos lleguen con la pantalla apagada, Android exige que la aplicación muestre
 una **notificación permanente** mientras mantiene la conexión con la computadora principal: «AD-EL POS conectado»
-(«Sin conexión con la computadora principal. Reintentando…» si se cortó la red). Aparece cuando un mesero entra con su
+(«Sin conexión con la computadora principal. Reintentando…» si se cortó la red o la computadora principal dejó de
+responder, igual que la barra de la aplicación; sección 5). Aparece cuando un mesero entra con su
 PIN **con conexión** y se queda mientras haya meseros que entraron ese día en el dispositivo (o que siguen con su sesión
 abierta); desaparece sola cuando ya no hay a quién avisar (al terminar el día comercial, a la «Hora de inicio del día»
 de la computadora principal, si nadie sigue con su sesión), si se apaga «Avisar platillos listos», al retirar el
