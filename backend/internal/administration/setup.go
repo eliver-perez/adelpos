@@ -106,16 +106,19 @@ func (service *Service) setup(ctx context.Context, tx pgx.Tx, request Request) (
 	if err != nil {
 		return nil, err
 	}
-	// Etapa A1 (A1-D2): el rol Mesero recibe además waiter_devices.use (entrar con PIN en los dispositivos de
-	// meseros), lo mismo que la migración 0025 concede en una instalación existente.
-	_, err = tx.Exec(ctx, `INSERT INTO app.role_permissions(role_id,permission_key)
-        SELECT r.id,p.key FROM app.roles r CROSS JOIN app.permissions p
-        WHERE (r.code='supervisor' AND p.key IN ('users.read','devices.read','sessions.read','registers.read'))
-        OR (r.code IN ('cashier','finance') AND p.key='registers.read')
-        OR (r.code='waiter' AND p.key='waiter_devices.use')
-        ON CONFLICT DO NOTHING`)
-	if err != nil {
-		return nil, err
+	// Etapa A3 (§3.1, A3-D2): una instalación nueva trae los roles de fábrica con sus permisos habituales ya marcados
+	// (permission_catalog.go). Sustituye a lo que concedía hasta la A2 (algunos de consulta al supervisor, al cajero y a
+	// finanzas, y waiter_devices.use al mesero, A1-D2), que ya está dentro de cada conjunto. En una instalación
+	// existente nada cambia sin «Restablecer permisos predeterminados» (la 0027 no toca roles).
+	for _, code := range factoryRoleCodes {
+		keys, _ := factoryPermissions(code)
+		_, err = tx.Exec(ctx, `INSERT INTO app.role_permissions(role_id,permission_key)
+            SELECT r.id,p.key FROM app.roles r JOIN app.permissions p ON p.key = ANY($2::text[])
+            WHERE r.code=$1
+            ON CONFLICT DO NOTHING`, code, keys)
+		if err != nil {
+			return nil, err
+		}
 	}
 	var adminID, registerID string
 	err = tx.QueryRow(ctx, `INSERT INTO app.users(username,display_name,password_hash,role_id,initial_password)

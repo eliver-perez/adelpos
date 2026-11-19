@@ -4,7 +4,10 @@ package administration_test
 
 import (
 	"encoding/json"
+	"slices"
 	"testing"
+
+	"local/ad-el-pos/server/internal/administration"
 )
 
 // testLongOpenHours cubre la etapa 9D en administración: el umbral de cuenta abierta por mucho tiempo
@@ -109,11 +112,18 @@ func testLongOpenHours(t *testing.T, env *delegationEnvironment) {
 			descriptions["accounts.manage"] != "Editar datos de cuentas" {
 			t.Fatalf("descripciones visibles: %q / %q", descriptions["accounts.cancel"], descriptions["accounts.manage"])
 		}
+		// Desde la etapa A3 también lo tienen los roles de fábrica que lo traen (el Supervisor, A3-D2); ningún otro.
+		factoryHolders := 0
+		for _, code := range []string{"waiter", "cashier", "kitchen", "supervisor", "inventory", "finance"} {
+			if slices.Contains(administration.FactoryRolePermissions(code), "accounts.cancel") {
+				factoryHolders++
+			}
+		}
 		if env.scalar(t, `SELECT count(*) FROM app.role_permissions p JOIN app.roles r ON r.id=p.role_id
             WHERE p.permission_key='accounts.cancel' AND r.code='administrator'`) != 1 ||
 			env.scalar(t, `SELECT count(*) FROM app.role_permissions p JOIN app.roles r ON r.id=p.role_id
-            WHERE p.permission_key='accounts.cancel' AND r.code<>'administrator'`) != 0 {
-			t.Fatal("«Cancelar cuentas» debía concederse solo al administrador")
+            WHERE p.permission_key='accounts.cancel' AND r.code<>'administrator'`) != factoryHolders || factoryHolders != 1 {
+			t.Fatal("«Cancelar cuentas» debía concederse solo al administrador y al Supervisor de fábrica")
 		}
 	})
 }
