@@ -98,7 +98,11 @@ paquetes que se desinstalan antes de las instrumentadas, en «Pruebas») y en es
     desconexiones de la A2 (Fase 0 de la A3): Go cierra una conexión libre a los 60 s y OkHttp la guardaba 5 minutos sin
     revisarla antes de un `GET`; por eso el pool guarda las conexiones libres **30 s** y una lectura sin respuesta se
     repite **una vez** con una conexión nueva (nunca una escritura: llevan su `operation_id`; ni un canal ni un plazo
-    vencido; `retryOnConnectionFailure` sigue en `false`).
+    vencido; `retryOnConnectionFailure` sigue en `false`). Toda llamada de OkHttp de `core:data` se espera con
+    `Call.awaitResponse` (`core/data/…/api/CallAwait.kt`, la única): si la corrutina se cancela cuando la respuesta ya
+    llegó, la respuesta se cierra en `Dispatchers.IO`, nunca en el hilo de la corrutina (cerrar una conexión TLS escribe
+    en la red y en el hilo principal Android lanzaba `NetworkOnMainThreadException`: la aplicación se cerraba; Fase E de
+    la A3, `CallAwaitTest`).
 14. **Código fuente claro, nunca ofuscado ni compactado** (regla del propietario, la misma de `AGENTS.md` para todo el
     repositorio): saltos de línea, indentación de 4 espacios y una declaración por línea; funciones, `when`, `if` y
     llamadas con muchos argumentos en varias líneas; nombres descriptivos y comentarios en español donde haya reglas,
@@ -226,7 +230,10 @@ mismo entorno. Los comentarios de línea (`//`) se escriben de 100 columnas como
   tolerancia (unos 20–30 s), no con la primera falla: las esperas de esas pruebas son de 60 s. Ajustes de §4:
   `StageA3ScreensTest` (la tarjeta de cuenta en dos renglones a 320, 360, 400, 600 y 840 dp, la flecha y el logotipo de
   la barra, la búsqueda en un renglón, la tarjeta sin imagen, los textos de la entrada, la fila de Mesas y el mapa que
-  llena el espacio) y `DeviceLayoutTest` (la flecha de Pendientes y Lista | Mapa con rotación real).
+  llena el espacio), `DeviceLayoutTest` (la flecha de Pendientes y Lista | Mapa con rotación real) y
+  `PinOrientationTest` (el teclado del PIN completo, sin deslizar y con teclas de 48 dp o más, en la entrada y en
+  «Vuelve a escribir tu PIN», con rotación real; `PinPadChecks`). En la JVM, `PinPadSizingTest` y `CallAwaitTest` (la
+  respuesta abandonada por una cancelación se cierra fuera del hilo de la corrutina, con la carrera forzada).
 - **Contra el Go temporal**: `ServerApiOnDeviceTest` (`core:data`, argumentos `pin` y `net`) y, de punta a punta,
   `AccessOnGoTest` (`app`, 7 pasos: emparejar con el código, PIN incorrecto y bloqueo al quinto que cierra la entrada
   sin conexión, cabeceras de cada mesero, entrada sin conexión, PIN cambiado con «Vuelve a escribir tu PIN» sin salir
@@ -274,14 +281,20 @@ mismo entorno. Los comentarios de línea (`//`) se escriben de 100 columnas como
   cero: ningún segundo con «Sin conexión», ninguna petición sin respuesta (`ServerLinkMonitor.noAnswers`), ninguna
   lectura repetida (`repeats`) y cada vuelta con sesión de Go. El paso tiene tiempo límite (sus minutos más 15) y el
   guion agranda el registro del emulador. Con la Mac sin carga y sin Gradle compilando.
-- **`AdjustmentsOnGoTest`** (etapa A3, §4, `--suite adjustments`, pasos `a1`–`a6`, con rotación real y capturas de
+- **`AdjustmentsOnGoTest`** (etapa A3, §4, `--suite adjustments`, pasos `a1`–`a7`, con rotación real y capturas de
   pantalla en `<salida>/screens`): `a1` arma el restaurante por la API de la principal (dos áreas con mesas, catálogo
   sin imágenes, una cuenta vacía), empareja y entra; `a2` Mesas en una fila, el mapa, el panel con la flecha y las
   cuentas en dos renglones; `a3` «Imprimir precuenta» desde el panel (llega a Go: sin impresora, Go lo dice) y
   «Descartar cuenta vacía» con confirmación (Go la descarta); `a4` la captura (título, «Buscar producto», tarjetas
   sin imagen, «Ver la cuenta · 1 por enviar», el aviso al salir con la flecha, Pendientes); `a5` la entrada; `a6` la
-  pantalla inicial Para llevar cambiada en Terminales (`PATCH` del dispositivo desde la principal). El
-  `ACCOUNT_NOT_EMPTY` del descarte se prueba en la JVM (`TablePanelAccountsTest`).
+  pantalla inicial Para llevar cambiada en Terminales (`PATCH` del dispositivo desde la principal); `a7` el teclado
+  del PIN completo en vertical y horizontal (la entrada y «Vuelve a escribir tu PIN»). El `ACCOUNT_NOT_EMPTY` del
+  descarte se prueba en la JVM (`TablePanelAccountsTest`).
+- **Ayudantes de punta a punta** (Fase E de la A3): `showOrder` espera la cuenta o su botón «Ver la cuenta» antes de
+  decidir si lo toca (la captura se dibuja antes que el botón: falla vista en `waiter w6`), y `GoTestServer.call`
+  repite hasta dos veces, con 2 s de pausa y una línea `AdelOnGo`, una lectura o un `auth/login` que no tuvo ninguna
+  respuesta de Go (`alerts r3` en Android 13: con la red del emulador cortada un momento, la petición llegó a la escucha
+  local más de 5 s después de abrir la conexión y Go la cerró sin leerla, `ReadHeaderTimeout`); nunca una escritura.
 - **Ejecutor de pruebas de `app`**: `com.adelpos.meseros.AdelTestRunner` (`testInstrumentationRunner` de
   `app/build.gradle.kts`; paquete de pruebas `com.adelpos.meseros.test`). Antes de crear el contenedor, busca por NSD
   el tipo `_adelpostest._tcp` y toma `clientVersion` de los argumentos. Ayudantes: `TestDevice` (un servidor
@@ -564,6 +577,13 @@ precheck`** (pasos `p1`–`p7`; la prueba hace de principal y del agente de impr
   mesero no eligió otra sección.
 - **Catálogo**: «Buscar producto» en un renglón siempre; un producto sin imagen usa la tarjeta compacta (nombre y
   precio, `TAG_PRODUCT_WITHOUT_IMAGE`).
+- **PIN con poca altura** (teléfono horizontal; antes solo se veían las teclas 1 a 6): la entrada y «Vuelve a
+  escribir tu PIN» van en dos columnas (`PinColumns`, `feature:access`): a la izquierda quién entra, los puntos
+  (`PinPadDots`), los avisos y sus botones; a la derecha el teclado completo (`PinPad` con `showDots = false`,
+  `keyHeight` y `gap`) con las teclas tan altas como quepan (`AdelPinPadDefaults.keyHeightToFit`: entre 48 y 72 dp; si
+  ni así cabe, se desliza). El diálogo usa más ancho con poca altura. En vertical y en la tableta, una columna como
+  antes. Las teclas tienen 8 dp de margen interior y su nombre va en un renglón: con el de Material, «Ingresar» y
+  «Borrar» se partían en el diálogo del teléfono (`PinPadChecks` lo comprueba).
 
 ## Aviso de platillos listos (etapa A2, Fase D, para los demás módulos)
 
