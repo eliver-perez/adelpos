@@ -2188,3 +2188,187 @@ Fusionadas en `85be71e` (solo `desktop/`).
   permisos de inventario y compras (`inventory/AdjustmentsView.tsx:182`, `required_permission` de Go) muestran la clave
   solo con un valor que el escritorio no conozca; hoy todos los que escribe Go tienen nombre. No se cambian en esta etapa
   (limitación).
+
+## Fase E · Correcciones de Android que encontró la regresión
+
+Agente de Android en `$SP/wt/and2` (rama `etapa-a3-and2`, desde `etapa-a3` = `e258fb4`), 19 de noviembre de 2026. Corrige
+lo que la primera corrida de la regresión encontró en `Pixel_Tablet` y `ADEL_A1_Phone_API33` (`precheck p1`, `alerts r3`
+y el teclado del PIN en el teléfono horizontal). Sin cambios en `backend/`, `desktop/`, `CLAUDE.md` de la raíz ni el
+contrato. Pruebas en copias aisladas: Go temporal `ISO_TAG=AN` (8193/8453; uno nuevo por suite), `ADEL_A1_Phone_API33`
+(5582, Android 13) y `Pixel_Tablet` (5580, Android 17) de solo lectura, siempre con `AdelTestRunner`; nunca la red real.
+
+### Commits (rama `etapa-a3-and2`, sin push ni merge; árbol limpio)
+
+- `34266e4` etapa A3 fase E (Android): el teclado del PIN completo en el teléfono horizontal
+- `094c7ce` etapa A3 fase E (Android): una respuesta abandonada por una cancelación se cierra fuera del hilo principal
+- `df108f5` etapa A3 fase E (Android): pruebas de punta a punta al día con la Fase C
+- `e5c5e78` etapa A3 fase E (Android): GoTestServer repite una lectura o un auth/login sin respuesta de Go
+- `c4754f3` etapa A3 fase E (Android): android/CLAUDE.md con el PIN en horizontal, awaitResponse y los ayudantes de
+  prueba
+
+### 1. A1 · `PrecheckOnGoTest p1` (prueba desactualizada por la Fase C)
+
+- `p1` (ahora `p1_prepararEnviarACocinaYSinPermisoElBotonDiceElMotivo`, también en `scripts/android-e2e.sh`): sin
+  `payments.tickets.print`, «Imprimir precuenta» se ve **deshabilitado** (`assertIsNotEnabled`), con
+  `TAG_PRECHECK_NOT_ALLOWED` y «Tu usuario no tiene permiso para imprimir la precuenta.»; tocarlo no crea ningún
+  documento en Go. Al final da el permiso como antes, así `p2`–`p7` ya no fallan en cadena.
+- **Otras expectativas de antes de la Fase C**: busqué en las pruebas instrumentadas y de punta a punta (botón de
+  precuenta ausente, «¿Quién eres?», «Pedidos pendientes», «Buscar mesa», «Ver la mesa», «Captura», «Entrar»,
+  «Elegir otro nombre», «Toca tu nombre», «Ver la cuenta (», `TAG_TABLES_SEARCH`). Solo quedaban dos literales
+  «Entrar» sin efecto en el resultado (`ServerLinkScreensTest`, `PinPadTest`): ahora «Ingresar».
+- **`waiter w6`** (falla que no se repitió en la Fase E): el ayudante `showOrder` decidía si tocar «Ver la cuenta» con
+  lo que había en ese instante; la captura se dibuja antes que ese botón, así que a veces no tocaba nada y esperaba la
+  cuenta 40 s (la pantalla al fallar mostraba el catálogo con «Ver la cuenta» a la vista, como en el registro de la
+  Fase E). Ahora espera la cuenta **o** el botón antes de decidir, en las seis pruebas que lo usan (`Alerts`, `Field`,
+  `Precheck`, `Takeaway`, `WaiterMode` y `Adjustments`). Lo vi igual en `adjustments a4` en la Fase C.
+
+### 2. A2 · `alerts r3` en Android 13
+
+**Lo que hice para encontrar la causa** (registro completo del dispositivo, `logcat -b all`, y el registro de Go en
+cada corrida):
+
+| Corrida en `ADEL_A1_Phone_API33`                                                                   | Resultado                          |
+| -------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| `--steps "r1 r2 r3"`, emulador recién arrancado                                                    | 3/3                                |
+| `--suite alerts` completa, con la tableta corriendo sus instrumentadas a la vez (carga)            | 11/11                              |
+| `--suite alerts` completa, después de `precheck`, `access` y `adjustments` (cortes de red de `p6`) | 11/11                              |
+| `--suite alerts` completa, corrida final (código final)                                            | 0/11: sin red del emulador (abajo) |
+| `--suite alerts` completa, repetida con un Go nuevo (código final)                                 | 11/11                              |
+| En la tableta, `--suite alerts` completa, dos veces (la segunda con el código final)               | 11/11 y 11/11                      |
+
+**No se reprodujo** (`r3` aprobó en todas). Lo que sí quedó demostrado:
+
+- **Go no deja registro si la petición llega tarde.** Con una conexión abierta a la escucha local del Go temporal y la
+  petición enviada después: a los 1 y 4,5 s Go responde (401 de `auth/login` sin cuerpo); a los 5,5 y 7 s cierra la
+  conexión sin responder y **sin ninguna línea en su registro** (`ReadHeaderTimeout: 5 s`,
+  `backend/cmd/ad-el-pos-server/main.go:262` y `lanlistener.go:234`). Desde el emulador por `10.0.2.2`, lo mismo
+  (`toybox nc`: 1 s → `HTTP/1.1 200`; 6 s → nada). Así se ve una petición que «Go no registró»: la que falló fue la
+  primera de un cliente nuevo de la prueba (`GoTestServer`, un `OkHttpClient` propio, no el de la aplicación) y se cortó
+  leyendo la respuesta.
+- **La red del emulador sí se corta y cambia sola alrededor de los cortes de red del guion.** En el registro completo
+  (`and2-r3/alerts-phone-1-full-logcat.txt` y `and2-e2e/emulator-5582-alerts-full-logcat.txt`): al cortar la red
+  (`r4`), «Destroyed 13 sockets on 10.0.2.16» y la aplicación registra varias «sin respuesta» en el mismo milisegundo;
+  al devolverla, la red celular queda unos segundos como predeterminada antes del wifi («Switching to new default
+  network»), el wifi se reconecta y, 30 s después, `handleLingerComplete for [… CELLULAR]` destruye las conexiones que
+  se abrieron en esa ventana («Destroyed … sockets for netId …»); en una corrida el wifi volvió a desconectarse unos
+  30 s después de reconectarse («Destroyed 5 sockets on 10.0.2.16»).
+- **En las dos fallas de la Fase E**, `r3` corrió **unos 45–55 s después de que el guion devolviera la red** en el
+  paso anterior (`precheck p6` en `all`: corte hacia las 16:27:45 y `p7` a las 16:28:39, falla a las 16:29:25;
+  `waiter w13b` en la repetición: 16:47:01–16:47:08, falla a las 16:48:04), con la Mac a carga 10–15 (dos emuladores y
+  el agente del escritorio; en mis corridas, 5). En la segunda, la aplicación registró **tres «sin respuesta» en el
+  mismo milisegundo** 3,9 s antes de la falla (todas sus conexiones cortadas a la vez, como en un cambio de red del
+  emulador), y en ninguna de las dos el estado de la aplicación dijo «Sin conexión».
+
+- **La corrida final del teléfono lo confirma de otra forma**: `alerts` falló completa (0/11) porque el emulador se
+  quedó sin red desde las 19:03:28 hasta que el corte de red de `r4` la reinició (19:09:06). En su registro completo,
+  el wifi (139) y la red celular (138) fallan la validación una y otra vez con el DNS sin respuesta («PROBE_DNS … FAIL
+  … Timeout», «validation failed»), la aplicación no llegó a la escucha de red de Go en esos minutos (ninguna petición
+  del dispositivo en el registro de Go) y, después de 19:09:06, las peticiones llegaron otra vez. Repetida con un Go
+  nuevo: 11/11. La tableta, con el mismo código: 11/11.
+
+**Conclusión**: no es de la aplicación ni de la A3. Lo más probable es un acomodo de la red del emulador de Android 13
+(wifi o celular como predeterminada, y conexiones destruidas al terminar el periodo de la red anterior) que, con la Mac
+cargada, cayó encima de la primera petición de la ayuda de la prueba. Esa petición llegó a Go cuando su conexión ya no
+servía (o tarde: Go la cierra sin registro). Los cambios de la A3 en la conexión (pool de 30 s, una repetición de
+lectura) son del cliente de la aplicación, no de esa ayuda. **No lo pude ver en vivo**: lo dejo como causa probable y
+no como causa demostrada.
+
+**Corrección (de la prueba, sin aflojar lo que comprueba)**: `GoTestServer.call` repite hasta dos veces, con 2 s de
+pausa y una línea `AdelOnGo` («… sin respuesta de Go (…); se repite (n)»), **solo** lo que no cambia nada si Go ya lo
+hubiera atendido: lecturas (`GET`) y `auth/login` (una sesión nueva). Nunca una escritura. Lo que `r3` comprueba (el
+aviso no llega a otro mesero ni a otro dispositivo y transferir cambia el destinatario) no cambia. En mis corridas
+finales la repetición **no se usó** (no hay ninguna línea «se repite»).
+
+### 3. El teclado del PIN completo en el teléfono horizontal
+
+En horizontal (≈ 267 dp para el panel) la entrada necesitaba ≈ 450 dp: solo se veían 1–6 (había que deslizar). Lo
+mismo pasaba en «Vuelve a escribir tu PIN». Cambio acotado, solo de presentación:
+
+- `PinPad` (`core:ui`): `showDots`, `keyHeight` y `gap` configurables; `PinPadDots` pública;
+  `AdelPinPadDefaults.keyHeightToFit(alto)` (las cuatro filas caben; entre 48 y 72 dp). Teclas con 8 dp de margen
+  interior y el nombre en un renglón: con el de Material, «Ingresar» y «Borrar» se partían («Ingr/esar», «Borr/ar») en
+  el diálogo del teléfono, también en vertical (lo vi en las capturas; «Ingresar» es más largo que «Entrar»).
+- `PinColumns` (`feature:access`, nuevo): con poca altura (`currentHeightCompact`, < 480 dp), dos columnas: a la
+  izquierda quién entra, los puntos, los avisos y «Elegir otro usuario»/«Cambiar de mesero»; a la derecha el teclado
+  completo. La entrada (`PinEntryScreen`) y el diálogo (`ReenterPinDialog`, más ancho con poca altura) lo usan. En
+  vertical y en la tableta, igual que antes.
+
+Pruebas: `PinPadSizingTest` (JVM: 267 dp → teclas de 60,75 dp; mucho alto → 72; poco → 48);
+`PinOrientationTest` (instrumentada, rotación real con `UiAutomation.setRotation`: en la orientación natural, girada y
+de vuelta, las doce teclas dentro del panel sin deslizar, de 48 dp o más y con su nombre completo en un renglón
+—`PinPadChecks`—; entra girado con el PIN 4829, que tiene 8 y 9; después «Vuelve a escribir tu PIN» en las dos
+orientaciones y se vuelve a entrar); y `adjustments a7` contra Go, con capturas.
+
+### 4. Hallazgo nuevo en las corridas: la aplicación se cerraba al cancelar una llamada ya respondida
+
+En `adjustments a4` (teléfono) la aplicación se cerró con `NetworkOnMainThreadException`. **Es un defecto de la
+aplicación de la A1/A2** (`WaiterApi`, `ServerApi` y `AuthorizedCalls`, tres copias del mismo `await`): si la corrutina
+del hilo principal se cancela (por ejemplo, al salir de una pantalla) cuando la respuesta ya llegó pero todavía no se
+entregó, el manejador de la cancelación cerraba la respuesta **en el hilo principal**; cerrar una conexión TLS escribe
+en la red (`close_notify`) y Android lo prohíbe: la excepción salía del manejador y cerraba el proceso. Pila
+completa en `and2-e2e/emulator-5582-adjustments/a4_…txt` de esa corrida (`WaiterApi.kt:402` → `Response.close` →
+`ConscryptEngineSocket.close` → `NetworkOnMainThreadException`). Es raro (una carrera de milisegundos), pero en el
+restaurante cerraría la aplicación.
+
+Corrección: una sola espera, `Call.awaitResponse` (`core/data/…/api/CallAwait.kt`), que en ese caso cierra la
+respuesta en `Dispatchers.IO`; las tres copias se quitaron. `CallAwaitTest` (JVM, MockWebServer) fuerza la carrera
+(el hilo de la corrutina ocupado mientras llega la respuesta, cancelación antes de entregarla) y comprueba que la
+respuesta se cierra fuera de ese hilo; una segunda prueba comprueba que con el cierre en el mismo hilo (lo de antes)
+se cerraría en el de la corrutina, o sea que la primera de verdad pasa por esa carrera.
+
+### Pruebas ejecutadas (resultado real)
+
+Código final (`c4754f3`) salvo donde se dice. Las instrumentadas con la aplicación, sus pruebas y las de la 0.1.0
+desinstaladas antes (`pm list packages`: 0) y contando los XML; copias en `$SP/and2-results/final-5582` y
+`final-5580`. Las de punta a punta, cada suite con un Go temporal nuevo y el registro completo del dispositivo y de Go
+(`$SP/and2-e2e/`).
+
+| Prueba                                                                             | `ADEL_A1_Phone_API33` (5582)                                                                                                                                       | `Pixel_Tablet` (5580)           |
+| ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------- |
+| JVM (`core:domain:test testDebugUnitTest`), `lintDebug`, `ktfmtCheck`, `fmt-check` | 386 pruebas, 0 fallas (domain 172, data 181 con `CallAwaitTest`, ui 15 con `PinPadSizingTest`, access 7, waiter 6, takeaway 5); lint sin errores; formato aprobado | (Mac)                           |
+| Instrumentadas `app`                                                               | 121 pruebas, 45 corridas, 76 omitidas (las de Go sin argumentos), 0 fallas; `PinOrientationTest` 1/1, `StageA3ScreensTest` 7/7                                     | igual: 121 / 45 / 76 / 0 fallas |
+| Instrumentadas `core:ui` / `core:data`                                             | 14/14 (`PinPadTest` 3/3) / 18 corridas + 2 omitidas, 0 fallas                                                                                                      | igual                           |
+| `--suite precheck`                                                                 | 7/7                                                                                                                                                                | 7/7                             |
+| `--suite access` (pasos 1–5 y 7)                                                   | 6/6                                                                                                                                                                | 6/6                             |
+| `--suite adjustments` (`a1`–`a7`)                                                  | 7/7                                                                                                                                                                | 7/7                             |
+| `--suite alerts`                                                                   | 0/11 (sin red del emulador, ver §2), repetida: **11/11**                                                                                                           | 11/11                           |
+| `--suite waiter` (`w1`–`w13c`, por `w6` y el cambio de `awaitResponse`)            | 19/19                                                                                                                                                              | no corrida                      |
+| La repetición de `GoTestServer`                                                    | no se usó en ninguna corrida (ninguna línea «se repite»)                                                                                                           | no se usó                       |
+
+En el camino (ya corregido y vuelto a correr): `PinOrientationTest` falló en los dos con la primera versión de la
+comprobación del nombre de la tecla (`hasVisualOverflow` marcaba el «1»; ahora se comprueba que el renglón tenga todo
+el texto), y `adjustments a4` en el teléfono encontró el cierre de la aplicación del punto 4.
+
+### Capturas
+
+`$SP/shots-fix/telefono-ADEL_A1_Phone_API33/` y `$SP/shots-fix/tableta-Pixel_Tablet/`: `a7-pin-vertical`,
+`a7-pin-horizontal`, `a7-vuelve-a-escribir-vertical`, `a7-vuelve-a-escribir-horizontal`, `a5-pin-vertical` y
+`a5-pin-horizontal`, de la corrida final.
+
+### No verificado / para el coordinador
+
+- `alerts r3` en Android 13: causa probable, no demostrada (arriba). Si vuelve a fallar, la línea `AdelOnGo` «se
+  repite» y el registro completo lo dirán.
+- `access` paso 6 (certificado cambiado) no se corrió: necesita otro servidor con otra identidad (solo en `--suite all`).
+- `Pixel_8` y `ADEL_A1_Tablet_API26` no se corrieron.
+- Las teclas de dígitos del diálogo «Vuelve a escribir tu PIN» casi no se distinguen del fondo del diálogo (el tono de
+  `FilledTonalButton` y `surfaceContainerHigh` son casi iguales); es de antes y no lo cambié.
+- En la tableta vertical, la pestaña de área siguiente queda cortada al borde (la fila se desliza y la elegida se ve
+  completa; observación de la Fase E, sin cambio).
+
+### Decisiones del coordinador sobre las correcciones de Android
+
+Fusionadas en `9038b79` (solo `android/` y `scripts/android-e2e.sh`).
+
+- **A3-D24 · El teclado del PIN completo en horizontal** (§6, «nada cortado»): se acepta el cambio de presentación (dos
+  columnas con poca altura, teclas de 48–72 dp con su nombre en un renglón). En vertical y en la tableta no cambia nada.
+- **A3-D25 · El cierre de la aplicación al cancelar una llamada ya respondida**: se corrige en esta etapa aunque viene de
+  la A1/A2. Es un defecto que cerraría la aplicación en el restaurante, no una función nueva. La espera queda en un solo
+  lugar (`Call.awaitResponse`).
+- **A3-D26 · `alerts r3` en Android 13**: se acepta la causa como **probable** (el acomodo de la red del emulador cae
+  sobre la primera petición de la ayuda de la prueba) y la repetición de `GoTestServer` solo para lecturas y
+  `auth/login`, con su línea en el registro. La regresión final la vigila: si aparece una línea «se repite», se
+  informa con su registro; la prueba no se afloja de ninguna otra forma.
+- **A3-D27 · Lo que queda igual**: el contraste de las teclas de dígitos en «Vuelve a escribir tu PIN» (viene de antes y
+  se lee bien) y la pestaña de área siguiente cortada al borde en la tableta vertical (la fila se desliza y la elegida se
+  ve completa). Quedan como observaciones; no se cambian en esta etapa.
