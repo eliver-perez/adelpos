@@ -41,11 +41,14 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.adelpos.meseros.core.domain.access.WaiterProfile
 import com.adelpos.meseros.core.domain.access.WaiterRoster
 import com.adelpos.meseros.core.domain.connection.LinkState
+import com.adelpos.meseros.core.ui.components.AdelPinPadDefaults
 import com.adelpos.meseros.core.ui.components.PinPad
+import com.adelpos.meseros.core.ui.components.PinPadDots
 import com.adelpos.meseros.core.ui.components.SecondaryButton
 import com.adelpos.meseros.core.ui.components.WaiterBadge
 import com.adelpos.meseros.core.ui.icons.AdelIcons
 import com.adelpos.meseros.core.ui.layout.PaneLayout
+import com.adelpos.meseros.core.ui.layout.currentHeightCompact
 import com.adelpos.meseros.core.ui.theme.AdelDimens
 import com.adelpos.meseros.core.ui.theme.AdelTheme
 import com.adelpos.meseros.feature.access.AccessDependencies
@@ -338,6 +341,47 @@ private fun PinPanel(
     onDelete: () -> Unit,
     onSubmit: () -> Unit,
 ) {
+    // Etapa A3 (§4): con poca altura (teléfono horizontal), en dos columnas para que el teclado
+    // completo quepa (antes solo se veían las teclas 1 a 6).
+    if (selected != null && currentHeightCompact()) {
+        PinColumns(
+            modifier =
+                Modifier.fillMaxSize().padding(AdelDimens.ScreenPadding).testTag(TAG_PIN_PANEL),
+            info = {
+                if (message != null) {
+                    Box(modifier = Modifier.testTag(TAG_ENTRY_MESSAGE)) {
+                        ProblemNotice(entryMessageText(message))
+                    }
+                }
+                PinFor(selected)
+                PinPadDots(length = pinLength)
+                if (busy) {
+                    Checking()
+                }
+                SecondaryButton(
+                    text = stringResource(R.string.entry_other_waiter),
+                    onClick = onBack,
+                    icon = AdelIcons.ChevronLeft,
+                    modifier = Modifier.testTag(TAG_ENTRY_BACK),
+                )
+            },
+            pad = { keyHeight ->
+                PinPad(
+                    length = pinLength,
+                    onDigit = onDigit,
+                    onDelete = onDelete,
+                    onSubmit = onSubmit,
+                    submitLabel = stringResource(R.string.entry_enter),
+                    enabled = !busy,
+                    showDots = false,
+                    keyHeight = keyHeight,
+                    gap = AdelPinPadDefaults.CompactGap,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            },
+        )
+        return
+    }
     Column(
         modifier =
             Modifier.fillMaxSize()
@@ -361,25 +405,9 @@ private fun PinPanel(
             )
             return@Column
         }
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            WaiterBadge(initial = selected.initial, colorHex = selected.color, size = 56.dp)
-            Text(
-                text = stringResource(R.string.entry_pin_for, selected.name),
-                style = MaterialTheme.typography.headlineSmall,
-            )
-        }
+        PinFor(selected)
         if (busy) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
-            ) {
-                CircularProgressIndicator(modifier = Modifier.padding(4.dp))
-                Text(stringResource(R.string.entry_checking))
-            }
+            Checking()
         }
         PinPad(
             length = pinLength,
@@ -396,6 +424,34 @@ private fun PinPanel(
             icon = AdelIcons.ChevronLeft,
             modifier = Modifier.testTag(TAG_ENTRY_BACK),
         )
+    }
+}
+
+/** «PIN de Ana» con su distintivo. */
+@Composable
+private fun PinFor(selected: WaiterProfile) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        WaiterBadge(initial = selected.initial, colorHex = selected.color, size = 56.dp)
+        Text(
+            text = stringResource(R.string.entry_pin_for, selected.name),
+            style = MaterialTheme.typography.headlineSmall,
+        )
+    }
+}
+
+/** «Comprobando…» mientras Go responde (también lo usa «Vuelve a escribir tu PIN»). */
+@Composable
+internal fun Checking() {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+    ) {
+        CircularProgressIndicator(modifier = Modifier.padding(4.dp))
+        Text(stringResource(R.string.entry_checking))
     }
 }
 
