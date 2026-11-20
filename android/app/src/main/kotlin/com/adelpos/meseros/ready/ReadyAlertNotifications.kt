@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.media.AudioAttributes
 import android.os.Bundle
+import android.os.SystemClock
 import android.provider.Settings
 import android.service.notification.StatusBarNotification
 import androidx.core.app.NotificationCompat
@@ -22,6 +23,7 @@ import com.adelpos.meseros.core.domain.ready.ReadyAlertWords
 import com.adelpos.meseros.core.domain.ready.ReadyChannels
 import com.adelpos.meseros.core.domain.ready.ReadyItem
 import com.adelpos.meseros.core.domain.ready.ReadyNotice
+import com.adelpos.meseros.core.domain.ready.ReadyShownNotices
 import com.adelpos.meseros.core.domain.waiter.OrderMode
 
 /**
@@ -54,15 +56,23 @@ interface InAppAlerts {
  *   repite.
  * - Sin el permiso de notificaciones (Android 13+) Android no las muestra y no falla: la ayuda lo
  *   dice.
+ * - El resumen del grupo se decide con [ReadyShownNotices] (etapa A3, Fase E): la lista de Android
+ *   tarda en reflejar lo recién publicado o quitado.
+ *
+ * @param listed lo que Android lista ahora (las pruebas lo reemplazan para ver su retraso).
  */
 class ReadyAlertNotifications(
     context: Context,
     private val inApp: InAppAlerts,
+    private val listed: (NotificationManager) -> List<StatusBarNotification> = { manager ->
+        manager.activeNotifications.toList()
+    },
 ) : ReadyAlertPresenter {
     private val appContext: Context = context.applicationContext
     private val manager: NotificationManager =
         appContext.getSystemService(NotificationManager::class.java)
     private val words: ReadyAlertWords = wordsFrom(appContext)
+    private val shown = ReadyShownNotices(clock = SystemClock::elapsedRealtime)
 
     @Volatile private var applied: ReadyAlertSettings? = null
 
@@ -149,6 +159,7 @@ class ReadyAlertNotifications(
                 continue
             }
             manager.notify(notice.accountId, ALERT_ID, alertNotification(notice, channel))
+            shown.posted(notice)
         }
         updateSummary(channel)
     }
@@ -157,12 +168,14 @@ class ReadyAlertNotifications(
     fun cancelAccount(accountId: String) {
         if (active().any { it.tag == accountId && it.id == ALERT_ID }) {
             manager.cancel(accountId, ALERT_ID)
+            shown.removed(accountId)
             updateSummary(readyChannel)
         }
     }
 
     /** Quita todos los avisos (borrar los datos del dispositivo). */
     fun cancelAlerts() {
+        shown.cleared()
         for (notification in active()) {
             if (notification.id == ALERT_ID || notification.id == SUMMARY_ID) {
                 manager.cancel(notification.tag, notification.id)
@@ -225,13 +238,26 @@ class ReadyAlertNotifications(
             .build()
     }
 
-    /** Con dos o más cuentas a la vista, el resumen del grupo (sin sonido); con menos, ninguno. */
+    /**
+     * Con dos o más cuentas a la vista, el resumen del grupo (sin sonido). Las cuentas a la vista
+     * son las de Android más lo recién publicado y menos lo recién quitado ([ReadyShownNotices]):
+     * justo después de `notify` la lista de Android muchas veces todavía no lo tiene y, con una
+     * sola cuenta en ella, antes se quitaba el resumen en lugar de publicarlo (etapa A3, Fase E).
+     *
+     * Con una sola cuenta el resumen no se toca: quitar el resumen de un grupo hace que Android
+     * quite también sus notificaciones, y se iría el aviso de la cuenta que queda (con una sola,
+     * Android muestra esa notificación y no el resumen). Sin ninguna, se quita.
+     */
     private fun updateSummary(channel: String) {
-        val notices = activeNotices().values.toList()
-        if (notices.size < 2) {
+        val visible = shown.visible(activeNotices())
+        if (visible.isEmpty()) {
             manager.cancel(null, SUMMARY_ID)
             return
         }
+        if (!ReadyShownNotices.needsSummary(visible)) {
+            return
+        }
+        val notices = visible.values.toList()
         val style = NotificationCompat.InboxStyle()
         for (notice in notices) {
             style.addLine(words.title(notice))
@@ -255,7 +281,7 @@ class ReadyAlertNotifications(
 
     private fun active(): List<StatusBarNotification> =
         try {
-            manager.activeNotifications.toList()
+            listed(manager)
         } catch (_: RuntimeException) {
             // Algunos sistemas fallan al leerlas durante un cambio de usuario: se trata como nada.
             emptyList()

@@ -233,10 +233,25 @@ class AccessRepository(
      * La sonda del estado único de conexión (`GET health/live` al servidor emparejado; su respuesta
      * llega al estado por el cliente). No toma el candado: también la pide la entrada con PIN
      * mientras lo tiene. false si no hay servidor emparejado al que preguntar.
+     *
+     * Etapa A3 (Fase E, `access` paso 6): si la sonda que busca el servidor ([relocate], la de «Sin
+     * conexión») encuentra **otro certificado** en su dirección y tampoco lo halla en otra, lo
+     * informa como cualquier otra petición ([report]): el dispositivo pide emparejar de nuevo.
+     * Antes solo lo descubría la comprobación de versiones, y con «Sin conexión» esa comprobación
+     * espera a que la sonda responda; con otro certificado la sonda nunca responde, así que el
+     * dispositivo se quedaba en «Sin conexión» sin pedir emparejar de nuevo.
      */
     suspend fun probeServer(relocate: Boolean, quick: Boolean): Boolean {
         val current = connection ?: return false
-        current.live(relocate, quick)
+        val outcome = current.live(relocate, quick)
+        if (
+            relocate &&
+                outcome is ApiOutcome.NoAnswer &&
+                outcome.error == AppError.ServerIdentityChanged &&
+                connection === current
+        ) {
+            report(AppError.ServerIdentityChanged, userId = null)
+        }
         return true
     }
 

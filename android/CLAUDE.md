@@ -94,15 +94,18 @@ paquetes que se desinstalan antes de las instrumentadas, en «Pruebas») y en es
     ninguna con el canal de eventos abierto; cada 60 s sin él (se salta si hubo otro éxito, como la lista de «Selecciona
     tu usuario», que también es cada 60 s); nada en segundo plano; versiones y lista cada 5 minutos. Al tocar algo que
     necesita a Go con «Sin conexión» y red de Android, se pregunta en ese momento (`ServerLink.confirm`) antes de decir
-    que falta conexión. Las constantes llevan su porqué en `ServerLinkTracker` y `PinnedHttpClient`. La causa de las
-    desconexiones de la A2 (Fase 0 de la A3): Go cierra una conexión libre a los 60 s y OkHttp la guardaba 5 minutos sin
-    revisarla antes de un `GET`; por eso el pool guarda las conexiones libres **30 s** y una lectura sin respuesta se
-    repite **una vez** con una conexión nueva (nunca una escritura: llevan su `operation_id`; ni un canal ni un plazo
-    vencido; `retryOnConnectionFailure` sigue en `false`). Toda llamada de OkHttp de `core:data` se espera con
-    `Call.awaitResponse` (`core/data/…/api/CallAwait.kt`, la única): si la corrutina se cancela cuando la respuesta ya
-    llegó, la respuesta se cierra en `Dispatchers.IO`, nunca en el hilo de la corrutina (cerrar una conexión TLS escribe
-    en la red y en el hilo principal Android lanzaba `NetworkOnMainThreadException`: la aplicación se cerraba; Fase E de
-    la A3, `CallAwaitTest`).
+    que falta conexión. Otro certificado en la dirección del servidor (otra identidad) nunca «responde»: la sonda que
+    busca el servidor (la de «Sin conexión») lo informa con `report` y el dispositivo pide emparejar de nuevo
+    (`AccessRepository.probeServer`; antes solo lo veía la comprobación de versiones, que con «Sin conexión» espera a la
+    sonda, y el dispositivo se quedaba en «Sin conexión»; Fase E de la A3, `access` paso 6). Las constantes llevan su
+    porqué en `ServerLinkTracker` y `PinnedHttpClient`. La causa de las desconexiones de la A2 (Fase 0 de la A3): Go
+    cierra una conexión libre a los 60 s y OkHttp la guardaba 5 minutos sin revisarla antes de un `GET`; por eso el pool
+    guarda las conexiones libres **30 s** y una lectura sin respuesta se repite **una vez** con una conexión nueva
+    (nunca una escritura: llevan su `operation_id`; ni un canal ni un plazo vencido; `retryOnConnectionFailure` sigue en
+    `false`). Toda llamada de OkHttp de `core:data` se espera con `Call.awaitResponse` (`core/data/…/api/CallAwait.kt`,
+    la única): si la corrutina se cancela cuando la respuesta ya llegó, la respuesta se cierra en `Dispatchers.IO`,
+    nunca en el hilo de la corrutina (cerrar una conexión TLS escribe en la red y en el hilo principal Android lanzaba
+    `NetworkOnMainThreadException`: la aplicación se cerraba; Fase E de la A3, `CallAwaitTest`).
 14. **Código fuente claro, nunca ofuscado ni compactado** (regla del propietario, la misma de `AGENTS.md` para todo el
     repositorio): saltos de línea, indentación de 4 espacios y una declaración por línea; funciones, `when`, `if` y
     llamadas con muchos argumentos en varias líneas; nombres descriptivos y comentarios en español donde haya reglas,
@@ -643,10 +646,15 @@ arma la aplicación (A2-D10) con las plantillas de `app/src/main/res/values/stri
   guardado en Room, sin preguntar a Go (el servicio comprueba el dispositivo al arrancar).
 - **Notificaciones**: un solo canal visible «Platillos listos» cuyo id depende del sonido y la vibración de Terminales
   (A2-D7); una notificación por cuenta (etiqueta = la cuenta) con el acumulado, y el resumen del grupo con dos o más.
-  Al tocarla, `MainActivity` recibe la cuenta (`ReadyAlertsController.pendingOpen`): en «Selecciona tu usuario» la
-  entrada con PIN deja elegido a su mesero y, al entrar (él u otro que pueda ver la cuenta), se abre su captura
-  (`ReadyAlertsNavigationEffects`); si ya no está abierta, se pregunta a Go: combinada en otra, abre la vigente; cobrada
-  o cancelada, «Esta cuenta ya no está abierta». Con esa cuenta a la vista, el aviso va dentro de la aplicación
+  El resumen se decide con `ReadyShownNotices` (`core:domain`): lo que Android lista **más** lo recién publicado y
+  **menos** lo recién quitado (`notify` es asíncrono; en Android 13, 18 de 30 notificaciones no estaban en la lista
+  justo después de publicarlas y el resumen se quitaba en lugar de publicarse). Con una sola cuenta el resumen no se
+  toca (quitar el resumen de un grupo hace que Android quite sus notificaciones: se iría la de la cuenta que queda); sin
+  ninguna, se quita. Pruebas: `ReadyShownNoticesTest` (JVM) y `ReadyAlertsOnDeviceTest` con la lista de Android atrasada
+  a propósito. Al tocarla, `MainActivity` recibe la cuenta (`ReadyAlertsController.pendingOpen`): en «Selecciona tu
+  usuario» la entrada con PIN deja elegido a su mesero y, al entrar (él u otro que pueda ver la cuenta), se abre su
+  captura (`ReadyAlertsNavigationEffects`); si ya no está abierta, se pregunta a Go: combinada en otra, abre la vigente;
+  cobrada o cancelada, «Esta cuenta ya no está abierta». Con esa cuenta a la vista, el aviso va dentro de la aplicación
   (`inAppNotices`).
 - **Permisos** (`ReadyAlertsOverlay`): la primera vez que el servicio corre, una explicación antes del diálogo de
   Android: notificaciones (API 33+) y la exclusión de la optimización de batería (`tools:ignore="BatteryLife"`, con su
