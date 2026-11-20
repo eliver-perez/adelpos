@@ -96,8 +96,8 @@ versión de cada una): envía lo pendiente desde ella y sigue desde el paso 2.
   **Administración › Sistema › Configuración › «Ver estado del sistema»**, en «Versión de AD-EL POS». Si tiene una
   versión anterior, el teléfono lo dice antes de pedir el código (y también si ya estaba emparejado):
   **«Actualiza el servidor del restaurante»**, con «Volver a comprobar» y «Elegir otra computadora principal». Lo que
-  hay que actualizar es la computadora principal: soporte o el administrador instala la 0.13.0 con su instalador (pide
-  la contraseña de administrador de la Mac). Cómo se instala la computadora principal:
+  hay que actualizar es la computadora principal: soporte o el administrador instala la versión más reciente (hoy, la
+  0.14.0) con su instalador (pide la contraseña de administrador de la Mac). Cómo se instala la computadora principal:
   [INSTALAR_EN_RED.md](INSTALAR_EN_RED.md).
 - **El teléfono o la tableta debe estar en la misma red wifi del restaurante** que la computadora principal (la red
   principal, no la de invitados).

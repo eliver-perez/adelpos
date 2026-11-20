@@ -2514,3 +2514,38 @@ Fusionadas en `be46a07` (solo `android/`).
 - **A3-D30 · `alerts r3` con la repetición de la ayuda**: en la corrida de `ca120ee`, `r3` aprobó en el teléfono las dos
   veces **gracias a la repetición** de `GoTestServer` (un `auth/login` sin respuesta, con el patrón de A3-D26). Se da por
   aprobado y se informa así en la verificación; la prueba no se afloja de otra forma.
+
+## Fase E · Cierre de la regresión
+
+La última corrida de Android fue sobre una copia exacta de `49961de`, la cabeza con todo fusionado; el detalle está en
+[VERIFICATION_STAGEA3.md](VERIFICATION_STAGEA3.md), «Android». Resultados:
+
+- **JVM**: 393 pruebas, 0 fallas.
+- **Instrumentadas**: 156 en cada uno de los cuatro emuladores, sin fallas.
+- **`Pixel_8`**: `--suite all` 76 de 76.
+- **`Pixel_Tablet` y `ADEL_A1_Phone_API33`**: `access` (con el paso 6) y `alerts` (con `r5`), aprobadas.
+- **`ADEL_A1_Tablet_API26`**: 75 de 76, corrida por partes.
+- **Mesero de fábrica**: aprobado desde la aplicación en `Pixel_Tablet`, sin tocar el rol.
+- **Capturas**: 138 revisadas.
+- **Repeticiones de `GoTestServer`**: ninguna sobre `49961de`.
+
+Lo que quedó abierto es `takeaway t6` en Android 8 (C1). La edición en línea del cliente llega a Go, pero la lista de
+la tableta no muestra el nombre nuevo en 40 s. Falló dos veces y aprueba en los otros tres emuladores; su causa no se
+determinó.
+
+### Decisiones del coordinador al cerrar la regresión
+
+- **A3-D31 · La hora sin uso no se corre, por decisión del propietario** (20/11/2026: «Omite la prueba de la hora sin
+  uso»). §6 la pedía; queda como no verificada, nunca como aprobada. La referencia es la corrida de 10 minutos de la Fase
+  A (0 de 557 s con «Sin conexión»), sobre el código de esa fase.
+- **A3-D32 · C1 queda como pendiente conocido de Android 8, por decisión del propietario** (20/11/2026: cerrar la etapa
+  sin investigarlo). Se documenta como limitación en la verificación y en `CLAUDE.md`. El dato llega a Go y la
+  computadora principal lo muestra; solo la lista de la tableta no se pone al día.
+- **A3-D33 · Lo demás de la corrida se acepta como está.**
+  - Android 8 se completó por partes, instalando con `adb install` cuando la instalación por Gradle (`ddmlib`) se colgaba.
+    Hace lo mismo que `install_app` del guion; el guion no cambió.
+  - Las cuatro observaciones nuevas de las capturas quedan como observaciones, sin cambio en esta etapa:
+    - la etiqueta «Enviado · sin confirmar en coci…» con puntos suspensivos en la tableta vertical;
+    - el título «Nuevo pe…» en `Pixel_8` vertical;
+    - el panel que todavía decía «Borrador» justo después de enviar;
+    - Para llevar como inicio, capturada solo en la orientación natural.
