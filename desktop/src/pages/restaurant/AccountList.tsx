@@ -1,4 +1,4 @@
-import { preparationLabels } from '../../services/kitchen';
+import { preparationLabel } from '../../services/kitchen';
 import { Field, Notice } from '../../components/Forms';
 import {
   accountLabel,
@@ -8,7 +8,7 @@ import {
 } from '../../services/restaurant';
 import type { Account, AccountPage } from '../../services/restaurant';
 import { formatMoney } from '../../services/money';
-import { deliveryStateBadges, paymentStateBadges } from '../../services/payments';
+import { deliveryStateBadge, paymentStateBadge } from '../../services/payments';
 import { countLabel } from '../../services/plural';
 import { Select } from '../../components/Select';
 import { Icon } from '../../components/Icon';
@@ -60,14 +60,14 @@ function FinanceBadges({ account, takeaway }: { account: Account; takeaway: bool
   return (
     <>
       <span className={`finance-badge finance-badge-${account.payment_state}`}>
-        Pago: {paymentStateBadges[account.payment_state] ?? account.payment_state}
+        Pago: {paymentStateBadge(account.payment_state)}
       </span>
       {account.payment_state === 'partial' && account.finance && (
         <span className="finance-badge">Saldo {formatMoney(account.finance.balance)}</span>
       )}
       {takeaway && (
         <span className={`finance-badge finance-badge-${account.delivery_state}`}>
-          Entrega: {deliveryStateBadges[account.delivery_state] ?? account.delivery_state}
+          Entrega: {deliveryStateBadge(account.delivery_state)}
         </span>
       )}
     </>
@@ -93,7 +93,7 @@ function AccountCard({
   onSelect: (id: string) => void;
 }) {
   const place = placeText(account, takeaway);
-  const preparation = preparationLabels[account.preparation_state] ?? account.preparation_state;
+  const preparation = preparationLabel(account.preparation_state);
   return (
     <button
       className={`account-list-card ${selected ? 'account-list-selected' : ''} ${takeaway ? `account-urgency-${account.urgency}` : ''} ${longOpen(account) ? 'account-long-open' : ''}`}

@@ -15,12 +15,11 @@ import com.adelpos.meseros.core.domain.access.IdleLock
 import com.adelpos.meseros.core.domain.access.UnsentOrder
 import com.adelpos.meseros.core.domain.access.WaiterWorkGate
 import com.adelpos.meseros.core.domain.connection.LinkState
+import com.adelpos.meseros.core.domain.connection.ServerLink
 import com.adelpos.meseros.core.domain.pairing.PairingFlow
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
@@ -31,6 +30,8 @@ import kotlinx.coroutines.launch
  *
  * @param idleLock el del proceso (lo vigila `AppContainer`; `MainActivity` y los diálogos le avisan
  *   de cada toque). Las pantallas no lo vigilan: volver a crearlas nunca reinicia el plazo.
+ * @param serverLink el estado único de conexión (etapa A3, A3-D1): el aviso de «Selecciona tu
+ *   usuario» lo lee, igual que la barra.
  * @param wallClock hora del dispositivo, para mostrar «Intenta de nuevo a las 14:35».
  */
 class AccessDependencies(
@@ -38,16 +39,17 @@ class AccessDependencies(
     val pairing: PairingFlow,
     val work: WaiterWorkGate,
     val idleLock: IdleLock,
-    val linkState: Flow<LinkState>,
+    val serverLink: ServerLink,
     val wallClock: () -> Long = System::currentTimeMillis,
 )
 
 /**
  * Puerta de entrada de la aplicación: decide qué pantalla se ve según el estado del dispositivo
- * ([DeviceAccess.status]) y el mesero activo, vuelve a comprobar el servidor al recuperar la red y
- * cada minuto con la aplicación a la vista, y hace el cambio rápido de mesero. El bloqueo por
- * inactividad **no** vive aquí sino en el proceso (`AppContainer.startIdleLock`; revisión R3, A2):
- * esta pantalla se destruye y se vuelve a crear con el proceso vivo.
+ * ([DeviceAccess.status]) y el mesero activo, vuelve a comprobar el servidor (versiones, lista de
+ * meseros y verificadores) al volver la conexión y cada 5 minutos con la aplicación a la vista, y
+ * hace el cambio rápido de mesero. El bloqueo por inactividad **no** vive aquí sino en el proceso
+ * (`AppContainer.startIdleLock`; revisión R3, A2): esta pantalla se destruye y se vuelve a crear
+ * con el proceso vivo.
  */
 class AccessViewModel(private val dependencies: AccessDependencies) : ViewModel() {
     private val access = dependencies.access
@@ -63,17 +65,17 @@ class AccessViewModel(private val dependencies: AccessDependencies) : ViewModel(
 
     init {
         viewModelScope.launch { access.start() }
-        // Al recuperar la red: versiones, lista de meseros e invalidación de verificadores.
+        // Al volver la conexión (la red o la computadora principal, según el estado único):
+        // versiones, lista de meseros e invalidación de verificadores.
         viewModelScope.launch {
-            dependencies.linkState
-                .distinctUntilChanged()
+            dependencies.serverLink.state
                 .drop(1)
                 .filter { it == LinkState.ONLINE }
                 .collect { access.recheck() }
         }
     }
 
-    /** La aplicación pasó a primer plano: comprueba ya y después cada minuto. */
+    /** La aplicación pasó a primer plano: comprueba ya y después cada 5 minutos. */
     fun onForeground() {
         periodicCheck?.cancel()
         periodicCheck = viewModelScope.launch {
@@ -136,7 +138,13 @@ class AccessViewModel(private val dependencies: AccessDependencies) : ViewModel(
     }
 
     companion object {
-        private const val PERIODIC_CHECK_MILLIS = 60_000L
+        /**
+         * Versiones, capacidades y lista de meseros con la aplicación a la vista (A3-D1: `GET
+         * version` cada 5 minutos). Si hay conexión lo revisa el estado único (`ServerLink`), no
+         * esta comprobación: antes era de 60 s exactos y caía siempre sobre la conexión que Go
+         * acababa de cerrar (Fase 0, §0.3).
+         */
+        private const val PERIODIC_CHECK_MILLIS = 5 * 60_000L
 
         fun factory(dependencies: AccessDependencies): ViewModelProvider.Factory =
             viewModelFactory {

@@ -41,7 +41,7 @@ function PanelLines({
 }) {
   const active = bill.lines.filter((line) => line.state === 'active');
   if (active.length === 0 && localDraft.length === 0) {
-    return <p className="muted table-panel-empty-lines">La cuenta aún no tiene productos.</p>;
+    return <p className="muted table-panel-empty-lines">La cuenta no tiene productos.</p>;
   }
   return (
     <ul className="table-panel-lines" aria-label="Productos de la cuenta">

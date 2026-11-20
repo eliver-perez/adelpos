@@ -9,6 +9,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.adelpos.meseros.core.capture.CaptureDependencies
+import com.adelpos.meseros.core.domain.connection.LinkState
 import com.adelpos.meseros.core.domain.waiter.Capture
 import com.adelpos.meseros.core.domain.waiter.CustomerTarget
 import com.adelpos.meseros.core.domain.waiter.DeliveryResult
@@ -68,6 +69,9 @@ class TakeawayViewModel(private val dependencies: TakeawayDependencies) : ViewMo
 
     val status: StateFlow<RestaurantStatus> = capture.restaurant.status
 
+    /** El estado único de conexión (etapa A3, A3-D1), el mismo de la barra. */
+    val link: StateFlow<LinkState> = capture.link
+
     val readAt: StateFlow<TakeawayRead?> = capture.takeaway.readAt
 
     val entries: StateFlow<List<TakeawayEntry>> =
@@ -101,7 +105,10 @@ class TakeawayViewModel(private val dependencies: TakeawayDependencies) : ViewMo
     var noticeMessage: String? by mutableStateOf(null)
         private set
 
-    /** El mesero tiene sesión de Go: «Entregado» exige conexión (no va a la cola). */
+    /**
+     * El mesero tiene sesión de Go: «Entregado» exige conexión (no va a la cola). La pantalla lo
+     * junta con el estado único de conexión ([link]).
+     */
     val online: Boolean
         get() = capture.activeWaiter.value?.hasServerSession == true
 
@@ -188,7 +195,14 @@ class TakeawayViewModel(private val dependencies: TakeawayDependencies) : ViewMo
                         is DeliveryResult.Delivered -> TakeawayNotice.DELIVERED
                         DeliveryResult.CollectFirst -> TakeawayNotice.COLLECT_FIRST
                         DeliveryResult.AlreadyDelivered -> TakeawayNotice.ALREADY_DELIVERED
-                        DeliveryResult.NoConnection -> TakeawayNotice.NO_CONNECTION
+                        // «Necesitas conexión» solo si la barra también dice «Sin conexión»; con
+                        // «En línea», Go no respondió esta vez: «No se pudo… Inténtalo de nuevo».
+                        DeliveryResult.NoConnection ->
+                            if (link.value == LinkState.OFFLINE) {
+                                TakeawayNotice.NO_CONNECTION
+                            } else {
+                                TakeawayNotice.FAILED
+                            }
                         is DeliveryResult.Failed -> TakeawayNotice.FAILED
                     }
             } finally {

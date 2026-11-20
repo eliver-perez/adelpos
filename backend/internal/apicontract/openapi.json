@@ -1606,6 +1606,66 @@
         }
       }
     },
+    "/restaurant/accounts/{id}/discard": {
+      "post": {
+        "operationId": "discardAccount",
+        "summary": "Descartar una cuenta vacía",
+        "description": "Etapa 9D; en el contrato desde la etapa A3 (A3-D8), sin cambios: el escritorio y la aplicación Android ya la usaban. Descarta sin motivo una cuenta abierta sin productos enviados, pagos, ajustes, documentos ni registros de cocina, aunque tenga un borrador sin enviar, que se borra en la misma transacción. Requiere accounts.open y accounts.read (en un pedido para llevar, además takeaway.manage). El cliente la ofrece cuando la cuenta trae discardable true. No es una cancelación: no pide motivo ni autorización y no aparece en «Cuentas canceladas» ni en otros reportes; la cuenta queda anulada (state voided) y se publica restaurant.account.discarded. Una cuenta con productos enviados, pagos, ajustes, documentos o registros de cocina: 409 ACCOUNT_NOT_EMPTY (se cancela con su motivo en el escritorio); 409 ACCOUNT_CONFLICT si la revisión cambió; una cuenta que ya no está abierta: 400 OPERATION_VALIDATION con details AccountNotOpenDetails. Idempotente con operation_id (otro contenido con la misma clave: 409 IDEMPOTENCY_CONFLICT). Devuelve la cuenta.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "operation_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "revision": {
+                    "type": "integer"
+                  }
+                },
+                "required": ["operation_id", "revision"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Cuenta descartada (state voided, sin borrador).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Bill"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Restaurante"]
+      }
+    },
     "/restaurant/offline-orders": {
       "post": {
         "operationId": "submitOfflineOrder",
@@ -4515,6 +4575,14 @@
           },
           "long_open": {
             "type": "boolean"
+          },
+          "discardable": {
+            "type": "boolean",
+            "description": "Lo calcula Go en cada lectura (etapa 9D; en el contrato desde la etapa A3): true si la cuenta está abierta y sin productos enviados, pagos, ajustes, documentos ni registros de cocina, aunque tenga borrador. Entonces se descarta con discardAccount, sin motivo; una cuenta descartable no se cancela."
+          },
+          "releasable": {
+            "type": "boolean",
+            "description": "Lo calcula Go en cada lectura (etapa 7.1; en el contrato desde la etapa A3): discardable y además sin borrador, la cuenta vacía en sentido estricto («Liberar mesa» del escritorio)."
           }
         },
         "required": [
@@ -4535,7 +4603,9 @@
           "delivery_state",
           "confirmed_quantity",
           "draft_quantity",
-          "totals"
+          "totals",
+          "discardable",
+          "releasable"
         ],
         "description": "Cuenta con su revisión (control optimista: toda escritura la envía) y los estados que calcula Go. Un pedido para llevar es una cuenta con mode takeaway, sin mesa (table_id null), con su folio, el cliente, el origen y sus estados de preparación, pago y entrega independientes (estar pagado no es estar entregado)."
       },

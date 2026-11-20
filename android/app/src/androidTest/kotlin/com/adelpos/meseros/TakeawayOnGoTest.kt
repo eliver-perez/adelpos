@@ -57,7 +57,7 @@ import com.adelpos.meseros.feature.takeaway.TAG_TAKEAWAY_EDIT_PREFIX
 import com.adelpos.meseros.feature.takeaway.TAG_TAKEAWAY_EMPTY
 import com.adelpos.meseros.feature.takeaway.TAG_TAKEAWAY_ENTRY_PREFIX
 import com.adelpos.meseros.feature.takeaway.TAG_TAKEAWAY_NEW
-import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_SEARCH
+import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_SCREEN
 import com.adelpos.meseros.navigation.TAG_MAIN_NAVIGATION
 import com.adelpos.meseros.navigation.TAG_NAVIGATION_RAIL
 import com.adelpos.meseros.navigation.TAG_NAV_TAKEAWAY
@@ -446,7 +446,7 @@ class TakeawayOnGoTest {
             compose.onNodeWithTag("$TAG_PIN_KEY_PREFIX$digit").performClick()
         }
         compose.onNodeWithTag(TAG_PIN_SUBMIT).performClick()
-        waitFor(TAG_TABLES_SEARCH)
+        waitFor(TAG_TABLES_SCREEN)
     }
 
     private fun openTakeaway() {
@@ -491,7 +491,13 @@ class TakeawayOnGoTest {
 
     /** En el teléfono, la cuenta está a un toque; en la tableta, siempre a la vista. */
     private fun showOrder() {
-        if (!present(TAG_ORDER_PANEL) && present(TAG_PANE_OPEN_SECONDARY)) {
+        // Se espera a la cuenta o a su botón «Ver la cuenta» antes de decidir: si la captura
+        // todavía
+        // no terminó de dibujarse, el botón no está y no se tocaba nada (falla vista en `w6`).
+        waitUntil("la cuenta o «Ver la cuenta»") {
+            present(TAG_ORDER_PANEL) || present(TAG_PANE_OPEN_SECONDARY)
+        }
+        if (!present(TAG_ORDER_PANEL)) {
             compose.onNodeWithTag(TAG_PANE_OPEN_SECONDARY).performClick()
         }
         waitFor(TAG_ORDER_PANEL)

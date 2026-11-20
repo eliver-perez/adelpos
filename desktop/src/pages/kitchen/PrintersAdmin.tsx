@@ -632,8 +632,8 @@ function TerminalPrinterFields({
           </Field>
           {queues.length === 0 && (
             <Notice>
-              {terminal.device_name} todavía no informó sus impresoras. Abre AD-EL POS en esa
-              terminal con la impresora conectada y encendida; la lista se actualiza sola.
+              {terminal.device_name} no ha informado sus impresoras. Abre AD-EL POS en esa terminal
+              con la impresora conectada y encendida; la lista se actualiza sola.
             </Notice>
           )}
           <p className="muted text-sm">

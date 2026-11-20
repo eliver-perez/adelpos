@@ -8,6 +8,7 @@ import com.adelpos.meseros.core.domain.catalog.CatalogQuery
 import com.adelpos.meseros.core.domain.catalog.CatalogSource
 import com.adelpos.meseros.core.domain.catalog.CatalogSyncStatus
 import com.adelpos.meseros.core.domain.catalog.LineSelection
+import com.adelpos.meseros.core.domain.connection.LinkState
 import com.adelpos.meseros.core.domain.error.AppError
 import com.adelpos.meseros.core.domain.error.AppResult
 import com.adelpos.meseros.core.domain.money.Money
@@ -20,6 +21,7 @@ import com.adelpos.meseros.core.domain.waiter.CaptureService
 import com.adelpos.meseros.core.domain.waiter.CustomerEdit
 import com.adelpos.meseros.core.domain.waiter.CustomerTarget
 import com.adelpos.meseros.core.domain.waiter.DeliveryResult
+import com.adelpos.meseros.core.domain.waiter.DiscardAccountResult
 import com.adelpos.meseros.core.domain.waiter.DiscardResult
 import com.adelpos.meseros.core.domain.waiter.DraftOperation
 import com.adelpos.meseros.core.domain.waiter.DraftQuote
@@ -86,7 +88,18 @@ class FakeWaiter(catalog: Catalog = Catalog.EMPTY) {
 
             override suspend fun bill(accountId: String): AppResult<AccountBill> =
                 AppResult.Failure(AppError.Unreachable)
+
+            override suspend fun discardEmptyAccount(
+                account: AccountSummary,
+            ): DiscardAccountResult {
+                discarded.add(account.id)
+                return discardAnswer
+            }
         }
+
+    /** «Descartar cuenta vacía» que pidió la pantalla (etapa A3) y lo que responde Go. */
+    val discarded = mutableListOf<String>()
+    var discardAnswer: DiscardAccountResult = DiscardAccountResult.Discarded
 
     val captures =
         object : CaptureService {
@@ -286,6 +299,9 @@ class FakeWaiter(catalog: Catalog = Catalog.EMPTY) {
             ),
         )
 
+    /** El estado único de conexión que ven las pantallas (A3-D1). */
+    val link = MutableStateFlow(LinkState.ONLINE)
+
     fun captureDependencies(): CaptureDependencies =
         CaptureDependencies(
             restaurant = restaurant,
@@ -297,6 +313,7 @@ class FakeWaiter(catalog: Catalog = Catalog.EMPTY) {
             activeWaiter = active,
             takeaway = takeaway,
             precheck = precheck,
+            link = link,
         )
 
     fun dependencies(): WaiterDependencies =

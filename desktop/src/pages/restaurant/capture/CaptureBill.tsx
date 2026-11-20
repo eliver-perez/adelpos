@@ -3,13 +3,13 @@ import { Notice } from '../../../components/Forms';
 import { useConfirmDialog } from '../../../components/ConfirmDialog';
 import { usePendingEntry } from '../../../hooks/pendingOperations';
 import type { Lookups } from '../../../services/catalog';
-import { preparationLabels } from '../../../services/kitchen';
+import { preparationLabel } from '../../../services/kitchen';
 import { IconLabel } from '../../../components/Icon';
 import { formatMoney } from '../../../services/money';
 import {
-  deliveryStateDescriptions,
+  deliveryStateDescription,
   paymentPendingKey,
-  paymentStateDescriptions,
+  paymentStateDescription,
 } from '../../../services/payments';
 import { isPendingAccount } from '../../../services/restaurant';
 import type {
@@ -32,7 +32,7 @@ export type { BillAction };
 
 // Estado de pago con el saldo que calculó Go; la interfaz no suma importes.
 function paymentDescription(account: Account) {
-  const label = paymentStateDescriptions[account.payment_state] ?? account.payment_state;
+  const label = paymentStateDescription(account.payment_state);
   if (account.payment_state === 'partial' && account.finance) {
     return `${label} · saldo ${formatMoney(account.finance.balance)}`;
   }
@@ -44,9 +44,7 @@ function paymentDescription(account: Account) {
 function headerDescription(account: Account) {
   const parts: string[] = [];
   if (account.preparation_state !== 'pending_release') {
-    parts.push(
-      `Preparación: ${preparationLabels[account.preparation_state] ?? account.preparation_state}`,
-    );
+    parts.push(`Preparación: ${preparationLabel(account.preparation_state)}`);
   }
   if (account.mode !== 'takeaway') {
     parts.push(`Pago: ${paymentDescription(account)}`);
@@ -260,7 +258,7 @@ export function CaptureBill({
             {/* Etapa 9D (§4.5): pago y entrega en un renglón para que quepan más productos. */}
             <span>
               Pago: {paymentDescription(account)} · Entrega:{' '}
-              {deliveryStateDescriptions[account.delivery_state] ?? account.delivery_state}
+              {deliveryStateDescription(account.delivery_state)}
             </span>
             {account.customer_name && (
               <strong>
@@ -294,7 +292,7 @@ export function CaptureBill({
                   void confirm({
                     title: 'Descartar productos nuevos',
                     message:
-                      'Se quitarán de esta terminal los productos nuevos que aún no se guardaron en la cuenta.',
+                      'Se quitarán de esta terminal los productos nuevos que no se han guardado en la cuenta.',
                     confirmLabel: 'Descartar productos',
                     cancelLabel: 'Conservarlos',
                     tone: 'danger',
@@ -329,7 +327,7 @@ export function CaptureBill({
           onCustomize={onCustomize}
         />
         {bill.lines.length === 0 && localDraft.length === 0 && (
-          <p className="muted capture-empty">La cuenta aún no tiene productos.</p>
+          <p className="muted capture-empty">La cuenta no tiene productos.</p>
         )}
         {account.notes && <p className="bill-account-notes">Observaciones: {account.notes}</p>}
       </div>

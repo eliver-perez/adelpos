@@ -2,7 +2,7 @@
 <!-- Textos del catálogo y del personalizador (captura del mesero y, en la A2, Para llevar). En español del
      restaurante, sin tecnicismos. Los mensajes de Go se muestran tal cual. -->
 <resources xmlns:tools="http://schemas.android.com/tools" tools:locale="es">
-    <string name="catalog_search_label">Buscar producto por nombre o código</string>
+    <string name="catalog_search_label">Buscar producto</string>
     <string name="catalog_search_clear">Borrar búsqueda</string>
     <string name="catalog_categories">Categorías</string>
 

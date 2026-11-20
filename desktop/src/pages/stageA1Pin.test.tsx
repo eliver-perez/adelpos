@@ -280,7 +280,7 @@ describe('«Mi PIN»', () => {
   it('pide la contraseña actual y el PIN dos veces', async () => {
     const refresh = vi.fn(async () => undefined);
     render(<MyPinPage hasPIN={false} refresh={refresh} />);
-    expect(screen.getByText(/Todavía no tienes PIN/)).toBeTruthy();
+    expect(screen.getByText(/No tienes PIN/)).toBeTruthy();
     fireEvent.change(screen.getByLabelText('Contraseña actual'), {
       target: { value: 'secreta-1' },
     });

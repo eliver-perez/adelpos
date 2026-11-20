@@ -11,7 +11,7 @@ import com.adelpos.meseros.core.domain.waiter.OrderMode
  * @param shown los avisos que ya contiene (sus `key`).
  * @param items los platillos acumulados, en el orden en que llegaron; el mismo nombre se suma.
  * @param waiterUserId el mesero del último aviso (si la cuenta se transfirió, el nuevo): al tocarla
- *   en «¿Quién eres?» se le pide su PIN.
+ *   en «Selecciona tu usuario» se le pide su PIN.
  */
 data class ReadyNotice(
     val accountId: String,

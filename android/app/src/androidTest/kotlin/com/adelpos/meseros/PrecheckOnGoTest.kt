@@ -25,6 +25,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.adelpos.meseros.core.capture.TAG_CAPTURE
 import com.adelpos.meseros.core.capture.TAG_ORDER_PANEL
 import com.adelpos.meseros.core.capture.TAG_PRECHECK_MESSAGE_PREFIX
+import com.adelpos.meseros.core.capture.TAG_PRECHECK_NOT_ALLOWED
 import com.adelpos.meseros.core.capture.TAG_PRECHECK_OFFLINE
 import com.adelpos.meseros.core.capture.TAG_PRECHECK_PRINT
 import com.adelpos.meseros.core.capture.TAG_PRECHECK_RETRY
@@ -52,7 +53,7 @@ import com.adelpos.meseros.feature.waiter.tables.TAG_ACCOUNT_PANE
 import com.adelpos.meseros.feature.waiter.tables.TAG_ACCOUNT_PREFIX
 import com.adelpos.meseros.feature.waiter.tables.TAG_NEW_ACCOUNT
 import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_LIST
-import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_SEARCH
+import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_SCREEN
 import com.adelpos.meseros.feature.waiter.tables.TAG_TABLE_PREFIX
 import com.adelpos.meseros.navigation.TAG_NAV_TABLES
 import com.adelpos.meseros.navigation.TAG_NAV_TAKEAWAY
@@ -98,8 +99,9 @@ import org.junit.runner.RunWith
  *
  * - `p1` prepara el restaurante (rol de meseros **sin** `payments.tickets.print`, catálogo, mesa,
  *   la terminal «Caja 2» con su impresora USB y una impresora de red que no responde), empareja,
- *   entra y envía una cuenta a cocina: sin el permiso no hay botón de imprimir. Al final da el
- *   permiso (la guía: «Imprimir tickets y precuentas»).
+ *   entra y envía una cuenta a cocina: sin el permiso el botón de imprimir se ve deshabilitado con
+ *   el motivo (etapa A3, §4.9) y tocarlo no manda nada. Al final da el permiso (la guía: «Imprimir
+ *   tickets y precuentas»).
  * - `p2` sin impresora asignada: «Imprimir precuenta» → «Este dispositivo no tiene impresora
  *   asignada» y Go no encola nada (A2-D3: nunca otra impresora).
  * - `p3` la impresora USB de «Caja 2», que está desconectada: «La Caja 2 está desconectada»; al
@@ -151,7 +153,7 @@ class PrecheckOnGoTest {
     // --- Pasos ---
 
     @Test
-    fun p1_prepararEnviarACocinaYSinPermisoNoHayBoton() {
+    fun p1_prepararEnviarACocinaYSinPermisoElBotonDiceElMotivo() {
         val ana = main.ensureWaiters(mapOf(ANA_USER to ("Ana" to ANA_PIN))).getValue(ANA_USER)
         setWaiterPermissions(WAITER_PERMISSIONS)
         val ids = mutableMapOf("ana" to ana)
@@ -179,12 +181,21 @@ class PrecheckOnGoTest {
         ids["account"] = accountId
         ids["folio"] = account(accountId).getValue("folio").jsonPrimitive.content
         saveIds(ids)
-        // Sin `payments.tickets.print` en los permisos de Go: la cuenta no ofrece imprimir.
+        // Sin `payments.tickets.print` en los permisos de Go (etapa A3, §4.9): el botón se ve, pero
+        // deshabilitado y con el motivo, en lugar de ocultarse sin decir nada.
         openAccount(ids.getValue("table"), accountId)
         compose.waitForIdle()
         Thread.sleep(SETTLE_MILLIS)
-        assertFalse(present(TAG_PRECHECK_PRINT))
-        assertFalse(reveal(TAG_PRECHECK_PRINT))
+        showPrecheck()
+        compose.onNodeWithTag(TAG_PRECHECK_PRINT).assertIsNotEnabled()
+        reveal(TAG_PRECHECK_NOT_ALLOWED)
+        waitFor(TAG_PRECHECK_NOT_ALLOWED)
+        waitForText("Tu usuario no tiene permiso para imprimir la precuenta.")
+        // Tocarlo no manda nada a Go.
+        val before = documents(accountId).size
+        compose.onNodeWithTag(TAG_PRECHECK_PRINT).performClick()
+        Thread.sleep(SETTLE_MILLIS)
+        assertEquals(before, documents(accountId).size)
         // El permiso de la guía para el rol Mesero (se lee al volver a entrar).
         setWaiterPermissions(WAITER_PERMISSIONS + PRINT_PERMISSION)
     }
@@ -198,7 +209,7 @@ class PrecheckOnGoTest {
         openAccount(ids.getValue("table"), ids.getValue("account"))
         // Ya se sabe (getIdentity) que no tiene: se avisa antes de tocar, pero Go manda.
         showPrecheck()
-        waitForText("Este dispositivo todavía no tiene impresora asignada.")
+        waitForText("Este dispositivo no tiene impresora asignada.")
         tapWhenShown(TAG_PRECHECK_PRINT, "Imprimir precuenta")
         waitFor("${TAG_PRECHECK_MESSAGE_PREFIX}no-printer")
         waitForText("Este dispositivo no tiene impresora asignada.")
@@ -401,7 +412,7 @@ class PrecheckOnGoTest {
             compose.onNodeWithTag("$TAG_PIN_KEY_PREFIX$digit").performClick()
         }
         compose.onNodeWithTag(TAG_PIN_SUBMIT).performClick()
-        waitFor(TAG_TABLES_SEARCH)
+        waitFor(TAG_TABLES_SCREEN)
     }
 
     private fun openTakeaway() {
@@ -451,7 +462,13 @@ class PrecheckOnGoTest {
 
     /** En el teléfono, la cuenta está a un toque; en la tableta, siempre a la vista. */
     private fun showOrder() {
-        if (!present(TAG_ORDER_PANEL) && present(TAG_PANE_OPEN_SECONDARY)) {
+        // Se espera a la cuenta o a su botón «Ver la cuenta» antes de decidir: si la captura
+        // todavía
+        // no terminó de dibujarse, el botón no está y no se tocaba nada (falla vista en `w6`).
+        waitUntil("la cuenta o «Ver la cuenta»") {
+            present(TAG_ORDER_PANEL) || present(TAG_PANE_OPEN_SECONDARY)
+        }
+        if (!present(TAG_ORDER_PANEL)) {
             compose.onNodeWithTag(TAG_PANE_OPEN_SECONDARY).performClick()
         }
         waitFor(TAG_ORDER_PANEL)
@@ -469,19 +486,19 @@ class PrecheckOnGoTest {
     /** Sale de la captura (o de la mesa en el teléfono) hasta la lista de Mesas. */
     private fun backToTables() {
         repeat(4) {
-            if (!present(TAG_TABLES_SEARCH) || present(TAG_CAPTURE)) {
+            if (!present(TAG_TABLES_SCREEN) || present(TAG_CAPTURE)) {
                 pressBack()
             }
         }
-        if (!present(TAG_TABLES_SEARCH) && present(TAG_NAV_TABLES)) {
+        if (!present(TAG_TABLES_SCREEN) && present(TAG_NAV_TABLES)) {
             compose.onNodeWithTag(TAG_NAV_TABLES).performClick()
         }
-        waitFor(TAG_TABLES_SEARCH)
+        waitFor(TAG_TABLES_SCREEN)
     }
 
     /** Mesas: en el teléfono con la mesa abierta, primero «Volver a Mesas». */
     private fun showTables() {
-        waitUntil("Mesas") { present(TAG_TABLES_SEARCH) || present(TAG_ACCOUNT_PANE) }
+        waitUntil("Mesas") { present(TAG_TABLES_SCREEN) || present(TAG_ACCOUNT_PANE) }
         if (present(TAG_ACCOUNT_PANE) && present(TAG_PANE_BACK)) {
             pressBack()
         }

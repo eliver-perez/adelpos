@@ -337,7 +337,7 @@ export function FindServerPage({ state }: { state: InstallationState }) {
       ) : (
         <div className="find-server" aria-busy={saving}>
           <p className="find-server-status" role="status">
-            Esta terminal todavía no está conectada al servidor del restaurante.
+            Esta terminal no está conectada al servidor del restaurante.
           </p>
           <div className="find-server-form">
             <Field label="Nombre de esta terminal">

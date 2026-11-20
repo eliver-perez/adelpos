@@ -70,6 +70,10 @@ export type Operation =
   | 'create_role'
   | 'update_role'
   | 'permissions'
+  // Etapa A3 (§3): catálogo agrupado de permisos y «Restablecer permisos predeterminados» (vista previa y confirmación).
+  | 'permission_catalog'
+  | 'role_defaults'
+  | 'restore_role_defaults'
   | 'settings'
   | 'save_settings'
   | 'settings_features'

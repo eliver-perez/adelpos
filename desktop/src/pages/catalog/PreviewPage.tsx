@@ -122,7 +122,7 @@ export function PreviewPage({
                         className="danger-button"
                         onClick={() => setLines(lines.filter((_, position) => position !== index))}
                       >
-                        Retirar de prueba
+                        Quitar producto
                       </button>
                     )}
                   </div>

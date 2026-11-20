@@ -1,6 +1,8 @@
 package com.adelpos.meseros
 
+import android.util.Log
 import androidx.test.platform.app.InstrumentationRegistry
+import java.io.IOException
 import java.nio.ByteBuffer
 import java.security.MessageDigest
 import java.security.SecureRandom
@@ -67,15 +69,35 @@ class GoTestServer {
                 else -> null
             }
         builder.method(method, payload)
-        client.newCall(builder.build()).execute().use { response ->
-            val text = response.body.string()
-            val parsed =
-                if (text.isBlank()) {
-                    JsonObject(emptyMap())
-                } else {
-                    Json.parseToJsonElement(text).jsonObject
+        val request = builder.build()
+        // Etapa A3 (Fase E, `alerts r3` en Android 13): un corte breve de la red del emulador hizo
+        // que la petición de esta ayuda llegara a la escucha local más de 5 s después de abrir la
+        // conexión; Go la cierra sin leerla (`ReadHeaderTimeout`, sin registro) y aquí se vio
+        // «Connection reset» sin ninguna respuesta de Go. Solo se repite lo que no cambia nada si
+        // Go ya lo hubiera atendido (lecturas y una sesión nueva), nunca una escritura, y queda
+        // en el registro (`AdelOnGo`). Lo que la prueba comprueba de la aplicación no cambia.
+        val repeatable = method == "GET" || url.endsWith("/auth/login")
+        var attempt = 1
+        while (true) {
+            try {
+                client.newCall(request).execute().use { response ->
+                    val text = response.body.string()
+                    val parsed =
+                        if (text.isBlank()) {
+                            JsonObject(emptyMap())
+                        } else {
+                            Json.parseToJsonElement(text).jsonObject
+                        }
+                    return Answer(response.code, parsed)
                 }
-            return Answer(response.code, parsed)
+            } catch (failure: IOException) {
+                if (!repeatable || attempt >= ATTEMPTS) {
+                    throw failure
+                }
+                Log.w(LOG_TAG, "$method $url sin respuesta de Go ($failure); se repite ($attempt)")
+                attempt += 1
+                Thread.sleep(RETRY_PAUSE_MILLIS)
+            }
         }
     }
 
@@ -196,6 +218,11 @@ class GoTestServer {
 
     companion object {
         private val JSON_TYPE = "application/json; charset=utf-8".toMediaType()
+
+        // Intentos de una petición repetible sin respuesta de Go y la pausa entre ellos.
+        private const val ATTEMPTS = 3
+        private const val RETRY_PAUSE_MILLIS = 2_000L
+        private const val LOG_TAG = "AdelOnGo"
 
         fun operationId(): String = UUID.randomUUID().toString()
 

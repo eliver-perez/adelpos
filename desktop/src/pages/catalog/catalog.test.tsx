@@ -143,7 +143,7 @@ afterEach(() => {
 describe('catálogo y personalización', () => {
   it('guarda una categoría por el puente nativo con su estado y disponibilidad', async () => {
     render(<CatalogPage can={() => true} />);
-    await screen.findByText('Aún no hay registros');
+    await screen.findByText('No hay registros');
     fireEvent.click(screen.getByRole('tab', { name: 'Categorías' }));
     await waitFor(() =>
       expect(screen.getByRole('tab', { name: 'Categorías' }).getAttribute('aria-selected')).toBe(
@@ -171,7 +171,7 @@ describe('catálogo y personalización', () => {
 
   it('oculta creación cuando solo se permite consultar', async () => {
     render(<CatalogPage can={(permission) => permission === 'catalog.read'} />);
-    await screen.findByText('Aún no hay registros');
+    await screen.findByText('No hay registros');
     expect(screen.queryByRole('button', { name: /Crear/ })).toBeNull();
   });
 

@@ -89,6 +89,9 @@ data class ReadyOpenRequest(
  *   de cada tipo por proceso. El servicio tampoco envía pedidos: al reconectar pide un envío de la
  *   cola ([retryOrders]), como los disparadores de la A1.
  *
+ * @param linkState la red de Android: al volver, el canal reconecta sin esperar su espera.
+ * @param serverLink el estado único de conexión (etapa A3, A3-D1): la notificación permanente dice
+ *   «Sin conexión…» solo con él, igual que la barra.
  * @param enabled en las pruebas instrumentadas de la A1 el aviso queda apagado (su notificación y
  *   su canal no deben cambiar esas pruebas); en la aplicación, siempre encendido.
  * @param askPermissions si se explican y piden los permisos (notificaciones y batería) al arrancar
@@ -101,6 +104,7 @@ class ReadyAlertsController(
     private val preferences: DevicePreferencesRepository,
     private val foreground: StateFlow<Boolean>,
     private val linkState: Flow<LinkState>,
+    private val serverLink: StateFlow<LinkState>,
     private val retryOrders: () -> Unit,
     private val enabled: Boolean,
     val askPermissions: Boolean,
@@ -224,9 +228,10 @@ class ReadyAlertsController(
         }
         scope.launch {
             // Reabrir el canal (Go lo cierra cada 5 minutos) tarda un instante: «Conectando» solo
-            // si tarda; tras una falla, el texto de sin conexión se queda hasta volver a recibir.
-            channel.state.collectLatest { state ->
-                val next = ReadyOngoing.after(ongoingState.value, state)
+            // si tarda. «Sin conexión» solo con el estado único de conexión (etapa A3, A3-D1), el
+            // mismo de la barra; el protocolo del canal no cambia.
+            combine(channel.state, serverLink, ::Pair).collectLatest { (state, link) ->
+                val next = ReadyOngoing.of(state, link)
                 if (
                     next == ReadyOngoing.CONNECTING && ongoingState.value == ReadyOngoing.CONNECTED
                 ) {

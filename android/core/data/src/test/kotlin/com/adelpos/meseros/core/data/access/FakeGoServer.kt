@@ -8,6 +8,7 @@ import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import mockwebserver3.RecordedRequest
+import mockwebserver3.SocketEffect
 import okhttp3.tls.HandshakeCertificates
 import okhttp3.tls.HeldCertificate
 
@@ -58,6 +59,12 @@ class FakeGoServer(
     /** `X-Client-Kind` distinto del tipo del dispositivo: 400 CLIENT_KIND_MISMATCH en pin-login. */
     var kindMismatch = false
     var revoked = false
+
+    /**
+     * Cuántas peticiones más se leen y se cortan sin responder, como una conexión que se cayó
+     * (etapa A3: una falla aislada).
+     */
+    @Volatile var dropNext = 0
     var forbidden = emptySet<String>()
     var pairingState = "pending"
 
@@ -79,10 +86,18 @@ class FakeGoServer(
     init {
         val handshake = HandshakeCertificates.Builder().heldCertificate(certificate).build()
         server.useHttps(handshake.sslSocketFactory())
+        // Como la escucha de red de Go: HTTP/1.1 sin ALPN (etapa A3, Fase 0 §0.3).
+        server.protocolNegotiationEnabled = false
         server.dispatcher =
             object : Dispatcher() {
                 override fun dispatch(request: RecordedRequest): MockResponse {
                     requests.add(request)
+                    if (dropNext > 0) {
+                        dropNext -= 1
+                        return MockResponse.Builder()
+                            .onResponseStart(SocketEffect.ShutdownConnection)
+                            .build()
+                    }
                     return route(request)
                 }
             }

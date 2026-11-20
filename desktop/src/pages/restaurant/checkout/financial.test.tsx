@@ -344,7 +344,7 @@ describe('devoluciones y correcciones en la pantalla de cobro', () => {
     expect(registerButton().disabled).toBe(true);
   });
 
-  it('informa que una corrección con el turno cerrado requiere una regularización posterior', async () => {
+  it('informa que una corrección con el turno cerrado requiere una regularización en Caja', async () => {
     correctionHandler = async () => ({
       status: 409,
       body: {
@@ -365,7 +365,7 @@ describe('devoluciones y correcciones en la pantalla de cobro', () => {
       target: { value: 'Se cobró con transferencia' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Corregir a Transferencia' }));
-    await screen.findByText(/Usa una regularización posterior \(etapa 7\)/);
+    await screen.findByText(/Usa una regularización en Caja o, si corresponde, una devolución/);
     expect(lastBody('payments_correct')).toMatchObject({
       payment_id: paymentID,
       method_id: 'method-transfer',

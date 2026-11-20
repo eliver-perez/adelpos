@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"local/ad-el-pos/server/internal/administration"
 	"local/ad-el-pos/server/internal/events"
 	"local/ad-el-pos/server/internal/inventory"
 	"local/ad-el-pos/server/internal/kitchen"
@@ -172,7 +173,8 @@ func testInventorySeed(t *testing.T, fixture *inventoryFixture) {
 			t.Fatalf("El permiso %s no coincide entre Go y PostgreSQL", permission.Key)
 		}
 	}
-	// Solo el administrador tiene permisos de inventario (el rol «Inventarios» sigue vacío).
+	// El administrador tiene todos los permisos de inventario; desde la etapa A3 los demás roles, solo los de su conjunto
+	// de fábrica (A3-D2: Inventarios y Finanzas).
 	var administrator, others int
 	err = fixture.pool.QueryRow(fixture.ctx, `SELECT count(*) FILTER (WHERE r.code='administrator'),
             count(*) FILTER (WHERE r.code IS DISTINCT FROM 'administrator')
@@ -181,12 +183,20 @@ func testInventorySeed(t *testing.T, fixture *inventoryFixture) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if administrator != len(inventory.Permissions) || others != 0 {
-		t.Fatalf("Concesiones de inventario: administrador %d, otros roles %d", administrator, others)
+	factoryGrants := 0
+	for _, code := range []string{"waiter", "cashier", "kitchen", "supervisor", "inventory", "finance"} {
+		for _, key := range administration.FactoryRolePermissions(code) {
+			if strings.HasPrefix(key, "inventory.") {
+				factoryGrants++
+			}
+		}
+	}
+	if administrator != len(inventory.Permissions) || others != factoryGrants {
+		t.Fatalf("Concesiones de inventario: administrador %d, otros roles %d (de fábrica %d)", administrator, others, factoryGrants)
 	}
 	if rowCount(t, fixture.restaurantFixture, `SELECT count(*) FROM app.role_permissions p JOIN app.roles r ON r.id=p.role_id
-        WHERE r.code='inventory'`) != 0 {
-		t.Fatal("El rol «Inventarios» recibió permisos por inferencia")
+        WHERE r.code='inventory'`) != len(administration.FactoryRolePermissions("inventory")) {
+		t.Fatal("El rol «Inventarios» debía tener exactamente su conjunto de fábrica")
 	}
 }
 

@@ -1,7 +1,7 @@
 # Teléfonos y tabletas de meseros
 
-Guía corta para usar la aplicación **AD-EL POS para Android** en los teléfonos y tabletas de los meseros (etapas A1 y
-A2). Con ella cada mesero:
+Guía corta para usar la aplicación **AD-EL POS para Android** en los teléfonos y tabletas de los meseros (etapas A1 a
+A3). Con ella cada mesero:
 
 - Entra con **su nombre y su PIN** en un teléfono o una tableta que comparten varios meseros.
 - Ve las mesas y sus cuentas, captura los pedidos y los manda a cocina con **«Enviar a cocina»**.
@@ -16,7 +16,7 @@ La **computadora principal** sigue mandando en todo: precios, impuestos, permiso
 cada pedido. Los precios que muestra el teléfono son de referencia. **El teléfono o la tableta no cobra**: se cobra en
 la caja, como siempre.
 
-> **Versión de prueba.** Esta es la versión **0.2.0** de la aplicación. No viene de la tienda de Google (Play Store):
+> **Versión de prueba.** Esta es la versión **0.3.0** de la aplicación. No viene de la tienda de Google (Play Store):
 > se instala con un archivo y está firmada con una llave de desarrollo, por eso Android avisa al instalarla. Todavía no
 > se ha probado en un teléfono ni en una tableta reales (solo en los emuladores de la Mac de pruebas).
 
@@ -24,7 +24,7 @@ la caja, como siempre.
 
 Sirve cualquier teléfono o tableta con **Android 8.0 o posterior**.
 
-1. **Pasa el archivo `AD-EL-POS-Android-0.2.0.apk`** al teléfono o la tableta, de la forma que te sea más fácil:
+1. **Pasa el archivo `AD-EL-POS-Android-0.3.0.apk`** al teléfono o la tableta, de la forma que te sea más fácil:
    - **Carpeta compartida** (por ejemplo, Google Drive): súbelo desde la computadora y ábrelo en el dispositivo.
    - **Correo**: envíalo como archivo adjunto y ábrelo desde el correo del dispositivo. Algunos correos (Gmail, por
      ejemplo) no dejan adjuntar archivos `.apk`; si te pasa, usa una carpeta compartida.
@@ -48,8 +48,8 @@ Sirve cualquier teléfono o tableta con **Android 8.0 o posterior**.
 **Instalar una versión nueva.** Instálala **encima** de la que ya tienes, con los mismos pasos: se conservan el
 emparejamiento, los meseros y los pedidos sin enviar. Eso funciona si la versión nueva viene firmada con la misma llave;
 si Android dice que no puede instalarla porque choca con la que ya está, **no la desinstales** (sobre todo si hay
-pedidos sin enviar) y avisa a soporte. **De la 0.1.0 a la 0.2.0 es distinto**: no se instala encima (ver «Pasar de la
-0.1.0 a la 0.2.0», al final de esta sección).
+pedidos sin enviar) y avisa a soporte. La 0.3.0 se instala así encima de la 0.2.0. **De la 0.1.0 a una versión
+posterior es distinto**: no se instala encima (ver «Pasar de la 0.1.0 a la 0.2.0», al final de esta sección).
 
 **Si desinstalas la aplicación** (o borras sus datos en los Ajustes de Android), el dispositivo olvida el
 emparejamiento y se pierden los pedidos que no se hayan enviado. Al volver a instalarla hay que emparejarlo de nuevo
@@ -85,8 +85,9 @@ En cada teléfono o tableta que tenga la 0.1.0, en este orden:
    (sección 8, «Si los avisos no llegan»). Si no das el de notificaciones, la explicación vuelve a salir cada vez que un
    mesero entra con conexión, hasta que lo des. La 0.1.0 no tenía avisos: no hay nada que pasar de una a otra.
 
-Si en un dispositivo nunca se instaló la 0.1.0, no hace falta nada de esto: instala la 0.2.0 directamente. Si por
-error quedaron las dos, la 0.1.0 es la que ya estaba emparejada (en **Ajustes › Aplicaciones › AD-EL POS** se ve la
+Si instalas directamente la 0.3.0 en lugar de la 0.2.0, los pasos son los mismos: donde dice 0.2.0, usa la 0.3.0.
+Si en un dispositivo nunca se instaló la 0.1.0, no hace falta nada de esto: instala la versión nueva directamente. Si
+por error quedaron las dos, la 0.1.0 es la que ya estaba emparejada (en **Ajustes › Aplicaciones › AD-EL POS** se ve la
 versión de cada una): envía lo pendiente desde ella y sigue desde el paso 2.
 
 ## 2. Antes de emparejar
@@ -95,8 +96,8 @@ versión de cada una): envía lo pendiente desde ella y sigue desde el paso 2.
   **Administración › Sistema › Configuración › «Ver estado del sistema»**, en «Versión de AD-EL POS». Si tiene una
   versión anterior, el teléfono lo dice antes de pedir el código (y también si ya estaba emparejado):
   **«Actualiza el servidor del restaurante»**, con «Volver a comprobar» y «Elegir otra computadora principal». Lo que
-  hay que actualizar es la computadora principal: soporte o el administrador instala la 0.13.0 con su instalador (pide
-  la contraseña de administrador de la Mac). Cómo se instala la computadora principal:
+  hay que actualizar es la computadora principal: soporte o el administrador instala la versión más reciente (hoy, la
+  0.14.0) con su instalador (pide la contraseña de administrador de la Mac). Cómo se instala la computadora principal:
   [INSTALAR_EN_RED.md](INSTALAR_EN_RED.md).
 - **El teléfono o la tableta debe estar en la misma red wifi del restaurante** que la computadora principal (la red
   principal, no la de invitados).
@@ -124,66 +125,91 @@ versión de cada una): envía lo pendiente desde ella y sigue desde el paso 2.
    …»** el código del dispositivo y toca **«Aprobar»**. Si no reconoces la solicitud, toca **«Rechazar»**.
    - Solo se aprueba desde la computadora principal: desde otra terminal no se puede.
    - Tras 5 códigos incorrectos la solicitud se rechaza sola y hay que pedir otro código.
-6. El dispositivo dice **«Emparejamiento listo.»** y pasa a la pantalla de entrada, **«¿Quién eres?»**. Si dice
-   «Todavía no hay meseros con PIN», sigue con la sección 4.
+6. El dispositivo dice **«Emparejamiento listo.»** y pasa a la pantalla de entrada, **«Selecciona tu usuario»**. Si dice
+   «No hay meseros con PIN», sigue con la sección 4.
 
 Después, en **Administración › Sistema › Terminales**, el dispositivo aparece con su tipo («Teléfono o tableta»), el
 mesero que lo usa y si está **en línea**. Con **«Editar»** cambias su nombre, su bloqueo por inactividad (sección 4),
 su **impresora de precuentas** (sección 7) y sus **avisos de platillos listos** (sección 8). Estas dos últimas opciones
 solo aparecen en la computadora principal con la 0.13.0 (o en una terminal que también la tenga).
 
+### Entrar y moverse en la aplicación
+
+- **Entrar.** La pantalla de entrada se llama **«Ingresar»**, con el logotipo de AD-EL POS arriba. Dice **«Selecciona
+  tu usuario y escribe tu PIN.»**: el mesero toca su nombre, escribe su PIN y toca **«Ingresar»**. Si se equivocó
+  de nombre, **«Elegir otro usuario»** regresa a la lista.
+- **Pantalla inicial.** Al entrar, el dispositivo abre **Mesas** o **Para llevar**, según la **«Pantalla inicial»** que
+  tenga en **Administración › Sistema › Terminales › «Editar»**. Abre Para llevar solo si el mesero tiene el permiso de
+  ver los pedidos para llevar (sección 4); si no, o si la computadora principal no lo dice (la primera entrada sin
+  conexión), abre Mesas. El cambio se toma la próxima vez que un mesero entra con conexión.
+- **Mesas.** Arriba, en una sola fila: **«Lista | Mapa»**, las **áreas** (toca una para ver solo sus mesas) y
+  **«Pendientes»**. En el mapa las mesas se ven como en la computadora principal, del tamaño que quepa; si el área es
+  grande, el mapa se desliza hacia los lados y hacia abajo. Toca una mesa para ver sus cuentas.
+- **Las cuentas de una mesa.** Cada una dice en un renglón «Mesa 6 · folio 12 · $755.00» y debajo su estado. Desde ahí
+  se abre la cuenta, se imprime la precuenta (**«Imprimir precuenta»**, sección 7) y, si la cuenta está vacía (sin
+  productos ni pagos), se puede quitar con **«Descartar cuenta vacía»**: pide confirmación, necesita conexión y el
+  permiso de abrir cuentas (sección 4). Si mientras tanto otra terminal le agregó algo, no se descarta y se ve como
+  está.
+- **Capturar.** Arriba dice la mesa o el pedido («Mesa 4», «Para llevar #12»). El catálogo se busca con **«Buscar
+  producto»** (nombre o código). Los productos sin foto se ven en tarjetas más chicas, con su nombre y su precio. En el
+  teléfono, **«Ver la cuenta»** muestra lo capturado; si hay productos sin mandar, dice cuántos («Ver la cuenta · 2 por
+  enviar»).
+- **Regresar.** En la captura, la cuenta, Pendientes y la revisión de un pedido hay una **flecha** arriba a la
+  izquierda, que hace lo mismo que el botón Atrás de Android. Si sales de una captura con productos sin enviar, no se
+  pierden: el dispositivo avisa «Lo capturado en Mesa 4 quedó guardado sin enviar a cocina. Lo encuentras en la mesa o
+  en Pendientes.».
+
 ## 4. Dar permiso y PIN a los meseros
 
 Hazlo en la computadora principal (o en una terminal que ya tenga la 0.12.0: en una versión anterior estas opciones no
-aparecen).
+aparecen). La pantalla de permisos agrupada y «Restablecer permisos predeterminados» son de la 0.14.0; con una terminal
+anterior se ve la lista de permisos de siempre.
 
 ### Permisos del rol Mesero
 
-Desde la 0.12.0, el rol **Mesero** ya trae el permiso de entrar con PIN; los demás los das tú (en una instalación
-nueva no trae ningún otro). Abre **Administración › Personal › Roles**, toca **«Editar permisos»** en el rol Mesero,
-revisa que tenga marcados estos y toca **«Guardar rol»**:
+Desde la **0.14.0**, una **instalación nueva** trae el rol **Mesero** con sus permisos ya marcados: **no hay que marcar
+nada a mano**. Un mesero nuevo con su PIN entra, ve las mesas, abre cuentas, captura y envía a cocina, toma pedidos
+para llevar, marca «Entregado» un pedido ya pagado e imprime la precuenta. Lo trae así:
 
-| Para que el mesero pueda…                  | Marca                                                                                 |
-| ------------------------------------------ | ------------------------------------------------------------------------------------- |
-| Entrar con su PIN                          | «Entrar con PIN en teléfonos y tabletas de meseros» (ya viene marcado)                |
-| Ver las áreas y las mesas                  | «Consultar áreas del restaurante» y «Consultar mesas y ocupación real»                |
-| Ver las cuentas de una mesa                | «Consultar cuentas e importes»                                                        |
-| Empezar una cuenta nueva                   | «Abrir cuentas»                                                                       |
-| Capturar y cambiar lo que no se ha enviado | «Capturar y editar borradores de pedidos»                                             |
-| Ver el catálogo y los precios              | «Consultar catálogo y configuraciones» y «Consultar precios y previsualizar cálculos» |
-| Mandar a cocina                            | «Confirmar pedidos»                                                                   |
-| Ver al momento los cambios de otras cajas  | «Recibir eventos autenticados»                                                        |
-| Modificar lo ya enviado (opcional)         | «Modificar partidas confirmadas sin aprobación adicional»                             |
-| Cancelar unidades ya enviadas (opcional)   | «Cancelar partidas o cantidades confirmadas»                                          |
+| Para que el mesero pueda…                           | Permiso (ya viene marcado)                                                                           |
+| --------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Entrar con su PIN                                   | «Entrar con PIN en teléfonos y tabletas de meseros»                                                  |
+| Ver las áreas y las mesas                           | «Consultar áreas del restaurante» y «Consultar mesas y ocupación real»                               |
+| Ver las cuentas de una mesa                         | «Consultar cuentas e importes»                                                                       |
+| Empezar una cuenta nueva                            | «Abrir cuentas»                                                                                      |
+| Capturar y mandar a cocina                          | «Capturar y editar borradores de pedidos» y «Confirmar pedidos»                                      |
+| Ver el catálogo y los precios                       | «Consultar catálogo y configuraciones» y «Consultar precios y previsualizar cálculos»                |
+| Ver al momento los cambios de otras cajas           | «Ver al momento los cambios de otras terminales»                                                     |
+| Para llevar: ver, tomar pedidos y anotar el cliente | «Consultar tablero de pedidos para llevar y ventanilla» y «Administrar datos de pedidos para llevar» |
+| Marcar «Entregado» un pedido para llevar ya pagado  | «Registrar entrega de pedidos para llevar»                                                           |
+| Imprimir la precuenta (sección 7)                   | «Imprimir tickets y precuentas»                                                                      |
 
-Para bajar la cantidad de algo ya enviado hacen falta los dos últimos.
+El mesero **nunca cobra** y no se entrega un pedido sin pagar: si no está pagado, el teléfono dice «Cobrar en caja
+antes de entregar». Imprimir desde el dispositivo necesita además una impresora asignada a ese dispositivo (sección 7).
 
-Para **Para llevar** (sección 6), marca además:
+**Opcional**: «Modificar partidas confirmadas sin aprobación adicional» (cambiar lo ya enviado) y «Cancelar partidas o
+cantidades confirmadas» (cancelar unidades ya enviadas o bajar su cantidad) **no vienen marcados**. Para darlos: abre
+**Administración › Personal › Roles**, toca **«Editar permisos»** en el rol Mesero, pasa a la **«Vista detallada»**,
+abre **«Captura y pedidos»**, marca el que quieras (al marcar «Cancelar…» se marca solo «Modificar…», que hace falta) y
+toca **«Guardar rol»**.
 
-| Para que el mesero pueda…                                          | Marca                                                   |
-| ------------------------------------------------------------------ | ------------------------------------------------------- |
-| Ver los pedidos para llevar y sus estados (y la opción en el menú) | «Consultar tablero de pedidos para llevar y ventanilla» |
-| Tomar pedidos para llevar y anotar el nombre y el teléfono         | «Administrar datos de pedidos para llevar»              |
-| Marcar «Entregado» un pedido ya pagado (opcional)                  | «Registrar entrega de pedidos para llevar»              |
+La pantalla de permisos de un rol abre en la **«Vista sencilla»**, con lo que el rol puede hacer («Atender mesas»,
+«Para llevar», «Cobrar», «Manejar caja»…; «Parcial» si tiene solo una parte), y la **«Vista detallada»** muestra cada
+permiso por área con su descripción, un buscador y «Marcar todo el grupo» o «Quitar todo el grupo». Al marcar un
+permiso se marca solo lo que necesita, y al quitar uno del que dependen otros, la pantalla avisa cuáles dejarán de
+funcionar.
 
-Las dos primeras van juntas (sin la segunda solo ve la lista). Para capturar hacen falta además los de arriba («Abrir
-cuentas», «Capturar y editar borradores de pedidos», «Confirmar pedidos», catálogo y precios). Sin la tercera, el
-mesero ve si el pedido está pagado y entregado, pero la entrega se marca en la caja. El mesero **nunca cobra** y no se
-entrega un pedido sin pagar: si no está pagado, el teléfono dice «Cobrar en caja antes de entregar». Para llevar
-necesita la computadora principal en la versión **0.13.0**. Si a un mesero le falta un permiso, el
-dispositivo lo dice («No tienes permiso para ver las mesas…», «Sin permiso para enviar a cocina.») y la computadora
-principal rechaza lo que no tenga permitido. El permiso de marcar productos como agotados no hace falta: desde el
-teléfono no se marcan.
+**Si la computadora principal ya estaba instalada** (0.12.0 o 0.13.0), la actualización **no cambia los roles**: el
+Mesero conserva lo que le marcaste. Para dejarlo como en una instalación nueva, en **«Editar permisos»** del rol toca
+**«Restablecer permisos predeterminados»**: la computadora muestra qué se agregará y qué se quitará, pide confirmación y
+lo deja en el Registro de movimientos. No cambia el límite de descuento del rol ni los permisos propios de cada usuario.
+Si le habías dado «Modificar» o «Cancelar unidades», el restablecimiento los quita: márcalos otra vez si los usa. El
+botón lo tienen los roles que trae el sistema (Mesero, Cajero, Cocina, Supervisor, Inventarios y Finanzas); los roles
+que creaste y el Administrador, no.
 
-Para **imprimir la precuenta** desde el teléfono o la tableta (sección 7), marca además:
-
-| Para que el mesero pueda…                                 | Marca                           |
-| --------------------------------------------------------- | ------------------------------- |
-| Imprimir la precuenta (o el ticket de venta, o la cuenta) | «Imprimir tickets y precuentas» |
-
-No hace falta «Reimprimir tickets»: volver a imprimir arma otra precuenta con lo que tenga la cuenta en ese momento,
-como en la caja. Sin el permiso, el botón no aparece. Imprimir desde el dispositivo necesita la computadora principal
-en la versión **0.13.0** y una impresora asignada a ese dispositivo (sección 7).
+Si a un mesero le falta un permiso, el dispositivo lo dice («No tienes permiso para ver las mesas…», «Sin permiso para
+enviar a cocina.») y la computadora principal rechaza lo que no tenga permitido, aunque una pantalla lo muestre. El
+permiso de marcar productos como agotados no hace falta: desde el teléfono no se marcan.
 
 **Una sesión con PIN solo permite lo del mesero**, aunque la persona sea administrador o supervisor: lo
 administrativo se sigue haciendo en la computadora con su contraseña.
@@ -216,7 +242,7 @@ administrativo se sigue haciendo en la computadora con su contraseña.
 ### Bloqueo por inactividad y cambio de mesero
 
 - Tras **2 minutos sin uso** (lo puedes cambiar por dispositivo en **Administración › Sistema › Terminales ›
-  «Editar»** del teléfono o la tableta, en «Bloqueo por inactividad»), el dispositivo vuelve a «¿Quién eres?». **No se
+  «Editar»** del teléfono o la tableta, en «Bloqueo por inactividad»), el dispositivo vuelve a «Selecciona tu usuario». **No se
   bloquea** mientras el mesero tiene una captura a medias o pedidos sin enviar.
 - Para pasarle el dispositivo a otro mesero: toca el nombre del mesero arriba y **«Cambiar de mesero»**. No se puede
   mientras ese mesero tenga **pedidos sin enviar**; una captura a medias sí se queda guardada con él y el siguiente no
@@ -225,6 +251,12 @@ administrativo se sigue haciendo en la computadora con su contraseña.
 ## 5. Sin conexión
 
 Arriba, siempre se ve si el dispositivo está **«En línea»**, **«Sin conexión»** y cuántos pedidos hay **por enviar**.
+La barra y los avisos de cada pantalla («Selecciona tu usuario», Mesas, Para llevar, la precuenta, «Entregado» y la
+notificación «AD-EL POS conectado») dicen siempre lo mismo. Dice **«Sin conexión»** en cuanto el teléfono o la tableta
+se queda sin red, o si la computadora principal deja de responder unos **20 segundos** seguidos; una falla aislada (un
+instante sin respuesta) no la cambia. En cuanto la computadora principal vuelve a responder, dice **«En línea»** otra
+vez. Con el dispositivo sin uso, la aplicación pregunta a la computadora principal como mucho una vez por minuto.
+
 Cada pedido tiene uno de estos estados:
 
 | Estado                        | Qué significa                                                      |
@@ -237,10 +269,11 @@ Cada pedido tiene uno de estos estados:
 
 - Los pedidos «Por enviar» se mandan solos al volver la red, **aunque la aplicación esté cerrada** o la esté usando
   otro mesero, y no se pierden al cerrar la aplicación ni al reiniciar el dispositivo. Si uno tarda, abre la
-  aplicación o toca **«Pedidos pendientes» › «Reintentar ya»**. Nunca se duplica un pedido por reintentarlo.
+  aplicación o toca **«Pendientes» › «Reintentar ya»** (solo aparece si hay algo que reintentar). Nunca se duplica un
+  pedido por reintentarlo.
 - **«Requiere tu revisión»** aparece cuando cambió un precio («Hamburguesa: $120.00 → $130.00»), se agotó un producto
   («Malteada de fresa: agotado. Quítalo del pedido.») o la mesa ya se cobró («La cuenta «Mesa 4» ya se cobró.»). El
-  mesero lo abre en **«Pedidos pendientes» › «Revisar»**, ve la lista de cambios y elige **«Aceptar los cambios y
+  mesero lo abre en **«Pendientes» › «Revisar»**, ve la lista de cambios y elige **«Aceptar los cambios y
   enviar»**, quitar o corregir lo que haga falta, o **«Descartar el pedido»**. Para eso necesita conexión y su PIN.
 - Sin conexión se ven las mesas de la última vez que hubo conexión. **Modificar o cancelar lo ya enviado** necesita
   conexión.
@@ -291,9 +324,11 @@ solo cambia si la cocina marca los platillos en la pantalla de cocina.
 ## 7. Imprimir la precuenta
 
 En la cuenta de una mesa o de un pedido para llevar (en el teléfono, en «Ver la cuenta»), al final, está el botón
-**«Imprimir precuenta»**. Dice el nombre elegido en **Administración › Documentos**: «Imprimir precuenta», «Imprimir
-ticket de venta» o «Imprimir cuenta», y el papel sale con ese mismo título. Aparece cuando la cuenta ya está en la
-computadora principal (con el primer producto guardado) y el rol tiene el permiso (sección 4).
+**«Imprimir precuenta»**. También está en **cada cuenta de una mesa**, al tocar la mesa en Mesas, sin abrir la cuenta.
+Dice el nombre elegido en **Administración › Documentos**: «Imprimir precuenta», «Imprimir ticket de venta» o
+«Imprimir cuenta», y el papel sale con ese mismo título. Aparece cuando la cuenta ya está en la computadora principal
+(con el primer producto guardado). Si el rol no tiene el permiso (sección 4), el botón se ve pero no se puede tocar y
+dice **«Tu usuario no tiene permiso para imprimir la precuenta. Pídelo en la computadora principal.»**.
 
 - La precuenta es **la misma que imprime la caja** (la misma plantilla), con lo que tenga la cuenta en ese momento y
   **«Atendió: <el mesero que la imprime>»**. Tocar el botón otra vez arma otra precuenta, como en la caja.
@@ -310,7 +345,7 @@ computadora principal (con el primer producto guardado) y el rol tiene el permis
 | «La impresora no responde.» con **«Reintentar»**          | No salió en papel. Revisa que esté encendida, con papel y conectada, y toca «Reintentar» (manda la misma precuenta, sin pedir motivo).                                         |
 | «La impresora necesita revisión: avisa al administrador.» | La impresora no está bien configurada (se revisa en Cocina › Impresoras). Con «Reintentar», cuando esté corregida.                                                             |
 | «No se sabe si salió en papel…»                           | Revisa el papel en la impresora antes de imprimir otra.                                                                                                                        |
-| «Este dispositivo no tiene impresora asignada.»           | Hay que elegirle una impresora (abajo). La precuenta no se manda a ninguna otra.                                                                                               |
+| «Este dispositivo no tiene impresora asignada.»           | Hay que elegirle una impresora en Terminales (abajo). La precuenta no se manda a ninguna otra.                                                                                 |
 | «La impresora … está desactivada.»                        | La impresora asignada no puede imprimir ahora: el administrador la revisa en Terminales o en Cocina › Impresoras.                                                              |
 
 ### Impresora de precuentas por dispositivo
@@ -334,10 +369,10 @@ Cuando la cocina marca **«Listo»** un platillo en la **pantalla de cocina** (K
 recibe un aviso en su teléfono o su tableta, **aunque la pantalla esté apagada o la aplicación cerrada**: «Mesa 4 · 2
 platillos listos» con «2 × Filete de res» debajo, o «Para llevar #12 (Juan) · 1 platillo listo». Nunca muestra
 precios. Los avisos de una misma mesa o pedido se juntan en uno solo que va sumando, y con varias cuentas aparece un
-resumen. Se ve también en «¿Quién eres?» y en la pantalla de bloqueo.
+resumen. Se ve también en «Selecciona tu usuario» y en la pantalla de bloqueo.
 
-- **Al tocarlo**, la aplicación abre esa cuenta o ese pedido. Si el dispositivo está en «¿Quién eres?», primero pide
-  el PIN del mesero del aviso (ya elegido) y después abre la cuenta. Si entra otro mesero, solo se abre si él puede
+- **Al tocarlo**, la aplicación abre esa cuenta o ese pedido. Si el dispositivo está en «Selecciona tu usuario», primero
+  pide el PIN del mesero del aviso (ya elegido) y después abre la cuenta. Si entra otro mesero, solo se abre si él puede
   ver esa cuenta. Si mientras tanto la cuenta se combinó con otra, abre esa; si ya se cobró o se canceló, dice **«Esta
   cuenta ya no está abierta»**.
 - **Si el mesero ya está viendo esa cuenta** en la aplicación, el aviso aparece arriba de la pantalla unos segundos,
@@ -358,7 +393,8 @@ resumen. Se ve también en «¿Quién eres?» y en la pantalla de bloqueo.
 
 **«AD-EL POS conectado».** Para que los avisos lleguen con la pantalla apagada, Android exige que la aplicación muestre
 una **notificación permanente** mientras mantiene la conexión con la computadora principal: «AD-EL POS conectado»
-(«Sin conexión con la computadora principal. Reintentando…» si se cortó la red). Aparece cuando un mesero entra con su
+(«Sin conexión con la computadora principal. Reintentando…» si se cortó la red o la computadora principal dejó de
+responder, igual que la barra de la aplicación; sección 5). Aparece cuando un mesero entra con su
 PIN **con conexión** y se queda mientras haya meseros que entraron ese día en el dispositivo (o que siguen con su sesión
 abierta); desaparece sola cuando ya no hay a quién avisar (al terminar el día comercial, a la «Hora de inicio del día»
 de la computadora principal, si nadie sigue con su sesión), si se apaga «Avisar platillos listos», al retirar el

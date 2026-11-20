@@ -420,7 +420,7 @@ func (handler *service) readClosure(parts []string) (any, error) {
 		return nil, err
 	}
 	if shift.State != shiftClosed {
-		return nil, conflict("SHIFT_NOT_CLOSED", "El turno de "+shift.RegisterName+" aún no está cerrado.")
+		return nil, conflict("SHIFT_NOT_CLOSED", "El turno de "+shift.RegisterName+" no está cerrado.")
 	}
 	view := &ClosureView{Shift: shift}
 	var expectedMXN, expectedUSD, differenceMXN, differenceUSD string
@@ -432,7 +432,7 @@ func (handler *service) readClosure(parts []string) (any, error) {
         WHERE c.shift_id=$1`, shift.ID).Scan(&view.CashierNotes, &view.ClosedByName, &view.DeviceName, &view.ClosedAt,
 		&view.FinalReportID, &expectedMXN, &expectedUSD, &differenceMXN, &differenceUSD, &rate, &equivalent)
 	if isNoRows(err) {
-		return nil, notFound("El turno se cerró antes de la etapa 7 y no tiene arqueo registrado.")
+		return nil, notFound("Este turno no tiene arqueo registrado.")
 	}
 	if err != nil {
 		return nil, err

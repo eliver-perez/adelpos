@@ -60,7 +60,7 @@ export function receiptPrinterOptions(printers: Printer[], empty = 'Sin asignar'
   for (const printer of printers) {
     let reason = '';
     if (printer.transport === 'agent' && !printer.agent_device_id) {
-      reason = 'Esta impresora todavía no puede usarse para imprimir';
+      reason = 'Esta impresora no se puede usar para imprimir';
     } else if (!printer.active) {
       reason = 'desactivada';
     }

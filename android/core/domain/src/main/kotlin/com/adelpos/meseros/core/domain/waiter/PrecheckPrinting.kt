@@ -129,6 +129,14 @@ class PrecheckPrinting(
                         canRetry = retrying,
                         following = false,
                     )
+            PrintAnswer.NoAnswer ->
+                mutableState.value =
+                    PrecheckPrintState(
+                        message = PrintMessage.Failed(null),
+                        busy = false,
+                        canRetry = retrying,
+                        following = false,
+                    )
             is PrintAnswer.Status ->
                 show(answer.jobState, answer.jobProblem, answer.printerName, answer.terminalName)
         }

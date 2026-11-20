@@ -26,7 +26,7 @@ import okhttp3.sse.EventSources
 /**
  * Lo que el canal de avisos necesita de la entrada al dispositivo: **solo la credencial del
  * dispositivo** (A2-D9, como el agente de impresión): sin sesión de mesero ni credencial de envío,
- * para que el aviso llegue también en «¿Quién eres?» y con la aplicación cerrada.
+ * para que el aviso llegue también en «Selecciona tu usuario» y con la aplicación cerrada.
  */
 interface ReadyAlertsServer {
     /**

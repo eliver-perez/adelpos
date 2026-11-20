@@ -17,6 +17,7 @@ import com.adelpos.meseros.core.domain.table.TableState
 import com.adelpos.meseros.core.domain.waiter.AccountSummary
 import com.adelpos.meseros.core.domain.waiter.CustomerEdit
 import com.adelpos.meseros.core.domain.waiter.DiningTable
+import com.adelpos.meseros.core.domain.waiter.DiscardAccountResult
 import com.adelpos.meseros.core.domain.waiter.DraftLine
 import com.adelpos.meseros.core.domain.waiter.DraftOperation
 import com.adelpos.meseros.core.domain.waiter.OrderMode
@@ -98,16 +99,16 @@ class WaiterViewModelsTest {
         )
 
     @Test
-    fun mesasConservaBusquedaYMesaElegidaYAbreConLasCuentasVistas() =
+    fun mesasConservaAreaYMesaElegidaYAbreConLasCuentasVistas() =
         runTest(dispatcher) {
             val fake = FakeWaiter()
             val saved = SavedStateHandle()
             val model = TablesViewModel(fake.dependencies(), saved)
-            model.onSearchChange("terraza")
+            model.onAreaSelect("terraza")
             model.onTableSelect(table)
             // Otro ViewModel con el mismo estado guardado (rotación o cierre del proceso).
             val restored = TablesViewModel(fake.dependencies(), saved)
-            assertEquals("terraza", restored.search)
+            assertEquals("terraza", restored.areaId)
             assertEquals("t1", restored.selectedTableId)
             assertTrue(restored.showingAccount)
 
@@ -277,6 +278,51 @@ class WaiterViewModelsTest {
      * sigue unos segundos sin bloquear la captura; «Reintentar» solo si nunca salió en papel; y
      * otra cuenta olvida lo de la anterior.
      */
+    /**
+     * Etapa A3 (§4.9 y §4.10): desde el panel de la mesa, la precuenta de cada cuenta (una a la
+     * vez) y «Descartar cuenta vacía» solo de una cuenta que Go marcó `discardable`.
+     */
+    @Test
+    fun elPanelImprimeLaPrecuentaDeCadaCuentaYDescartaSoloLaVacia() =
+        runTest(dispatcher) {
+            val fake = FakeWaiter()
+            val model = TablesViewModel(fake.dependencies(), SavedStateHandle())
+            advanceUntilIdle()
+            assertTrue(model.canWriteNow.value)
+            val first = account("c1", "t1")
+            val second = account("c2", "t1").copy(discardable = true)
+            fake.printAnswers.add(PrintAnswer.Rejected(409, "PRINTER_NOT_CONFIGURED", null))
+            model.onPrintPrecheck(first)
+            advanceUntilIdle()
+            assertEquals("c1", model.printingAccountId)
+            assertEquals(PrintMessage.NoPrinter, model.precheckState.value.message)
+            // Otra cuenta: lo de la anterior ya no se dice en ella.
+            fake.printAnswers.add(PrintAnswer.Rejected(409, "PRINTER_NOT_CONFIGURED", null))
+            model.onPrintPrecheck(second)
+            advanceUntilIdle()
+            assertEquals("c2", model.printingAccountId)
+            assertEquals(listOf("c1", "c2"), fake.printed.map { it.first })
+
+            // Solo una cuenta que Go marcó vacía se descarta.
+            model.onDiscardEmpty(first)
+            advanceUntilIdle()
+            assertTrue(fake.discarded.isEmpty())
+            model.onDiscardEmpty(second)
+            advanceUntilIdle()
+            assertEquals(listOf("c2"), fake.discarded)
+            assertEquals(DiscardAccountResult.Discarded, model.discardResult)
+            assertNull(model.discardingAccountId)
+            fake.discardAnswer = DiscardAccountResult.Changed
+            model.onDiscardEmpty(second)
+            advanceUntilIdle()
+            assertEquals(DiscardAccountResult.Changed, model.discardResult)
+
+            // Sin conexión (el estado único) no se puede ni imprimir ni descartar desde el panel.
+            fake.connected.value = false
+            advanceUntilIdle()
+            assertFalse(model.canWriteNow.value)
+        }
+
     @Test
     fun capturaImprimeLaPrecuentaYSigueElTrabajo() =
         runTest(dispatcher) {

@@ -58,6 +58,11 @@ var capabilities = []string{
 	// del dispositivo, filtrados por destinatario en Go) y «Avisar platillos listos», «Sonido» y «Vibración» de cada
 	// teléfono o tableta (PATCH devices/{id}, su configuración y la terminal de auth/me y restaurant/state).
 	"ready-alerts-v1",
+	// Etapa A3 (§3, servidor 0.14.0): permisos agrupados y roles de fábrica del escritorio: GET permissions/catalog
+	// (grupos, descripciones, dependencias, capacidades de la vista sencilla y roles de fábrica) y GET y POST
+	// roles/{id}/defaults («Restablecer permisos predeterminados»). El escritorio muestra la pantalla agrupada solo con
+	// ella; con un servidor anterior, la lista de siempre (A3-D9).
+	"permission-groups-v1",
 }
 
 type ErrorBody struct {
@@ -128,7 +133,7 @@ func NewWithOptions(options Options, probe Probe, origins []string, logger *slog
 			application[0].ServeHTTP(w, r)
 			return
 		}
-		fail(w, r, 501, "EVENTS_NOT_AVAILABLE", "Los eventos en tiempo real aún no están habilitados.")
+		fail(w, r, 501, "EVENTS_NOT_AVAILABLE", "Los avisos al momento no están disponibles en este servidor.")
 	})
 	if len(application) > 0 {
 		mux.Handle("/api/v1/", application[0])

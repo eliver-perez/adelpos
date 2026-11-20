@@ -160,7 +160,7 @@ export function PreparationPicker({
       {results.error && <small className="muted">{results.error}</small>}
       {results.data && results.data.total === 0 && search.trim() === '' && (
         <small className="muted">
-          Aún no hay preparaciones activas. Se crean en el apartado «Preparaciones».
+          No hay preparaciones activas. Se crean en el apartado «Preparaciones».
         </small>
       )}
     </div>

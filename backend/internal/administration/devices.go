@@ -72,6 +72,18 @@ func validTerminalHome(screen string) bool {
 	return slices.Contains(terminalHomeScreens, screen)
 }
 
+// androidTerminalHomeScreens son las pantallas de inicio de un teléfono o tableta de meseros (etapa A3, §5.1 y A3-D7):
+// la aplicación Android no tiene modo cocina ni cobra. Coincide con el CHECK devices_android_home_check de la 0027.
+var androidTerminalHomeScreens = []string{"tables", "takeaway"}
+
+// androidHomeMessage explica por qué se rechaza otra pantalla de inicio en un dispositivo android.
+const androidHomeMessage = "En un teléfono o tableta de meseros la pantalla inicial es Mesas o Para llevar."
+
+// validAndroidHome indica si la pantalla pedida sirve para un teléfono o tableta de meseros.
+func validAndroidHome(screen string) bool {
+	return slices.Contains(androidTerminalHomeScreens, screen)
+}
+
 func devices(ctx context.Context, tx pgx.Tx, request Request, principal Principal, parts []string) (any, error) {
 	if request.Method == "GET" && len(parts) == 1 {
 		if err := principal.require("devices.read"); err != nil {
@@ -156,6 +168,17 @@ func devices(ctx context.Context, tx pgx.Tx, request Request, principal Principa
 	}
 	if input.HomeScreen != nil && !validTerminalHome(*input.HomeScreen) {
 		return nil, invalid("Elige la pantalla inicial de la terminal: Mesas, Para llevar, Cocina o Caja.")
+	}
+	// Etapa A3 (A3-D7): en un dispositivo android solo Mesas o Para llevar. Un escritorio anterior que la envíe sin
+	// cambiarla manda la guardada, que desde la 0027 ya es una de las dos.
+	if input.HomeScreen != nil && !validAndroidHome(*input.HomeScreen) {
+		var kind string
+		if err := tx.QueryRow(ctx, "SELECT kind FROM app.devices WHERE id=$1", deviceID).Scan(&kind); err != nil {
+			return nil, err
+		}
+		if kind == "android" {
+			return nil, invalid(androidHomeMessage)
+		}
 	}
 	if input.IdleLockSeconds != nil && (*input.IdleLockSeconds < minimumIdleLockSeconds || *input.IdleLockSeconds > maximumIdleLockSeconds) {
 		return nil, invalid("El bloqueo por inactividad debe ser de 30 segundos a 1 hora.")

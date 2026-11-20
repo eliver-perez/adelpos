@@ -22,7 +22,7 @@ data class ReadyItem(val productName: String, val quantity: Int)
  *   restaurar un respaldo en la computadora principal, Go puede repetir números con otro contenido.
  * @param key la identidad del aviso que da Go, única y que nunca se reutiliza: un aviso con una
  *   [key] ya mostrada en este dispositivo nunca se vuelve a mostrar.
- * @param waiterUserId el mesero del aviso: al tocarlo en «¿Quién eres?» se le pide su PIN.
+ * @param waiterUserId el mesero del aviso: al tocarlo en «Selecciona tu usuario» se le pide su PIN.
  */
 data class ReadyAlert(
     val id: Long,

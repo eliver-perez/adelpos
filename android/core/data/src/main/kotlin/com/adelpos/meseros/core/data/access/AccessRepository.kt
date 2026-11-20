@@ -26,6 +26,9 @@ import com.adelpos.meseros.core.domain.access.UnsentOrder
 import com.adelpos.meseros.core.domain.access.UnsentOrdersSource
 import com.adelpos.meseros.core.domain.access.WaiterProfile
 import com.adelpos.meseros.core.domain.access.WaiterRoster
+import com.adelpos.meseros.core.domain.connection.LinkState
+import com.adelpos.meseros.core.domain.connection.ServerAnswers
+import com.adelpos.meseros.core.domain.connection.ServerLink
 import com.adelpos.meseros.core.domain.error.AppError
 import com.adelpos.meseros.core.domain.security.SecretSealer
 import com.adelpos.meseros.core.domain.security.SecretUnavailableException
@@ -61,7 +64,10 @@ import okhttp3.Headers
  *
  * @param destroyKey borra la llave del Keystore al retirar el dispositivo: todo lo cifrado queda
  *   ilegible aunque algo sobreviviera al borrado.
- * @param isOnline si el dispositivo tiene una red por la que intentar (monitor de conexión).
+ * @param link el estado único de conexión (etapa A3, A3-D1): la lista sin conexión y la entrada
+ *   directa sin conexión solo con «Sin conexión», nunca por una falla aislada.
+ * @param answers a quién informa el cliente del servidor emparejado cada respuesta de Go (el mismo
+ *   estado único; null en pruebas que no lo miran).
  * @param unsentOrders pedidos sin enviar que pasan a la bitácora antes de borrar todo (Fase E).
  * @param wipe registro único de «borrar los datos de este dispositivo» (catálogo, imágenes y, en la
  *   Fase E, la cola): se usa al retirar el dispositivo y en «Emparejar de nuevo».
@@ -72,7 +78,7 @@ class AccessRepository(
     private val destroyKey: () -> Unit,
     private val identity: ClientIdentity,
     private val relocator: ServerRelocator,
-    private val isOnline: () -> Boolean,
+    private val link: ServerLink,
     private val unsentOrders: UnsentOrdersSource,
     private val scope: CoroutineScope,
     private val wipe: DeviceDataWipe = DeviceDataWipe(),
@@ -80,6 +86,7 @@ class AccessRepository(
     private val verifierIterations: Int = PinVerifier.DEFAULT_ITERATIONS,
     private val cpuDispatcher: CoroutineDispatcher = Dispatchers.Default,
     private val busyRetryMillis: Long = BUSY_RETRY_MILLIS,
+    private val answers: ServerAnswers? = null,
 ) : DeviceAccess {
     private val mutableStatus = MutableStateFlow<DeviceStatus>(DeviceStatus.Starting)
     private val mutableActive = MutableStateFlow<ActiveWaiter?>(null)
@@ -89,10 +96,13 @@ class AccessRepository(
     // Un cambio de estado a la vez (comprobar, entrar, retirar, emparejar).
     private val mutex = Mutex()
     private var server: PairedServerEntity? = null
-    private var connection: PairedConnection? = null
 
-    // La última lista de Go (con conexión).
+    // Se lee sin el candado en la sonda del estado de conexión (probeServer).
+    @Volatile private var connection: PairedConnection? = null
+
+    // La última lista de Go (con conexión) y si ya se leyó desde que se cargó el servidor.
     private var listed: List<WaiterProfile> = emptyList()
+    private var listedFromGo = false
 
     // Sesión de Go de cada mesero en este dispositivo (solo en memoria; cada mesero tiene la suya).
     // Solo la pone una entrada CON conexión; una entrada sin conexión, una sesión terminada o un
@@ -117,18 +127,15 @@ class AccessRepository(
 
     override suspend fun roster(): WaiterRoster = mutex.withLock {
         val current = connection
-        if (current != null && mutableStatus.value is DeviceStatus.Ready) {
-            if (isOnline()) {
-                refreshRosterLocked(current)
-            } else {
-                // Sin red no se pregunta a Go: solo los meseros que ya entraron aquí.
-                markOffline()
-            }
+        // A3-D1: con «Sin conexión» (del estado único) no se pregunta a Go, salvo que la sonda del
+        // momento diga que ya responde; una falla aislada deja la última lista de Go.
+        if (current != null && mutableStatus.value is DeviceStatus.Ready && link.confirm()) {
+            refreshRosterLocked(current)
         }
-        val status = mutableStatus.value
-        if (status is DeviceStatus.Ready && status.online) {
+        if (listedFromGo && link.state.value == LinkState.ONLINE) {
             WaiterRoster(listed, online = true)
         } else {
+            // Sin conexión (o mientras Go no ha dado su lista): los meseros que ya entraron aquí.
             WaiterRoster(knownProfiles(), online = false)
         }
     }
@@ -142,15 +149,14 @@ class AccessRepository(
         if (status !is DeviceStatus.Ready) {
             return@withLock EntryResult.Failed(AppError.Unreachable)
         }
-        // Con la última comprobación sin respuesta se entra directo sin conexión (y se vuelve
-        // a comprobar aparte); así el mesero no espera a que venza la conexión.
-        if (status.online && isOnline()) {
+        // A3-D1: se entra directo sin conexión solo con el estado único en «Sin conexión» y sin
+        // respuesta a la sonda del momento (así el mesero no espera a que venza la conexión);
+        // una falla aislada nunca lo hace. Si Go no responde al PIN, sigue el verificador local.
+        if (link.confirm()) {
             val online = enterOnlineLocked(current, userId, pin)
             if (online != null) {
                 return@withLock online
             }
-        } else {
-            scope.launch { recheck() }
         }
         enterOfflineLocked(userId, pin)
     }
@@ -221,6 +227,32 @@ class AccessRepository(
         if (active != null && active.userId == userId) {
             mutableActive.value = active.copy(hasServerSession = false, mustReenterPin = true)
         }
+    }
+
+    /**
+     * La sonda del estado único de conexión (`GET health/live` al servidor emparejado; su respuesta
+     * llega al estado por el cliente). No toma el candado: también la pide la entrada con PIN
+     * mientras lo tiene. false si no hay servidor emparejado al que preguntar.
+     *
+     * Etapa A3 (Fase E, `access` paso 6): si la sonda que busca el servidor ([relocate], la de «Sin
+     * conexión») encuentra **otro certificado** en su dirección y tampoco lo halla en otra, lo
+     * informa como cualquier otra petición ([report]): el dispositivo pide emparejar de nuevo.
+     * Antes solo lo descubría la comprobación de versiones, y con «Sin conexión» esa comprobación
+     * espera a que la sonda responda; con otro certificado la sonda nunca responde, así que el
+     * dispositivo se quedaba en «Sin conexión» sin pedir emparejar de nuevo.
+     */
+    suspend fun probeServer(relocate: Boolean, quick: Boolean): Boolean {
+        val current = connection ?: return false
+        val outcome = current.live(relocate, quick)
+        if (
+            relocate &&
+                outcome is ApiOutcome.NoAnswer &&
+                outcome.error == AppError.ServerIdentityChanged &&
+                connection === current
+        ) {
+            report(AppError.ServerIdentityChanged, userId = null)
+        }
+        return true
     }
 
     /** Sesión de Go del mesero [userId] en este dispositivo (la cola y el modo Mesero, Fase E). */
@@ -306,8 +338,10 @@ class AccessRepository(
                 identity = identity,
                 relocator = relocator,
                 onMoved = { base -> dao.updateBaseUrl(base) },
+                answers = answers,
             )
-        mutableStatus.value = ready(entity, online = false)
+        listedFromGo = false
+        mutableStatus.value = ready(entity)
     }
 
     // Comprueba versiones y la lista de meseros. Solo desde un estado que tenga servidor.
@@ -320,8 +354,8 @@ class AccessRepository(
         if (status is DeviceStatus.NeedsRepair && status.reason != RepairReason.IDENTITY_CHANGED) {
             return
         }
-        if (!isOnline()) {
-            markOffline()
+        // Con «Sin conexión» solo se pregunta si la sonda del momento dice que Go ya responde.
+        if (!link.confirm()) {
             return
         }
         when (val version = current.version()) {
@@ -355,10 +389,8 @@ class AccessRepository(
                 applyErrorLocked(version.error)
                 return
             }
-            is ApiOutcome.Malformed -> {
-                markOffline()
-                return
-            }
+            // Una respuesta que esta versión no entiende: nada cambia (antes «sin conexión»).
+            is ApiOutcome.Malformed -> return
         }
         refreshRosterLocked(current)
     }
@@ -373,11 +405,12 @@ class AccessRepository(
                 val entity = dao.pairedServer() ?: return
                 server = entity
                 listed = profiles
-                mutableStatus.value = ready(entity, online = true)
+                listedFromGo = true
+                mutableStatus.value = ready(entity)
             }
             is ApiOutcome.Rejected -> applyErrorLocked(ApiErrors.toAppError(outcome.problem))
             is ApiOutcome.NoAnswer -> applyErrorLocked(outcome.error)
-            is ApiOutcome.Malformed -> markOffline()
+            is ApiOutcome.Malformed -> Unit
         }
     }
 
@@ -455,7 +488,7 @@ class AccessRepository(
                     applyErrorLocked(outcome.error)
                     return EntryResult.Failed(outcome.error)
                 }
-                markOffline()
+                // Sin respuesta: el estado único ya la contó; se sigue con el verificador local.
                 return null
             }
             is ApiOutcome.Malformed ->
@@ -604,7 +637,9 @@ class AccessRepository(
         return EntryResult.Entered(waiter)
     }
 
-    // Lo que hace cada error de Go con el estado del dispositivo.
+    // Lo que hace cada error de Go con el estado del dispositivo. Ninguno dice «sin conexión»: eso
+    // lo
+    // decide el estado único de conexión (A3-D1) con todas las respuestas de Go.
     private suspend fun applyErrorLocked(error: AppError) {
         when (error) {
             is AppError.DeviceRevoked -> retireLocked()
@@ -616,30 +651,18 @@ class AccessRepository(
             is AppError.Rejected ->
                 when (error.code) {
                     "PIN_DEVICE_NOT_ALLOWED" -> needsRepair(RepairReason.NOT_RECOGNIZED)
-                    // El tipo de cliente no coincide con el del dispositivo: un problema para
-                    // soporte, no una sesión que dejó de valer ni falta de red; nada cambia aquí.
-                    CLIENT_KIND_MISMATCH -> Unit
-                    else -> markOffline()
+                    // El tipo de cliente no coincide con el del dispositivo (CLIENT_KIND_MISMATCH):
+                    // un problema para soporte, no una sesión que dejó de valer ni falta de red;
+                    // nada cambia aquí, como con cualquier otro rechazo.
+                    else -> Unit
                 }
-            is AppError.ServerProblem ->
-                if (error.code != PIN_LOGIN_BUSY) {
-                    markOffline()
-                }
-            else -> markOffline()
+            else -> Unit
         }
     }
 
     private fun needsRepair(reason: RepairReason) {
         mutableActive.value = null
         mutableStatus.value = DeviceStatus.NeedsRepair(reason)
-    }
-
-    private fun markOffline() {
-        val entity = server ?: return
-        if (connection == null) {
-            return
-        }
-        mutableStatus.value = ready(entity, online = false)
     }
 
     // DEVICE_REVOKED (§3.2): los pedidos sin enviar pasan a la bitácora, se borra todo lo demás
@@ -678,6 +701,7 @@ class AccessRepository(
         dao.forgetServer(emptyList())
         sessions.clear()
         listed = emptyList()
+        listedFromGo = false
         mutableActive.value = null
         connection = null
         server = null
@@ -706,12 +730,11 @@ class AccessRepository(
             .filter { it.sealedVerifier != null }
             .map { waiter -> waiter.profile().copy(offlineEntryClosed = waiter.offlineClosed) }
 
-    private fun ready(entity: PairedServerEntity, online: Boolean) =
+    private fun ready(entity: PairedServerEntity) =
         DeviceStatus.Ready(
             serverName = entity.serverName,
             deviceName = entity.deviceName,
             idleLockSeconds = entity.idleLockSeconds,
-            online = online,
         )
 
     private fun profileOf(user: PinUserDto) =

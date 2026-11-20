@@ -222,6 +222,9 @@ func TestClientMinimumVersionByKind(t *testing.T) {
 	if !found["takeaway-v1"] || !found["device-precheck-printer-v1"] || !found["ready-alerts-v1"] {
 		t.Fatalf("capacidades de la etapa A2: %v", capabilities)
 	}
+	if !found["permission-groups-v1"] {
+		t.Fatalf("capacidades de la etapa A3: %v", capabilities)
+	}
 }
 
 func TestOpenAPIDocumentIsServed(t *testing.T) {

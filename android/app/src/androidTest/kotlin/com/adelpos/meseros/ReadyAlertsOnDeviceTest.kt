@@ -5,6 +5,7 @@ import android.app.ActivityManager
 import android.app.NotificationManager
 import android.content.Intent
 import android.os.Build
+import android.service.notification.StatusBarNotification
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -94,8 +95,10 @@ class ReadyAlertsOnDeviceTest {
             "Recibiendo avisos de platillos listos",
             ongoing.notification.extras.getCharSequence("android.text")?.toString(),
         )
-        // Sin servidor que responda, sigue en primer plano reintentando y lo dice.
-        waitUntil("el texto de sin conexión") {
+        // Sin servidor que responda, sigue en primer plano reintentando y lo dice cuando el estado
+        // único de conexión (el de la barra) dice «Sin conexión»: tras la tolerancia de la etapa
+        // A3 (3 fallas seguidas y 20 s, con la espera creciente del canal: unos 30 s).
+        waitUntil("el texto de sin conexión", timeout = 60_000) {
             ongoing()?.notification?.extras?.getCharSequence("android.text")?.toString() ==
                 "Sin conexión con la computadora principal. Reintentando…"
         }
@@ -230,6 +233,41 @@ class ReadyAlertsOnDeviceTest {
         }
         notifications.cancelAlerts()
         waitUntil("sin avisos") { manager.activeNotifications.isEmpty() }
+    }
+
+    @Test
+    fun elResumenNoEsperaAQueAndroidListeLoRecienPublicado() = runBlocking {
+        // Etapa A3 (Fase E, `alerts r5` en Android 13): `notify` es asíncrono y, justo después de
+        // publicar, la lista de Android muchas veces todavía no tiene la notificación. Aquí la
+        // lista que lee la aplicación se queda atrasada a propósito hasta que la prueba la pone al
+        // día; antes, con una sola cuenta en ella, se quitaba el resumen en lugar de publicarlo.
+        var listed: List<StatusBarNotification> = emptyList()
+        val notifications = ReadyAlertNotifications(app, NotViewing, listed = { listed })
+        notifications.apply(ReadyAlertSettings(true, false, false))
+        notifications.present(listOf(alert(1)))
+        waitUntil("el aviso de la Mesa 4") { alertsOf("cuenta-4").isNotEmpty() }
+        listed = manager.activeNotifications.toList()
+        // Otra cuenta: la lista atrasada todavía no la tiene.
+        notifications.present(
+            listOf(alert(3, account = "cuenta-12", table = "Mesa 12", folio = 12)),
+        )
+        waitUntil("el resumen con las dos cuentas") { summary() != null }
+        // Quitar una de las dos (el mesero abrió la Mesa 12): el aviso de la otra se queda. Quitar
+        // el resumen del grupo haría que Android quitara también el de la Mesa 4.
+        waitUntil("la Mesa 12 en la lista de Android") { alertsOf("cuenta-12").isNotEmpty() }
+        listed = manager.activeNotifications.toList()
+        notifications.cancelAccount("cuenta-12")
+        waitUntil("sin la Mesa 12") { alertsOf("cuenta-12").isEmpty() }
+        Thread.sleep(SETTLE_MILLIS)
+        assertEquals("el aviso de la Mesa 4 se queda", 1, alertsOf("cuenta-4").size)
+        // Sin ninguna cuenta a la vista, el resumen se quita (aunque la lista atrasada las tenga).
+        listed = manager.activeNotifications.toList()
+        notifications.cancelAccount("cuenta-4")
+        waitUntil("sin resumen") { summary() == null }
+        notifications.cancelAlerts()
+        waitUntil("sin avisos") {
+            manager.activeNotifications.none { it.id != ReadyAlertNotifications.ONGOING_ID }
+        }
     }
 
     @Test

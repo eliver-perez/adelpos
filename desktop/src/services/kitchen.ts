@@ -349,6 +349,11 @@ export const preparationLabels: Record<string, string> = {
   cancelled: 'Cancelado',
 };
 
+// Etapa A3 (A3-D22): un valor que esta versión no conoce se dice en general, nunca con su código.
+export function preparationLabel(state: string) {
+  return preparationLabels[state] ?? 'Otro estado de preparación';
+}
+
 // Tipo de documento en comandas y cola de impresión, incluidos los documentos comerciales.
 export const ticketKindLabels: Record<TicketSummary['kind'], string> = {
   normal: 'Comanda',

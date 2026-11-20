@@ -3,6 +3,7 @@ package com.adelpos.meseros.core.capture
 import com.adelpos.meseros.core.domain.access.ActiveWaiter
 import com.adelpos.meseros.core.domain.catalog.CatalogImages
 import com.adelpos.meseros.core.domain.catalog.CatalogSource
+import com.adelpos.meseros.core.domain.connection.LinkState
 import com.adelpos.meseros.core.domain.waiter.CaptureService
 import com.adelpos.meseros.core.domain.waiter.OrderQueueService
 import com.adelpos.meseros.core.domain.waiter.PrecheckService
@@ -28,4 +29,9 @@ class CaptureDependencies(
     val takeaway: TakeawayService,
     /** Imprimir la precuenta desde la cuenta (etapa A2, Fase C): nunca en la cola. */
     val precheck: PrecheckService,
+    /**
+     * El estado único de conexión (etapa A3, A3-D1), el mismo de la barra: Mesas y Para llevar
+     * dicen «Sin conexión» solo con él, y «Entregado» lo necesita.
+     */
+    val link: StateFlow<LinkState>,
 )

@@ -15,7 +15,7 @@ import com.adelpos.meseros.core.domain.waiter.OrderLine
 import com.adelpos.meseros.core.domain.waiter.OrderState
 import com.adelpos.meseros.core.domain.waiter.PendingOrder
 import com.adelpos.meseros.feature.access.pin.TAG_ENTRY
-import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_SEARCH
+import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_SCREEN
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertTrue
@@ -73,7 +73,7 @@ class IdleLockWithPendingOnDeviceTest {
 
         // Más que el plazo sin tocar la pantalla: sigue en Mesas.
         Thread.sleep((IDLE_SECONDS + 15) * 1_000L)
-        assertTrue("Sigue en Mesas con un pedido por enviar", present(TAG_TABLES_SEARCH))
+        assertTrue("Sigue en Mesas con un pedido por enviar", present(TAG_TABLES_SCREEN))
         assertTrue(!present(TAG_ENTRY))
 
         // Sin pedidos pendientes, el bloqueo llega en la siguiente revisión.

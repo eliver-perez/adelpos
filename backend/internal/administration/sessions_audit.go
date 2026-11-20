@@ -2,6 +2,7 @@ package administration
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"time"
 
@@ -25,11 +26,24 @@ func sessions(ctx context.Context, tx pgx.Tx, request Request, principal Princip
 	}
 	sessionID := parts[1]
 	var support bool
-	if err := tx.QueryRow(ctx, "SELECT u.support FROM app.sessions s JOIN app.users u ON u.id=s.user_id WHERE s.id=$1", sessionID).Scan(&support); err != nil {
+	var ownerID string
+	if err := tx.QueryRow(ctx, "SELECT u.support,u.id FROM app.sessions s JOIN app.users u ON u.id=s.user_id WHERE s.id=$1", sessionID).Scan(&support, &ownerID); err != nil {
 		return nil, err
 	}
 	if support && !principal.Support {
 		return nil, denied()
+	}
+	// Etapa A3 (revisión R1, A3-D16): la regla de delegación también al cerrar la sesión de otro usuario, como al
+	// editarlo, cambiar su PIN o su contraseña: nadie cierra la sesión de alguien con permisos (o un límite de
+	// descuento) que no tiene. La sesión propia se puede cerrar siempre.
+	if ownerID != principal.UserID {
+		if err := requireManageableUser(ctx, tx, principal, ownerID); err != nil {
+			var fault *Fault
+			if errors.As(err, &fault) && fault.Code == "PERMISSION_DENIED" {
+				return nil, delegationDenied("No puedes cerrar la sesión de un usuario con permisos que tú no tienes.")
+			}
+			return nil, err
+		}
 	}
 	if _, err := tx.Exec(ctx, "UPDATE app.sessions SET revoked_at=coalesce(revoked_at,now()),revoke_reason='admin_revoked' WHERE id=$1", sessionID); err != nil {
 		return nil, err

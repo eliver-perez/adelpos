@@ -4,7 +4,7 @@ import { IconLabel } from '../../components/Icon';
 import { ReprintReason } from '../../components/ReprintReason';
 import { useLiveResource } from '../../hooks/useLiveResource';
 import { APIError } from '../../services/api';
-import { cashDocumentKindLabels, cashJobLabels, previewCashDocument } from '../../services/cash';
+import { cashDocumentKindLabels, cashJobLabel, previewCashDocument } from '../../services/cash';
 import type {
   CashDocumentPreview,
   CashDocumentRecord,
@@ -81,7 +81,7 @@ export function documentOptions(
 
 // Estado visible del documento: tipo, último trabajo y copias, sin identificadores internos.
 function documentSummary(document: CashDocumentRecord) {
-  const state = document.job_state ? (cashJobLabels[document.job_state] ?? document.job_state) : '';
+  const state = document.job_state ? cashJobLabel(document.job_state) : '';
   const copies = countLabel(document.copies, 'envío', 'envíos');
   const parts = [cashDocumentKindLabels[document.kind], state, copies];
   if (document.printer_name) {

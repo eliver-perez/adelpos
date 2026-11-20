@@ -293,7 +293,7 @@ describe('catálogo: posiciones, alta continua y vista previa', () => {
 
   it('la categoría elige posición y color de la paleta, y «Guardar y crear otra» abre otra', async () => {
     render(<CatalogPage can={() => true} />);
-    await screen.findByText('Aún no hay registros');
+    await screen.findByText('No hay registros');
     fireEvent.click(screen.getByRole('tab', { name: 'Categorías' }));
     await waitFor(() =>
       expect(screen.getByRole('tab', { name: 'Categorías' }).getAttribute('aria-selected')).toBe(
@@ -341,7 +341,7 @@ describe('catálogo: posiciones, alta continua y vista previa', () => {
 
   it('el producto conserva la categoría al crear otro y se coloca después del último', async () => {
     render(<CatalogPage can={() => true} />);
-    await screen.findByText('Aún no hay registros');
+    await screen.findByText('No hay registros');
     fireEvent.click(screen.getByRole('button', { name: 'Crear registro' }));
     await screen.findByLabelText('Nombre');
     chooseOption(screen.getByLabelText('Categoría'), 'Desayunos');
@@ -372,7 +372,7 @@ describe('catálogo: posiciones, alta continua y vista previa', () => {
 
   it('«Vista previa» vive en Catálogo solo con permisos de catálogo y precios', async () => {
     const { unmount } = render(<CatalogPage can={() => true} />);
-    await screen.findByText('Aún no hay registros');
+    await screen.findByText('No hay registros');
     fireEvent.click(screen.getByRole('tab', { name: 'Vista previa' }));
     expect(await screen.findByLabelText('Producto a comprobar')).toBeTruthy();
     expect(screen.getByRole('tab', { name: 'Vista previa' }).getAttribute('aria-selected')).toBe(
@@ -380,10 +380,10 @@ describe('catálogo: posiciones, alta continua y vista previa', () => {
     );
     expect(screen.queryByRole('button', { name: 'Crear registro' })).toBeNull();
     fireEvent.click(screen.getByRole('tab', { name: 'Productos' }));
-    await screen.findByText('Aún no hay registros');
+    await screen.findByText('No hay registros');
     unmount();
     render(<CatalogPage can={(permission) => permission !== 'catalog.prices.read'} />);
-    await screen.findByText('Aún no hay registros');
+    await screen.findByText('No hay registros');
     expect(screen.queryByRole('tab', { name: 'Vista previa' })).toBeNull();
   });
 });

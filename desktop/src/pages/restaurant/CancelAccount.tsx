@@ -72,7 +72,7 @@ export function kitchenEffect(
     return ['La cuenta no tiene productos enviados a cocina.'];
   }
   const lines = [
-    'Lo que aún no se libera a preparación se retira sin imprimir; las estaciones reciben el aviso de cancelación de lo ya liberado.',
+    'Lo que no se ha liberado a preparación se retira sin imprimir; las estaciones reciben el aviso de cancelación de lo ya liberado.',
   ];
   if (!reason) {
     lines.push('Lo ya preparado se trata según el motivo que elijas.');

@@ -6,6 +6,7 @@ import com.adelpos.meseros.core.domain.access.WaiterProfile
 import com.adelpos.meseros.core.domain.catalog.CatalogSource
 import com.adelpos.meseros.core.domain.catalog.Customization
 import com.adelpos.meseros.core.domain.catalog.LineSelection
+import com.adelpos.meseros.core.domain.connection.LinkState
 import com.adelpos.meseros.core.domain.money.Money
 import com.adelpos.meseros.core.domain.waiter.AccountSummary
 import com.adelpos.meseros.core.domain.waiter.Capture
@@ -148,6 +149,9 @@ class TakeawayViewModelTest {
                 }
             }
 
+        /** El estado único de conexión que ve la pantalla (A3-D1). */
+        val link = MutableStateFlow(LinkState.ONLINE)
+
         fun dependencies() =
             TakeawayDependencies(
                 capture =
@@ -167,6 +171,7 @@ class TakeawayViewModelTest {
                             ),
                         takeaway = takeaway,
                         precheck = unused<PrecheckService>(),
+                        link = link,
                     ),
                 elapsedClock = { 10_000L },
                 wallClock = { 1_700_000_000_000L },
@@ -273,6 +278,9 @@ class TakeawayViewModelTest {
             val model = TakeawayViewModel(fake.dependencies())
             advanceUntilIdle()
             val entry = model.entries.value.single() as TakeawayEntry.InGo
+            // Con «Sin conexión» en el estado único (el botón no se ve habilitado, pero el aviso
+            // de la respuesta también lo dice).
+            fake.link.value = LinkState.OFFLINE
             val expected =
                 mapOf(
                     DeliveryResult.Delivered(closed = true) to TakeawayNotice.DELIVERED,
@@ -293,6 +301,13 @@ class TakeawayViewModelTest {
                 model.onNoticeShown()
             }
             assertEquals(List(expected.size) { TAKEAWAY }, fake.delivered)
+            // Etapa A3: sin respuesta, «necesitas conexión» solo si el estado único de conexión
+            // (el de la barra) dice «Sin conexión»; con «En línea» fue esta vez: «No se pudo».
+            fake.delivery = DeliveryResult.NoConnection
+            fake.link.value = LinkState.ONLINE
+            model.deliver(entry)
+            advanceUntilIdle()
+            assertEquals(TakeawayNotice.FAILED, model.notice)
         }
 
     companion object {

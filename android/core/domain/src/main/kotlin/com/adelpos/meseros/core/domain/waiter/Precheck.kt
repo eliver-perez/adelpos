@@ -42,12 +42,14 @@ data class PrecheckPrinter(val name: String, val terminalName: String?) {
 /**
  * Lo último que se leyó de Go para imprimir, guardado para verse también sin conexión: el nombre
  * visible y la impresora de este dispositivo (null si no tiene). Con [read] en false nunca se leyó:
- * no se avisa nada antes de tocar (la respuesta de Go manda siempre).
+ * no se avisa nada antes de tocar (la respuesta de Go manda siempre). Desde la etapa A3 también la
+ * pantalla inicial del dispositivo ([home], de la misma lectura de `getIdentity`).
  */
 data class PrecheckSetup(
     val name: PrecheckName,
     val printer: PrecheckPrinter?,
     val read: Boolean,
+    val home: DeviceHome = DeviceHome.TABLES,
 ) {
     companion object {
         val UNKNOWN = PrecheckSetup(PrecheckName.PRECHECK, printer = null, read = false)
@@ -88,8 +90,18 @@ sealed interface PrintAnswer {
         val message: String?,
     ) : PrintAnswer
 
-    /** Sin conexión con la computadora principal (sin sesión de Go, sin red o sin respuesta). */
+    /**
+     * Sin conexión con la computadora principal: sin sesión de Go, o el estado único de conexión
+     * dice «Sin conexión» (etapa A3, A3-D1).
+     */
     data object NoConnection : PrintAnswer
+
+    /**
+     * Con el estado único de conexión en «En línea», Go no respondió a esta petición (ya repetida
+     * con la misma clave): «No se pudo imprimir», sin decir «necesitas conexión» mientras la barra
+     * dice «En línea» (etapa A3, §2: nunca se contradicen).
+     */
+    data object NoAnswer : PrintAnswer
 }
 
 /**

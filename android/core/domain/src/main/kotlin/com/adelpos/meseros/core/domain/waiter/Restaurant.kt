@@ -63,25 +63,12 @@ data class RestaurantSettings(
 
 /**
  * Lienzo lógico del mapa de mesas: Go guarda la posición y el tamaño de cada mesa en un rectángulo
- * de 1000 × 560 por área (restricciones de la migración 0004). La pantalla lo escala al espacio que
- * tiene, conservando la proporción.
+ * de 1000 × 560 por área (restricciones de la migración 0004). Desde la etapa A3 el mapa se escala
+ * por el rectángulo que ocupan las mesas del área ([TableMapFit]), no por el lienzo completo.
  */
 object TableCanvas {
     const val WIDTH = 1000
     const val HEIGHT = 560
-
-    /**
-     * Escala que hace caber el lienzo completo en [availableWidth] × [availableHeight] sin
-     * deformarlo.
-     */
-    fun scaleToFit(availableWidth: Float, availableHeight: Float): Float {
-        if (availableWidth <= 0f || availableHeight <= 0f) {
-            return 0f
-        }
-        val horizontal = availableWidth / WIDTH
-        val vertical = availableHeight / HEIGHT
-        return minOf(horizontal, vertical)
-    }
 }
 
 /**
@@ -147,26 +134,5 @@ object TableNames {
         }
     }
 
-    private val SPACES = Regex("\\s+")
-}
-
-/** Búsqueda de mesa por nombre (§6.1), sin distinguir acentos ni mayúsculas. */
-object TableSearch {
-    fun matches(table: DiningTable, query: String): Boolean {
-        val wanted = normalize(query)
-        if (wanted.isEmpty()) {
-            return true
-        }
-        val name = normalize(table.name)
-        return wanted.split(' ').all { word -> name.contains(word) }
-    }
-
-    private fun normalize(text: String): String {
-        val decomposed = java.text.Normalizer.normalize(text, java.text.Normalizer.Form.NFD)
-        val withoutMarks = decomposed.replace(COMBINING_MARKS, "")
-        return withoutMarks.lowercase().trim().replace(SPACES, " ")
-    }
-
-    private val COMBINING_MARKS = Regex("\\p{Mn}+")
     private val SPACES = Regex("\\s+")
 }

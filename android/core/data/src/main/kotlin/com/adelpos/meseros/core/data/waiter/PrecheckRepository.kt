@@ -5,6 +5,7 @@ import com.adelpos.meseros.core.data.api.ApiJson
 import com.adelpos.meseros.core.data.api.ApiOutcome
 import com.adelpos.meseros.core.data.waiter.db.RestaurantSnapshotEntity
 import com.adelpos.meseros.core.data.waiter.db.WaiterDao
+import com.adelpos.meseros.core.domain.waiter.DeviceHome
 import com.adelpos.meseros.core.domain.waiter.PrecheckName
 import com.adelpos.meseros.core.domain.waiter.PrecheckPrinter
 import com.adelpos.meseros.core.domain.waiter.PrecheckService
@@ -39,6 +40,8 @@ data class IdentityDto(
 @Serializable
 data class IdentityTerminalDto(
     @SerialName("precheck_printer") val precheckPrinter: PrecheckPrinterDto? = null,
+    // Etapa A3 (§4.12): la pantalla inicial del dispositivo que se guarda en Terminales.
+    @SerialName("home_screen") val homeScreen: String? = null,
 )
 
 /** `Terminal.precheck_printer`: la impresora de precuentas del dispositivo, o null. */
@@ -90,12 +93,14 @@ data class DocumentStatusDto(
 data class SavedPrecheckSetup(
     @SerialName("precheck_name") val precheckName: String,
     val printer: PrecheckPrinterDto? = null,
+    // Etapa A3: lo guardado antes no lo tiene (Mesas).
+    @SerialName("home_screen") val homeScreen: String? = null,
 )
 
 /**
  * Imprimir la precuenta (etapa A2, §5) con la **sesión del mesero** que la pide: nunca va a la cola
  * sin conexión ni usa la credencial de envío (que solo sirve para `submitOfflineOrder`, revisión R3
- * de la A1). Sin sesión o sin red responde [PrintAnswer.NoConnection] sin pedir nada.
+ * de la A1). Sin sesión o con «Sin conexión» responde [PrintAnswer.NoConnection] sin pedir nada.
  *
  * El nombre visible (`establishment.precheck_name`) y la impresora de este dispositivo
  * (`terminal.precheck_printer`) se leen de `getIdentity` al entrar un mesero con conexión y al
@@ -103,7 +108,10 @@ data class SavedPrecheckSetup(
  * de Room) para mostrarse sin conexión. Ese registro lo borra `WaiterDao.eraseAll`, ya en
  * `deviceDataWipe`.
  *
- * @param connected el dispositivo tiene red (el mismo monitor del indicador).
+ * @param connected el estado único de conexión está en «En línea» (etapa A3, A3-D1: el mismo de la
+ *   barra; antes, solo la red de Android).
+ * @param confirmConnection el reintento en el momento: con «Sin conexión» y red de Android,
+ *   pregunta a Go antes de decir que falta conexión (`ServerLink.confirm`).
  */
 class PrecheckRepository(
     private val dao: WaiterDao,
@@ -111,6 +119,7 @@ class PrecheckRepository(
     private val api: WaiterApi,
     override val connected: StateFlow<Boolean>,
     private val scope: CoroutineScope,
+    private val confirmConnection: suspend () -> Boolean = { connected.value },
     private val wallClock: () -> Long = System::currentTimeMillis,
     private val retryDelayMillis: Long = RETRY_DELAY_MILLIS,
 ) : PrecheckService {
@@ -145,6 +154,7 @@ class PrecheckRepository(
                         precheckName =
                             outcome.value.establishment?.precheckName ?: PrecheckName.PRECHECK.key,
                         printer = outcome.value.terminal?.precheckPrinter,
+                        homeScreen = outcome.value.terminal?.homeScreen,
                     )
                 // Primero se guarda (para verlo sin conexión) y después se muestra.
                 dao.saveSnapshot(
@@ -170,7 +180,7 @@ class PrecheckRepository(
     ): PrintAnswer {
         val transport = server.transport() ?: return PrintAnswer.NoConnection
         val headers = server.sessionHeaders(userId) ?: return PrintAnswer.NoConnection
-        if (!connected.value) {
+        if (!confirmConnection()) {
             return PrintAnswer.NoConnection
         }
         val body = PrintPrecheckBody(operationId = operationId)
@@ -210,7 +220,7 @@ class PrecheckRepository(
     ): PrintAnswer {
         val transport = server.transport() ?: return PrintAnswer.NoConnection
         val headers = server.sessionHeaders(userId) ?: return PrintAnswer.NoConnection
-        if (!connected.value) {
+        if (!confirmConnection()) {
             return PrintAnswer.NoConnection
         }
         val body = RetryDocumentBody(operationId = operationId, ticketId = ticketId)
@@ -236,7 +246,9 @@ class PrecheckRepository(
                     terminalName = outcome.value.terminalName,
                 )
             is ApiOutcome.Rejected -> rejected(outcome, userId)
-            is ApiOutcome.NoAnswer -> PrintAnswer.NoConnection
+            // Sin respuesta: «necesitas conexión» solo si el estado único ya dice «Sin conexión».
+            is ApiOutcome.NoAnswer ->
+                if (connected.value) PrintAnswer.NoAnswer else PrintAnswer.NoConnection
             is ApiOutcome.Malformed -> PrintAnswer.Rejected(outcome.status, null, null)
         }
 
@@ -289,6 +301,7 @@ class PrecheckRepository(
             name = PrecheckName.fromKey(precheckName),
             printer = printer?.let { PrecheckPrinter(it.name, it.terminalName) },
             read = true,
+            home = DeviceHome.fromWire(homeScreen),
         )
 
     companion object {

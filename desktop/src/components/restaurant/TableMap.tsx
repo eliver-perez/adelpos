@@ -587,7 +587,7 @@ export function TableMap({
             {visible.length === 0 && (
               <p className="table-map-empty muted">
                 {availableAreas.length
-                  ? 'Esta área aún no tiene mesas.'
+                  ? 'Esta área no tiene mesas.'
                   : 'Crea un área y sus mesas para comenzar.'}
               </p>
             )}

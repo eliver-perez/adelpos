@@ -304,7 +304,7 @@ export function SupplierItemsSection({
           </li>
         ))}
         {supplier.items.length === 0 && (
-          <li className="muted text-sm">Aún no hay insumos asociados a este proveedor.</li>
+          <li className="muted text-sm">No hay insumos asociados a este proveedor.</li>
         )}
       </ul>
       {dialog}

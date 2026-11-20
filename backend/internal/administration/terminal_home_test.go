@@ -17,3 +17,18 @@ func TestTerminalHomeIsAClosedList(t *testing.T) {
 		}
 	}
 }
+
+// Un teléfono o tableta de meseros solo abre en Mesas o Para llevar (etapa A3, §5.1 y A3-D7): la aplicación Android no
+// tiene modo cocina ni cobra. Su lista es parte de la lista cerrada de todas las terminales.
+func TestAndroidTerminalHomeIsTablesOrTakeaway(t *testing.T) {
+	for _, screen := range []string{"tables", "takeaway"} {
+		if !validAndroidHome(screen) || !validTerminalHome(screen) {
+			t.Fatalf("%q debía aceptarse como pantalla de inicio de un android", screen)
+		}
+	}
+	for _, screen := range []string{"kitchen", "cash", "", "status", "Tables"} {
+		if validAndroidHome(screen) {
+			t.Fatalf("%q no debía aceptarse como pantalla de inicio de un android", screen)
+		}
+	}
+}

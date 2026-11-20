@@ -49,7 +49,8 @@ sin conexión y el cursor de eventos de la recuperación (ver «Modo Mesero»). 
    `client-versions-by-kind`, `waiter-pin-v1` (entrada con PIN, credencial de envío y su administración) y
    `waiter-mode-v1` (lo del modo Mesero de la sección «Modo Mesero»); desde la etapa A2, `takeaway-v1` (lo de la
    sección «Para llevar»), `device-precheck-printer-v1` (lo de «Imprimir la precuenta») y `ready-alerts-v1` (lo de
-   «Avisos de platillos listos»)). La aplicación Android 0.1.0 exige un servidor 0.12.0 o posterior; el escritorio 0.12.0 sigue
+   «Avisos de platillos listos»); desde la etapa A3, `permission-groups-v1`, que solo usa el escritorio (permisos
+   agrupados y roles de fábrica, `API_CONTRACTS.md`)). La aplicación Android 0.1.0 exige un servidor 0.12.0 o posterior; el escritorio 0.12.0 sigue
    funcionando con un servidor 0.11.0 y solo muestra lo del PIN si el servidor anuncia `waiter-pin-v1`.
 4. **Credenciales**: la terminal (o el teléfono) emparejada envía `X-Device-ID` y `X-Device-Token`; con sesión,
    además `Authorization: Bearer <token>` (desde la etapa A1, en `submitOfflineOrder` el teléfono puede enviar en su
@@ -102,6 +103,7 @@ sin conexión y el cursor de eventos de la recuperación (ver «Modo Mesero»). 
 | `previewEdit`            | `POST /restaurant/accounts/{id}/edit-preview`  | Calcular la modificación de una partida enviada y su huella.                   |
 | `editUnits`              | `POST /restaurant/accounts/{id}/edit`          | Modificar una partida enviada, con motivo.                                     |
 | `updateTakeawayCustomer` | `POST /restaurant/accounts/{id}/customer`      | Nombre del cliente y teléfono de un pedido para llevar (etapa A2).             |
+| `discardAccount`         | `POST /restaurant/accounts/{id}/discard`       | Descartar sin motivo una cuenta vacía (etapa A3 en el contrato).               |
 | `submitOfflineOrder`     | `POST /restaurant/offline-orders`              | Pedido capturado sin conexión (Android; con sesión o credencial de envío).     |
 | `printPrecheck`          | `POST /payments/accounts/{id}/precheck/print`  | Imprimir la precuenta (etapa A2 en el contrato).                               |
 | `getDocumentStatus`      | `GET /payments/accounts/{id}/documents/status` | Estado de impresión de una precuenta, sin importes (etapa A2).                 |
@@ -307,7 +309,8 @@ bloqueo por inactividad de cada dispositivo) es de la computadora principal y es
 
 - `listAccounts` (`GET /restaurant/accounts`), `getAccount` (`GET /restaurant/accounts/{id}`): cuentas con su
   **revisión** y sus estados (`preparation_state`, `payment_state`, `delivery_state`); las partidas confirmadas traen
-  su `preparation_state`.
+  su `preparation_state`. Desde la etapa A3 el contrato documenta además `discardable` y `releasable` (Go ya los
+  enviaba): ver «Descartar una cuenta vacía».
 - `openAccount` (`POST /restaurant/accounts`): abre la cuenta con su primer producto (ninguna cuenta se guarda sin
   productos). Con `seen_account_ids` (las cuentas que el cliente veía en la mesa) responde 409 `TABLE_HAS_ACCOUNT` si
   otra terminal ya abrió una.
@@ -355,6 +358,24 @@ registradas con quién las hizo y cocina recibe su aviso (cancelación o modific
 - Errores propios: 409 `UNIT_HAS_PAYMENT` o `UNIT_HAS_DISCOUNT` (unidades con pago o descuento manual: primero la
   devolución o quitar el descuento) y 409 `ACCOUNT_BELOW_PAYMENTS`; con un producto agotado o no disponible al
   recalcular, los del catálogo (`PRODUCT_SOLD_OUT`…).
+
+### Descartar una cuenta vacía (etapa A3 en el contrato, A3-D8)
+
+Existe desde la etapa 9D y el escritorio y la aplicación la usaban; la etapa A3 la agrega al contrato sin cambiar su
+comportamiento.
+
+- **`discardable`** y **`releasable`** de cada cuenta los calcula Go en cada lectura: `discardable` es `true` si la
+  cuenta está abierta y **sin productos enviados, pagos, ajustes, documentos ni registros de cocina**, aunque tenga un
+  borrador sin enviar; `releasable` es lo mismo y además sin borrador (la cuenta vacía en sentido estricto, «Liberar
+  mesa» del escritorio). El cliente no los deduce.
+- **`discardAccount`** (`POST /restaurant/accounts/{id}/discard`, permisos **`accounts.open`** y `accounts.read`; en
+  un pedido para llevar, además `takeaway.manage`): `{"operation_id", "revision"}` → la cuenta (`Bill`) anulada
+  (`state` `voided`) y sin borrador, que se borra en la misma transacción. **No es una cancelación**: no pide motivo ni
+  autorización y no aparece en «Cuentas canceladas» ni en otros reportes. Se publica `restaurant.account.discarded`.
+- Errores: 409 `ACCOUNT_NOT_EMPTY` si la cuenta ya tiene productos enviados, pagos, ajustes, documentos o registros
+  de cocina (se cancela con su motivo desde el escritorio); 409 `ACCOUNT_CONFLICT` si la revisión cambió; 400
+  `OPERATION_VALIDATION` con `details.reason` `account_not_open` si la cuenta ya no está abierta (§6.4, abajo).
+  Idempotente con `operation_id`.
 
 ### Estados de preparación
 

@@ -96,7 +96,7 @@ func (c Config) Validate() error {
 		return errors.New("listen_address debe contener IP explícita y puerto válido")
 	}
 	if !ip.IsLoopback() && (!c.AllowLAN || c.Environment != "development") {
-		return errors.New("escucha LAN requiere allow_lan y development; producción remota aún no habilitada")
+		return errors.New("escucha LAN requiere allow_lan y development; la producción remota no está habilitada")
 	}
 	if !ip.IsLoopback() && !ip.IsPrivate() {
 		return errors.New("la escucha solo admite loopback o una IP privada específica")

@@ -253,7 +253,7 @@ export function MyPinPage({ hasPIN, refresh }: { hasPIN: boolean; refresh: () =>
           <p className="muted text-sm">
             {hasPIN
               ? 'Ya tienes PIN. Al cambiarlo se cierran tus sesiones en los teléfonos y tabletas; entra otra vez con el PIN nuevo.'
-              : 'Todavía no tienes PIN.'}{' '}
+              : 'No tienes PIN.'}{' '}
             Debe tener de 4 a 6 dígitos y no puede ser fácil de adivinar (como 1234 o 0000).
           </p>
           <Field label="Contraseña actual">

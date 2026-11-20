@@ -86,6 +86,7 @@ object WaiterMapper {
             customer = TakeawayCustomer(dto.customerName, dto.phone),
             paymentState = dto.paymentState,
             deliveryState = dto.deliveryState,
+            discardable = dto.discardable,
         )
 
     fun draftLine(dto: DraftItemDto): DraftLine =

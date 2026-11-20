@@ -44,6 +44,9 @@ class ConnectionOnDeviceTest {
             "cmd connectivity airplane-mode requiere Android 11",
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.R,
         )
+        // Sin servidor emparejado el estado único de conexión sigue a la red de Android (etapa A3);
+        // con uno que no responde diría «Sin conexión» con razón.
+        TestDevice.reset()
         val state = compose.onNodeWithTag(TAG_CONNECTION_STATE, useUnmergedTree = true)
         compose.waitUntil(timeoutMillis = 15_000) {
             compose

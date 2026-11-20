@@ -13,7 +13,12 @@ const serverURL = process.env.ADEL_BROWSER_SERVER_URL ?? 'http://127.0.0.1:8183'
 // Editar de un teléfono de meseros emparejado (e2e/pairing.ts, como lo haría la aplicación Android) se elige su
 // «Impresora de precuentas», «Ver configuración» la informa y Go la guarda (la configuración y la terminal del teléfono
 // la devuelven); «Sin impresora» la quita; «Avisar platillos listos», «Sonido» y «Vibración» se cambian y el teléfono
-// los recibe en sus avisos (GET ready-alerts con su credencial); y una terminal de escritorio no ofrece nada de esto. La impresora es de aceptación: una cola del equipo
+// los recibe en sus avisos (GET ready-alerts con su credencial); y una terminal de escritorio no ofrece nada de esto.
+// Desde la etapa A3 (§5, A3-D7) también lo que cada tipo ve: el teléfono elige su pantalla inicial solo entre Mesas y
+// Para llevar, sin caja física ni teclado (Go rechaza «Cocina»), su caja es un guion en la tabla, el identificador ya no
+// está en la tabla y «Ver configuración» lo dice como «Identificador»; la terminal de escritorio conserva las cuatro
+// pantallas. Se hace aquí, con el mismo teléfono, para no pedir otro código de emparejamiento (límite de 5 por origen
+// cada 10 minutos). La impresora es de aceptación: una cola del equipo
 // que no existe (firma de datos de prueba en backend/internal/maintenance/signatures.go); aquí no se imprime nada. Se
 // ordena después de las especificaciones de la A1 y antes de workflow-zz-test-data.
 
@@ -177,4 +182,49 @@ test('Terminales: impresora de precuentas y avisos de platillos listos de un tel
   await expect(
     page.getByRole('button', { name: 'Avisar platillos listos', exact: true }),
   ).toHaveCount(0);
+  const homes = page.getByRole('group', { name: 'Pantalla inicial de la terminal' });
+  await expect(homes.getByRole('button')).toHaveText(['Mesas', 'Para llevar', 'Cocina', 'Caja']);
+  await expect(page.getByRole('combobox', { name: 'Caja física' })).toBeVisible();
+  await page.getByRole('button', { name: 'Cerrar editor', exact: true }).click();
+
+  // 6. Etapa A3 (§5): en la tabla la caja del teléfono es un guion y ninguna fila muestra el identificador.
+  await expect(device.locator('td').nth(2)).toHaveText('—');
+  await expect(page.locator('tbody')).not.toContainText('Código');
+  await expect(page.locator('tbody')).not.toContainText(phoneID);
+
+  // 7. El teléfono elige su pantalla inicial solo entre Mesas y Para llevar, sin caja física ni teclado, y Go la guarda.
+  await device.getByRole('button', { name: 'Editar', exact: true }).click();
+  await expect(homes.getByRole('button')).toHaveText(['Mesas', 'Para llevar']);
+  await expect(page.getByRole('combobox', { name: 'Caja física' })).toHaveCount(0);
+  await expect(page.getByRole('combobox', { name: 'Teclado virtual' })).toHaveCount(0);
+  await homes.getByRole('button', { name: 'Para llevar', exact: true }).click();
+  await page.getByRole('button', { name: 'Guardar cambios', exact: true }).click();
+  // El aviso «Terminal actualizada.» del guardado anterior puede seguir en pantalla: se espera a que Go lo tenga.
+  await expect
+    .poll(async () => {
+      const saved = await driver.request('GET', `devices/${phoneID}/configuration`);
+      return (saved.body.device as { home_screen?: string }).home_screen;
+    })
+    .toBe('takeaway');
+  // Go rechaza «Cocina» en un teléfono aunque la pida otro cliente, con un mensaje claro.
+  const rejected = await driver.request('PATCH', `devices/${phoneID}`, {
+    name: 'Tableta de precuentas A2',
+    register_id: null,
+    keyboard_mode: 'auto',
+    home_screen: 'kitchen',
+  });
+  expect(rejected.status).toBe(400);
+  expect(JSON.stringify(rejected.body)).toContain(
+    'En un teléfono o tableta de meseros la pantalla inicial es Mesas o Para llevar.',
+  );
+  await page.getByRole('button', { name: 'Cerrar editor', exact: true }).click();
+  await expect(device.locator('td').nth(3)).toHaveText('Para llevar', { timeout: 10000 });
+
+  // 8. «Ver configuración» dice el identificador y no lo que no le aplica.
+  await device.getByRole('button', { name: 'Ver configuración', exact: true }).click();
+  await expect(panel).toContainText(`Identificador${phoneID}`);
+  await expect(panel).toContainText('Pantalla inicialPara llevar');
+  await expect(panel).not.toContainText('Caja física');
+  await expect(panel).not.toContainText('Estaciones que muestra en Cocina');
+  await panel.getByRole('button', { name: 'Cerrar configuración', exact: true }).click();
 });

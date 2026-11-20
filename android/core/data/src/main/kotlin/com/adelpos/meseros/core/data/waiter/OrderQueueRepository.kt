@@ -431,7 +431,7 @@ class OrderQueueRepository(
                 capture.tableName
             }
         if (capture.sync == DraftSync.DISCARDING) {
-            return "$place (descartado, sin quitar todavía de la cuenta): $lines"
+            return "$place (descartado, falta quitarlo de la cuenta): $lines"
         }
         return "$place (sin enviar a cocina): $lines"
     }
@@ -441,7 +441,7 @@ class OrderQueueRepository(
         val UNSENT_STATES: List<String> =
             OrderState.entries.filter { it.unsent }.map { it.storedName }
 
-        /** Cuánto tiempo se muestran los recibidos en «Pedidos pendientes». */
+        /** Cuánto tiempo se muestran los recibidos en «Pendientes». */
         const val RECEIVED_KEPT_MILLIS: Long = 12L * 60 * 60 * 1000
 
         private const val UNKNOWN_PRODUCT = "Producto"

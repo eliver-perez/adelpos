@@ -3110,10 +3110,11 @@ de otra terminal (`agent`). Si no, Go responde **antes de encolar** (no se crea 
 `error.details = {document: "precheck" | "receipt" | "cash_document", problem: "missing" | "inactive" |
 "unsupported", printer_name?}`. Mensajes: «No hay impresora configurada para precuentas.» (con el nombre visible:
 «…para tickets de venta.»), «No hay impresora configurada para tickets de pago.», «…para los documentos de caja.»,
-«La impresora X está desactivada.», «Esta impresora todavía no puede usarse para imprimir.». Las comandas no cambian:
+«La impresora X está desactivada.», «Esta impresora no se puede usar para imprimir.». Las comandas no cambian:
 una impresora inactiva bloquea la liberación como antes y la de otra terminal deja el trabajo en «Requiere
-intervención», ahora con el texto «Esta impresora todavía no puede usarse para imprimir.» (antes «El destino está
-inactivo o requiere un agente de impresión aún no implementado»).
+intervención», ahora con el texto «Esta impresora no se puede usar para imprimir.» (antes «El destino está
+inactivo o requiere un agente de impresión aún no implementado»; hasta la etapa A3, «Esta impresora todavía no puede
+usarse para imprimir.», reescrito por la regla de textos de la A3).
 
 ### Rutas nuevas
 
@@ -4091,3 +4092,81 @@ Especificación: [docs/etapas/ETAPA_A2_ANDROID.md](docs/etapas/ETAPA_A2_ANDROID.
 devices`, la configuración (`device`), `auth/me` y `restaurant/state` (`terminal`) los informan.
 - **Escritorio**: Terminales › Editar de un `android` muestra «Avisar platillos listos», «Sonido» y «Vibración» y «Ver
   configuración» los informa, solo si el servidor anuncia `ready-alerts-v1`; si no, el `PATCH` no los lleva.
+
+## Etapa A3 · Terminales por tipo de dispositivo (Fase D, esquema 27; servidor 0.14.0)
+
+Especificación: [docs/etapas/ETAPA_A3_AJUSTES.md](docs/etapas/ETAPA_A3_AJUSTES.md) §5 y decisiones A3-D7, A3-D8 y
+A3-D12 de [docs/ETAPA_A3_AVANCE.md](docs/ETAPA_A3_AVANCE.md). Ninguna ruta nueva ni capacidad nueva:
+`min_client_versions` sigue igual (escritorio 0.10.0 y Android 0.1.0, A3-D9).
+
+- **Base** (`0027_android_a3_adjustments.sql`, la única de la etapa): sección «Fase A» (A3-D12), la nota de la versión 1
+  de las diez plantillas del sistema pasa de «Formato predeterminado, igual al anterior a la etapa 9B» a «Formato
+  predeterminado», solo donde es exactamente ese texto (el disparador de inmutabilidad de las versiones se desactiva
+  solo para esa sentencia y vuelve a quedar activo); sección «Fase D» (A3-D7), los dispositivos `android` con
+  `home_screen` `kitchen` o `cash` pasan a `tables` y `CHECK devices_android_home_check (kind <> 'android' OR
+home_screen IN ('tables', 'takeaway'))`. Ninguna otra fila cambia (`TestStageA3Upgrade`).
+- **`PATCH devices/{id}`** (`devices.manage`): en un `android`, un `home_screen` que no sea `tables` o `takeaway`
+  responde `400 VALIDATION_ERROR` «En un teléfono o tableta de meseros la pantalla inicial es Mesas o Para llevar.» sin
+  escribir ni auditar. Sin el campo se conserva lo guardado, como siempre; los demás campos no cambian (Go sigue
+  aceptando `register_id` y `keyboard_mode` en un `android`: el escritorio 0.14.0 envía los guardados sin cambio).
+- **`GET kitchen/access`** (`kitchen.stations.manage`, Cocina › Estaciones › Terminales de cocina): ya no lista los
+  dispositivos `android`, que no tienen modo cocina (§5.1: cada tipo solo ve lo que le aplica). `PUT kitchen/access` no
+  cambia.
+- **Contrato v1** (A3-D8, sin cambiar el comportamiento): `discardAccount` (`POST restaurant/accounts/{id}/discard`) y
+  los campos `discardable` y `releasable` de `Account` en `internal/apicontract/openapi.json` y
+  [docs/API_V1.md](docs/API_V1.md), «Descartar una cuenta vacía»; `TestContractV1` los recorre.
+- **Escritorio** (`pages/DevicesPage.tsx`): en un `android`, «Pantalla inicial» ofrece solo Mesas y Para llevar (un
+  valor guardado que no aplica se muestra como Mesas), sin «Caja física», «Teclado virtual» ni la nota de Cocina en
+  «Editar», y «Ver configuración» sin caja, teclado, estaciones, aviso sonoro ni impresoras de la terminal; en la tabla
+  su caja es «—». La tabla ya no muestra el identificador de ninguna terminal: «Ver configuración» lo dice como
+  «Identificador», y el filtro del Registro de movimientos se llama «Identificador de la terminal». Sin operaciones
+  nuevas en Rust.
+
+## Etapa A3 · permisos agrupados y roles de fábrica (Fase B, sin migración; servidor 0.14.0)
+
+Especificación: [docs/etapas/ETAPA_A3_AJUSTES.md](docs/etapas/ETAPA_A3_AJUSTES.md) §3 y decisiones A3-D2 a A3-D6 de
+[docs/ETAPA_A3_AVANCE.md](docs/ETAPA_A3_AVANCE.md). Rutas del escritorio (no están en el contrato v1), escondidas sin la
+capacidad nueva **`permission-groups-v1`** de `GET version`. `GET permissions` no cambia (escritorios anteriores).
+
+- **Catálogo** (`administration/permission_catalog.go` y `permission_catalog_entries.go`, el único lugar): por permiso,
+  el grupo (uno de diez: `tables` «Mesas y cuentas», `orders` «Captura y pedidos», `takeaway` «Para llevar», `kitchen`
+  «Cocina e impresión», `cash` «Caja y cobros», `catalog`, `inventory`, `reports`, `staff` «Personal» y `system`
+  «Terminales y sistema»), la descripción corta y `requires` (lo que exige la ruta o la pantalla que usa); las once
+  capacidades de la vista sencilla (las nueve de §3.2 más «Manejar inventario» y «Autorizar y corregir», A3-D5); y los
+  conjuntos de fábrica (A3-D2: Mesero 14, Cajero 36, Cocina 8, Supervisor 88 desde la revisión, A3-D19, Inventarios 20 y Finanzas 28, cerrados bajo
+  `requires`; el Administrador, todos). El nombre visible es el que registra cada módulo, salvo `events.read` («Ver al
+  momento los cambios de otras terminales») y `kitchen.kds.ack` («Confirmar que la cocina recibió la comanda»). Go **no
+  impone** `requires` al guardar un rol (A3-D4): solo lo informa; cada ruta sigue validando sus permisos.
+- **`GET permissions/catalog`** (`permissions.read`) → `{groups: [{code, name, permissions: [clave]}], permissions:
+[{key, name, description, group, requires: [clave]}], capabilities: [{code, name, description, permissions:
+[clave]}], factory_roles: [código], factory_permissions: {código: [clave]}}`, en el orden de la pantalla.
+  `factory_permissions` (revisión R2, A3-D17) deja a la pantalla no ofrecer «Restablecer» donde Go lo rechazaría.
+- **Asistente** (`POST setup`): cada rol de fábrica recibe su conjunto (sustituye lo que concedía hasta la A2: algunos de
+  consulta al supervisor, al cajero y a finanzas, y `waiter_devices.use` al mesero, que ya están dentro). En una
+  instalación existente **nada cambia** (la `0027` no toca roles).
+- **`GET roles/{id}/defaults`** (`roles.manage`, `permissions.manage` y `permissions.read`) → `{role: {id, code, name},
+current, factory, add, remove}` (listas de claves ordenadas), sin escribir. **`POST roles/{id}/defaults`** con
+  `{expected: [clave]}` (lo `current` que mostró la vista previa; sin él, `400 VALIDATION_ERROR`) → `{role, changed,
+added, removed}`. Reglas, las de `PATCH roles/{id}`: `lockAdministration`; rol reservado `403`; rol sin conjunto (del
+  usuario, el Administrador) `400 VALIDATION_ERROR` «Solo los roles de fábrica (…) tienen permisos predeterminados.»;
+  el propio rol `403` «No puedes modificar tu propio rol.»; `requireWithin` sobre los permisos actuales («No puedes editar
+  un rol con permisos que tú no tienes.») y los de fábrica («No puedes conceder a un rol permisos que tú no tienes.»),
+  `403`; `requireLimitWithin`; `preserveAdministration` (`400` si dejaría el sistema sin un administrador completo); rol
+  inexistente `404`. Si el rol ya tiene exactamente los de fábrica, `200` con `changed: false` sin escribir ni auditar
+  (el reintento de una confirmación cuya respuesta se perdió); si no y `expected` no coincide con los actuales, **`409
+ROLE_CHANGED`** sin escribir. Solo cambia `role_permissions`: el límite de descuento y `user_permissions` quedan igual.
+  Auditoría `role.defaults_restored` (antes: el rol; después: `{role, added, removed}`).
+- **Puente nativo** (`desktop/src-tauri/src/api.rs`): `permission_catalog` (`GET permissions/catalog`), `role_defaults`
+  (`GET roles/{id}/defaults`) y `restore_role_defaults` (`POST roles/{id}/defaults`), con identificador validado y su
+  prueba de `cargo`.
+- **`POST sessions/{id}/revoke`** (`sessions.manage`; revisión R1, A3-D16): cerrar la sesión de **otro** usuario aplica
+  la regla de delegación (`requireManageableUser`: sus permisos efectivos y su límite de descuento dentro de los del
+  actor); si no, `403 PERMISSION_DENIED` «No puedes cerrar la sesión de un usuario con permisos que tú no tienes.». La
+  propia se cierra siempre; la del soporte reservado, como antes, solo el soporte. Es la única ruta de `sessions.*` que
+  cierra sesiones (las demás que lo hacen —desactivar un usuario, cambiar su PIN— ya aplicaban la regla).
+- **Escritorio**: Roles › «Editar permisos» con la vista sencilla y la detallada y «Restablecer permisos
+  predeterminados» en los roles de `factory_roles` (ver `CLAUDE.md`, «Permisos agrupados y roles de fábrica»); sin la
+  capacidad, la lista de siempre. Desde la revisión: el botón no se ofrece donde Go lo rechazaría (rol propio, rol o
+  conjunto de fábrica con permisos que quien edita no tiene, límite de descuento mayor; se dice por qué, R2); con una
+  búsqueda, los botones del grupo actúan solo sobre lo que se ve («Marcar los 3 que se ven», R3); y tras `409
+ROLE_CHANGED` la pantalla carga los permisos que el rol tiene ahora y lo avisa (R5).

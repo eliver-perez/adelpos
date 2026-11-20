@@ -53,7 +53,7 @@ import com.adelpos.meseros.feature.access.status.TAG_REPAIR_CONFIRM
 import com.adelpos.meseros.feature.access.status.TAG_RETIRED
 import com.adelpos.meseros.feature.access.status.TAG_RETIRED_PAIR_AGAIN
 import com.adelpos.meseros.feature.access.status.TAG_UPDATE_APP
-import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_SEARCH
+import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_SCREEN
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
@@ -204,7 +204,8 @@ class AccessOnGoTest {
         waitFor("$TAG_WAITER_PREFIX${userIdOf("Ana")}")
         waitFor("$TAG_WAITER_PREFIX${userIdOf("Beto")}")
         val status = container.deviceAccess.status.value
-        assertTrue("$status", status is DeviceStatus.Ready && status.online)
+        assertTrue("$status", status is DeviceStatus.Ready)
+        assertEquals(LinkState.ONLINE, container.serverLink.state.value)
     }
 
     // GET restaurant/state con las cabeceras del mesero [owner] (revisión R3, M5): Go responde a
@@ -226,7 +227,7 @@ class AccessOnGoTest {
         // Beto entra una vez con conexión (queda su verificador) y cambia de mesero.
         compose.onNodeWithTag("$TAG_WAITER_PREFIX$beto").performClick()
         typePin(BETO_PIN)
-        waitFor(TAG_TABLES_SEARCH)
+        waitFor(TAG_TABLES_SCREEN)
         compose.onNodeWithTag(TAG_WAITER_MENU).performClick()
         compose.onNodeWithTag(TAG_WAITER_SWITCH).performClick()
         waitFor("$TAG_WAITER_PREFIX$beto")
@@ -256,7 +257,7 @@ class AccessOnGoTest {
         waitFor("$TAG_WAITER_PREFIX$ana")
         compose.onNodeWithTag("$TAG_WAITER_PREFIX$ana").performClick()
         typePin(ANA_PIN)
-        waitFor(TAG_TABLES_SEARCH)
+        waitFor(TAG_TABLES_SCREEN)
         val active = container.deviceAccess.activeWaiter.value
         assertEquals(ana, active?.userId)
         assertTrue(active!!.hasServerSession)
@@ -307,7 +308,7 @@ class AccessOnGoTest {
             typePin("9999")
             waitForText("PIN incorrecto")
             typePin(ANA_PIN)
-            waitFor(TAG_TABLES_SEARCH)
+            waitFor(TAG_TABLES_SCREEN)
             val active = container.deviceAccess.activeWaiter.value
             assertEquals(ana, active?.userId)
             assertFalse("sin conexión no hay sesión de Go", active!!.hasServerSession)
@@ -337,14 +338,14 @@ class AccessOnGoTest {
         waitFor("$TAG_WAITER_PREFIX$ana")
         compose.onNodeWithTag("$TAG_WAITER_PREFIX$ana").performClick()
         typePin(ANA_PIN)
-        waitFor(TAG_TABLES_SEARCH)
+        waitFor(TAG_TABLES_SCREEN)
         // En la principal le cambian el PIN mientras trabaja: al volver a comprobar (otra
         // pin_version) su acceso deja de valer, pero Ana no sale de Mesas (revisión R3, M3).
         main.changePin("ana.a1", ANA_NEW_PIN)
         runBlocking { container.deviceAccess.recheck() }
         waitFor(TAG_REENTER)
         waitForText("Vuelve a escribir tu PIN")
-        compose.onNodeWithTag(TAG_TABLES_SEARCH).assertExists()
+        compose.onNodeWithTag(TAG_TABLES_SCREEN).assertExists()
         assertEquals(ana, container.deviceAccess.activeWaiter.value?.userId)
         assertNull(runBlocking { container.database.access().knownWaiter(ana) })
         assertNull(runBlocking { container.deviceAccess.offlineCredential(ana) })
@@ -357,7 +358,7 @@ class AccessOnGoTest {
         compose.waitUntil(timeoutMillis = 40_000) {
             compose.onAllNodes(hasTestTag(TAG_REENTER)).fetchSemanticsNodes().isEmpty()
         }
-        compose.onNodeWithTag(TAG_TABLES_SEARCH).assertExists()
+        compose.onNodeWithTag(TAG_TABLES_SCREEN).assertExists()
         val active = container.deviceAccess.activeWaiter.value!!
         assertTrue(active.hasServerSession)
         assertFalse(active.mustReenterPin)
@@ -402,6 +403,8 @@ class AccessOnGoTest {
             .assertIsDisplayed()
         assertNull(container.deviceAccess.activeWaiter.value)
         compose.onNodeWithTag(TAG_REPAIR_ACTION).performScrollTo().performClick()
+        // La confirmación es un diálogo: se espera a que aparezca antes de tocarla.
+        waitFor(TAG_REPAIR_CONFIRM)
         compose.onNodeWithTag(TAG_REPAIR_CONFIRM).performClick()
         // De vuelta a buscar el servidor y emparejar con el nuevo (su huella es otra).
         pairByAddress()

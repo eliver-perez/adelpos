@@ -375,7 +375,7 @@ detrás de condiciones por plataforma. Lista para la próxima sesión en Windows
      comprobar que aparece en «Respaldos de AD-EL POS» y que el aviso final nombra el respaldo.
 6. **Aviso sin impresora válida**:
    - Mientras la impresora de tickets siga siendo el destino de prueba (tipo agente), imprimir una precuenta debe avisar
-     en el momento («Esta impresora todavía no puede usarse para imprimir.») sin encolar nada, con «Configurar
+     en el momento («Esta impresora no se puede usar para imprimir.») sin encolar nada, con «Configurar
      impresora» (lleva a Cobros › Políticas de cobro) y «Reintentar»; sin impresora de tickets, «No hay impresora
      configurada para precuentas.». Antes de la 9F salía «Requiere intervención. Se resuelve en Cocina → Cola de
      impresión».

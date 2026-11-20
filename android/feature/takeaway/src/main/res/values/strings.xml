@@ -7,7 +7,7 @@
     <string name="takeaway_refresh">Actualizar</string>
     <string name="takeaway_loading">Leyendo los pedidos…</string>
     <string name="takeaway_offline_since">Sin conexión: es lo último que se vio, a las %1$s.</string>
-    <string name="takeaway_offline_never">Sin conexión: todavía no hay pedidos para llevar guardados en este dispositivo.</string>
+    <string name="takeaway_offline_never">Sin conexión: no hay pedidos para llevar guardados en este dispositivo.</string>
     <string name="takeaway_empty">No hay pedidos para llevar abiertos.</string>
     <string name="takeaway_folio">Folio %1$d</string>
     <string name="takeaway_not_in_go">Pedido nuevo (sin folio todavía)</string>

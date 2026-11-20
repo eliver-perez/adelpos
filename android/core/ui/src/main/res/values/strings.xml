@@ -16,6 +16,8 @@
     <string name="table_state_out_of_service">Fuera de servicio</string>
 
     <string name="panes_back">Volver a %1$s</string>
+    <string name="top_bar_back">Volver</string>
+    <string name="top_bar_logo">AD-EL POS</string>
 
     <!-- Teclado del PIN (§3.2). -->
     <string name="pin_pad_delete">Borrar</string>

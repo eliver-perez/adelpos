@@ -688,7 +688,7 @@ export function RecipeEditorPanel({
     if (dirty.current) {
       const discard = await confirm({
         title: 'Cambios sin guardar',
-        message: 'Esta receta tiene cambios que aún no se guardan. ¿Quieres descartarlos?',
+        message: 'Esta receta tiene cambios sin guardar. ¿Quieres descartarlos?',
         confirmLabel: 'Descartar cambios',
         cancelLabel: 'Seguir editando',
         tone: 'danger',

@@ -31,22 +31,6 @@ class WaiterRulesTest {
     }
 
     @Test
-    fun lienzoDelMapaEscalaSinDeformar() {
-        assertEquals(0.5f, TableCanvas.scaleToFit(500f, 1000f), 0.0001f)
-        assertEquals(0.5f, TableCanvas.scaleToFit(2000f, 280f), 0.0001f)
-        assertEquals(0f, TableCanvas.scaleToFit(0f, 200f), 0.0001f)
-    }
-
-    @Test
-    fun busquedaDeMesaSinAcentosNiMayusculas() {
-        val terraza = WaiterFixtures.table("t1", "Terraza Árbol 3")
-        assertTrue(TableSearch.matches(terraza, "arbol"))
-        assertTrue(TableSearch.matches(terraza, "  3   TERRAZA "))
-        assertTrue(TableSearch.matches(terraza, ""))
-        assertFalse(TableSearch.matches(terraza, "barra"))
-    }
-
-    @Test
     fun mesasVisiblesComoEnElEscritorio() {
         val view =
             RestaurantView(
