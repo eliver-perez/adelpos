@@ -80,11 +80,12 @@
 #
 # Suite `precheck` (etapa A2, Fase C, PrecheckOnGoTest, con un servidor temporal nuevo; la prueba hace de principal y
 # del agente de impresión de una terminal de prueba «Caja 2»): p1 restaurante, la terminal con su impresora USB y una
-# impresora de red que no responde, emparejar, entrar y enviar una cuenta (sin `payments.tickets.print` no hay botón)
-# · p2 sin impresora asignada (no se encola nada) · p3 la USB de «Caja 2» desconectada y, al volver, los bytes ESC/POS
-# de la precuenta (título, «Atendió:», folio, mesa y partidas) · p4 el nombre visible (Ticket de venta, Cuenta) en el
-# botón y en el impreso · p5 un pedido para llevar con su folio · p6 (SIN red) el botón lo dice · p7 la impresora de
-# red no responde y «Reintentar» sin motivo. La impresora de red usa el puerto 9106 de la Mac: nada debe escuchar ahí.
+# impresora de red que no responde, emparejar, entrar y enviar una cuenta (sin `payments.tickets.print`, el botón
+# deshabilitado con su motivo) · p2 sin impresora asignada (no se encola nada) · p3 la USB de «Caja 2» desconectada
+# y, al volver, los bytes ESC/POS de la precuenta (título, «Atendió:», folio, mesa y partidas) · p4 el nombre visible
+# (Ticket de venta, Cuenta) en el botón y en el impreso · p5 un pedido para llevar con su folio · p6 (SIN red) el
+# botón lo dice · p7 la impresora de red no responde y «Reintentar» sin motivo. La impresora de red usa el puerto 9106
+# de la Mac: nada debe escuchar ahí.
 #
 # La red la corta y la devuelve este guion entre pasos (modo avión desde la Mac en Android 11+; `adb root` + `svc
 # wifi/data` en Android 8–10). Si no se puede cortar (por ejemplo, `adb root` no responde tras tres intentos), el
@@ -111,7 +112,8 @@
 # la mesa abre su panel; cuentas en dos renglones) · a3 «Imprimir precuenta» y «Descartar cuenta vacía» desde el panel
 # · a4 la captura (título de la mesa, «Buscar producto», tarjetas sin imagen, «Ver la cuenta · 1 por enviar», la flecha
 # con su aviso y «Pendientes») · a5 la entrada («Ingresar», logotipo, «Selecciona tu usuario») · a6 la pantalla inicial
-# Para llevar desde Terminales. Capturas de pantalla de cada paso en <salida>/screens.
+# Para llevar desde Terminales · a7 el teclado del PIN completo en vertical y horizontal (la entrada y «Vuelve a
+# escribir tu PIN»). Capturas de pantalla de cada paso en <salida>/screens.
 #
 # Suite `connection` (etapa A3, §2 y §6, ConnectionOnGoTest con `readyAlerts=on`, con un servidor temporal nuevo; NO
 # entra en `all` porque dura): c1 empareja, entra un mesero y deja el dispositivo sin uso durante
@@ -182,7 +184,7 @@ suite_steps() {
         takeaway) echo "t1 t2 t3 t4 t5 t6 t7 t8 t9" ;;
         precheck) echo "p1 p2 p3 p4 p5 p6 p7" ;;
         alerts) echo "r1 r2 r3 r4 r5 r6 r7 r8 r10 r9" ;;
-        adjustments) echo "a1 a2 a3 a4 a5 a6" ;;
+        adjustments) echo "a1 a2 a3 a4 a5 a6 a7" ;;
         connection) echo "c1" ;;
     esac
 }
@@ -607,7 +609,7 @@ takeaway_step() {
 # Etapa A2, Fase C: imprimir la precuenta desde el dispositivo.
 precheck_step() {
     case "$1" in
-        p1) run_step p1_prepararEnviarACocinaYSinPermisoNoHayBoton ;;
+        p1) run_step p1_prepararEnviarACocinaYSinPermisoElBotonDiceElMotivo ;;
         p2) run_step p2_sinImpresoraAsignadaNoSeImprime ;;
         p3) run_step p3_terminalDesconectadaYLosBytesEscPos ;;
         p4) run_step p4_elNombreVisibleEnElBotonYEnElImpreso ;;
@@ -828,6 +830,7 @@ adjustments_step() {
         a4) run_step a4_capturaConTituloBuscadorFlechaYPendientes ;;
         a5) run_step a5_entradaConLosTextosNuevos ;;
         a6) run_step a6_pantallaInicialParaLlevar ;;
+        a7) run_step a7_tecladoDelPinCompletoEnVerticalYHorizontal ;;
         *) fail "paso desconocido de la suite adjustments: $1" ;;
     esac
     mkdir -p "$SUITE_OUT/screens"

@@ -868,7 +868,13 @@ class WaiterModeOnGoTest {
 
     /** En el teléfono, la cuenta está a un toque; en la tableta, siempre a la vista. */
     private fun showOrder() {
-        if (!present(TAG_ORDER_PANEL) && present(TAG_PANE_OPEN_SECONDARY)) {
+        // Se espera a la cuenta o a su botón «Ver la cuenta» antes de decidir: si la captura
+        // todavía
+        // no terminó de dibujarse, el botón no está y no se tocaba nada (falla vista en `w6`).
+        waitUntil("la cuenta o «Ver la cuenta»") {
+            present(TAG_ORDER_PANEL) || present(TAG_PANE_OPEN_SECONDARY)
+        }
+        if (!present(TAG_ORDER_PANEL)) {
             compose.onNodeWithTag(TAG_PANE_OPEN_SECONDARY).performClick()
         }
         waitFor(TAG_ORDER_PANEL)
