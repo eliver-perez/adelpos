@@ -2372,3 +2372,145 @@ Fusionadas en `9038b79` (solo `android/` y `scripts/android-e2e.sh`).
 - **A3-D27 · Lo que queda igual**: el contraste de las teclas de dígitos en «Vuelve a escribir tu PIN» (viene de antes y
   se lee bien) y la pestaña de área siguiente cortada al borde en la tableta vertical (la fila se desliza y la elegida se
   ve completa). Quedan como observaciones; no se cambian en esta etapa.
+
+## Fase E · Segunda corrida de Android: B1 y B2
+
+La regresión de Android sobre una copia exacta de `ca120ee` aprobó la JVM (386), las instrumentadas en `Pixel_Tablet` y
+`ADEL_A1_Phone_API33` (155 en cada uno, 0 fallas) y `--suite all` salvo dos pasos que fallaron otra vez al repetirlos:
+`access` paso 6 en la tableta (B1, con el paso 7 en cadena) y `alerts r5` en Android 13 (B2). Total: tableta 74 de 76 y
+teléfono 75 de 76. Las corrigió el agente de Android en `$SP/wt/and3` (rama `etapa-a3-and3`, desde `ca120ee`).
+
+### Commits
+
+- `63d8e3b` etapa A3 fase E (Android): el resumen de los avisos de platillos listos ya no depende de que Android liste
+  lo recién publicado
+- `e60ee75` etapa A3 fase E (Android): con «Sin conexión», otro certificado en el servidor pide emparejar de nuevo
+- `dcec52e` etapa A3 fase E (Android): android/CLAUDE.md con el resumen de los avisos y la sonda ante otro certificado
+
+### B2 · `alerts r5` en Android 13: el resumen del grupo (defecto de la A2)
+
+**Causa, con evidencia.**
+
+- Medición en el emulador de Android 13, con la Mac sin carga: se publicaron 30 notificaciones y se leyó
+  `activeNotifications` justo después de cada `notify`. **18 de 30 todavía no estaban.** La prueba fue desechable y no
+  quedó en el árbol; su registro está en `$SP/and3-exp/`.
+- En el registro completo de la regresión (`logcat-all/emulator-5582-alerts-rep.txt`, `r5`), las dos notificaciones de
+  cuenta (4101) se encolaron y el resumen (4102) nunca.
+- El código lo explica: `present()` llama a `notify` y enseguida a `updateSummary`, que cuenta la lista de Android. Con
+  una sola cuenta en ella, quitaba el resumen en vez de publicarlo.
+
+**Corrección.**
+
+- `ReadyShownNotices` (`core:domain`) decide el resumen con lo que Android lista, **más** lo recién publicado y
+  **menos** lo recién quitado.
+- Lo recordado se olvida cuando la lista lo refleja o pasan 10 s (por ejemplo, si se descartó al instante o las
+  notificaciones están apagadas).
+- `ReadyAlertNotifications` lo registra en `present`, `cancelAccount` y `cancelAlerts`.
+- La lista de Android quedó como parámetro (`listed`), para que la prueba la atrase.
+
+**Lo que encontró la prueba nueva.** Quitar el resumen de un grupo hace que Android quite también sus notificaciones.
+
+- Visto en el dispositivo: al pasar de 2 cuentas a 1, se fue también el aviso de la cuenta que queda.
+- Antes lo tapaba el mismo retraso: la lista atrasada seguía con 2 y el resumen no se quitaba.
+- Pasaba igual en `present()` si el mesero había descartado una de las dos.
+- Ahora el resumen se publica o se pone al día con 2 o más cuentas. Con 1 no se toca (Android muestra esa notificación y
+  no el resumen). Con 0 se quita.
+- Sonido, vibración, `GROUP_ALERT_CHILDREN`, no volver a sonar y el aviso dentro de la aplicación no cambiaron. El
+  acumulado de una cuenta sigue leyendo la lista de Android, como antes.
+
+**Pruebas.**
+
+- `ReadyShownNoticesTest`, JVM, 5 pruebas: lista atrasada, acumulado reemplazado, quitar, plazo y borrar todo.
+- `ReadyAlertsOnDeviceTest.elResumenNoEsperaAQueAndroidListeLoRecienPublicado`, instrumentada, con la lista de Android
+  atrasada a propósito:
+  - Con la decisión anterior (solo la lista de Android) **falla** en el teléfono.
+  - Con la corrección pasa.
+  - Además comprueba que, al quitar una de dos cuentas, el aviso de la otra se queda.
+
+No usé Robolectric: `app` no tiene pruebas de la JVM ni esa dependencia, y agregarla cambiaría los archivos de bloqueo.
+La parte que decide es JVM en `core:domain`; la integración se comprueba en el dispositivo con el retraso controlado.
+
+### B1 · `access` paso 6 en `Pixel_Tablet`
+
+**(a) La espera que faltaba en la prueba**: `AccessOnGoTest` paso 6 espera el diálogo (`waitFor(TAG_REPAIR_CONFIRM)`)
+antes de tocar la confirmación.
+
+**(b) La forma de `all`: es de la aplicación (de la A3), no de la red.**
+
+Evidencia:
+
+- **Go no registra los intercambios TLS fallidos** de la escucha de red (`lanlistener.go`:
+  `ErrorLog: log.New(io.Discard, …)`, comentado «clientes sin la huella»). «Go no registró ninguna conexión» no
+  significa que no llegaran: un cliente con la huella vieja contra la identidad nueva falla el TLS sin dejar línea.
+- **El segundo Go estaba listo a tiempo**: `server_started` con `network_listen 127.0.0.1:8455` a las 20:02:32.042 y el
+  paso 6 arrancó a las 20:02:33.8 (`E-200320-…log`). Sus únicas peticiones registradas son las de la preparación del
+  guion y las del paso 7.
+- **En Android 17 el proceso de la instrumentación arranca en segundo plano con la red bloqueada.** En las dos corridas
+  la aplicación registró «estado: Sin conexión» al arrancar:
+  - `all`: 20:02:33.745.
+  - Repetición: 20:31:22.001; ahí «En línea» llegó a las 20:31:22.424, justo cuando arrancó `MainActivity`.
+- **Ese «Sin conexión» se queda.** En `ServerLinkTracker`, `onNetwork(OFFLINE)` pone `declaredOffline` y solo una
+  respuesta de Go lo quita. Con otro certificado ninguna sonda responde: cada intento cuenta «sin respuesta»; en `all`,
+  cada ~10 s, la sonda de «Sin conexión».
+- **La comprobación de versiones queda bloqueada.** Es lo único que convierte la huella distinta en
+  `NeedsRepair(IDENTITY_CHANGED)`, y empieza con `link.confirm()`, que con «Sin conexión» exige que la sonda responda.
+  Nunca la corría: la aplicación se quedó en «Sin conexión» los 40 s.
+- **La repetición pasó por suerte.** La primera sonda corrió antes de cargar el servidor guardado (`onNothingToProbe`
+  quita `declaredOffline`), así que el estado ya estaba en «En línea» cuando se hizo la comprobación. Depende del
+  tiempo; por eso falló una vez y pasó otra, y solo en la tableta (Android 13 no bloquea así al arrancar).
+- **También pasa fuera de las pruebas.** Si la computadora principal cambia de identidad con el dispositivo en uso, a los
+  20 s de sondas fallidas se declara «Sin conexión» y el dispositivo se queda ahí sin pedir emparejar de nuevo. En la A2,
+  la comprobación de cada 60 s no estaba condicionada y lo detectaba.
+
+**Corrección.**
+
+- `AccessRepository.probeServer`: si la sonda que busca el servidor (la de «Sin conexión») da otro certificado y tampoco
+  lo halla en otra dirección, lo informa con `report(AppError.ServerIdentityChanged)` → «necesita emparejarse de nuevo».
+- La sonda que solo duda, sin buscar en otra dirección, no decide: ahí otro certificado podría ser otro equipo en la
+  dirección vieja.
+
+**Pruebas (`AccessRepositoryTest`).**
+
+- `conSinConexionLaSondaVeOtroCertificadoYPideEmparejarDeNuevo`: **falla sin la corrección** (comprobado devolviendo
+  el archivo) y pasa con ella.
+- `laSondaSinBuscarElServidorNoDecideConOtroCertificado`.
+
+### Pruebas ejecutadas (resultado real, con el código final)
+
+| Prueba                                                                                                       | Resultado                                                                                                                   |
+| ------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
+| JVM (`core:domain:test testDebugUnitTest`), `lintDebug`, `ktfmtCheck`, `fmt-check`                           | **393 pruebas, 0 fallas** (domain 177, data 183, ui 15, access 7, waiter 6, takeaway 5); lint sin errores; formato aprobado |
+| Instrumentadas `app`, `ADEL_A1_Phone_API33` (desinstalado antes: 0 paquetes; XML contados)                   | 122 pruebas, 46 corridas, 76 omitidas, **0 fallas** (`ReadyAlertsOnDeviceTest` 7/7)                                         |
+| Instrumentadas `app`, `Pixel_Tablet` (igual)                                                                 | 122 / 46 / 76, **0 fallas** (`ReadyAlertsOnDeviceTest` 7/7)                                                                 |
+| `--suite alerts` completa en el teléfono, 3 veces (un Go nuevo cada vez)                                     | **11/11, 11/11, 11/11**: `r5` aprobó las tres                                                                               |
+| `--suite alerts` completa en la tableta                                                                      | **11/11**                                                                                                                   |
+| `--suite access` completa (1–5 con un Go; 6–7 con otro Go, otra identidad, sin reinstalar), tableta, 2 veces | **5/5 + 2/2** y **5/5 + 2/2**                                                                                               |
+| `--suite access` completa, teléfono                                                                          | **5/5 + 2/2**                                                                                                               |
+| Repeticiones de `GoTestServer` (A3-D26)                                                                      | ninguna en estas corridas (ninguna línea «se repite»)                                                                       |
+
+Registros completos de cada corrida (dispositivo y Go) en `$SP/and3-e2e/`; XML en `$SP/and3-results/`.
+
+### Para el coordinador
+
+- En estas corridas de `access`, el paso 6 de la tableta volvió a pasar por el camino de la suerte («Sin conexión» al
+  arrancar y «En línea» 0,2–0,4 s después). La corrección no cambia ese camino: lo que la prueba de punta a punta no
+  puede forzar lo comprueba `AccessRepositoryTest` de forma determinista.
+- Comportamiento nuevo del resumen: con una sola cuenta a la vista el resumen ya no se quita (quitarlo quitaba también
+  el aviso que queda). Con 0 se quita y con 2 o más, como antes.
+
+### Decisiones del coordinador sobre B1 y B2
+
+Fusionadas en `be46a07` (solo `android/`).
+
+- **A3-D28 · El resumen de los avisos de platillos listos** (B2, defecto de la A2): se decide con lo que Android lista
+  más lo recién publicado y menos lo recién quitado (`ReadyShownNotices`), porque `NotificationManager.notify` es
+  asíncrono. Se acepta el cambio que encontró la prueba nueva: con una sola cuenta el resumen **ya no se quita**
+  (quitar el resumen de un grupo quita también sus notificaciones, y se iba el aviso de la cuenta que queda; con una
+  sola, Android muestra esa notificación). Sin ninguna cuenta, se quita. Nada más cambia en los avisos.
+- **A3-D29 · Otro certificado con «Sin conexión»** (B1, defecto de la A3): la sonda que busca el servidor, si encuentra
+  otro certificado en su dirección y no lo halla en otra, lo informa y el dispositivo pide emparejar de nuevo, como hacía
+  la comprobación de cada 60 s de la A2. La sonda mientras duda (sin buscar) no decide. `access` paso 6 espera además el
+  diálogo de confirmación antes de tocarlo.
+- **A3-D30 · `alerts r3` con la repetición de la ayuda**: en la corrida de `ca120ee`, `r3` aprobó en el teléfono las dos
+  veces **gracias a la repetición** de `GoTestServer` (un `auth/login` sin respuesta, con el patrón de A3-D26). Se da por
+  aprobado y se informa así en la verificación; la prueba no se afloja de otra forma.
