@@ -24,6 +24,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -393,6 +394,53 @@ class AccessRepositoryTest {
         assertEquals(DeviceStatus.Unpaired(), access.status.value)
         assertNull(database.access().pairedServer())
         assertEquals("«Emparejar de nuevo» también borra", listOf("catálogo"), erased)
+    }
+
+    @Test
+    fun conSinConexionLaSondaVeOtroCertificadoYPideEmparejarDeNuevo() = runBlocking {
+        // Etapa A3 (Fase E, `access` paso 6 en Android 17): Android informó un momento que no
+        // había red (el proceso arrancó en segundo plano) y el estado quedó en «Sin conexión»;
+        // después la computadora principal cambió de identidad. La comprobación de versiones
+        // espera a que la sonda responda, y con otro certificado nunca responde.
+        online = false
+        online = true
+        assertEquals(LinkState.OFFLINE, link.monitor.state.value)
+        val other = HeldCertificate.Builder().commonName("AD-EL POS prueba").build()
+        val access = repository()
+        access.pair(
+            fingerprint =
+                FakeGoServer(other).let { impostor ->
+                    impostor.close()
+                    impostor.fingerprint
+                },
+        )
+        assertTrue("sin la sonda no lo sabe", access.status.value is DeviceStatus.Ready)
+        // La sonda de «Sin conexión» (la que busca el servidor) lo descubre y lo informa.
+        assertTrue(access.probeServer(relocate = true, quick = false))
+        withTimeout(5_000) {
+            access.status.first { it == DeviceStatus.NeedsRepair(RepairReason.IDENTITY_CHANGED) }
+        }
+        assertEquals("ninguna petición llegó al servidor", 0, go.requests.size)
+    }
+
+    @Test
+    fun laSondaSinBuscarElServidorNoDecideConOtroCertificado() = runBlocking {
+        // Mientras solo duda (sin buscar en otra dirección), otro certificado puede ser otro equipo
+        // en la dirección vieja: la sonda no decide; lo hace la que busca el servidor.
+        online = false
+        online = true
+        val other = HeldCertificate.Builder().commonName("AD-EL POS prueba").build()
+        val access = repository()
+        access.pair(
+            fingerprint =
+                FakeGoServer(other).let { impostor ->
+                    impostor.close()
+                    impostor.fingerprint
+                },
+        )
+        assertTrue(access.probeServer(relocate = false, quick = true))
+        delay(300)
+        assertTrue(access.status.value is DeviceStatus.Ready)
     }
 
     @Test

@@ -403,6 +403,8 @@ class AccessOnGoTest {
             .assertIsDisplayed()
         assertNull(container.deviceAccess.activeWaiter.value)
         compose.onNodeWithTag(TAG_REPAIR_ACTION).performScrollTo().performClick()
+        // La confirmación es un diálogo: se espera a que aparezca antes de tocarla.
+        waitFor(TAG_REPAIR_CONFIRM)
         compose.onNodeWithTag(TAG_REPAIR_CONFIRM).performClick()
         // De vuelta a buscar el servidor y emparejar con el nuevo (su huella es otra).
         pairByAddress()
