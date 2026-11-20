@@ -4,19 +4,16 @@ import com.adelpos.meseros.core.data.api.ApiErrors
 import com.adelpos.meseros.core.data.api.ApiJson
 import com.adelpos.meseros.core.data.api.ApiOutcome
 import com.adelpos.meseros.core.data.api.RequestSent
+import com.adelpos.meseros.core.data.api.awaitResponse
 import com.adelpos.meseros.core.data.catalog.CustomizationJson
 import com.adelpos.meseros.core.data.session.ServerTransport
 import java.io.IOException
-import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.SerializationStrategy
-import okhttp3.Call
-import okhttp3.Callback
 import okhttp3.Headers
 import okhttp3.HttpUrl
 import okhttp3.Interceptor
@@ -318,7 +315,7 @@ class WaiterApi(
         val request = builder.tag(RequestSent::class.java, sent).build()
         val response =
             try {
-                clientFor(server).newCall(request).await()
+                clientFor(server).newCall(request).awaitResponse()
             } catch (exception: IOException) {
                 return ApiOutcome.NoAnswer(ApiErrors.fromException(exception), sent.value)
             }
@@ -387,20 +384,4 @@ class WaiterApi(
 
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
     }
-}
-
-/** Ejecuta la llamada sin bloquear el hilo; cancelar la corrutina cancela la petición. */
-private suspend fun Call.await(): Response = suspendCancellableCoroutine { continuation ->
-    continuation.invokeOnCancellation { cancel() }
-    enqueue(
-        object : Callback {
-            override fun onFailure(call: Call, e: IOException) {
-                continuation.resumeWithException(e)
-            }
-
-            override fun onResponse(call: Call, response: Response) {
-                continuation.resume(response) { _, value, _ -> value.close() }
-            }
-        },
-    )
 }

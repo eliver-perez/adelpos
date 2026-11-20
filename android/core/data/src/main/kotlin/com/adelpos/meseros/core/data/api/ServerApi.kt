@@ -3,17 +3,14 @@ package com.adelpos.meseros.core.data.api
 import com.adelpos.meseros.core.domain.error.AppError
 import com.adelpos.meseros.core.domain.error.AppResult
 import java.io.IOException
-import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.SerializationStrategy
 import kotlinx.serialization.json.Json
 import okhttp3.Call
-import okhttp3.Callback
 import okhttp3.EventListener
 import okhttp3.Headers
 import okhttp3.HttpUrl
@@ -21,7 +18,6 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-import okhttp3.Response
 
 /**
  * Resultado de una petición a Go con todo lo que la pantalla puede necesitar: el valor, el rechazo
@@ -115,7 +111,7 @@ class ServerApi(
         val request = builder.tag(RequestSent::class.java, sent).build()
         val response =
             try {
-                client.newCall(request).await()
+                client.newCall(request).awaitResponse()
             } catch (exception: IOException) {
                 return ApiOutcome.NoAnswer(ApiErrors.fromException(exception), sent.value)
             }
@@ -173,20 +169,4 @@ internal class RequestSent {
             }
         }
     }
-}
-
-/** Ejecuta la llamada sin bloquear el hilo; cancelar la corrutina cancela la petición. */
-private suspend fun Call.await(): Response = suspendCancellableCoroutine { continuation ->
-    continuation.invokeOnCancellation { cancel() }
-    enqueue(
-        object : Callback {
-            override fun onFailure(call: Call, e: IOException) {
-                continuation.resumeWithException(e)
-            }
-
-            override fun onResponse(call: Call, response: Response) {
-                continuation.resume(response) { _, value, _ -> value.close() }
-            }
-        },
-    )
 }
