@@ -30,7 +30,7 @@ import org.junit.runner.RunWith
 
 /**
  * Teclado del PIN y menú del mesero activo (componentes de `core:ui`), en ambos temas: teclas
- * grandes, «Entrar» desde 4 dígitos y hasta 6, «Borrar», y el cambio rápido de mesero.
+ * grandes, «Ingresar» desde 4 dígitos y hasta 6, «Borrar», y el cambio rápido de mesero.
  */
 @RunWith(AndroidJUnit4::class)
 class PinPadTest {
@@ -48,7 +48,7 @@ class PinPadTest {
                     onDigit = { digit -> pin += digit },
                     onDelete = { pin = pin.dropLast(1) },
                     onSubmit = { submitted = pin },
-                    submitLabel = "Entrar",
+                    submitLabel = "Ingresar",
                 )
             }
         }

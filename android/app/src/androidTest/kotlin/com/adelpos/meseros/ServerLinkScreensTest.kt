@@ -96,7 +96,7 @@ class ServerLinkScreensTest {
             val state by shared.state.collectAsState()
             AdelTheme(darkTheme = false) {
                 Column {
-                    AdelTopBar(title = "Entrar", connection = ConnectionSummary(state, 0))
+                    AdelTopBar(title = "Ingresar", connection = ConnectionSummary(state, 0))
                     AccessContent(
                         status = DeviceStatus.Ready("Fonda", "Tableta 1", 120),
                         dependencies = fake.dependencies(),

@@ -33,6 +33,7 @@ import com.adelpos.meseros.core.capture.TAG_SEND_TO_KITCHEN
 import com.adelpos.meseros.core.capture.pending.TAG_PENDING
 import com.adelpos.meseros.core.capture.pending.TAG_PENDING_CAPTURE_PREFIX
 import com.adelpos.meseros.core.capture.pending.TAG_RETRY_NOW
+import com.adelpos.meseros.core.domain.error.AppError
 import com.adelpos.meseros.core.ui.catalog.TAG_CATALOG_SEARCH
 import com.adelpos.meseros.core.ui.catalog.TAG_CUSTOMIZER_ADD
 import com.adelpos.meseros.core.ui.catalog.TAG_PRODUCT_GRID
@@ -52,6 +53,8 @@ import com.adelpos.meseros.feature.access.findserver.TAG_FIND_SERVER
 import com.adelpos.meseros.feature.access.findserver.TAG_PAIRING_CODE
 import com.adelpos.meseros.feature.access.pin.TAG_ENTRY
 import com.adelpos.meseros.feature.access.pin.TAG_ENTRY_BACK
+import com.adelpos.meseros.feature.access.pin.TAG_PIN_PANEL
+import com.adelpos.meseros.feature.access.pin.TAG_REENTER
 import com.adelpos.meseros.feature.access.pin.TAG_WAITER_PREFIX
 import com.adelpos.meseros.feature.takeaway.TAG_TAKEAWAY
 import com.adelpos.meseros.feature.waiter.tables.TAG_ACCOUNT_CARD_PREFIX
@@ -111,6 +114,8 @@ import org.junit.runner.RunWith
  * - `a5` la entrada (§4.5): «Ingresar» con el logotipo, «Selecciona tu usuario», «Elegir otro
  *   usuario».
  * - `a6` la pantalla inicial Para llevar (§4.12): Terminales la cambia y el mesero entra ahí.
+ * - `a7` el teclado del PIN completo (§4, teléfono horizontal) en la entrada y en «Vuelve a
+ *   escribir tu PIN», en vertical y horizontal, entrando con el PIN de Ana.
  *
  * Argumentos: `local`, `address`, `pin`, `mainDevice` y `mainToken` (los arma el guion).
  */
@@ -353,6 +358,43 @@ class AdjustmentsOnGoTest {
             screenshot("a6-inicio-para-llevar")
         } finally {
             patchDevice(home = "tables")
+        }
+    }
+
+    @Test
+    fun a7_tecladoDelPinCompletoEnVerticalYHorizontal() {
+        val ana = loadIds().getValue("ana")
+        launch()
+        for (landscape in orientations()) {
+            rotate(landscape)
+            val name = orientationName(landscape)
+            // La entrada: las doce teclas a la vista, sin deslizar.
+            waitFor("$TAG_WAITER_PREFIX$ana")
+            tap("$TAG_WAITER_PREFIX$ana")
+            waitFor(TAG_PIN_SUBMIT)
+            PinPadChecks.assertWholePad(compose, TAG_PIN_PANEL, "la entrada en $name")
+            screenshot("a7-pin-$name")
+            for (digit in ANA_PIN) {
+                compose.onNodeWithTag("$TAG_PIN_KEY_PREFIX$digit").performClick()
+            }
+            compose.onNodeWithTag(TAG_PIN_SUBMIT).performClick()
+            waitFor(TAG_TABLES_SCREEN)
+            // «Vuelve a escribir tu PIN» encima de Mesas (la sesión de Go se dio por terminada).
+            container.deviceAccess.report(
+                AppError.SessionEnded("SESSION_EXPIRED", null, null),
+                ana,
+            )
+            waitFor(TAG_REENTER)
+            PinPadChecks.assertWholePad(compose, TAG_REENTER, "el diálogo en $name")
+            screenshot("a7-vuelve-a-escribir-$name")
+            for (digit in ANA_PIN) {
+                compose.onNodeWithTag("$TAG_PIN_KEY_PREFIX$digit").performClick()
+            }
+            compose.onNodeWithTag(TAG_PIN_SUBMIT).performClick()
+            waitUntil("el diálogo cerrado") { !present(TAG_REENTER) }
+            // De vuelta a la entrada para la otra orientación.
+            tap(TAG_WAITER_MENU)
+            tap(TAG_WAITER_SWITCH)
         }
     }
 
