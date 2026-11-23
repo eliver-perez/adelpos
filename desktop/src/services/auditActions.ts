@@ -28,8 +28,6 @@ export const auditActionLabels: Record<string, string> = {
   'license.support_unlocked': 'Desbloqueo de soporte aplicado',
   'license.support_unlock_rejected': 'Desbloqueo de soporte rechazado',
   'license.state_changed': 'Estado de la licencia cambiado',
-  // Etapa L1 (Fase D): «Liberar cupo» desde Terminales.
-  'license.seat_released': 'Cupo de la licencia liberado',
   // Etapa 9G (fase B): emparejamiento y administración de terminales.
   'device.pairing_requested': 'Terminal nueva pidió su código',
   'device.pairing_approved': 'Terminal aprobada',
