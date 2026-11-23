@@ -43,7 +43,7 @@ func loadLicense(ctx context.Context, logger *slog.Logger, options licenseOption
 	if options.identity == nil {
 		managerOptions.IdentityProblem = "la identidad del servidor no está disponible"
 	} else {
-		key, err := localsetup.EnsureLicenseKey(options.identityDir)
+		key, err := localsetup.EnsureLicenseKey(options.identityDir, licensing.ReadMachineFingerprint)
 		if err != nil {
 			managerOptions.IdentityProblem = err.Error()
 			logger.Error("license_key_unavailable", "reason", err.Error())

@@ -65,8 +65,13 @@ func (h *clientHarness) station(name string) station {
 	h.t.Helper()
 	installation := h.fixtures.Installations[name]
 	trust := h.fixtures.Trust()
+	// El registro firmado de la huella, como lo crea la llave de licencias (revisión R1).
+	identityDir := h.t.TempDir()
+	if err := licensing.WriteMachineRecord(identityDir, installation.PrivateKey, installation.ServerID, licensing.MachineFingerprint("cccccccc-1111-2222-3333-444444444444"), time.Now()); err != nil {
+		h.t.Fatal(err)
+	}
 	manager := licensing.NewManager(licensing.Options{
-		Directory:    filepath.Join(h.t.TempDir(), "licencia"),
+		Directory:    filepath.Join(identityDir, "licencia"),
 		Installation: &licensing.Installation{ServerID: installation.ServerID, PublicKey: installation.PublicKey},
 		PrivateKey:   installation.PrivateKey,
 		Trust:        &trust,

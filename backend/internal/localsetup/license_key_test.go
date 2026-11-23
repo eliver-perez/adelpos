@@ -3,9 +3,14 @@ package localsetup
 import (
 	"crypto/ed25519"
 	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"local/ad-el-pos/server/internal/licensing"
 )
 
 // Etapa L1, fase A: una instalación 0.14.0 (los tres archivos de la identidad, sin llave de licencias) crea la
@@ -18,7 +23,7 @@ func TestLicenseKeyIsCreatedOnceForAnExistingIdentity(t *testing.T) {
 	}
 	before := identityFiles(t, directory)
 
-	first, err := EnsureLicenseKey(directory)
+	first, err := EnsureLicenseKey(directory, testFingerprint)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +36,7 @@ func TestLicenseKeyIsCreatedOnceForAnExistingIdentity(t *testing.T) {
 	}
 	requirePrivateKey(t, filepath.Join(directory, LicenseKeyFile))
 
-	second, err := EnsureLicenseKey(directory)
+	second, err := EnsureLicenseKey(directory, testFingerprint)
 	if err != nil || second.PublicKey != first.PublicKey || !second.PrivateKey.Equal(first.PrivateKey) {
 		t.Fatal("la llave de licencias nunca se regenera")
 	}
@@ -48,7 +53,7 @@ func TestLicenseKeyIsCreatedOnceForAnExistingIdentity(t *testing.T) {
 	if _, err := EnsureIdentity(otherDirectory); err != nil {
 		t.Fatal(err)
 	}
-	other, err := EnsureLicenseKey(otherDirectory)
+	other, err := EnsureLicenseKey(otherDirectory, testFingerprint)
 	if err != nil || other.PublicKey == first.PublicKey {
 		t.Fatal("dos instalaciones no comparten llave de licencias")
 	}
@@ -68,7 +73,7 @@ func TestLicenseStateWithoutKeyIsAnError(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(state, name), []byte("{}"), 0600); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := EnsureLicenseKey(directory); err == nil {
+		if _, err := EnsureLicenseKey(directory, testFingerprint); err == nil {
 			t.Fatalf("con %s y sin llave debe fallar", name)
 		}
 		if _, err := os.Lstat(filepath.Join(directory, LicenseKeyFile)); !os.IsNotExist(err) {
@@ -83,7 +88,7 @@ func TestLicenseStateWithoutKeyIsAnError(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(directory, LicenseStateFolder), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := EnsureLicenseKey(directory); err != nil {
+	if _, err := EnsureLicenseKey(directory, testFingerprint); err != nil {
 		t.Fatalf("una carpeta vacía no impide crear la llave: %v", err)
 	}
 }
@@ -98,7 +103,7 @@ func TestDamagedLicenseKeyIsNeverReplaced(t *testing.T) {
 	if err := os.WriteFile(leftover, []byte("a medias"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := EnsureLicenseKey(directory); err != nil {
+	if _, err := EnsureLicenseKey(directory, testFingerprint); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(leftover); !os.IsNotExist(err) {
@@ -113,7 +118,7 @@ func TestDamagedLicenseKeyIsNeverReplaced(t *testing.T) {
 	if err := os.WriteFile(keyFile, foreign, 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := EnsureLicenseKey(directory); err == nil {
+	if _, err := EnsureLicenseKey(directory, testFingerprint); err == nil {
 		t.Fatal("una llave que no es Ed25519 se rechaza")
 	}
 	if body, _ := os.ReadFile(keyFile); string(body) != string(foreign) {
@@ -122,11 +127,11 @@ func TestDamagedLicenseKeyIsNeverReplaced(t *testing.T) {
 	if err := os.WriteFile(keyFile, []byte("no es una llave"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := EnsureLicenseKey(directory); err == nil {
+	if _, err := EnsureLicenseKey(directory, testFingerprint); err == nil {
 		t.Fatal("un archivo ilegible se rechaza")
 	}
 	// Sin carpeta de identidad no se crea nada.
-	if _, err := EnsureLicenseKey(filepath.Join(t.TempDir(), "no-existe")); err == nil {
+	if _, err := EnsureLicenseKey(filepath.Join(t.TempDir(), "no-existe"), testFingerprint); err == nil {
 		t.Fatal("sin carpeta de identidad es un error")
 	}
 }
@@ -143,4 +148,71 @@ func identityFiles(t *testing.T, directory string) string {
 		summary += name + ":" + string(body) + "\n"
 	}
 	return summary
+}
+
+// testFingerprint es una huella de equipo simulada (las pruebas nunca dependen de la de esta computadora).
+func testFingerprint() (string, error) {
+	return strings.Repeat("ab", 32), nil
+}
+
+// Revisión R1 (R1-2, L1-D27): la llave se crea junto con el registro firmado de la huella de este equipo; con la
+// llave ya creada el registro nunca se crea otra vez; un registro sin llave (una creación interrumpida) se reemplaza.
+func TestLicenseKeyIsCreatedWithItsMachineRecord(t *testing.T) {
+	directory := filepath.Join(t.TempDir(), IdentityFolder)
+	identity, err := EnsureIdentity(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Un registro sin llave, de una creación interrumpida.
+	if err := os.WriteFile(filepath.Join(directory, licensing.MachineRecordFile), []byte("a medias"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	key, err := EnsureLicenseKey(directory, testFingerprint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(directory, licensing.MachineRecordFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var record struct {
+		ServerID           string `json:"server_id"`
+		PublicKey          string `json:"installation_public_key"`
+		MachineFingerprint string `json:"machine_fingerprint"`
+		Signature          string `json:"signature"`
+	}
+	if err := json.Unmarshal(raw, &record); err != nil || record.ServerID != identity.ServerID || record.PublicKey != key.PublicKey || record.Signature == "" {
+		t.Fatalf("el registro es de esta identidad y de su llave: %s", raw)
+	}
+	fingerprint, _ := testFingerprint()
+	if record.MachineFingerprint != fingerprint {
+		t.Fatal("el registro lleva la huella de este equipo")
+	}
+	requirePrivateKey(t, filepath.Join(directory, licensing.MachineRecordFile))
+	// Con la llave creada, un registro borrado no se vuelve a crear (el gestor la trata como copiada).
+	if err := os.Remove(filepath.Join(directory, licensing.MachineRecordFile)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := EnsureLicenseKey(directory, testFingerprint); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(directory, licensing.MachineRecordFile)); !os.IsNotExist(err) {
+		t.Fatal("con la llave ya creada, el registro nunca se crea solo")
+	}
+	// Sin poder leer la huella no se crea ni la llave ni el registro.
+	other := filepath.Join(t.TempDir(), IdentityFolder)
+	if _, err := EnsureIdentity(other); err != nil {
+		t.Fatal(err)
+	}
+	unreadable := func() (string, error) {
+		return "", errors.New("sin huella")
+	}
+	if _, err := EnsureLicenseKey(other, unreadable); err == nil {
+		t.Fatal("sin huella no se crea la llave")
+	}
+	for _, name := range []string{LicenseKeyFile, licensing.MachineRecordFile} {
+		if _, err := os.Stat(filepath.Join(other, name)); !os.IsNotExist(err) {
+			t.Fatalf("sin huella no se crea %s", name)
+		}
+	}
 }

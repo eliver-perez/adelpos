@@ -15,7 +15,7 @@ func TestRegenerateIdentitySetsTheOldOneAside(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	previousKey, err := EnsureLicenseKey(directory)
+	previousKey, err := EnsureLicenseKey(directory, testFingerprint)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,7 +26,7 @@ func TestRegenerateIdentitySetsTheOldOneAside(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 11, 23, 16, 30, 0, 0, time.UTC)
-	identity, key, aside, err := RegenerateIdentity(directory, now)
+	identity, key, aside, err := RegenerateIdentity(directory, now, testFingerprint)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestRegenerateIdentitySetsTheOldOneAside(t *testing.T) {
 	requirePrivateFolder(t, directory)
 	requirePrivateKey(t, filepath.Join(directory, LicenseKeyFile))
 	// Otra regeneración en el mismo segundo no pisa la apartada.
-	_, _, second, err := RegenerateIdentity(directory, now)
+	_, _, second, err := RegenerateIdentity(directory, now, testFingerprint)
 	if err != nil || second == aside || filepath.Base(second) != "identity-reemplazada-20261123-163000-2" {
 		t.Fatalf("segunda identidad apartada: %s %v", second, err)
 	}
@@ -58,7 +58,7 @@ func TestRegenerateIdentitySetsTheOldOneAside(t *testing.T) {
 	if err := os.MkdirAll(damaged, 0700); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, err := RegenerateIdentity(damaged, now); err == nil {
+	if _, _, _, err := RegenerateIdentity(damaged, now, testFingerprint); err == nil {
 		t.Fatal("una identidad ilegible no se regenera")
 	}
 }

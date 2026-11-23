@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -24,7 +25,21 @@ type DatabaseProbe interface {
 	// LatestActivity es la hora de la última actividad registrada (max de audit_events.occurred_at), con
 	// falso si no hay ninguna. Solo inicia la última hora confiable cuando todavía no existe.
 	LatestActivity(ctx context.Context) (time.Time, bool, error)
+	// AcceptedRevisions es la segunda copia del historial de revisiones aceptadas, en la base (revisión R1, hallazgo
+	// R1-3; L1-D29): por license_id, la revisión más alta y su sha256.
+	AcceptedRevisions(ctx context.Context) (map[string]AcceptedRevision, error)
+	// RecordAcceptedRevision sube esa copia para una licencia aceptada (nunca la baja).
+	RecordAcceptedRevision(ctx context.Context, licenseID string, revision int64, sha256 string) error
 }
+
+// AcceptedRevision es la revisión más alta aceptada de una licencia en la copia de la base.
+type AcceptedRevision struct {
+	Revision int64
+	SHA256   string
+}
+
+// databaseTimeout limita cada consulta del gestor a la base.
+const databaseTimeout = 5 * time.Second
 
 // Options es lo que necesita el gestor. Todos los campos son opcionales salvo Directory.
 type Options struct {
@@ -97,8 +112,15 @@ type Manager struct {
 	// state es lo guardado en estado.json, más la última hora confiable todavía sin guardar (dirty).
 	state storedState
 	dirty bool
-	// persistent indica que hay identidad y la carpeta se pudo preparar: solo entonces se escribe.
+	// persistent indica que hay identidad y la carpeta se pudo preparar.
 	persistent bool
+	// stateLoaded indica que se conoce el estado del disco (leído, inexistente o dañado ya apartado). Sin él no se
+	// escribe nada: un estado que no se pudo leer no se reemplaza (revisión R1, hallazgo R1-1; L1-D28). Cada escritura
+	// lo vuelve a intentar.
+	stateLoaded bool
+	// databaseRevisions es la copia del historial de revisiones de la base (R1-3); databaseLoaded, que se leyó.
+	databaseRevisions map[string]acceptedRecord
+	databaseLoaded    bool
 	// license es la licencia vigente ya verificada (nil si no hay ninguna).
 	license *License
 	// machine es la huella actual del equipo (vacía si no se pudo leer).
@@ -166,11 +188,13 @@ func (manager *Manager) Load(ctx context.Context) error {
 		manager.store.removeLeftovers()
 		state, outcome, err := manager.store.read(now)
 		if err != nil {
-			// Sin poder leerlo (o apartarlo), no se escribe nada: el gestor sigue en memoria.
+			// Sin poder leerlo (o apartarlo), no se escribe nada: el gestor sigue en memoria y cada escritura lo vuelve
+			// a intentar (R1-1).
 			problems = append(problems, err)
-			manager.persistent = false
+		} else {
+			manager.state = state
+			manager.stateLoaded = true
 		}
-		manager.state = state
 		switch outcome {
 		case stateDamaged:
 			manager.logger.Error("license_state_damaged", "action", "set_aside")
@@ -182,11 +206,12 @@ func (manager *Manager) Load(ctx context.Context) error {
 		}
 	}
 
-	if manager.checkMachine() {
-		changed = true
-	}
+	manager.checkMachine()
 	if manager.recordInstallation() {
 		changed = true
+	}
+	if err := manager.loadDatabaseRevisions(ctx); err != nil {
+		problems = append(problems, err)
 	}
 	if manager.seedTrustedTime(ctx) {
 		changed = true
@@ -196,7 +221,7 @@ func (manager *Manager) Load(ctx context.Context) error {
 	}
 	manager.refreshOperations(ctx)
 
-	if changed || manager.dirty {
+	if manager.stateLoaded && (changed || manager.dirty) {
 		if err := manager.persist(); err != nil {
 			problems = append(problems, err)
 		}
@@ -214,9 +239,10 @@ func (manager *Manager) Load(ctx context.Context) error {
 	return errors.Join(problems...)
 }
 
-// checkMachine lee la huella del equipo (tres intentos) y la compara con la guardada. La primera vez que
-// arranca esta versión la registra. Devuelve si el estado cambió.
-func (manager *Manager) checkMachine() bool {
+// checkMachine lee la huella del equipo (tres intentos) y la compara con el registro firmado de identity/
+// (machine_record.go; revisión R1, hallazgo R1-2, L1-D27). No depende de estado.json: si el registro falta, está
+// alterado o es de otra huella, falla cerrado (Copied). Nunca registra una huella nueva.
+func (manager *Manager) checkMachine() {
 	delay := manager.options.MachineRetryDelay
 	if delay == 0 {
 		delay = 200 * time.Millisecond
@@ -226,27 +252,31 @@ func (manager *Manager) checkMachine() bool {
 		// Falla cerrada (L1-D10): la licencia guardada se ignora hasta que la huella se pueda leer.
 		manager.machineUnverified = true
 		manager.logger.Error("license_machine_unverified", "attempts", machineAttempts)
-		return false
+		return
 	}
 	manager.machine = fingerprint
-	if manager.state.MachineFingerprint == "" {
-		manager.state.MachineFingerprint = fingerprint
-		return true
+	if manager.options.Installation == nil {
+		return
 	}
-	if manager.state.MachineFingerprint != fingerprint {
-		// La carpeta de datos se copió de otra computadora (o cambió la tarjeta madre): la licencia guardada se
-		// ignora, sin borrarla. Para activar, primero se crea una identidad nueva (Fase B, L1-D11).
+	recorded, problem := readMachineRecord(filepath.Dir(manager.options.Directory), *manager.options.Installation)
+	switch {
+	case problem != "":
+		// Sin registro válido junto a la llave no se puede saber dónde se creó: se trata como copiada.
 		manager.copied = true
-		manager.logger.Warn("license_installation_copied")
+		manager.logger.Warn("license_installation_copied", "reason", "machine_record_"+problem)
+	case recorded != fingerprint:
+		// La carpeta de datos se copió de otra computadora (o cambió la tarjeta madre): la licencia guardada se
+		// ignora, sin borrarla. Para activar, primero se crea una identidad nueva (license/identity/regenerate).
+		manager.copied = true
+		manager.logger.Warn("license_installation_copied", "reason", "other_machine")
 	}
-	return false
 }
 
 // recordInstallation anota en el estado la identidad a la que pertenece. Si el estado es de otra identidad,
 // solo se avisa: las licencias se comprueban siempre contra la identidad cargada.
 func (manager *Manager) recordInstallation() bool {
 	installation := manager.options.Installation
-	if installation == nil || !manager.persistent {
+	if installation == nil || !manager.stateLoaded {
 		return false
 	}
 	if manager.state.ServerID == "" {
@@ -279,12 +309,13 @@ func (manager *Manager) seedTrustedTime(ctx context.Context) bool {
 
 // loadLicense vuelve a verificar la licencia guardada con la §10 completa (L1-D20). Prueba primero la de
 // estado.json y después la copia de vigente.lic: un archivo alterado, firmado con otra llave o de otra
-// instalación se ignora y queda la última válida. Las dos deben ser exactamente la revisión aceptada; solo si
-// estado.json faltaba o estaba dañado, vigente.lic se acepta como primera revisión (recuperación).
+// instalación se ignora y queda la última válida. Las dos deben ser exactamente la revisión mínima aceptable de su
+// licencia, el máximo de las dos copias del historial (estado.json y la base, R1-3). Solo si estado.json faltaba o
+// estaba dañado y ninguna de las dos copias conoce la licencia, vigente.lic se acepta como primera revisión.
 // Devuelve si el estado cambió.
 func (manager *Manager) loadLicense(recoverFromFile bool) bool {
 	installation := manager.options.Installation
-	if installation == nil || !manager.persistent {
+	if installation == nil || !manager.stateLoaded {
 		return false
 	}
 	verifier := manager.verifier()
@@ -295,7 +326,7 @@ func (manager *Manager) loadLicense(recoverFromFile bool) bool {
 	chosenJWS := ""
 	if manager.state.License != "" {
 		license, err := verifier.verifyContent(manager.state.License)
-		if err == nil && manager.state.matchesAccepted(license) {
+		if err == nil && manager.matchesFloor(license) {
 			chosen, chosenJWS = license, manager.state.License
 		} else {
 			manager.logger.Error("license_stored_rejected", "reason", rejectionCode(err, "not_accepted_revision"))
@@ -306,9 +337,9 @@ func (manager *Manager) loadLicense(recoverFromFile bool) bool {
 		switch {
 		case err != nil:
 			manager.logger.Error("license_file_rejected", "reason", rejectionCode(err, ""))
-		case manager.state.matchesAccepted(license):
+		case manager.matchesFloor(license):
 			chosen, chosenJWS = license, fileJWS
-		case recoverFromFile && manager.state.recordAccepted(license) == nil:
+		case recoverFromFile && manager.floor(license.LicenseID) == nil && manager.state.recordAccepted(license) == nil:
 			chosen, chosenJWS = license, fileJWS
 			manager.logger.Warn("license_recovered_from_file", "license_id", license.LicenseID, "revision", license.LicenseRevision)
 		default:
@@ -319,6 +350,11 @@ func (manager *Manager) loadLicense(recoverFromFile bool) bool {
 	if chosen == nil {
 		// Sin ninguna válida, lo guardado no se borra (sirve a soporte); se ignora hasta que se acepte otra.
 		return changed
+	}
+	// La copia de estado.json se completa con la revisión (si venía de la base o de la recuperación).
+	if !manager.state.matchesAccepted(chosen) {
+		manager.state.Accepted[chosen.LicenseID] = acceptedRecord{Revision: chosen.LicenseRevision, SHA256: chosen.SHA256}
+		changed = true
 	}
 	if manager.state.License != chosenJWS {
 		manager.state.License = chosenJWS
@@ -338,6 +374,76 @@ func (manager *Manager) loadLicense(recoverFromFile bool) bool {
 		changed = true
 	}
 	return changed
+}
+
+// floor es la revisión mínima aceptable de una licencia: la más alta de las dos copias del historial (estado.json y
+// la base; R1-3, L1-D29). Si se restaura un respaldo viejo de la base, manda la de identity/; si se borra o se
+// edita estado.json, manda la de la base. Con la misma revisión en las dos, manda la de identity/.
+func (manager *Manager) floor(licenseID string) *Accepted {
+	best := manager.state.accepted(licenseID)
+	if record, exists := manager.databaseRevisions[licenseID]; exists {
+		if best == nil || record.Revision > best.Revision {
+			best = &Accepted{LicenseID: licenseID, Revision: record.Revision, SHA256: record.SHA256}
+		}
+	}
+	return best
+}
+
+// matchesFloor indica si la licencia es exactamente la revisión mínima aceptable de su license_id.
+func (manager *Manager) matchesFloor(license *License) bool {
+	floor := manager.floor(license.LicenseID)
+	return floor != nil && floor.Revision == license.LicenseRevision && floor.SHA256 == license.SHA256
+}
+
+// loadDatabaseRevisions lee la copia del historial de la base. Sin base (pruebas) no hay copia.
+func (manager *Manager) loadDatabaseRevisions(ctx context.Context) error {
+	if manager.options.Database == nil || manager.databaseLoaded {
+		return nil
+	}
+	queryCtx, cancel := context.WithTimeout(ctx, databaseTimeout)
+	defer cancel()
+	revisions, err := manager.options.Database.AcceptedRevisions(queryCtx)
+	if err != nil {
+		manager.logger.Warn("license_revisions_unavailable", "reason", err.Error())
+		return errors.New("no se pudo leer la copia del historial de revisiones de la base")
+	}
+	manager.databaseRevisions = make(map[string]acceptedRecord, len(revisions))
+	for licenseID, revision := range revisions {
+		manager.databaseRevisions[licenseID] = acceptedRecord{Revision: revision.Revision, SHA256: revision.SHA256}
+	}
+	manager.databaseLoaded = true
+	return nil
+}
+
+// ensureStateLocked vuelve a leer el estado del disco si no se pudo leer al arrancar (R1-1). Sin poder leerlo, no se
+// escribe nada: ErrStateNotSaved. Lo usan todas las escrituras.
+func (manager *Manager) ensureStateLocked() error {
+	if manager.options.Installation == nil {
+		return ErrIdentityUnavailable
+	}
+	if manager.stateLoaded {
+		return nil
+	}
+	if !manager.persistent {
+		if err := manager.store.ensureDirectory(); err != nil {
+			return ErrStateNotSaved
+		}
+		manager.persistent = true
+	}
+	state, outcome, err := manager.store.read(manager.now())
+	if err != nil {
+		return ErrStateNotSaved
+	}
+	// Lo que se observó en memoria mientras tanto no se pierde.
+	if manager.state.TrustedTime != nil {
+		state.raiseTrustedTime(*manager.state.TrustedTime, manager.state.TrustedSource)
+	}
+	manager.state = state
+	manager.stateLoaded = true
+	manager.recordInstallation()
+	manager.loadLicense(outcome != stateRead)
+	manager.logger.Info("license_state_recovered")
+	return nil
 }
 
 // rejectionCode es el motivo estable de un rechazo, para la bitácora (nunca la licencia).
@@ -377,8 +483,12 @@ func (manager *Manager) verifier() Verifier {
 
 // persist guarda estado.json con la última hora confiable que hubiera en memoria.
 func (manager *Manager) persist() error {
-	if !manager.persistent {
+	// Sin identidad no se escribe nada (Options.Installation); sin el estado del disco, tampoco (R1-1).
+	if manager.options.Installation == nil {
 		return nil
+	}
+	if err := manager.ensureStateLocked(); err != nil {
+		return err
 	}
 	if err := manager.store.write(manager.state, manager.now()); err != nil {
 		manager.logger.Error("license_state_not_saved", "reason", err.Error())
@@ -488,11 +598,16 @@ func (manager *Manager) ReplaceTrustedTime(instant time.Time, reason ReplaceReas
 	if manager.state.TrustedTime != nil {
 		previous = *manager.state.TrustedTime
 	}
+	if manager.options.Installation != nil {
+		if err := manager.ensureStateLocked(); err != nil {
+			return previous, ErrStateNotSaved
+		}
+	}
 	next := manager.state.clone()
 	replaced := instant.UTC()
 	next.TrustedTime = &replaced
 	next.TrustedSource = string(reason)
-	if manager.persistent {
+	if manager.stateLoaded {
 		if err := manager.store.write(next, manager.now()); err != nil {
 			manager.logger.Error("license_state_not_saved", "reason", err.Error())
 			return previous, ErrStateNotSaved
@@ -518,11 +633,20 @@ func (manager *Manager) Accept(jws string) (Status, error) {
 	case manager.machineUnverified:
 		return manager.statusLocked(), ErrMachineUnverified
 	}
+	// Sin conocer las dos copias del historial no se acepta nada (R1-1 y R1-3): se vuelven a leer.
+	if err := manager.ensureStateLocked(); err != nil {
+		return manager.statusLocked(), err
+	}
+	if manager.options.Database != nil && !manager.databaseLoaded {
+		if err := manager.loadDatabaseRevisions(context.Background()); err != nil {
+			return manager.statusLocked(), ErrStateNotSaved
+		}
+	}
 	license, err := manager.verifier().verifyContent(jws)
 	if err != nil {
 		return manager.statusLocked(), err
 	}
-	if err := checkRevision(license, manager.state.accepted(license.LicenseID)); err != nil {
+	if err := checkRevision(license, manager.floor(license.LicenseID)); err != nil {
 		return manager.statusLocked(), err
 	}
 	if manager.license != nil && manager.license.SHA256 == license.SHA256 {
@@ -531,7 +655,8 @@ func (manager *Manager) Accept(jws string) (Status, error) {
 	}
 
 	// Se prepara el estado nuevo y se guarda antes de cambiar la memoria: si no se puede guardar, la licencia
-	// no se acepta (§10.5).
+	// no se acepta (§10.5). Primero la copia de la base y después estado.json (L1-D29): si falla la de la base, no se
+	// acepta; si falla estado.json después, la base ya tiene la revisión y la misma licencia se puede aceptar otra vez.
 	next := manager.state.clone()
 	if err := next.recordAccepted(license); err != nil {
 		return manager.statusLocked(), err
@@ -541,11 +666,20 @@ func (manager *Manager) Accept(jws string) (Status, error) {
 	next.ServerID = manager.options.Installation.ServerID
 	next.InstallationPublicKey = manager.options.Installation.PublicKey
 	next.raiseTrustedTime(license.IssuedAt, string(TimeFromLicense))
-	if !manager.persistent {
-		if err := manager.store.ensureDirectory(); err != nil {
+	if manager.options.Database != nil {
+		recordCtx, cancel := context.WithTimeout(context.Background(), databaseTimeout)
+		err := manager.options.Database.RecordAcceptedRevision(recordCtx, license.LicenseID, license.LicenseRevision, license.SHA256)
+		cancel()
+		if err != nil {
+			manager.logger.Error("license_revision_not_saved", "reason", err.Error())
 			return manager.statusLocked(), ErrStateNotSaved
 		}
-		manager.persistent = true
+		if manager.databaseRevisions == nil {
+			manager.databaseRevisions = map[string]acceptedRecord{}
+		}
+		if previous, exists := manager.databaseRevisions[license.LicenseID]; !exists || previous.Revision < license.LicenseRevision {
+			manager.databaseRevisions[license.LicenseID] = acceptedRecord{Revision: license.LicenseRevision, SHA256: license.SHA256}
+		}
 	}
 	if err := manager.store.write(next, manager.now()); err != nil {
 		manager.logger.Error("license_state_not_saved", "reason", err.Error())
@@ -688,6 +822,10 @@ func (manager *Manager) SwitchInstallation(directory string, installation Instal
 	if manager.machine == "" {
 		return ErrMachineUnverified
 	}
+	// La identidad nueva trae su registro firmado de la huella de este equipo (localsetup.EnsureLicenseKey).
+	if recorded, problem := readMachineRecord(filepath.Dir(directory), installation); problem != "" || recorded != manager.machine {
+		return ErrCopiedInstallation
+	}
 	store := stateStore{directory: directory}
 	if err := store.ensureDirectory(); err != nil {
 		return err
@@ -706,12 +844,22 @@ func (manager *Manager) SwitchInstallation(directory string, installation Instal
 	manager.options.Installation = &identity
 	manager.options.PrivateKey = private
 	manager.options.IdentityProblem = ""
+	manager.options.Directory = directory
 	manager.store = store
 	manager.state = next
 	manager.dirty = false
 	manager.persistent = true
+	manager.stateLoaded = true
 	manager.license = nil
 	manager.copied = false
 	manager.logger.Info("license_installation_switched", "server_id", installation.ServerID)
 	return nil
+}
+
+// CurrentMachine es la huella de este equipo que se leyó al arrancar (falso si no se pudo leer). La identidad nueva
+// de una instalación copiada firma con ella su registro (license/identity/regenerate).
+func (manager *Manager) CurrentMachine() (string, bool) {
+	manager.mutex.Lock()
+	defer manager.mutex.Unlock()
+	return manager.machine, manager.machine != ""
 }

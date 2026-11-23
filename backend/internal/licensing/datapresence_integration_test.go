@@ -159,3 +159,40 @@ func TestDatabaseProbeCountsOnlyOperations(t *testing.T) {
 		t.Fatalf("la consulta esperó a los locks del negocio (%s)", elapsed)
 	}
 }
+
+// Revisión R1 (R1-3, L1-D29): la copia del historial de revisiones en la base sube y nunca baja.
+func TestDatabaseRevisionCopyNeverGoesBack(t *testing.T) {
+	pool := testDatabase(t)
+	ctx := context.Background()
+	probe := PoolProbe{Pool: pool}
+	revisions, err := probe.AcceptedRevisions(ctx)
+	if err != nil || len(revisions) != 0 {
+		t.Fatalf("una base nueva no tiene revisiones: %v %v", revisions, err)
+	}
+	licenseID := "11111111-1111-4111-8111-111111111111"
+	first, second := strings.Repeat("a", 64), strings.Repeat("b", 64)
+	if err := probe.RecordAcceptedRevision(ctx, licenseID, 2, second); err != nil {
+		t.Fatal(err)
+	}
+	// Una menor, o la misma con otro contenido, no la cambia.
+	if err := probe.RecordAcceptedRevision(ctx, licenseID, 1, first); err != nil {
+		t.Fatal(err)
+	}
+	if err := probe.RecordAcceptedRevision(ctx, licenseID, 2, first); err != nil {
+		t.Fatal(err)
+	}
+	revisions, err = probe.AcceptedRevisions(ctx)
+	if err != nil || revisions[licenseID] != (AcceptedRevision{Revision: 2, SHA256: second}) {
+		t.Fatalf("la copia no baja: %v %v", revisions, err)
+	}
+	if err := probe.RecordAcceptedRevision(ctx, licenseID, 5, first); err != nil {
+		t.Fatal(err)
+	}
+	if revisions, _ = probe.AcceptedRevisions(ctx); revisions[licenseID].Revision != 5 {
+		t.Fatalf("la copia sube: %v", revisions)
+	}
+	// Los formatos inválidos los rechaza la base.
+	if err := probe.RecordAcceptedRevision(ctx, licenseID, 9, "no es un sha256"); err == nil {
+		t.Fatal("un sha256 inválido se rechaza")
+	}
+}

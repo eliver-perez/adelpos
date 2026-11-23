@@ -465,8 +465,14 @@ func (service *Service) regenerateIdentity(ctx context.Context, tx pgx.Tx, reque
 			return nil, err
 		}
 	}
+	machine, ok := service.License.CurrentMachine()
+	if !ok {
+		return nil, licenseFault(licensing.ErrMachineUnverified)
+	}
 	identityDir := filepath.Dir(service.License.Directory())
-	identity, key, aside, err := localsetup.RegenerateIdentity(identityDir, time.Now())
+	identity, key, aside, err := localsetup.RegenerateIdentity(identityDir, time.Now(), func() (string, error) {
+		return machine, nil
+	})
 	if err != nil {
 		return nil, &Fault{Status: 503, Code: "IDENTITY_UNAVAILABLE", Message: "No se pudo crear la identidad nueva de esta computadora. No se cambió nada.", Details: map[string]string{"reason": "regeneration_failed"}}
 	}

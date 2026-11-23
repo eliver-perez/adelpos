@@ -12,6 +12,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
+
+	"local/ad-el-pos/server/internal/licensing"
 )
 
 // Llave de licencias de la instalación (etapa L1, fase A; contrato §2 y L1-D9).
@@ -49,8 +52,12 @@ type LicenseKey struct {
 var errLicenseKeyDamaged = errors.New("la llave de licencias de la instalación no es válida; no se reemplazará automáticamente (revisión manual necesaria)")
 
 // EnsureLicenseKey carga la llave de licencias de la carpeta de la identidad o, si no existe y todavía no hay
-// estado de licencia, la crea. La carpeta de la identidad ya debe existir (EnsureIdentity).
-func EnsureLicenseKey(directory string) (LicenseKey, error) {
+// estado de licencia, la crea junto con el registro firmado de la huella de este equipo (licensing.MachineRecordFile,
+// revisión R1, L1-D27). fingerprint lee la huella (licensing.ReadMachineFingerprint): sin ella no se crea nada y se
+// vuelve a intentar en el siguiente arranque. Con la llave ya creada, el registro nunca se toca aquí: si falta o no
+// vale, el gestor de la licencia trata la instalación como copiada. La carpeta de la identidad ya debe existir
+// (EnsureIdentity).
+func EnsureLicenseKey(directory string, fingerprint func() (string, error)) (LicenseKey, error) {
 	if info, err := os.Stat(directory); err != nil || !info.IsDir() {
 		return LicenseKey{}, errors.New("no existe la carpeta de la identidad del servidor")
 	}
@@ -64,7 +71,7 @@ func EnsureLicenseKey(directory string) (LicenseKey, error) {
 	if hasLicenseState(directory) {
 		return LicenseKey{}, errors.New("falta la llave de licencias de esta instalación, pero ya hay una licencia guardada; no se creará otra automáticamente (revisión manual necesaria)")
 	}
-	if err := createLicenseKey(directory); err != nil {
+	if err := createLicenseKey(directory, fingerprint); err != nil {
 		return LicenseKey{}, err
 	}
 	return LoadLicenseKey(directory)
@@ -108,13 +115,25 @@ func LoadLicenseKey(directory string) (LicenseKey, error) {
 	return LicenseKey{PrivateKey: private, PublicKey: base64.RawURLEncoding.EncodeToString(public)}, nil
 }
 
-// createLicenseKey genera la llave y la escribe completa en un temporal (0600, fsync) que después se enlaza con
-// el nombre definitivo: el nombre definitivo solo aparece con la llave completa, y un enlace nunca reemplaza un
-// archivo que ya exista.
-func createLicenseKey(directory string) error {
+// createLicenseKey genera la llave, firma con ella el registro de la huella de este equipo y lo guarda, y al final
+// escribe la llave completa en un temporal (0600, fsync) que se enlaza con el nombre definitivo: el nombre definitivo
+// solo aparece con la llave completa y con su registro ya guardado, y un enlace nunca reemplaza un archivo que ya
+// exista. Un corte antes del enlace deja a lo más un registro sin llave, que se reemplaza en el siguiente intento.
+func createLicenseKey(directory string, fingerprint func() (string, error)) error {
+	record, err := readIdentityRecord(filepath.Join(directory, identityFile))
+	if err != nil {
+		return errors.New("la identidad del servidor no es válida; no se creó la llave de licencias")
+	}
+	machine, err := fingerprint()
+	if err != nil {
+		return errors.New("no se pudo comprobar esta computadora; la llave de licencias se creará en el siguiente arranque")
+	}
 	_, private, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return errors.New("no se pudo generar la llave de licencias")
+	}
+	if err := licensing.WriteMachineRecord(directory, private, record.ServerID, machine, time.Now()); err != nil {
+		return errors.New("no se pudo guardar el registro de esta computadora; no se creó la llave de licencias")
 	}
 	der, err := x509.MarshalPKCS8PrivateKey(private)
 	if err != nil {
@@ -156,7 +175,8 @@ func removeLicenseKeyLeftovers(directory string) {
 		return
 	}
 	for _, entry := range entries {
-		if !entry.IsDir() && strings.HasPrefix(entry.Name(), licenseKeyTemporary) {
+		temporary := strings.HasPrefix(entry.Name(), licenseKeyTemporary) || strings.HasPrefix(entry.Name(), "."+licensing.MachineRecordFile+"-")
+		if !entry.IsDir() && temporary {
 			_ = os.Remove(filepath.Join(directory, entry.Name()))
 		}
 	}

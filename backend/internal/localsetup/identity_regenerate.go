@@ -19,9 +19,9 @@ import (
 // replacedIdentityPrefix es el inicio del nombre de una identidad apartada.
 const replacedIdentityPrefix = "identity-reemplazada-"
 
-// RegenerateIdentity aparta la identidad de la carpeta y crea una nueva. Devuelve la identidad, la llave de licencias
-// y la ruta de la carpeta apartada.
-func RegenerateIdentity(directory string, now time.Time) (ServerIdentity, LicenseKey, string, error) {
+// RegenerateIdentity aparta la identidad de la carpeta y crea una nueva, con el registro de la huella de este equipo
+// (fingerprint). Devuelve la identidad, la llave de licencias y la ruta de la carpeta apartada.
+func RegenerateIdentity(directory string, now time.Time, fingerprint func() (string, error)) (ServerIdentity, LicenseKey, string, error) {
 	if _, err := LoadIdentity(directory); err != nil {
 		return ServerIdentity{}, LicenseKey{}, "", errors.New("la identidad actual no se puede leer; revisión manual necesaria")
 	}
@@ -47,7 +47,7 @@ func RegenerateIdentity(directory string, now time.Time) (ServerIdentity, Licens
 		restore()
 		return ServerIdentity{}, LicenseKey{}, "", err
 	}
-	key, err := EnsureLicenseKey(directory)
+	key, err := EnsureLicenseKey(directory, fingerprint)
 	if err != nil {
 		restore()
 		return ServerIdentity{}, LicenseKey{}, "", err

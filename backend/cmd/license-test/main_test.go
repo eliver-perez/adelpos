@@ -53,7 +53,9 @@ func TestLicenseTestIssue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	key, err := localsetup.EnsureLicenseKey(identityDir)
+	key, err := localsetup.EnsureLicenseKey(identityDir, func() (string, error) {
+		return licensing.MachineFingerprint("dddddddd-1111-2222-3333-444444444444"), nil
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,8 +158,12 @@ func TestLicenseTestServer(t *testing.T) {
 	}
 	installation := fixtures.Installations["installation-fixture-a"]
 	trust := fixtures.Trust()
+	identityDir := t.TempDir()
+	if err := licensing.WriteMachineRecord(identityDir, installation.PrivateKey, installation.ServerID, licensing.MachineFingerprint("eeeeeeee-1111-2222-3333-444444444444"), time.Now()); err != nil {
+		t.Fatal(err)
+	}
 	manager := licensing.NewManager(licensing.Options{
-		Directory:    filepath.Join(t.TempDir(), "licencia"),
+		Directory:    filepath.Join(identityDir, "licencia"),
 		Installation: &licensing.Installation{ServerID: installation.ServerID, PublicKey: installation.PublicKey},
 		PrivateKey:   installation.PrivateKey,
 		Trust:        &trust,
