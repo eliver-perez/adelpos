@@ -78,7 +78,7 @@ func TestClassifyOperation(t *testing.T) {
 		{"POST", "payments/cash/open-drawer", RowCloseShift, true},
 		{"POST", "payments/cash/count-preview", RowRecords, false},
 		// F5: cocina.
-		{"GET", "kitchen/board", RowKitchen, false},
+		{"GET", "kitchen/board", RowRecords, false},
 		{"POST", "kitchen/states", RowKitchen, true},
 		{"POST", "kitchen/display-mode", RowKitchen, false},
 		{"POST", "kitchen/releases/" + id + "/release", RowKitchen, true},

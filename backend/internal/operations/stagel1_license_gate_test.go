@@ -194,6 +194,8 @@ func (fixture *licenseGateFixture) alwaysAvailable(t *testing.T, accountID strin
 		fixture.allowed(t, "GET", "restaurant/accounts/"+accountID+"/history", nil, 200)
 	}
 	fixture.allowed(t, "GET", "audit", nil, 200)
+	// El tablero de Preparación es una lectura (F6); entrar en modo Cocina es otra operación (display-mode, F5).
+	fixture.allowed(t, "GET", "kitchen/board", nil, 200)
 	// Sin respaldos configurados en esta prueba la ruta responde 503, pero la puerta la deja pasar.
 	fixture.passesGate(t, "GET", "maintenance/backups", nil)
 	fixture.passesGate(t, "POST", "maintenance/backups/run", map[string]any{})

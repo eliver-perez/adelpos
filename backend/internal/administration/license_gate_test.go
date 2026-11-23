@@ -149,6 +149,15 @@ func TestEveryOperationHasItsLicenseClass(t *testing.T) {
 		}
 		seen[key] = true
 	}
+	// El tablero de Preparación es una lectura (F6): lo lee también la vista de una cuenta. Entrar en modo Cocina es
+	// kitchen/display-mode (F5, con cupo).
+	if board := ClassifyGateOperation("GET", "kitchen/board"); board.Row != licensing.RowRecords || board.Dated {
+		t.Errorf("GET kitchen/board: %+v", board)
+	}
+	if mode := ClassifyGateOperation("POST", "kitchen/display-mode"); mode.Row != licensing.RowKitchen ||
+		mode.SeatEffect != licenseseats.KitchenDisplay {
+		t.Errorf("POST kitchen/display-mode: %+v", mode)
+	}
 	t.Logf("operaciones clasificadas: %d (%d del puente, %d del contrato, %d locales)", len(seen), len(bridge), len(contract),
 		len(localRoutes))
 }

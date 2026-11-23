@@ -39,8 +39,9 @@ const (
 	// RowCloseShift es F4, «Cerrar turno y hacer el corte», con las operaciones de efectivo del turno (ingresos,
 	// retiros, gastos, correcciones, cortes parciales, tipo de cambio y abrir el cajón).
 	RowCloseShift Row = "close_shift"
-	// RowKitchen es F5, «KDS: mostrar pedidos ya enviados», con avanzar estados, liberar lo programado y reintentar
-	// la impresión de cocina (L1-D6) y el modo Cocina.
+	// RowKitchen es F5, «KDS: mostrar pedidos ya enviados»: entrar en modo Cocina (kitchen/display-mode, con cupo),
+	// avanzar estados, liberar lo programado y reintentar la impresión de cocina (L1-D6). Las lecturas de cocina,
+	// también el tablero, son F6.
 	RowKitchen Row = "kitchen"
 	// RowRecords es F6, «Reportes, historial y respaldos», con toda lectura y las vistas previas que solo calculan.
 	// Se permite en todos los estados: ningún estado bloquea reportes, historial ni respaldos.
@@ -407,10 +408,8 @@ func classifyKitchen(method string, parts []string) Operation {
 		resource = parts[1]
 	}
 	if readMethod(method) {
-		if length == 2 && resource == "board" {
-			// El tablero de Preparación es la fila KDS (lo ya enviado), sin fecha.
-			return known(RowKitchen, false)
-		}
+		// Toda lectura de cocina es F6, también el tablero de Preparación (GET kitchen/board): lo lee además la vista de
+		// una cuenta (L1-D28), y entrar en modo Cocina ya lo controla kitchen/display-mode (F5, con cupo).
 		return known(RowRecords, false)
 	}
 	switch {
