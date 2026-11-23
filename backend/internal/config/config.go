@@ -56,6 +56,10 @@ type Config struct {
 	// configuración) y solo acepta orígenes de la red local. Sin valor (omitempty) no hay escucha de red y
 	// los archivos existentes no cambian. El servicio de macOS la abre por su cuenta (host, puerto 8443).
 	NetworkListenAddress string `json:"network_listen_address,omitempty"`
+	// LicenseServerURL (etapa L1, fase B) es la dirección base del servidor de licencias, https y sin más que una
+	// ruta. Sin valor (omitempty), la del entorno compilado (internal/licensing). Con test_mode solo se usa una de
+	// loopback (el servidor simulado de las pruebas), salvo ADEL_LICENSE_ALLOW_REMOTE=1.
+	LicenseServerURL string `json:"license_server_url,omitempty"`
 }
 
 func Load(filename string) (Config, error) {
@@ -117,6 +121,9 @@ func (c Config) Validate() error {
 	}
 	if !ip.IsLoopback() && c.TLSCertificate == "" {
 		return errors.New("la escucha LAN requiere un certificado TLS; HTTP solo se admite en loopback")
+	}
+	if err := checkLicenseServerURL(c.LicenseServerURL); err != nil {
+		return err
 	}
 	if c.Environment == "development" && c.LicenseMode != "development" {
 		return errors.New("desarrollo requiere license_mode development")
@@ -208,4 +215,16 @@ func (d Database) ConnectionString() string {
 
 func (c Config) String() string {
 	return fmt.Sprintf("environment=%s mode=%s listen=%s", c.Environment, c.InstallationMode, c.ListenAddress)
+}
+
+// checkLicenseServerURL exige https, un host y nada de usuario, consulta ni fragmento (etapa L1, fase B).
+func checkLicenseServerURL(value string) error {
+	if value == "" {
+		return nil
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return errors.New("license_server_url debe ser una dirección https sin usuario, consulta ni fragmento")
+	}
+	return nil
 }

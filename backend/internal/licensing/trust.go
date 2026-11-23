@@ -139,3 +139,9 @@ func (set TrustSet) WithTestKeys(filename string) (TrustSet, error) {
 	}
 	return combined, nil
 }
+
+// TestHooksAllowed indica si esta compilación admite las ayudas de las pruebas con test_mode (las llaves de
+// vectors.json, el reloj con desfase y la autoridad del servidor de licencias simulado). Nunca en producción.
+func TestHooksAllowed() bool {
+	return testHooksAllowed
+}

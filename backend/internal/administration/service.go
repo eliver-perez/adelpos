@@ -18,8 +18,8 @@ import (
 	"local/ad-el-pos/server/internal/documents"
 	"local/ad-el-pos/server/internal/kitchen"
 	"local/ad-el-pos/server/internal/legacyimport"
-	"local/ad-el-pos/server/internal/licensing"
 	"local/ad-el-pos/server/internal/licenseseats"
+	"local/ad-el-pos/server/internal/licensing"
 	"local/ad-el-pos/server/internal/maintenance"
 	"local/ad-el-pos/server/internal/reports"
 )
@@ -69,6 +69,9 @@ type Service struct {
 	// las rutas license/* (Fase B), la puerta de la §6 y la hora (Fase C) y los cupos (Fase D). Sin valor
 	// (pruebas que no lo necesitan) no hay licencia.
 	License *licensing.Manager
+	// LicenseServer es el cliente del servidor de licencias (etapa L1, fase B; license.go): activar, transferir,
+	// consultar y liberar. Sin valor, esas rutas responden 503 LICENSE_SERVER_UNAVAILABLE.
+	LicenseServer *licensing.Client
 	// Seats aplica los cupos de la licencia (etapa L1, Fase D; license_seats.go e internal/licenseseats). Sin valor, o
 	// sin fuente de límites, no hay licencia válida y ninguna operación que pide cupo procede (falla cerrada): main.go
 	// lo crea siempre y las pruebas inyectan uno con los cupos y el reloj que necesitan (licenseseats/seatstest).
@@ -385,6 +388,11 @@ func (service *Service) dispatch(ctx context.Context, tx pgx.Tx, request Request
 	// tableta, porque llegan aunque nadie tenga la sesión abierta (en «¿Quién eres?» o con la aplicación cerrada).
 	if readyRoute {
 		return readyAlerts(ctx, tx, request)
+	}
+	// Etapa L1, fase B (license.go): el resumen del estado de la licencia con solo la credencial del dispositivo, para
+	// el teléfono o la tableta en «¿Quién eres?». Con sesión, GET license/status responde el estado completo.
+	if route == "license/status" && request.Method == "GET" && request.SessionToken == "" {
+		return service.licenseDeviceSummary(), nil
 	}
 	principal, err := authenticateSession(ctx, tx, request)
 	if err != nil {

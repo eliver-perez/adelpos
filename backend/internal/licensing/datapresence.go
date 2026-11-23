@@ -111,3 +111,44 @@ func latestActivity(ctx context.Context, querier rowQuerier) (time.Time, bool, e
 	}
 	return latest.UTC(), true, nil
 }
+
+// --- Copia del historial de revisiones aceptadas (revisión R1, hallazgo R1-3) ---------------------------------
+//
+// app.license_revisions (0028, sección «Fase A (revisión R1)») guarda, por license_id, la revisión más alta aceptada
+// y su sha256: una segunda copia de lo que guarda estado.json. La revisión mínima aceptable es el máximo de las dos
+// (manager.go). La de la base viaja en los respaldos, pero restaurar uno viejo solo baja esa copia, nunca la de
+// identity/; y borrar o editar estado.json no toca la de la base. No reemplaza a L1-D9: es una protección más.
+
+// AcceptedRevisions lee la copia de la base.
+func (probe PoolProbe) AcceptedRevisions(ctx context.Context) (map[string]AcceptedRevision, error) {
+	revisions := map[string]AcceptedRevision{}
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
+	rows, err := probe.Pool.Query(ctx, `SELECT license_id::text, license_revision, sha256 FROM app.license_revisions`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var licenseID, sha256 string
+		var revision int64
+		if err := rows.Scan(&licenseID, &revision, &sha256); err != nil {
+			return nil, err
+		}
+		revisions[licenseID] = AcceptedRevision{Revision: revision, SHA256: sha256}
+	}
+	return revisions, rows.Err()
+}
+
+// RecordAcceptedRevision sube la copia de la base de una licencia aceptada; nunca la baja ni la reemplaza por una
+// revisión igual con otro contenido (la §10 ya lo rechazó antes).
+func (probe PoolProbe) RecordAcceptedRevision(ctx context.Context, licenseID string, revision int64, sha256 string) error {
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
+	_, err := probe.Pool.Exec(ctx, `INSERT INTO app.license_revisions(license_id, license_revision, sha256)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (license_id) DO UPDATE
+            SET license_revision = EXCLUDED.license_revision, sha256 = EXCLUDED.sha256, updated_at = now()
+            WHERE app.license_revisions.license_revision < EXCLUDED.license_revision`, licenseID, revision, sha256)
+	return err
+}

@@ -256,6 +256,17 @@ func contractScenario(t *testing.T, client *contractClient) {
 	client.call("GET", "/auth/me", nil, nil, 200)
 	// Un cliente anterior a la versión mínima recibe «Actualiza esta terminal» con el error documentado.
 	client.call("GET", "/auth/me", nil, map[string]string{httpapi.ClientVersionHeader: "0.0.1"}, 426)
+	// Etapa L1 (fase B): el estado de la licencia, con sesión y con solo la credencial del dispositivo.
+	status := decodeContract[map[string]any](t, client.call("GET", "/license/status", nil, nil, 200).Body.Bytes())
+	if status["state"] != "not_activated" || status["license"] != nil {
+		t.Fatalf("una instalación sin licencia: %v", status)
+	}
+	withoutSession := *client
+	withoutSession.session = ""
+	summary := decodeContract[map[string]any](t, withoutSession.call("GET", "/license/status", nil, nil, 200).Body.Bytes())
+	if len(summary) != 3 || summary["state"] != "not_activated" {
+		t.Fatalf("el resumen sin sesión: %v", summary)
+	}
 
 	// Catálogo de prueba (preparación, fuera del contrato).
 	category := decodeContract[map[string]any](t, client.setup("POST", "/catalog/categories",

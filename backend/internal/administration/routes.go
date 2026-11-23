@@ -156,6 +156,11 @@ func (service *Service) protected(ctx context.Context, tx pgx.Tx, request Reques
 	if strings.HasPrefix(route, "reports/") {
 		return handleReports(ctx, tx, request, principal, route)
 	}
+	// Licencia (etapa L1, fase B; license.go): estado, activar, transferir, consultar, liberar, sin internet e identidad
+	// nueva. Las rutas de la hora de la Fase C van aparte.
+	if isLicenseCoreRoute(route) {
+		return service.licenseRoutes(ctx, tx, request, principal, route)
+	}
 	// Estado y reinicio del servicio del servidor (etapa 9G, fase A; service_host.go).
 	if route == "maintenance/service" || strings.HasPrefix(route, "maintenance/service/") {
 		return service.serviceRoutes(ctx, tx, request, principal, route)

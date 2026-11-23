@@ -66,6 +66,10 @@ func (service *Service) completeDeferred(ctx context.Context, result any) (any, 
 	if removal, ok := result.(*testDataRemoval); ok {
 		return service.removeTestData(ctx, removal)
 	}
+	// Operaciones en línea de la licencia (etapa L1, fase B; license.go): la red, fuera de la transacción.
+	if operation, ok := result.(*licenseOperation); ok {
+		return service.completeLicenseOperation(ctx, operation)
+	}
 	// Reinicio del servicio (etapa 9G, fase A): se programa ya auditado (service_host.go).
 	if _, ok := result.(*serviceRestart); ok {
 		return service.completeRestart()
