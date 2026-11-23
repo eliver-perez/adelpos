@@ -48,3 +48,10 @@ android/local.properties
 *.p12
 android/**/signing.properties
 android/**/keystore.properties
+
+# Etapa L1 (licencias, revisión R1-6): la llave de licencias de una instalación, el registro firmado de su huella y el
+# estado de su licencia nunca se versionan, en ninguna carpeta de datos (contrato §2 y §12). Red de seguridad.
+**/identity/license-key.pem
+**/identity/license-machine.json
+**/identity/licencia/
+**/identity-reemplazada-*/
