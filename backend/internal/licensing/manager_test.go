@@ -403,8 +403,16 @@ func TestManagerIgnoresAlteredForeignAndOtherInstallationFiles(t *testing.T) {
 	if status := h.start().Status(); status.State != StateNotActivated || status.HasLicense() {
 		t.Fatalf("sin ninguna válida queda sin activar: %+v", status)
 	}
-	if h.readState().Accepted[valid.LicenseID].Revision != 1 {
-		t.Fatal("las revisiones aceptadas no se borran")
+	if state := h.readState(); state.Accepted[valid.LicenseID].Revision != 1 || state.License != h.negative("altered-content") {
+		t.Fatal("lo guardado no se borra: las revisiones aceptadas siguen y la licencia ignorada queda para soporte")
+	}
+	// Importar otra vez el .lic válido (la misma revisión, idéntica) la vuelve a instalar.
+	reimported := h.start()
+	if status := h.accept(reimported, "subscription-monthly"); status.State != StateActive || status.LicenseID != valid.LicenseID {
+		t.Fatalf("el .lic válido se vuelve a instalar: %+v", status)
+	}
+	if h.readState().License != h.jws("subscription-monthly") || h.licenseFile() != h.jws("subscription-monthly") {
+		t.Fatal("los dos archivos vuelven a tener la licencia válida")
 	}
 }
 

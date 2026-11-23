@@ -142,8 +142,9 @@ func NewManager(options Options) *Manager {
 }
 
 // Load lee el estado guardado, comprueba la huella del equipo y la presencia de operaciones en la base, y
-// vuelve a verificar la licencia guardada (L1-D20). El gestor queda utilizable aunque devuelva un error
-// (por ejemplo, sin poder escribir la carpeta): el error es para la bitácora, y el estado queda en memoria.
+// vuelve a verificar la licencia guardada (L1-D20). Se llama una vez, al arrancar. El gestor queda utilizable
+// aunque devuelva un error (por ejemplo, sin poder escribir la carpeta): el error es para la bitácora, y el
+// estado queda en memoria.
 func (manager *Manager) Load(ctx context.Context) error {
 	manager.mutex.Lock()
 	defer manager.mutex.Unlock()
@@ -165,6 +166,7 @@ func (manager *Manager) Load(ctx context.Context) error {
 		manager.store.removeLeftovers()
 		state, outcome, err := manager.store.read(now)
 		if err != nil {
+			// Sin poder leerlo (o apartarlo), no se escribe nada: el gestor sigue en memoria.
 			problems = append(problems, err)
 			manager.persistent = false
 		}
@@ -315,10 +317,7 @@ func (manager *Manager) loadLicense(recoverFromFile bool) bool {
 	}
 
 	if chosen == nil {
-		if manager.state.License != "" {
-			manager.state.License = ""
-			changed = true
-		}
+		// Sin ninguna válida, lo guardado no se borra (sirve a soporte); se ignora hasta que se acepte otra.
 		return changed
 	}
 	if manager.state.License != chosenJWS {
@@ -526,8 +525,8 @@ func (manager *Manager) Accept(jws string) (Status, error) {
 	if err := checkRevision(license, manager.state.accepted(license.LicenseID)); err != nil {
 		return manager.statusLocked(), err
 	}
-	if manager.state.License == jws {
-		// La misma licencia otra vez (por ejemplo, un reintento): no cambia nada.
+	if manager.license != nil && manager.license.SHA256 == license.SHA256 {
+		// La misma licencia vigente otra vez (por ejemplo, un reintento): no cambia nada.
 		return manager.statusLocked(), nil
 	}
 

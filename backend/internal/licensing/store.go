@@ -44,6 +44,9 @@ const (
 
 var sha256HexPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
+// errTooLarge es un archivo de estado más grande que maxStateSize: se trata como dañado.
+var errTooLarge = errors.New("archivo demasiado grande")
+
 // acceptedRecord es la revisión más alta aceptada de una licencia.
 type acceptedRecord struct {
 	Revision int64  `json:"license_revision"`
@@ -159,9 +162,10 @@ type stateStore struct {
 type readOutcome int
 
 const (
-	stateMissing readOutcome = iota // no existe: primera vez
-	stateRead                       // leído y válido
-	stateDamaged                    // ilegible o inválido: se apartó y se empieza de nuevo
+	stateMissing     readOutcome = iota // no existe: primera vez
+	stateRead                           // leído y válido
+	stateDamaged                        // contenido inválido: se apartó y se empieza de nuevo
+	stateUnavailable                    // no se pudo leer (permisos, disco): no se toca y no se escribe
 )
 
 // ensureDirectory crea la carpeta privada si falta (0700; en Windows, la ACL privada).
@@ -192,13 +196,18 @@ func (store stateStore) removeLeftovers() {
 	}
 }
 
-// read lee estado.json. Si está dañado lo aparta (estado.json.danado-AAAAMMDD-HHMMSS, para soporte) y
-// devuelve un estado nuevo: la licencia de vigente.lic se puede recuperar todavía (manager.go).
+// read lee estado.json. Si su contenido está dañado lo aparta (estado.json.danado-AAAAMMDD-HHMMSS, para
+// soporte) y devuelve un estado nuevo: la licencia de vigente.lic se puede recuperar todavía (manager.go). Si
+// no se puede leer (permisos, disco), no lo toca y devuelve un error: el gestor sigue en memoria sin escribir,
+// para no reemplazar un estado que quizá es válido.
 func (store stateStore) read(now time.Time) (storedState, readOutcome, error) {
 	filename := filepath.Join(store.directory, stateFileName)
 	raw, err := readLimited(filename)
 	if errors.Is(err, fs.ErrNotExist) {
 		return newStoredState(), stateMissing, nil
+	}
+	if err != nil && !errors.Is(err, errTooLarge) {
+		return newStoredState(), stateUnavailable, errors.New("no se pudo leer el estado de la licencia")
 	}
 	if err == nil {
 		var state storedState
@@ -253,7 +262,7 @@ func readLimited(filename string) ([]byte, error) {
 		return nil, err
 	}
 	if len(raw) > maxStateSize {
-		return nil, errors.New("archivo demasiado grande")
+		return nil, errTooLarge
 	}
 	return raw, nil
 }
