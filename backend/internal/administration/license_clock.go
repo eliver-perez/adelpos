@@ -117,6 +117,12 @@ func (service *Service) checkTimeWithInternet(ctx context.Context, tx pgx.Tx, re
 	}
 	serverTime = serverTime.UTC()
 	manager := service.License
+	// El server_time no va firmado (solo lo protege el TLS). Como piso, nunca puede ser anterior a la emisión de la
+	// licencia vigente, que sí está firmada por el mismo servidor: una respuesta así no se usa para bajar la hora.
+	if status := manager.Status(); status.HasLicense() && serverTime.Before(status.IssuedAt.Add(-licensing.ClockMargin)) {
+		return nil, &Fault{Status: 502, Code: "LICENSE_RESPONSE_INVALID",
+			Message: "La hora que respondió el servidor de licencias no es válida. Inténtalo más tarde o comunícate con soporte."}
+	}
 	before := manager.Clock()
 	location, timezone, err := restaurantLocation(ctx, tx)
 	if err != nil {

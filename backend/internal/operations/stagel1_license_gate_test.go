@@ -498,6 +498,16 @@ func TestStageL1LicenseGate(t *testing.T) {
 			t.Fatal("la comprobación que no coincide queda en la auditoría")
 		}
 
+		// Una hora del servidor anterior a la emisión de la licencia vigente (firmada) no se usa, aunque coincida con el
+		// reloj.
+		fixture.clock.Set(fixture.manager.Status().IssuedAt.Add(-48 * time.Hour))
+		server.instant = fixture.clock.Now()
+		if reply := fixture.send("POST", "license/time-check", map[string]any{}); reply.status != 502 ||
+			reply.code != "LICENSE_RESPONSE_INVALID" || !fixture.manager.TrustedTime().Equal(future) {
+			t.Fatalf("hora del servidor anterior a la licencia: %d %s", reply.status, reply.body)
+		}
+		fixture.clock.Set(real)
+
 		// Coincide: la última hora confiable baja al server_time, se audita con los dos valores y las operaciones con
 		// fecha futura se listan sin modificarlas.
 		server.instant = real.Add(2 * time.Minute)
