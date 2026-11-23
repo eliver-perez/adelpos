@@ -68,6 +68,9 @@ type Service struct {
 	// las rutas license/* (Fase B), la puerta de la §6 y la hora (Fase C) y los cupos (Fase D). Sin valor
 	// (pruebas que no lo necesitan) no hay licencia.
 	License *licensing.Manager
+	// LicenseServer es el cliente del servidor de licencias (etapa L1, fase B; license.go): activar, transferir,
+	// consultar y liberar. Sin valor, esas rutas responden 503 LICENSE_SERVER_UNAVAILABLE.
+	LicenseServer *licensing.Client
 	// Logger recibe el detalle técnico de los fallos que la interfaz explica sin términos técnicos.
 	Logger      *slog.Logger
 	reportsOnce sync.Once
@@ -377,6 +380,11 @@ func (service *Service) dispatch(ctx context.Context, tx pgx.Tx, request Request
 	// tableta, porque llegan aunque nadie tenga la sesión abierta (en «¿Quién eres?» o con la aplicación cerrada).
 	if readyRoute {
 		return readyAlerts(ctx, tx, request)
+	}
+	// Etapa L1, fase B (license.go): el resumen del estado de la licencia con solo la credencial del dispositivo, para
+	// el teléfono o la tableta en «¿Quién eres?». Con sesión, GET license/status responde el estado completo.
+	if route == "license/status" && request.Method == "GET" && request.SessionToken == "" {
+		return service.licenseDeviceSummary(), nil
 	}
 	principal, err := authenticateSession(ctx, tx, request)
 	if err != nil {

@@ -889,6 +889,12 @@ var permissionCatalogEntries = []catalogEntry{
 		group:       permissionGroupSystem,
 		description: "Ver el Registro de movimientos: quién hizo qué y cuándo.",
 	},
+	// Etapa L1 (fase B, L1-D21): solo el Administrador de fábrica lo tiene.
+	{
+		key:         "license.manage",
+		group:       permissionGroupSystem,
+		description: "Activar, transferir, actualizar y liberar la licencia de AD-EL POS en esta computadora.",
+	},
 	{
 		key:         "documents.templates.read",
 		group:       permissionGroupSystem,

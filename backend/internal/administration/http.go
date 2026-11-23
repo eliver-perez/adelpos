@@ -91,6 +91,10 @@ func (service *Service) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	if isMaintenanceRoute(request.URL.Path) {
 		timeout = maintenanceTimeout
 	}
+	// Etapa L1, fase B: las rutas de la licencia hablan con el servidor de licencias, con sus reintentos (license.go).
+	if isLicenseRoute(request.URL.Path) {
+		timeout = licenseTimeout
+	}
 	// El servidor HTTP corta toda respuesta a los 15 s (WriteTimeout): una ruta con más tiempo amplía
 	// su propio plazo de escritura. Sin soporte (pruebas con httptest) no hace falta.
 	if timeout > 10*time.Second {

@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/x509"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -9,6 +11,7 @@ import (
 
 	"local/ad-el-pos/server/internal/licensing"
 	"local/ad-el-pos/server/internal/localsetup"
+	"local/ad-el-pos/server/internal/product"
 )
 
 // Etapa L1, fase A: carga del gestor de la licencia al arrancar, en serve y en el host de macOS y de Windows
@@ -90,4 +93,49 @@ func applyLicenseTestHooks(logger *slog.Logger, options *licensing.Options) {
 			logger.Warn("license_test_clock_enabled")
 		}
 	}
+}
+
+// newLicenseClient prepara el cliente del servidor de licencias (Fase B): la dirección de license_server_url o la
+// del entorno compilado. Con test_mode solo habla con loopback, salvo ADEL_LICENSE_ALLOW_REMOTE=1 (L1-D18, solo la
+// Fase G), y en una compilación de desarrollo confía además en la autoridad del servidor simulado de las pruebas
+// (ADEL_TEST_LICENSE_CA, un PEM que escribe license-test server).
+func newLicenseClient(logger *slog.Logger, manager *licensing.Manager, serverURL string, testMode bool) *licensing.Client {
+	options := licensing.ClientOptions{
+		BaseURL:    serverURL,
+		AppVersion: product.Read().Version,
+		TestMode:   testMode,
+		Logger:     logger,
+	}
+	if testMode {
+		options.AllowRemote = os.Getenv("ADEL_LICENSE_ALLOW_REMOTE") == "1"
+		if options.AllowRemote {
+			logger.Warn("license_remote_allowed_in_test_mode")
+		}
+		if filename := os.Getenv("ADEL_TEST_LICENSE_CA"); filename != "" {
+			roots, err := testLicenseRoots(filename)
+			if err != nil {
+				logger.Error("license_test_ca_ignored", "reason", err.Error())
+			} else {
+				options.RootCAs = roots
+				logger.Warn("license_test_ca_enabled")
+			}
+		}
+	}
+	return licensing.NewClient(manager, options)
+}
+
+// testLicenseRoots lee la autoridad del servidor de licencias simulado (solo desarrollo y test_mode).
+func testLicenseRoots(filename string) (*x509.CertPool, error) {
+	if !licensing.TestHooksAllowed() {
+		return nil, errors.New("una versión de producción no confía en la autoridad de las pruebas")
+	}
+	raw, err := os.ReadFile(filename)
+	if err != nil {
+		return nil, errors.New("no se pudo leer la autoridad del servidor de licencias simulado")
+	}
+	roots := x509.NewCertPool()
+	if !roots.AppendCertsFromPEM(raw) {
+		return nil, errors.New("la autoridad del servidor de licencias simulado no es un PEM válido")
+	}
+	return roots, nil
 }
