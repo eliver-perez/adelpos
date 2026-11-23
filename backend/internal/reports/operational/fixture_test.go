@@ -23,6 +23,7 @@ import (
 	"local/ad-el-pos/server/internal/database"
 	"local/ad-el-pos/server/internal/inventory"
 	"local/ad-el-pos/server/internal/kitchen"
+	"local/ad-el-pos/server/internal/licenseseats/seatstest"
 	"local/ad-el-pos/server/internal/operations"
 	"local/ad-el-pos/server/internal/payments"
 )
@@ -101,7 +102,7 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 	current := &fixture{ctx: ctx, pool: pool, provisioning: token, methods: map[string]string{},
-		service: &administration.Service{Pool: pool, ProvisioningFile: filename}}
+		service: &administration.Service{Pool: pool, ProvisioningFile: filename, Seats: seatstest.Roomy()}}
 	setup := decode[map[string]any](t, current.call(t, terminal{}, "POST", "setup", map[string]string{
 		"name": "Restaurante operativo", "timezone": "America/Monterrey", "currency": "MXN", "theme": "light",
 		"terminal_name": "Caja principal",
@@ -138,7 +139,7 @@ func reopenFixture(t *testing.T) *fixture {
 	if err := os.WriteFile(filename, []byte(copied.provisioning), 0600); err != nil {
 		t.Fatal(err)
 	}
-	copied.service = &administration.Service{Pool: pool, ProvisioningFile: filename}
+	copied.service = &administration.Service{Pool: pool, ProvisioningFile: filename, Seats: seatstest.Roomy()}
 	return &copied
 }
 

@@ -18,6 +18,10 @@ func (service *Service) protected(ctx context.Context, tx pgx.Tx, request Reques
 	if route == "events/snapshot" && request.Method == "GET" {
 		return service.eventSnapshot(ctx, tx, request, principal)
 	}
+	// Modo Cocina (etapa L1, Fase D; license_seats.go): ocupa o libera el cupo de cocina de la terminal.
+	if request.Method == "POST" && route == "kitchen/display-mode" {
+		return service.kitchenDisplayMode(ctx, tx, request, principal)
+	}
 	if strings.HasPrefix(route, "kitchen/") {
 		// La cola vuelve a preparar precuentas, tickets y documentos de caja con el renderizador de pagos
 		// cuando su impresora cambió de papel (revisión 9F, M2).
@@ -191,7 +195,7 @@ func (service *Service) protected(ctx context.Context, tx pgx.Tx, request Reques
 		return service.pairingAdministration(ctx, tx, request, principal, route)
 	}
 	if route == "devices/sessions-summary" && request.Method == "GET" {
-		return sessionsSummary(ctx, tx, principal)
+		return sessionsSummary(ctx, tx, principal, service.seats())
 	}
 	// Catálogo agrupado de permisos (etapa A3, §3; permission_catalog.go).
 	if route == "permissions/catalog" && request.Method == "GET" {
@@ -222,7 +226,7 @@ func (service *Service) protected(ctx context.Context, tx pgx.Tx, request Reques
 	case "registers":
 		return registers(ctx, tx, request, principal, parts)
 	case "devices":
-		return devices(ctx, tx, request, principal, parts)
+		return devices(ctx, tx, request, principal, parts, service.seats())
 	case "sessions":
 		return sessions(ctx, tx, request, principal, parts)
 	case "audit":

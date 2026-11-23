@@ -23,6 +23,7 @@ import (
 	"local/ad-el-pos/server/internal/documents"
 	"local/ad-el-pos/server/internal/events"
 	"local/ad-el-pos/server/internal/kitchen"
+	"local/ad-el-pos/server/internal/licenseseats/seatstest"
 	"local/ad-el-pos/server/internal/stationscope"
 )
 
@@ -120,7 +121,7 @@ func newFixture(t *testing.T) *fixture {
 		"ADEL_TEST_IPP": {"device-uri": "ipp://192.168.1.20/ipp/print", "printer-make-and-model": "Generic PostScript", "printer-type": "2150404"},
 	}}
 	value := &fixture{ctx: ctx, pool: pool, provisioning: token, queues: inspector,
-		service: &administration.Service{Pool: pool, ProvisioningFile: filename, Queues: inspector}}
+		service: &administration.Service{Pool: pool, ProvisioningFile: filename, Queues: inspector, Seats: seatstest.Roomy()}}
 	setup := decodeAs[map[string]any](t, value.call(t, terminal{}, "POST", "setup", map[string]string{
 		"name": "Restaurante del diseñador", "timezone": "America/Monterrey", "currency": "MXN", "theme": "light", "terminal_name": "Diseño",
 	}, 200))

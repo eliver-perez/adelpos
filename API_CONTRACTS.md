@@ -4170,3 +4170,31 @@ ROLE_CHANGED`** sin escribir. Solo cambia `role_permissions`: el límite de desc
   conjunto de fábrica con permisos que quien edita no tiene, límite de descuento mayor; se dice por qué, R2); con una
   búsqueda, los botones del grupo actúan solo sobre lo que se ve («Marcar los 3 que se ven», R3); y tras `409
 ROLE_CHANGED` la pantalla carga los permisos que el rol tiene ahora y lo avisa (R5).
+
+## Etapa L1 · cupos de la licencia (Fase D, esquema 28; servidor 0.15.0)
+
+Cupos de sesiones simultáneas de la licencia (§7 del contrato de licencias, §5 de la especificación; decisiones L1-D2,
+L1-D3, L1-D7, L1-D13, L1-D16, L1-D17 y L1-D22). Paquete `internal/licenseseats` (pgx), tabla `app.license_seats`
+(`0028_licencias.sql`, sección «Fase D») y lock 7820148311 (§3 de `CLAUDE.md`). Lo que ocupa, renueva o libera cada
+operación lo dice una sola función, `licenseseats.ForOperation(método, ruta)`, y se aplica en un solo punto,
+`administration.Service.dispatch` (`administration/license_seats.go`). Lo de la API para clientes (el rechazo y
+`setKitchenDisplayMode`) está en `docs/API_V1.md`, «Cupos de la licencia».
+
+- **Sin cupo** (`openAccount`, `saveDraft`, `confirmDraft`, `editUnits`, `submitOfflineOrder`, `POST payments/shifts` y
+  `POST kitchen/display-mode`): `409 LICENSE_SEAT_UNAVAILABLE` con `details: {seat, in_use, limit}`; la operación se
+  revierte entera (ni el pedido, ni el turno, ni su `operation_id`). Sin licencia válida, `409 LICENSE_NOT_ACTIVATED`.
+  Cobrar y las operaciones de efectivo nunca piden cupo.
+- **`GET devices`** (`devices.read`, sin cambio): cada terminal agrega `seats`, los cupos que ocupa en este momento
+  (`["cash_registers"]`, `["order_takers", "kitchen_displays"]`…; vacío si ninguno). También el `device` de `GET
+devices/{id}/configuration`.
+- **`GET devices/sessions-summary`** (`devices.read`): conserva `by_kind` y `total` (escritorio 0.14.0) y agrega `seats:
+{cash_registers: {in_use, limit}, order_takers: {…}, kitchen_displays: {…}}`, con `limited: true`. `limit` es el de la
+  licencia (0 sin licencia válida).
+- **`POST devices/{id}/seat/release`** (`devices.manage`, `{}`) → `{released: ["order_takers" | "kitchen_displays"],
+sessions_closed}`: Terminales › «Liberar cupo». Libera el cupo de comandero o de cocina de esa terminal y cierra sus
+  sesiones (`revoke_reason` `seat_released`; las credenciales de envío de sus meseros siguen vigentes), con la auditoría
+  `license.seat_released` (antes: la terminal; después: lo liberado y las sesiones cerradas). Si no ocupa ninguno de los
+  dos, `409 LICENSE_SEAT_NOT_HELD` con `details.seats` (si solo ocupa una caja, el mensaje dice que se libera al cerrar
+  su turno). Terminal inexistente, `404`.
+- **Escritorio**: el puente nativo y las pantallas (Terminales, Preparación, Configuración › Licencia) son de la Fase E,
+  escondidos por la capacidad `license-v1`.

@@ -27,8 +27,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"local/ad-el-pos/server/internal/administration"
+
 	"local/ad-el-pos/server/internal/database"
 	"local/ad-el-pos/server/internal/identity"
+	"local/ad-el-pos/server/internal/licenseseats/seatstest"
 )
 
 // Aceptación con PostgreSQL de la identidad documental llamando al manejador directamente (cada
@@ -91,7 +93,7 @@ func newIdentityFixture(t *testing.T) *identityFixture {
 		t.Fatal(err)
 	}
 	fixture := &identityFixture{ctx: ctx, pool: pool, provisioning: token,
-		service: &administration.Service{Pool: pool, ProvisioningFile: filename}}
+		service: &administration.Service{Pool: pool, ProvisioningFile: filename, Seats: seatstest.Roomy()}}
 	setup := decodeMap(t, fixture.httpCall(t, terminal{}, "POST", "setup", map[string]string{
 		"name": "Fonda de pruebas", "timezone": "America/Monterrey", "currency": "MXN", "theme": "light",
 		"terminal_name": "Caja principal",

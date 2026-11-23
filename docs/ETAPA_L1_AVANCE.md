@@ -1302,3 +1302,360 @@ Fusionada en `27cb24c`.
 - **Para la Fase B**:
   - al regenerar la identidad se conserva la última hora confiable;
   - solo cuenta como hora confiable el `server_time` de una respuesta correcta.
+
+---
+
+## Fase D · Cupos de la licencia
+
+Árbol `$SP/wt/l1-d`, rama `etapa-l1-d` desde `etapa-l1` (`1ceee93`). `ISO_TAG=LD`. Sin emuladores.
+
+Commits (sin líneas de atribución):
+
+- `f202543` etapa L1 fase D: migración 0028 (sección «Fase D»: app.license_seats y la caja de los turnos activos),
+  versión 0.15.0 y esquema 28
+- `20019dc` etapa L1 fase D: paquete licenseseats (lock 7820148311, ForOperation y asignación atómica)
+- `e816750` etapa L1 fase D: los cupos en dispatch, modo Cocina, «Liberar cupo», Terminales y sessions-summary, con el
+  contrato v1
+- `bc4db5b` etapa L1 fase D: CLAUDE.md §3 con el lock 7820148311 y API_CONTRACTS.md con las rutas de los cupos
+
+### Qué se hizo
+
+- **Paquete nuevo `backend/internal/licenseseats/`** (pgx), con el lock nuevo **7820148311** (`licenseseats.LockKey`).
+  - `seats.go`: los tres cupos (`cash_registers`, `order_takers`, `kitchen_displays`), `Limits`, la interfaz
+    `LimitsSource`, `Options`, `Manager`, `UnavailableError` con su mensaje y `ErrNoValidLicense`.
+  - `operations.go`: **la única clasificación**, `ForOperation(método, ruta) Effect`.
+  - `store.go`: la definición SQL de «en uso» (una sola, `inUseCondition`), la asignación atómica (`claim`) y las
+    operaciones del gestor (`Capture`, `OpenShift`, `Renew`, `SetKitchenDisplay`, `Sweep`, `ReleaseDevice`,
+    `DeviceSeats`, `Usage`).
+  - `seatstest/`: la fuente de cupos y el reloj simulados de las pruebas. Solo lo importan archivos `_test.go`, y su
+    fuente no entrega ningún cupo fuera de una prueba (`testing.Testing()`).
+- **`0028_licencias.sql`, sección «Fase D»** (el archivo no existía en la rama: lleva solo esta sección y el encabezado
+  general). `app.license_seats`:
+  - una fila por terminal y tipo (`PRIMARY KEY (device_id, kind)`), `kind` `cash_register`, `order_taker` o
+    `kitchen_display`;
+  - `shift_id` (la caja, ligada al turno, L1-D3) y `session_id` (la cocina, ligada a la sesión que entró), con un
+    `CHECK` que exige a cada tipo su vínculo y solo el suyo;
+  - `acquired_at` y `last_activity_at` (hora de Go);
+  - llaves foráneas con `ON DELETE CASCADE` a `devices`, `cash_shifts` y `sessions`, e índices parciales por
+    `shift_id` y `session_id`;
+  - al actualizar con turnos abiertos o en arqueo, la terminal que abrió cada uno ya ocupa su caja (ver Decisión
+    propuesta 6).
+- **Versión 0.15.0 y esquema 28** en `config/product.json`, con `./scripts/dev.sh sync` en el árbol y los dos
+  `lockfile` (`desktop/package-lock.json`, `desktop/src-tauri/Cargo.lock`), como en la subida de la A3.
+  `min_client_versions` sin cambio.
+- **Un solo punto en `administration.Service.dispatch`** (`administration/service.go:366` para la credencial de envío
+  y `:390` para la sesión): `withSeats` (`administration/license_seats.go:45`), después de autenticar y en la misma
+  transacción, envuelve a `runProtected`.
+- **Rutas**:
+  - `POST kitchen/display-mode {active}` (`license_seats.go:127`, enrutada en `routes.go:22`).
+  - `POST devices/{id}/seat/release` (`license_seats.go:158`, enrutada en `devices.go:146`), con `devices.manage` y la
+    auditoría `license.seat_released`.
+  - `GET devices` y `GET devices/{id}/configuration`: `seats` por terminal (`devices.go:49`,
+    `licenseseats.DeviceSeatsColumn`).
+  - `GET devices/sessions-summary`: conserva `by_kind` y `total`, agrega `seats` (`in_use` y `limit` por cupo) y
+    `limited: true` (`devices.go:332`, L1-D22).
+- **`main.go`**: `Seats: licenseseats.NewManager(licenseseats.Options{Limits: nil})` en `newApplication`
+  (`cmd/ad-el-pos-server/main.go:222-240`), con el comentario de cómo se conecta. **Falla cerrada**: sin fuente no hay
+  licencia válida y ninguna operación que pide cupo procede.
+- **Contrato v1**: `openapi.json` (esquema `LicenseSeatUnavailable`, 409 en `openAccount`, `saveDraft`,
+  `confirmDraft`, `editUnits` y `submitOfflineOrder`, la operación nueva `setKitchenDisplayMode` con la etiqueta
+  «Cocina» y la descripción del error genérico), `docs/API_V1.md` (sección «Cupos de la licencia (etapa L1, Fase D)»,
+  la fila de la tabla de operaciones y la del código de error) y `TestContractV1` (`contractSeats`).
+- **Documentos**: `CLAUDE.md` §3 (fila 7820148311 y el orden de adquisición) y `API_CONTRACTS.md` (sección «Etapa L1 ·
+  cupos de la licencia»: `GET devices`, `sessions-summary` y la ruta de liberar).
+- **Pruebas**: `licenseseats` (unitarias y de integración, con la concurrencia), `database` (`TestStageL1Upgrade`),
+  `operations` (`TestStageL1LicenseSeats`, por la API real) y `apicontract`. El paquete nuevo va en la tupla
+  `packages` de `scripts/database.py`.
+- **Los 17 `administration.Service{…}` de las pruebas** de `administration`, `operations`, `apicontract`, `catalog`,
+  `designer`, `identity`, `reports` y `reports/operational` reciben `Seats: seatstest.Roomy()` (999 de cada cupo, el
+  máximo del contrato), o el mismo gestor en los «reinicios» de `operations`.
+
+### La interfaz `LimitsSource` y cómo se conecta
+
+```go
+// internal/licenseseats/seats.go
+type Limits struct {
+	CashRegisters   int
+	OrderTakers     int
+	KitchenDisplays int
+}
+
+// SeatLimits devuelve los cupos y true, o false si no hay ninguna licencia válida («Sin activar» o «Sin activar con
+// datos»). Sin licencia válida no se ocupa ningún cupo: nunca hay un valor «sin límite».
+type LimitsSource interface {
+	SeatLimits() (Limits, bool)
+}
+
+type LimitsFunc func() (Limits, bool) // adaptador, como http.HandlerFunc
+
+type Options struct {
+	Limits         LimitsSource     // sin valor: falla cerrada
+	Now            func() time.Time // sin valor: time.Now; la Fase C le pasa licensing.Manager.LocalClock (L1-D16)
+	OrderTakerIdle time.Duration    // solo las pruebas; sin valor, licenseseats.OrderTakerIdle (15 min)
+}
+```
+
+Para conectarlo (Fase C), en cuanto el gestor de licencias esté cargado y antes de atender peticiones (está escrito en
+el comentario de `main.go`):
+
+```go
+application.Seats = licenseseats.NewManager(licenseseats.Options{
+	Limits: licenseseats.LimitsFunc(func() (licenseseats.Limits, bool) {
+		status := manager.Status()
+		valid := status.State != licensing.StateNotActivated && status.State != licensing.StateNotActivatedWithData
+		return licenseseats.Limits{CashRegisters: status.Limits.CashRegisters,
+			OrderTakers: status.Limits.OrderTakers, KitchenDisplays: status.Limits.KitchenDisplays}, valid
+	}),
+	Now: manager.LocalClock,
+})
+```
+
+`licensing.Status` y sus `Limits` son los que publicó la Fase A en su rama (`fd31224`). Con una licencia vencida o
+revocada los cupos siguen siendo los de esa licencia: la puerta de la Fase C decide qué operación se permite en cada
+estado.
+
+### La clasificación: `licenseseats.ForOperation(método, ruta) Effect`
+
+Ruta relativa a `/api/v1`, con o sin el prefijo y con los identificadores reales (`operations.go:80`):
+
+| Efecto            | Operaciones                                                                                                                 | Qué hace                                                                                                                                                                                             |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `capture`         | `POST restaurant/accounts`, `PUT …/{id}/draft`, `POST …/{id}/confirm`, `POST …/{id}/edit`, `POST restaurant/offline-orders` | Con turno activo en la caja de la terminal: ocupa su cupo de caja (L1-D3) y borra su comandero. Si no: ocupa el comandero o renueva su actividad. Sin cupo, 409 y la transacción se revierte entera. |
+| `preview`         | `POST …/{id}/draft-preview`, `POST …/{id}/edit-preview`                                                                     | Renueva la actividad del comandero si la terminal lo tiene. Nunca ocupa ni rechaza.                                                                                                                  |
+| `open_shift`      | `POST payments/shifts`                                                                                                      | Ocupa la caja del turno nuevo (sin cupo, el turno no se abre) y borra los comanderos de las terminales de esa caja.                                                                                  |
+| `close_shift`     | `POST payments/shifts/{id}/closing/confirm`                                                                                 | Libera las cajas de todas las terminales del turno. No escribe: la fila cuenta solo con el turno activo.                                                                                             |
+| `kitchen_display` | `POST kitchen/display-mode`                                                                                                 | Ocupa o libera el cupo de cocina (lo hace la ruta).                                                                                                                                                  |
+| `session_end`     | `POST auth/logout`, `POST auth/password`, `POST sessions/{id}/revoke`, `POST devices/{id}/revoke`                           | Después de la operación borra las filas que ya no cuentan (`Sweep`).                                                                                                                                 |
+| `device_release`  | `POST devices/{id}/seat/release`                                                                                            | Lo hace la ruta.                                                                                                                                                                                     |
+| `none`            | Todo lo demás: lecturas, cobros, efectivo, cancelar, reorganizar, cocina, catálogo, inventario, reportes, administración    | Nada.                                                                                                                                                                                                |
+
+Cada efecto también dice qué cupos ocupa (`Occupies`), cuáles libera (`Releases`) y si renueva (`Renews`), para la
+prueba de completitud de la Fase C.
+
+### Qué cuenta como «en uso» (`store.go:22`)
+
+Una sola condición SQL, con la hora de Go como parámetro (nunca `now()`, L1-D16):
+
+- **caja**: el turno de la fila está `open` o `closing`;
+- **comandero**: `last_activity_at` después del corte (hora − 15 min) **y** la terminal tiene alguna sesión vigente
+  (`revoked_at IS NULL AND expires_at > hora`);
+- **cocina**: la sesión que entró a Preparación sigue vigente.
+
+### Asignación atómica (`store.go:62`, `claim`)
+
+1. `pg_advisory_xact_lock(7820148311)` y **después** se lee la hora de Go.
+2. Sin licencia válida: `ErrNoValidLicense`.
+3. **Una sola sentencia** con la misma foto: un `DELETE` en un `WITH` borra las filas que ya no están en uso y el
+   `SELECT` cuenta las que sí, de otras terminales, y si la terminal ya tiene la suya (en la caja, del mismo turno).
+4. La tiene → renueva (`last_activity_at`; en cocina pasa a la sesión que entra). Así una licencia nueva con menos
+   cupos no interrumpe a nadie.
+5. Si no: `otras >= límite` → `UnavailableError{Seat, InUse: otras, Limit}`; si hay lugar, `INSERT … ON CONFLICT`.
+
+Toda escritura de `app.license_seats` se hace con 7820148311 tomado. **Orden**: 7820148311 es el último lock de la
+transacción. En `withSeats`, la captura y la apertura de turno corren primero el manejador (que toma 7820148305 y, si
+hace falta, 7820148304) y después piden 7820148311; las previas, igual (con 7820148305 compartido); el modo Cocina, el
+barrido de los cierres de sesión y «Liberar cupo» lo toman solos (la liberación cierra las sesiones antes de pedirlo).
+Ninguna transacción que tiene 7820148311 espera otro lock consultivo.
+
+### Qué responde `restaurant/offline-orders` sin cupo (para la Fase F)
+
+```
+HTTP/1.1 409
+{"error": {
+  "code": "LICENSE_SEAT_UNAVAILABLE",
+  "message": "No hay cupo de comandero libre (1 de 1 en uso). Pide que se cierre la sesión de otra terminal.",
+  "request_id": "…",
+  "details": {"seat": "order_takers", "in_use": 1, "limit": 1}
+}}
+```
+
+- Con límite 0 (plan básico), `message` es «La licencia no incluye comanderos (0 de 0): solo se capturan pedidos en una
+  terminal con el turno de caja abierto.» y `details` `{"seat": "order_takers", "in_use": 0, "limit": 0}`.
+- `details.seat` es `order_takers` en todo dispositivo android (no tienen caja física). Solo sería `cash_registers` si
+  alguien asignara una caja con turno activo a ese dispositivo en Terminales: la Fase F debe leer `details.seat` y no
+  suponerlo.
+- **Orden**: primero las credenciales, después el propio pedido (`ORDER_REQUIRES_CONFIRMATION`, agotados, mesa…) y al
+  final el cupo. Un pedido con cambios recibe primero su revisión; el cupo se pide cuando se aceptaría.
+- **No se guarda nada**: ni la cuenta, ni el pedido, ni la `operation_id` en `restaurant_operations`, ni la auditoría
+  `restaurant.offline_order.*`, ni eventos (la transacción se revierte entera). Lo comprueban `TestStageL1LicenseSeats`
+  y `TestContractV1`.
+- **Definitivo para ese envío**: el mismo cuerpo reenviado se rechaza igual mientras no haya cupo (se probó dos veces).
+  Como la clave no quedó registrada, si el mesero lo reenvía a propósito con la misma `operation_id` y ya hay cupo,
+  entra.
+- **Android 0.3.0 ya lo trata como rechazo definitivo**: `ApiErrors.toAppError` lo vuelve `AppError.Rejected` (409 con
+  código propio) y `OrderSender.otherRejection` → `SendOutcome.Rejected(message)`: se marca con el mensaje y no se
+  reintenta (`android/core/data/…/waiter/OrderSender.kt:382-404`). La Fase F solo tiene que mostrarlo con su texto.
+- **Lo que ya entró no se rechaza**: si la `operation_id` ya está registrada (la respuesta se perdió), Go responde su
+  resultado guardado (o `OFFLINE_ORDER_ALREADY_ACCEPTED`) **sin pedir cupo**, aunque el del dispositivo haya vencido.
+- Sin licencia válida (protección de respaldo): 409 `LICENSE_NOT_ACTIVATED`; la puerta de la Fase C responde antes con
+  sus `details`.
+
+### Decisiones propuestas
+
+1. **El cupo se pide después del manejador, en la misma transacción, y 7820148311 es el último lock.** El plan de 0.5.7
+   decía «toma 7820148305 y después 7820148311; el manejador vuelve a tomar 7820148305». Pedirlo antes del manejador
+   dejaría 7820148311 entre 7820148305 y 7820148304 (el catálogo de la captura) en las capturas y después de 7820148304
+   en las previas: dos órdenes distintos que habría que cuidar siempre. Después del manejador:
+   - el orden es siempre 7820148305 → 7820148304 → 7820148308 → 7820148311, y quien tiene 7820148311 nunca espera otro
+     lock consultivo (no hay interbloqueo posible entre ellos);
+   - los errores propios de la operación se informan primero (turno ya abierto, mesa ocupada, cambios del pedido sin
+     conexión);
+   - el turno nuevo ya existe para ligarle la caja;
+   - si no hay cupo, toda la transacción se revierte: nada queda guardado.
+   - Sigue siendo atómico: contar y ocupar ocurren con 7820148311 tomado, y lo que decide el conteo (turnos) no cambia
+     porque la operación tiene 7820148305.
+2. **Una operación con `operation_id` ya registrada no pide cupo.** El manejador responde con lo guardado o con su
+   conflicto y nunca escribe nada nuevo. Sin esto, la cola de Android que reintenta un pedido que sí entró recibiría
+   un rechazo por cupo falso.
+3. **La caja no se libera al revocar la terminal**: el cupo dura lo que dura el turno, como dice el contrato («si la
+   terminal se cae, el turno sigue abierto y el cupo sigue ocupado») y la especificación («las cajas se liberan cerrando
+   el turno»).
+4. **El comandero cuenta solo con sesiones vigentes en la terminal, y nunca vuelve sin pedirlo.** La fila que dejó de
+   contar se borra en el barrido de cada asignación (en la misma sentencia que cuenta) y después de cada cierre de
+   sesión (`session_end`). Sin el barrido, una sesión nueva en la terminal la haría contar otra vez sin pasar por el
+   límite.
+5. **La cocina se liga a la sesión que entró a Preparación**: se libera al cerrar esa sesión aunque la terminal tenga
+   otras. Si otra sesión de la misma terminal entra, el cupo pasa a ella.
+6. **La migración ocupa la caja de cada turno activo al actualizar** (la terminal que lo abrió, con su hora de
+   apertura). Si no, una instalación con turnos abiertos empezaría con 0 cajas en uso. Con menos cajas en la licencia,
+   nadie se interrumpe.
+7. **Mensajes con límite 0** (plan básico): «La licencia no incluye comanderos (0 de 0): solo se capturan pedidos en una
+   terminal con el turno de caja abierto.», «La licencia no incluye pantallas de cocina (0 de 0): Preparación no está
+   disponible.» y «La licencia no incluye cajas (0 de 0). Avisa al encargado.». «Pide que se cierre la sesión de otra
+   terminal» no tiene sentido sin cupos. Con límite: «No hay cupo de comandero libre (3 de 3 en uso). Pide que se
+   cierre la sesión de otra terminal.», «No hay cupo de caja libre (1 de 1 en uso). Se libera al cerrar un turno de
+   caja.» y «No hay cupo de pantalla de cocina libre (1 de 1 en uso). Pide que otra terminal salga de Preparación.».
+8. **Sin licencia válida, `409 LICENSE_NOT_ACTIVATED`** con el mensaje «La licencia del sistema no permite esta
+   operación. Avisa al encargado.» y sin `details`: es la protección de respaldo; la puerta de la Fase C responde antes
+   con `state` y `copied` (L1-D17). Salir de Preparación y las previas siguen funcionando.
+9. **`POST devices/{id}/seat/release`**:
+   - sin comandero ni cocina en uso, `409 LICENSE_SEAT_NOT_HELD` con `details.seats`, sin cerrar nada (si solo ocupa
+     una caja, el mensaje dice que se libera al cerrar su turno);
+   - cierra las sesiones con `revoke_reason` `seat_released` (la sesión responde `SESSION_REVOKED`);
+   - **no** revoca las credenciales de envío de sus meseros: los pedidos de la cola de esa tableta piden cupo otra vez
+     al llegar (y se rechazan si no hay);
+   - responde `{released: [...], sessions_closed}`.
+10. **Los 15 minutos son una constante del backend**, `licenseseats.OrderTakerIdle`, no un campo de `server.json`
+    (`Options.OrderTakerIdle` solo lo usan las pruebas). Si el propietario quiere que cada instalación lo cambie, es un
+    campo opcional nuevo.
+11. **`POST kitchen/display-mode`**: pide `kitchen.states.read` (el mismo de `GET kitchen/board`), responde
+    `{active}`, no lleva `operation_id` (repetirlo deja el mismo estado) y en un dispositivo android es 400 (sin
+    Preparación; la sesión con PIN ya no tiene el permiso y responde 403).
+12. **El tablero de cocina no exige el cupo.** El plan de 0.5.7 ponía «cocina» en la columna de cupo de `kitchen/board`,
+    `kitchen/states` y `tickets/{id}/ack`; el encargo de esta fase solo lo pide en `display-mode`. Consecuencia: **un
+    escritorio 0.14.0** (que no llama a `display-mode`) entra a Preparación sin ocupar el cupo de cocina. Exigirlo en
+    `GET kitchen/board` rompería Preparación en los escritorios 0.14.0 y en las pantallas que la Fase E todavía no
+    cambie. **El coordinador decide** (las versiones mínimas no cambian, L1-D22).
+13. **Sin capacidad nueva**: el escritorio esconde lo de los cupos con `license-v1` (Fase B, L1-D22).
+14. **`sessions-summary` sin licencia válida** informa `limit: 0` en los tres cupos.
+15. **Un turno en arqueo de cierre (`closing`) sigue ocupando su caja** hasta confirmarlo; cancelar el arqueo no cambia
+    nada.
+16. **Las pruebas usan `seatstest.Roomy()`** (999, el máximo del contrato) salvo las de cupos. La fuente de
+    `seatstest` no da cupos fuera de una prueba (`testing.Testing()`), así que ni por error llega a un instalador.
+17. **Un rechazo por cupo no deja auditoría** (como cualquier 409 de la operación). Si el propietario quiere verlos en
+    el Registro de movimientos, se agrega `license.seat_denied` con el patrón de `Fault.Rejection`.
+
+### Lo que el coordinador debe saber al fusionar
+
+- **Hasta conectar `LimitsSource`, el servidor no captura**: `main.go` crea el gestor sin fuente (falla cerrada). Una
+  corrida de Playwright o de `android-e2e` sobre esta rama sola, o sobre A + B + D sin la conexión de la Fase C, falla
+  en toda captura, apertura de turno y Preparación con `409 LICENSE_NOT_ACTIVATED`. Se comprobó con el binario real
+  (prueba de humo, abajo).
+- **`config/product.json`**: esta rama y la Fase B suben a 0.15.0 y esquema 28 (L1-D23 lo pide a «la primera fase que
+  cree la `0028`»; las dos la crean). Al unir, una sola subida; los archivos generados por `sync` coinciden.
+- **`0028_licencias.sql`**: esta rama crea el archivo con el encabezado general y la sección «Fase D». Al unir con la
+  Fase B, su sección «Fase B» va antes de la «Fase D» y el encabezado queda uno.
+- **`stage9h_upgrade_test.go`** excluye `license_seats` de su conteo de filas (como `ready_notices`). Si la Fase B
+  agrega permisos, `stageA1Snapshot` necesitará excluir `license.manage` como excluye `waiter_devices.use`.
+- La Fase C pone la puerta del estado y de la hora alrededor de `withSeats` (antes, en `dispatch`) y su prueba de
+  completitud puede usar `licenseseats.ForOperation` y `Effects`.
+- Archivos compartidos tocados en bloques propios con comentario «Etapa L1 (Fase D)»: `administration/service.go`
+  (campo `Seats` y las dos llamadas a `withSeats`), `routes.go` (modo Cocina y el gestor para `devices` y
+  `sessions-summary`), `devices.go`, `main.go`, `openapi.json`, `docs/API_V1.md`.
+
+### Archivos
+
+- `backend/internal/licenseseats/seats.go`, `operations.go`, `store.go`, `seatstest/seatstest.go`
+- `backend/internal/licenseseats/operations_test.go`, `seats_integration_test.go`
+- `backend/internal/administration/license_seats.go`, `service.go`, `routes.go`, `devices.go`
+- `backend/cmd/ad-el-pos-server/main.go`
+- `backend/migrations/0028_licencias.sql`
+- `backend/internal/database/stagel1_upgrade_test.go`, `stage9h_upgrade_test.go`
+- `backend/internal/operations/stagel1_seats_test.go` y los fixtures con `Seats`
+- `backend/internal/administration/pairing_acceptance_test.go`: `stage9g_sesiones_activas_por_tipo` esperaba
+  `limited: false`; ahora espera `limited: true` y los tres `seats` (L1-D22), con el mismo `by_kind`
+- `backend/internal/apicontract/openapi.json`, `contract_integration_test.go`
+- `config/product.json` y los generados por `sync`; `scripts/database.py`
+- `docs/API_V1.md`, `API_CONTRACTS.md`, `CLAUDE.md`
+
+### Pruebas
+
+Todo con `ISO_TAG=LD` en el clúster temporal 55499. Lo de abajo es lo que **realmente** se ejecutó, en el árbol con
+los cambios (las corridas completas, sobre el estado final del código salvo donde se dice).
+
+| Prueba                                                                                                    | Resultado                                                                                                                                                               |
+| --------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `go test ./internal/licenseseats/...` (unitarias: `ForOperation`, efectos, mensajes, valores por omisión) | `ok`                                                                                                                                                                    |
+| `go-int ./internal/licenseseats` (`TestSeatAssignmentIsAtomic`, `TestSeatRules`)                          | `ok` (12 s). Concurrencia: 12 vueltas × 3 cupos × 8 transacciones en conexiones distintas por el último cupo; en cada vuelta una sola lo obtiene                        |
+| La misma prueba de concurrencia **sin** el `pg_advisory_xact_lock` (cambio temporal, revertido)           | **Falla** en la vuelta 2: «8 terminales obtuvieron el último cupo». La prueba detecta la falta del lock                                                                 |
+| `go-int ./internal/database` (todas las subidas, con `TestStageL1Upgrade` y `TestStage9HUpgrade`)         | `ok` (15 s)                                                                                                                                                             |
+| `go-int ./internal/operations` completo (con `TestStageL1LicenseSeats`)                                   | `ok` (543 s). `TestStageL1LicenseSeats` sola: `ok` (82 s)                                                                                                               |
+| `go-int ./internal/administration` completo                                                               | Primera corrida: falló `stage9g_sesiones_activas_por_tipo` (esperaba `limited: false`). Se cambió la prueba a `limited: true` y `seats` (L1-D22). Segunda: `ok` (260 s) |
+| `go-int ./internal/apicontract` (`TestContractV1` con `contractSeats`) y sus unitarias                    | `ok` (43 s)                                                                                                                                                             |
+| `go-int ./internal/catalog`, `./internal/identity`, `./internal/designer`                                 | `ok` (24 s, 22 s, 25 s)                                                                                                                                                 |
+| `go-int ./internal/reports`, `./internal/reports/operational`                                             | `ok` (145 s, 47 s)                                                                                                                                                      |
+| `go-int ./cmd/ad-el-pos-server`, con el candado `$SP/l1/candado-cmd`                                      | `ok` (65 s); candado soltado                                                                                                                                            |
+| `go-unit` (vet normal e integración, `test -race`, compilación y vet para Windows)                        | `ok` (36 s), antes del último cambio, que solo tocó una prueba de integración (después, `go vet -tags=integration ./internal/administration` limpio)                    |
+| `format`, `fmt-check`, `sync-check`                                                                       | Aprobados; `fmt-check` otra vez antes de cada commit                                                                                                                    |
+| Prueba de humo con el binario real (Go temporal 8203/8473, `server-up` y `server-down`)                   | Sin fuente de límites: abrir cuenta, abrir turno y entrar a Preparación → `409 LICENSE_NOT_ACTIVATED`; salir de Preparación 200; `sessions-summary` con límites 0       |
+| `md5` de `docs/etapas/*.md`, `docs/licencias/CONTRATO*`, la guía y `contracts/`, antes y después          | Iguales                                                                                                                                                                 |
+
+`TestStageL1LicenseSeats` (`operations`, por la API real) cubre: el plan básico (1, 0 y 0) con la caja que captura, la
+otra terminal de la misma caja rechazada por caja, el escritorio y la tableta rechazados por comandero, cobrar y
+registrar efectivo sin cupo y Preparación rechazada; el pedido sin conexión rechazado dos veces sin dejar rastro; los
+15 minutos con la previa que renueva; el reintento de una captura que ya entró; la tableta con tres PIN (un cupo) y
+«Selecciona tu usuario»; «Liberar cupo» (respuesta, auditoría, sesiones cerradas, 409 sin cupo o con caja, 403 sin
+permiso); la cocina (entrar, otro rechazado, salir, cerrar sesión, 403 en la tableta, 400 sin `active`); cerrar sesión
+el último usuario sin que la sesión siguiente lo recupere; abrir turno libera el comandero; la caja compartida (dos
+cupos) y el cierre del turno desde la computadora principal que libera los dos; la licencia nueva con menos cupos
+(nadie se interrumpe; ni capturas nuevas ni un turno nuevo); y tres vueltas de cuatro capturas simultáneas por el
+último cupo.
+
+### No verificado
+
+- **El escritorio y Android** (Fases E y F): ningún `vitest`, `cargo`, Playwright ni emulador. Las pruebas de Vitest
+  del escritorio simulan `sessions-summary` con `limited: false`; no cambian.
+- **`go-int ./internal/payments`**: no se tocó el paquete (cobrar no pide cupo y eso se probó por la API en
+  `operations`).
+- **La conexión real con el gestor de licencias** (Fase C) y la puerta del estado y de la hora alrededor de los cupos.
+- **La revisión independiente R3** de la asignación atómica: pendiente; sus correcciones vuelven a esta fase.
+- **Carga**: el lock 7820148311 se suma a cada captura y previa (después de 7820148305, que ya serializa las escrituras);
+  no se midió con varias terminales reales.
+
+### Decisiones del coordinador sobre la Fase D
+
+Fusionada en `f4b42a3`. Los conflictos con la Fase A fueron solo de renglones vecinos: la tupla de `database.py` y dos
+campos de `Service`. `go-unit` pasó sobre el árbol fusionado.
+
+- **L1-D27 · Se aceptan las doce decisiones propuestas del agente.**
+  - El cupo se pide después del manejador, y 7820148311 es siempre el último lock (05 → 04 → 08 → 11): ajusta el orden
+    de 0.5.7.
+  - Una `operation_id` ya registrada no pide cupo.
+  - El cupo de caja dura lo que dura el turno.
+  - El comandero solo cuenta con una sesión vigente.
+  - El cupo de cocina va ligado a la sesión que entró a Preparación.
+  - La migración da su cupo de caja a la terminal que abrió cada turno activo.
+  - Los mensajes son distintos con límite 0.
+  - `LICENSE_SEAT_NOT_HELD`.
+  - Los 15 minutos son una constante del backend.
+  - `display-mode` pide `kitchen.states.read`.
+  - No hay capacidad nueva, se usa `license-v1`.
+- **L1-D28 · El cupo de cocina sigue siendo explícito** (`POST kitchen/display-mode`). No se pide en `GET kitchen/board`,
+  porque esa lectura también la usa la vista de una cuenta (`AccountKitchen.tsx`) y ocuparía un cupo de cocina con solo
+  ver una cuenta.
+  - **Limitación**: un escritorio 0.14.0 conectado a un servidor 0.15.0 entra a Preparación sin ocupar cupo de cocina.
+    Las versiones mínimas no cambian (L1-D22), así que cada terminal debe actualizarse a la 0.15.0 para que se respete.
+    Va en `docs/licencias/INTEGRACION.md`.
+- **La conexión con el gestor de licencias** (`LimitsSource` con `licensing.Manager.Status()` y `LocalClock`) la hace la
+  Fase C. Hasta entonces, `etapa-l1` rechaza toda captura, toda apertura de turno y la entrada a Preparación (falla
+  cerrada, como se pidió): ninguna prueba de interfaz corre sobre `etapa-l1` antes de esa conexión.

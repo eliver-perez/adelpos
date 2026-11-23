@@ -20,6 +20,7 @@ import (
 	"local/ad-el-pos/server/internal/administration"
 	"local/ad-el-pos/server/internal/catalog"
 	"local/ad-el-pos/server/internal/database"
+	"local/ad-el-pos/server/internal/licenseseats/seatstest"
 	"local/ad-el-pos/server/internal/operations"
 )
 
@@ -98,7 +99,7 @@ func newFixture(t *testing.T) *restaurantFixture {
 	queues := newControlledQueues()
 	fixture := &restaurantFixture{
 		ctx: ctx, pool: pool, provisioning: token, queues: queues,
-		service: &administration.Service{Pool: pool, ProvisioningFile: filename, Queues: queues},
+		service: &administration.Service{Pool: pool, ProvisioningFile: filename, Queues: queues, Seats: seatstest.Roomy()},
 	}
 	setup := fixture.call(t, testTerminal{}, "POST", "setup", map[string]string{
 		"name": "Restaurante temporal de etapa 4", "timezone": "America/Monterrey", "currency": "MXN", "theme": "light", "terminal_name": "Prueba principal",

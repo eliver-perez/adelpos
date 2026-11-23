@@ -115,6 +115,7 @@ sin conexión y el cursor de eventos de la recuperación (ver «Modo Mesero»). 
 | `renamePairingRequest`   | `POST /pairing/requests/{id}/name`             | Corregir el nombre propuesto mientras espera.                                  |
 | `cancelPairingRequest`   | `POST /pairing/requests/{id}/cancel`           | Dejar de esperar la aprobación.                                                |
 | `claimPairingCredential` | `POST /pairing/requests/{id}/claim`            | Recibir una sola vez la credencial de la terminal.                             |
+| `setKitchenDisplayMode`  | `POST /kitchen/display-mode`                   | Entrar o salir de Preparación: ocupa o libera el cupo de cocina (etapa L1).    |
 
 ## Encontrar el servidor y emparejarse (fases B y C)
 
@@ -828,6 +829,44 @@ cocina no usa el KDS, no hay avisos.
    código (`TEMPORARY` si la base no respondió a tiempo, o el código del rechazo) se reconecta con espera creciente.
    Al abrir, los errores son los de `getReadyAlerts`.
 
+## Cupos de la licencia (etapa L1, Fase D)
+
+El servidor Go aplica los cupos de sesiones simultáneas de la licencia (§7 del contrato de licencias, §5 de
+[etapas/ETAPA_L1_LICENCIAS_v2.md](etapas/ETAPA_L1_LICENCIAS_v2.md)): **cajas** (`cash_registers`), **comanderos**
+(`order_takers`) y **pantallas de cocina** (`kitchen_displays`). Cuentan **lo que hace cada terminal**, no su tipo. Go
+decide; el cliente solo muestra el mensaje o arma el suyo con `details`.
+
+| Cupo               | Lo ocupa                                                                                                                                                                                                                                                                                            | Se libera                                                                                                                                                                                                     |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cash_registers`   | La terminal que abre un turno de caja, y la terminal que crea o modifica un pedido con un turno activo en su caja aunque lo abriera otra (dos terminales con la misma caja física ocupan dos cupos, L1-D3). Cambiar de cajero en la misma terminal no ocupa otro.                                   | Al cerrar ese turno (confirmar el arqueo), también desde otra computadora: se liberan todas las terminales que lo usaban. Si la terminal se cae o se revoca, el cupo sigue hasta cerrar el turno.             |
+| `order_takers`     | La **terminal** (no el usuario) que crea o modifica un pedido sin turno activo en su caja: varios meseros con su PIN en una tableta ocupan uno, y volver a «Selecciona tu usuario» no lo libera. Consultar no ocupa nada; las previas (`previewEdit` y la del borrador) solo renuevan su actividad. | A los **15 minutos** sin crear ni modificar pedidos (valor del servidor), cuando se cierra la última sesión de esa terminal, al abrir turno en su caja o desde Terminales («Liberar cupo», `devices.manage`). |
+| `kitchen_displays` | La terminal de escritorio en Cocina › Preparación: `setKitchenDisplayMode` con `active: true`, ligado a la sesión que entra.                                                                                                                                                                        | Con `active: false`, al cerrar esa sesión o desde Terminales.                                                                                                                                                 |
+
+- **Qué ocupa cupo**: `openAccount`, `saveDraft`, `confirmDraft`, `editUnits` y `submitOfflineOrder` (crear o modificar
+  un pedido); abrir turno; y `setKitchenDisplayMode`. **Cobrar y las operaciones de efectivo nunca piden cupo**, ni
+  cancelar, reorganizar cuentas, la precuenta, «Entregado», la cocina ya enviada, las lecturas o la administración.
+- **Sin cupo**: **409 `LICENSE_SEAT_UNAVAILABLE`** (`LicenseSeatUnavailable`) con `details.seat` (el cupo que falta),
+  `details.in_use` (los que usan otras terminales) y `details.limit` (el de la licencia). `message` ya lo dice en
+  español, por ejemplo «No hay cupo de comandero libre (3 de 3 en uso). Pide que se cierre la sesión de otra terminal.»;
+  si la licencia no trae ese cupo (límite 0), «La licencia no incluye comanderos (0 de 0): solo se capturan pedidos en
+  una terminal con el turno de caja abierto.». La operación **no se aplica**: no se guarda el pedido ni su
+  `operation_id`.
+- **El pedido sin conexión** (`submitOfflineOrder`) rechazado por cupo: el mismo 409 con `details.seat:
+"order_takers"`. Es **definitivo para ese envío**: el dispositivo lo marca rechazado con el mensaje y no lo reintenta
+  solo (la aplicación 0.3.0 ya trata un 409 con código propio como rechazo). Como la clave no quedó registrada, si el
+  mesero lo vuelve a enviar a propósito con la misma `operation_id`, Go lo evalúa otra vez.
+- **Lo que ya entró no vuelve a pedir cupo**: un reintento con una `operation_id` ya registrada (la respuesta se perdió)
+  recibe su resultado guardado aunque el cupo de esa terminal haya vencido mientras tanto.
+- **Licencia nueva con menos cupos**: nadie se interrumpe (quien tiene su cupo lo conserva y sigue capturando); no se
+  ocupan cupos nuevos hasta quedar dentro del límite.
+- **Sin licencia válida**: 409 `LICENSE_NOT_ACTIVATED` (la puerta de la licencia rechaza antes esas operaciones).
+- **`setKitchenDisplayMode`** (`POST /kitchen/display-mode`, `{active: boolean}` → `{active}`): lo llama la terminal al
+  entrar a Preparación y al salir. Requiere `kitchen.states.read`; repetirlo no ocupa otro cupo; salir nunca falla por
+  la licencia. En un teléfono o tableta de meseros, 400.
+- **Terminales y `sessions-summary`** (administración, en `API_CONTRACTS.md`): `GET devices` dice en `seats` qué cupo
+  ocupa cada terminal; `POST devices/{id}/seat/release` libera su comandero o su cocina y cierra sus sesiones;
+  `devices/sessions-summary` conserva `by_kind` y agrega `seats` con `in_use` y `limit` por cupo (`limited: true`).
+
 ## Códigos de error más frecuentes
 
 | Código                                                   | Estado | Qué hacer                                                                                                                  |
@@ -861,3 +900,4 @@ cocina no usa el KDS, no hay avisos.
 | `PIN_DEVICE_NOT_ALLOWED`                                 | 403    | La entrada con PIN solo existe en dispositivos `android` emparejados.                                                      |
 | `OFFLINE_CREDENTIAL_INVALID`                             | 401    | Conservar el pedido y pedir al mesero que entre con su PIN con conexión.                                                   |
 | `OFFLINE_CREDENTIAL_NOT_ALLOWED`                         | 401    | La credencial de envío solo se usa en `submitOfflineOrder`.                                                                |
+| `LICENSE_SEAT_UNAVAILABLE`                               | 409    | Sin cupo de la licencia (`details.seat`, `in_use`, `limit`): mostrar el mensaje; en la cola, marcar el pedido rechazado.   |
