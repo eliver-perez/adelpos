@@ -273,6 +273,8 @@ func serveHTTP(ctx context.Context, logger *slog.Logger, cfg config.Config, pool
 	}))
 	// Etapa L1, fase B: el cliente del servidor de licencias (rutas license/* y consulta en segundo plano).
 	application.LicenseServer = newLicenseClient(logger, application.License, cfg.LicenseServerURL, testMode)
+	// Etapa L1, fase C: «Comprobar la hora con internet» (§6.3) con la hora de ese mismo cliente.
+	application.LicenseServerClock = administration.LicenseClientClock(application.LicenseServer)
 	if err := config.CheckNetworkAddress(network.Address, cfg.ListenAddress); err != nil {
 		return err
 	}

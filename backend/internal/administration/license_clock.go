@@ -29,8 +29,9 @@ type LicenseServerClock interface {
 	ServerTime(ctx context.Context) (time.Time, error)
 }
 
-// timeCheckTimeout limita la consulta al servidor de licencias (por debajo de los 10 s de la petición).
-const timeCheckTimeout = 8 * time.Second
+// timeCheckTimeout limita la consulta al servidor de licencias: el cliente de la Fase B hace el desafío y la consulta,
+// con sus reintentos, dentro del plazo de las rutas de la licencia (licenseTimeout).
+const timeCheckTimeout = 60 * time.Second
 
 // futureOperationsLimit es cuántos identificadores de cada tipo se listan en la auditoría de la §6.3.
 const futureOperationsLimit = 20
@@ -87,14 +88,15 @@ func decodeOptional(body []byte, destination any) error {
 	return decode(body, destination)
 }
 
-// checkTimeWithInternet es «Comprobar la hora con internet» (§6.3, L1-D5): compara la hora del servidor de licencias
-// con el reloj de la computadora principal.
-//
-//   - Si coinciden dentro del margen, el reloj está bien. Si la última hora confiable estaba en el futuro, se reemplaza
-//     por el server_time (el único caso, con el desbloqueo de soporte, en que baja) y se audita con los dos valores. Las
-//     operaciones registradas con fecha futura no se modifican: se listan en esa auditoría para que el propietario
-//     decida.
-//   - Si no coinciden, se rechaza con LICENSE_TIME_MISMATCH y la hora del servidor, para corregir el reloj a esa hora.
+// timeCheck es «Comprobar la hora con internet» ya autorizada: la consulta al servidor de licencias corre después de
+// confirmar la autenticación (completeDeferred), fuera de la transacción, como las operaciones en línea de la Fase B: la
+// red nunca retiene una conexión de la base ni un lock.
+type timeCheck struct {
+	principal Principal
+}
+
+// checkTimeWithInternet autoriza «Comprobar la hora con internet» (§6.3, L1-D5); la comprobación la hace
+// completeTimeCheck.
 func (service *Service) checkTimeWithInternet(ctx context.Context, tx pgx.Tx, request Request, principal Principal) (any, error) {
 	var input struct{}
 	if err := decodeOptional(request.Body, &input); err != nil {
@@ -104,6 +106,19 @@ func (service *Service) checkTimeWithInternet(ctx context.Context, tx pgx.Tx, re
 		return nil, &Fault{Status: 503, Code: "LICENSE_SERVER_UNAVAILABLE",
 			Message: "No se pudo comprobar la hora con internet. Revisa la conexión a internet e inténtalo de nuevo."}
 	}
+	return &timeCheck{principal: principal}, nil
+}
+
+// completeTimeCheck compara la hora del servidor de licencias con el reloj de la computadora principal:
+//
+//   - Si coinciden dentro del margen, el reloj está bien. Si la última hora confiable estaba en el futuro, se reemplaza
+//     por el server_time (el único caso, con el desbloqueo de soporte, en que baja) y se audita con los dos valores. Las
+//     operaciones registradas con fecha futura no se modifican: se listan en esa auditoría para que el propietario
+//     decida.
+//   - Si no coinciden, se rechaza con LICENSE_TIME_MISMATCH y la hora del servidor, para corregir el reloj a esa hora.
+//
+// La auditoría va en una transacción corta aparte, después de la consulta.
+func (service *Service) completeTimeCheck(ctx context.Context, check *timeCheck) (any, error) {
 	serverContext, cancel := context.WithTimeout(ctx, timeCheckTimeout)
 	serverTime, err := service.LicenseServerClock.ServerTime(serverContext)
 	cancel()
@@ -124,23 +139,33 @@ func (service *Service) checkTimeWithInternet(ctx context.Context, tx pgx.Tx, re
 			Message: "La hora que respondió el servidor de licencias no es válida. Inténtalo más tarde o comunícate con soporte."}
 	}
 	before := manager.Clock()
-	location, timezone, err := restaurantLocation(ctx, tx)
+	auditContext, cancelAudit := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancelAudit()
+	tx, err := service.Pool.Begin(auditContext)
 	if err != nil {
 		return nil, err
 	}
-	check := map[string]any{
+	defer tx.Rollback(context.Background())
+	location, timezone, err := restaurantLocation(auditContext, tx)
+	if err != nil {
+		return nil, err
+	}
+	details := map[string]any{
 		"local_time":         before.LocalTime,
 		"server_time":        serverTime,
 		"last_activity_time": nullableTime(before.LastActivity),
 		"margin_minutes":     int(licensing.ClockMargin / time.Minute),
 	}
 	if !licensing.ServerTimeMatches(before.LocalTime, serverTime) {
-		check["matches"] = false
-		if err := audit(ctx, tx, principal, timeCheckAction, "license", nil, nil, check, false); err != nil {
+		details["matches"] = false
+		if err := audit(auditContext, tx, check.principal, timeCheckAction, "license", nil, nil, details, false); err != nil {
+			return nil, err
+		}
+		if err := tx.Commit(auditContext); err != nil {
 			return nil, err
 		}
 		difference := before.LocalTime.Sub(serverTime)
-		return nil, &Fault{Status: 409, Code: "LICENSE_TIME_MISMATCH", Commit: true,
+		return nil, &Fault{Status: 409, Code: "LICENSE_TIME_MISMATCH",
 			Message: "La fecha y hora de esta computadora no coinciden con la de internet. Corrígela a " +
 				licensing.ScreenTime(serverTime, location) + " y vuelve a comprobar.",
 			Details: map[string]any{
@@ -152,7 +177,7 @@ func (service *Service) checkTimeWithInternet(ctx context.Context, tx pgx.Tx, re
 				"timezone":           timezone,
 			}}
 	}
-	check["matches"] = true
+	details["matches"] = true
 	replaced := false
 	if !before.LastActivity.IsZero() && before.LastActivity.After(serverTime) {
 		previous, err := manager.ReplaceTrustedTime(serverTime, licensing.ReplaceByInternetCheck)
@@ -160,20 +185,24 @@ func (service *Service) checkTimeWithInternet(ctx context.Context, tx pgx.Tx, re
 			return nil, stateNotSaved()
 		}
 		replaced = true
-		future, err := futureOperations(ctx, tx, serverTime.Add(licensing.ClockMargin))
+		future, err := futureOperations(auditContext, tx, serverTime.Add(licensing.ClockMargin))
 		if err != nil {
 			return nil, err
 		}
-		check["previous_last_activity_time"] = previous
-		check["future_operations"] = future
-		if err := audit(ctx, tx, principal, timeCorrectedAction, "license", nil,
-			map[string]any{"last_activity_time": previous}, check, true); err != nil {
+		details["previous_last_activity_time"] = previous
+		details["future_operations"] = future
+		if err := audit(auditContext, tx, check.principal, timeCorrectedAction, "license", nil,
+			map[string]any{"last_activity_time": previous}, details, true); err != nil {
 			return nil, err
 		}
-	} else if err := audit(ctx, tx, principal, timeCheckAction, "license", nil, nil, check, true); err != nil {
+	} else if err := audit(auditContext, tx, check.principal, timeCheckAction, "license", nil, nil, details, true); err != nil {
 		return nil, err
 	}
-	service.wakeLicenseMonitor()
+	if err := tx.Commit(auditContext); err != nil {
+		return nil, err
+	}
+	// Las terminales se enteran en el momento (el vigilante también lo vería en su siguiente revisión).
+	service.notifyLicense(ctx)
 	return map[string]any{
 		"matches":                     true,
 		"replaced":                    replaced,
@@ -182,6 +211,45 @@ func (service *Service) checkTimeWithInternet(ctx context.Context, tx pgx.Tx, re
 		"previous_last_activity_time": nullableTime(before.LastActivity),
 		"clock":                       clockDetails(manager.Clock(), manager.Status(), location, timezone),
 	}, nil
+}
+
+// licenseClientClock adapta el cliente del servidor de licencias de la Fase B (licensing.Client.ServerTime: refresh
+// con activación; sin ella, el desafío, L1-D5) a LicenseServerClock, con los códigos de error de la Fase B
+// (licenseFault).
+type licenseClientClock struct {
+	client *licensing.Client
+}
+
+// LicenseClientClock es la hora del servidor de licencias para la §6.3, a partir del cliente de la Fase B (serveHTTP).
+func LicenseClientClock(client *licensing.Client) LicenseServerClock {
+	return licenseClientClock{client: client}
+}
+
+func (clock licenseClientClock) ServerTime(ctx context.Context) (time.Time, error) {
+	if clock.client == nil {
+		return time.Time{}, licenseFault(&licensing.TransportError{Reason: licensing.ReasonNotConfigured})
+	}
+	value, err := clock.client.ServerTime(ctx)
+	if err != nil {
+		return time.Time{}, licenseFault(err)
+	}
+	return value.Time, nil
+}
+
+// licenseNotice es una respuesta de una ruta de la licencia que cambió el estado dentro de la transacción (importar un
+// .lic, la identidad nueva): después de confirmarla, completeDeferred avisa a las terminales (notifyLicense) y entrega
+// la respuesta.
+type licenseNotice struct {
+	result any
+}
+
+// notifyLicense revisa la licencia y la hora en el momento y publica license.changed si algo cambió (CheckLicense), en
+// su propia transacción. Se llama siempre fuera de la transacción de una petición. Un fallo solo queda en la bitácora:
+// el vigilante lo vuelve a intentar en su siguiente revisión.
+func (service *Service) notifyLicense(ctx context.Context) {
+	if err := service.CheckLicense(context.WithoutCancel(ctx)); err != nil && service.Logger != nil {
+		service.Logger.Warn("license_notice_failed", "reason", err.Error())
+	}
 }
 
 func nullableTime(instant time.Time) *time.Time {
