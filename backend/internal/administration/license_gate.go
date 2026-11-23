@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"local/ad-el-pos/server/internal/licenseseats"
 	"local/ad-el-pos/server/internal/licensing"
 )
 
@@ -28,8 +29,10 @@ import (
 //     problemas por separado.
 //  2. **El estado de la licencia** (tabla de la §6): LICENSE_NOT_ACTIVATED, LICENSE_EXPIRED o LICENSE_REVOKED, con sus
 //     details. Abrir turno en Vencida o Revocada solo procede si hay cuentas pendientes de cobro (L1-D6).
-//  3. **El cupo** no se decide aquí: lo aplica la Fase D en la misma transacción, después de autenticar la sesión y de
-//     que el manejador haga su trabajo (LICENSE_SEAT_UNAVAILABLE). La puerta solo deja pasar lo que el estado permite.
+//  3. **El cupo** no se decide aquí: lo aplica withSeats (license_seats.go, Fase D) en la misma transacción, después
+//     de autenticar la sesión y de que el manejador haga su trabajo, con los límites reales de la licencia
+//     (LicenseSeats) y 7820148311 como último lock (LICENSE_SEAT_UNAVAILABLE). La puerta va antes y solo deja pasar lo
+//     que el estado y la hora permiten.
 //
 // Las reglas firmes del contrato salen de la tabla: ningún estado borra datos (la puerta solo rechaza antes de
 // escribir), ningún estado impide cobrar lo abierto en una instalación activada (RowCaptured se permite en Vencida y
@@ -42,29 +45,52 @@ import (
 // Sin gestor de licencias (Service.License nil: solo las pruebas que no tratan de la licencia) la puerta no aplica
 // nada. main.go lo crea siempre, en serve y en el host de macOS y de Windows, antes de atender peticiones.
 
-// SeatClassifier dice qué cupos puede ocupar una operación de la API (cash_registers, order_takers o
-// kitchen_displays). Es la clasificación de la Fase D (licenseseats.ForOperation(method, route).Occupies()): la puerta
-// no la repite. Mientras la Fase D no esté fusionada en esta rama no hay ninguna (seatsOfOperation devuelve nil) y la
-// prueba de completitud solo revisa la tabla de la §6.
-type SeatClassifier func(method, route string) []string
-
-// seatsOfOperation es la clasificación de los cupos que usa la puerta. Al fusionar la Fase D se conecta a
-// licenseseats.ForOperation(method, route).Occupies().
-var seatsOfOperation SeatClassifier
-
-// GateOperation es la fila completa de una operación: su clase en la tabla de la §6 y los cupos que puede ocupar.
+// GateOperation es la fila completa de una operación para la puerta y su prueba de completitud: su clase en la tabla de
+// la §6 (licensing.ClassifyOperation) y lo que hace con los cupos, que es la clasificación de la Fase D
+// (licenseseats.ForOperation). La puerta no repite esa clasificación ni aplica los cupos: los aplica withSeats
+// (license_seats.go), después del manejador y con 7820148311 como último lock (L1-D27).
 type GateOperation struct {
 	licensing.Operation
-	Seats []string
+	SeatEffect licenseseats.Effect
 }
 
-// ClassifyGateOperation es la clase de una operación para la puerta y la prueba de completitud.
+// ClassifyGateOperation es la clase de una operación (ruta relativa a /api/v1, con o sin ese prefijo).
 func ClassifyGateOperation(method, route string) GateOperation {
-	operation := GateOperation{Operation: licensing.ClassifyOperation(method, route)}
-	if seatsOfOperation != nil {
-		operation.Seats = seatsOfOperation(method, strings.TrimPrefix(route, "/api/v1/"))
+	route = strings.TrimPrefix(strings.TrimPrefix(route, "/"), "api/v1/")
+	return GateOperation{
+		Operation:  licensing.ClassifyOperation(method, route),
+		SeatEffect: licenseseats.ForOperation(method, route),
 	}
-	return operation
+}
+
+// LicenseSeats es el gestor de cupos con los límites reales de la licencia (L1-D13; lo que la Fase D dejó para conectar):
+//
+//   - los cupos son los de Status().Limits, solo si hay una licencia válida aceptada (HasLicense: Vigente, Tolerancia,
+//     Vencida o Revocada). En Vencida y Revocada siguen siendo los de esa licencia: la puerta decide antes qué se
+//     permite en cada estado (abrir turno con cuentas pendientes, Preparación). Sin licencia válida no se ocupa ningún
+//     cupo (falla cerrada; la puerta ya respondió LICENSE_NOT_ACTIVATED con su details);
+//   - la hora es la del reloj del gestor (LocalClock), el mismo de la puerta y el simulado de las pruebas (L1-D16).
+//
+// Se lee en cada asignación, así que una licencia nueva con otros cupos vale desde la siguiente operación. main.go lo
+// conecta en serveHTTP (serve y el host de macOS y de Windows) en cuanto carga el gestor, antes de atender peticiones.
+func LicenseSeats(manager *licensing.Manager) *licenseseats.Manager {
+	if manager == nil {
+		return licenseseats.NewManager(licenseseats.Options{})
+	}
+	return licenseseats.NewManager(licenseseats.Options{
+		Limits: licenseseats.LimitsFunc(func() (licenseseats.Limits, bool) {
+			status := manager.Status()
+			if !status.HasLicense() {
+				return licenseseats.Limits{}, false
+			}
+			return licenseseats.Limits{
+				CashRegisters:   status.Limits.CashRegisters,
+				OrderTakers:     status.Limits.OrderTakers,
+				KitchenDisplays: status.Limits.KitchenDisplays,
+			}, true
+		}),
+		Now: manager.LocalClock,
+	})
 }
 
 // publicLicenseRoute: las rutas que dispatch atiende antes de autenticar la terminal.

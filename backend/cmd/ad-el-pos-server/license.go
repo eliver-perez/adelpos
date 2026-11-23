@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"local/ad-el-pos/server/internal/administration"
 	"local/ad-el-pos/server/internal/licensing"
 	"local/ad-el-pos/server/internal/localsetup"
 )
@@ -59,6 +60,14 @@ func loadLicense(ctx context.Context, logger *slog.Logger, options licenseOption
 		logger.Error("license_state_unavailable", "reason", err.Error())
 	}
 	return manager
+}
+
+// useLicense pone el gestor de la licencia en el servicio y conecta los cupos con los límites reales de esa licencia y el
+// reloj del gestor (etapa L1, fase C; L1-D13 y L1-D16): Vigente, Tolerancia, Vencida o Revocada dan sus cupos; sin
+// licencia válida, ninguno. Se hace antes de atender peticiones, en serve y en el host de macOS y de Windows.
+func useLicense(application *administration.Service, manager *licensing.Manager) {
+	application.License = manager
+	application.Seats = administration.LicenseSeats(manager)
 }
 
 // applyLicenseTestHooks aplica, solo con test_mode y solo en una compilación de desarrollo, las ayudas del Go

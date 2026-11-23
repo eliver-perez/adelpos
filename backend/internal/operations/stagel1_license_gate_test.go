@@ -223,6 +223,12 @@ func (fixture *licenseGateFixture) count(t *testing.T, query string, args ...any
 	return value
 }
 
+// use pone el gestor de licencias en el servidor, con los cupos de esa licencia (el gestor real, como en main.go).
+func (fixture *licenseGateFixture) use(manager *licensing.Manager) {
+	fixture.service.License = manager
+	fixture.service.Seats = administration.LicenseSeats(manager)
+}
+
 // serverClock es el servidor de licencias simulado de la §6.3.
 type serverClock struct {
 	instant time.Time
@@ -248,7 +254,7 @@ func TestStageL1LicenseGate(t *testing.T) {
 	fixture.licenses = licensingtest.New(t, fixture.clock)
 	fixture.licenses.Database = licensing.PoolProbe{Pool: fixture.pool}
 	fixture.manager = fixture.licenses.Start()
-	fixture.service.License = fixture.manager
+	fixture.use(fixture.manager)
 
 	t.Run("Sin activar: solo reportes, la sesión y la licencia", func(t *testing.T) {
 		if state := fixture.licenseOf(t).State; state != licensing.StateNotActivated {
@@ -363,7 +369,7 @@ func TestStageL1LicenseGate(t *testing.T) {
 		// La misma carpeta de datos en otra computadora: la licencia guardada se ignora.
 		fixture.licenses.SetMachine(licensingtest.OtherMachineID)
 		copied := fixture.licenses.Start()
-		fixture.service.License = copied
+		fixture.use(copied)
 		summary := fixture.licenseOf(t)
 		if summary.State != licensing.StateNotActivatedWithData || !summary.Copied {
 			t.Fatalf("copia: %+v", summary)
@@ -380,7 +386,7 @@ func TestStageL1LicenseGate(t *testing.T) {
 		// Un respaldo restaurado en otra computadora: identidad sin licencia y la base con operaciones.
 		restored := licensingtest.New(t, fixture.clock)
 		restored.Database = licensing.PoolProbe{Pool: fixture.pool}
-		fixture.service.License = restored.Start()
+		fixture.use(restored.Start())
 		summary = fixture.licenseOf(t)
 		if summary.State != licensing.StateNotActivatedWithData || summary.Copied {
 			t.Fatalf("respaldo restaurado: %+v", summary)
@@ -388,7 +394,7 @@ func TestStageL1LicenseGate(t *testing.T) {
 		fixture.rejected(t, "POST", "restaurant/accounts", fixture.openAccountBody("Restaurado"), "LICENSE_NOT_ACTIVATED")
 		fixture.alwaysAvailable(t, accounts[0].Account.ID)
 		fixture.licenses.SetMachine(licensingtest.MachineID)
-		fixture.service.License = original
+		fixture.use(original)
 	})
 
 	t.Run("Hora del equipo incorrecta: se bloquea todo lo que registra con fecha, también cobrar", func(t *testing.T) {
@@ -556,6 +562,33 @@ func TestStageL1LicenseGate(t *testing.T) {
 			t.Fatal("cada intento queda en la auditoría")
 		}
 		fixture.service.SupportTrust = nil
+	})
+
+	t.Run("Cupos con los límites reales de la licencia (plan básico y licencia nueva con más cupos)", func(t *testing.T) {
+		// Plan básico: 1 caja, 0 comanderos y 0 pantallas de cocina. La puerta deja pasar; el cupo lo decide la Fase D
+		// con los cupos del gestor real.
+		fixture.licenses.Accept(fixture.manager, licensingtest.Perpetual(1, 0, 0))
+		if fixture.shiftID == "" {
+			fixture.openShift(t)
+		}
+		bill := fixture.pendingAccount(t, "Plan básico con turno")
+		mode := fixture.send("POST", "kitchen/display-mode", map[string]any{"active": true})
+		if mode.status != 409 || mode.code != "LICENSE_SEAT_UNAVAILABLE" || mode.details["seat"] != "kitchen_displays" ||
+			mode.details["limit"] != float64(0) {
+			t.Fatalf("Preparación en el plan básico: %d %s", mode.status, mode.body)
+		}
+		fixture.allowed(t, "POST", "payments/accounts/"+bill.Account.ID+"/payments", fixture.payBody(t, bill.Account.ID), 200)
+		fixture.closeShift(t)
+		// Sin turno, la terminal sería comandero: no hay cupo.
+		captured := fixture.send("POST", "restaurant/accounts", fixture.openAccountBody("Plan básico sin turno"))
+		if captured.status != 409 || captured.code != "LICENSE_SEAT_UNAVAILABLE" || captured.details["seat"] != "order_takers" {
+			t.Fatalf("captura sin turno en el plan básico: %d %s", captured.status, captured.body)
+		}
+		// Una licencia nueva con un comandero y una pantalla de cocina vale desde la siguiente operación.
+		fixture.licenses.Accept(fixture.manager, licensingtest.Perpetual(1, 1, 1))
+		fixture.allowed(t, "POST", "restaurant/accounts", fixture.openAccountBody("Comandero"), 200)
+		fixture.allowed(t, "POST", "kitchen/display-mode", map[string]any{"active": true}, 200)
+		fixture.allowed(t, "POST", "kitchen/display-mode", map[string]any{"active": false}, 200)
 	})
 }
 
