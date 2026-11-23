@@ -50,7 +50,8 @@ sin conexión y el cursor de eventos de la recuperación (ver «Modo Mesero»). 
    `waiter-mode-v1` (lo del modo Mesero de la sección «Modo Mesero»); desde la etapa A2, `takeaway-v1` (lo de la
    sección «Para llevar»), `device-precheck-printer-v1` (lo de «Imprimir la precuenta») y `ready-alerts-v1` (lo de
    «Avisos de platillos listos»); desde la etapa A3, `permission-groups-v1`, que solo usa el escritorio (permisos
-   agrupados y roles de fábrica, `API_CONTRACTS.md`)). La aplicación Android 0.1.0 exige un servidor 0.12.0 o posterior; el escritorio 0.12.0 sigue
+   agrupados y roles de fábrica, `API_CONTRACTS.md`); desde la etapa L1, `license-v1` (lo de la sección «Licencia del
+   servidor principal»)). La aplicación Android 0.1.0 exige un servidor 0.12.0 o posterior; el escritorio 0.12.0 sigue
    funcionando con un servidor 0.11.0 y solo muestra lo del PIN si el servidor anuncia `waiter-pin-v1`.
 4. **Credenciales**: la terminal (o el teléfono) emparejada envía `X-Device-ID` y `X-Device-Token`; con sesión,
    además `Authorization: Bearer <token>` (desde la etapa A1, en `submitOfflineOrder` el teléfono puede enviar en su
@@ -115,6 +116,7 @@ sin conexión y el cursor de eventos de la recuperación (ver «Modo Mesero»). 
 | `renamePairingRequest`   | `POST /pairing/requests/{id}/name`             | Corregir el nombre propuesto mientras espera.                                  |
 | `cancelPairingRequest`   | `POST /pairing/requests/{id}/cancel`           | Dejar de esperar la aprobación.                                                |
 | `claimPairingCredential` | `POST /pairing/requests/{id}/claim`            | Recibir una sola vez la credencial de la terminal.                             |
+| `getLicenseStatus`       | `GET /license/status`                          | Estado de la licencia del servidor principal (etapa L1; también sin sesión).   |
 | `setKitchenDisplayMode`  | `POST /kitchen/display-mode`                   | Entrar o salir de Preparación: ocupa o libera el cupo de cocina (etapa L1).    |
 
 ## Encontrar el servidor y emparejarse (fases B y C)
@@ -866,6 +868,46 @@ decide; el cliente solo muestra el mensaje o arma el suyo con `details`.
 - **Terminales y `sessions-summary`** (administración, en `API_CONTRACTS.md`): `GET devices` dice en `seats` qué cupo
   ocupa cada terminal; `POST devices/{id}/seat/release` libera su comandero o su cocina y cierra sus sesiones;
   `devices/sessions-summary` conserva `by_kind` y agrega `seats` con `in_use` y `limit` por cupo (`limited: true`).
+
+## Licencia del servidor principal (etapa L1, fase B)
+
+Capacidad `license-v1` (servidor 0.15.0). La licencia es de la computadora principal: solo Go habla con el servidor de
+licencias (contrato de licencias §1). El escritorio y Android **solo muestran** el estado y los códigos de error.
+
+- **`getLicenseStatus`** (`GET /license/status`):
+  - **Con sesión**, el estado completo (`LicenseStatus`). Ver el estado no pide permiso.
+    - `state`: `active` (vigente), `grace` (tolerancia), `expired` (vencida), `revoked` (revocada; el motivo va en
+      `revocation_reason`: `deactivated`, `transferred` o `revoked`), `not_activated` o `not_activated_with_data`
+      (sin activar, con datos).
+    - `license`: plan, cliente, cupos (`limits`), vencimiento (`expires_at`, o `perpetual`), `grace_days` y
+      `grace_ends_at`; `null` sin licencia válida.
+    - `copied`: la instalación se copió de otra computadora. `machine_unverified` e `identity_unavailable`: no se pudo
+      comprobar la computadora o falta su identidad.
+    - `environment`: `test` en las versiones de desarrollo (servidor de licencias de pruebas).
+  - **Con solo la credencial del dispositivo** (sin `Authorization`), el resumen `LicenseDeviceSummary`: `state`,
+    `environment` y `copied`. Sirve al teléfono o la tableta en «¿Quién eres?».
+- **La gestión** (activar, transferir, buscar actualización, liberar, la solicitud y el archivo sin internet, y la
+  identidad nueva de una instalación copiada) es del escritorio, con el permiso «Administrar la licencia»
+  (`license.manage`, solo el rol Administrador de fábrica). No es de este contrato: va en `API_CONTRACTS.md`.
+- **Códigos de las rutas de la licencia** (los da Go, con su texto en español; nunca el mensaje del servidor de
+  licencias):
+
+  | Código                        | Estado | Caso                                                                                         |
+  | ----------------------------- | ------ | -------------------------------------------------------------------------------------------- |
+  | `LICENSE_KEY_INVALID_FORMAT`  | 400    | El código no tiene el formato: 15 símbolos en grupos de 3, 4, 4 y 4.                         |
+  | `LICENSE_KEY_NOT_FOUND`       | 404    | No existe una licencia con ese código.                                                       |
+  | `LICENSE_SERVER_REVOKED`      | 409    | La licencia fue revocada.                                                                    |
+  | `LICENSE_ACTIVATION_LIMIT`    | 409    | Activa en otra computadora; `details.transfer_available` dice si se puede transferir.        |
+  | `LICENSE_TRANSFER_LIMIT`      | 409    | Tiene una transferencia pendiente: «Comunícate con soporte».                                 |
+  | `LICENSE_INSTALLATION_COPIED` | 409    | La instalación se copió de otra computadora: antes hay que crear una identidad nueva.        |
+  | `LICENSE_NOT_ACTIVATED`       | 409    | Buscar actualización, liberar o la solicitud de renovar o liberar sin una licencia activada. |
+  | `LICENSE_SERVER_BUSY`         | 429    | Demasiados intentos; `details.retry_after_seconds`.                                          |
+  | `LICENSE_SERVER_UNAVAILABLE`  | 503    | Sin conexión, falla temporal o TLS; `details.reason`. La licencia instalada no cambia.       |
+  | `LICENSE_SERVER_ERROR`        | 502    | El servidor de licencias rechazó la operación o respondió algo inesperado.                   |
+  | `LICENSE_RESPONSE_INVALID`    | 502    | La licencia recibida no pasó la verificación y no se instaló; `details.reason`.              |
+  | `LICENSE_FILE_INVALID`        | 400    | El archivo `.lic` no es válido para esta computadora; `details.reason`.                      |
+  | `LICENSE_STATE_NOT_SAVED`     | 503    | No se pudo guardar la licencia; no cambió nada.                                              |
+  | `IDENTITY_UNAVAILABLE`        | 503    | Falta la identidad o no se pudo comprobar la computadora (`details.reason`).                 |
 
 ## Códigos de error más frecuentes
 
