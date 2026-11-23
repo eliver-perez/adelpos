@@ -1,0 +1,222 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://licensing.sicrat.com/contracts/v1/license.schema.json",
+	"title": "Contenido de la licencia firmada de AD-EL POS",
+	"description": "Contenido (payload) del JWS de una licencia, según la sección 4 del contrato de licencias V1.0. Todos los campos son obligatorios. El cliente ignora los campos adicionales que no conozca. El servidor emite los instantes con seis decimales; el cliente acepta de 0 a 9.",
+	"type": "object",
+	"required": [
+		"schema_version",
+		"product_id",
+		"environment",
+		"license_id",
+		"activation_id",
+		"server_id",
+		"installation_public_key",
+		"licensee_name",
+		"license_type",
+		"billing_period",
+		"license_status",
+		"status_reason",
+		"license_revision",
+		"issued_at",
+		"period_starts_at",
+		"expires_at",
+		"grace_days",
+		"updates_until",
+		"plan",
+		"limits",
+		"features"
+	],
+	"properties": {
+		"schema_version": {
+			"description": "Versión del contenido. Si no empieza con «1.», el cliente la trata como incompatible.",
+			"const": "1.0"
+		},
+		"product_id": {
+			"description": "Producto de la licencia. Es fijo.",
+			"const": "adel_pos"
+		},
+		"environment": {
+			"description": "Entorno de firma. Debe coincidir con el entorno de la llave «kid» que firmó.",
+			"enum": ["test", "production"]
+		},
+		"license_id": { "$ref": "#/$defs/uuid" },
+		"activation_id": { "$ref": "#/$defs/uuid" },
+		"server_id": {
+			"description": "Identidad de la instalación: UUID versión 4, en minúsculas.",
+			"type": "string",
+			"pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+		},
+		"installation_public_key": {
+			"description": "Llave pública Ed25519 de licencias de la instalación: 32 bytes en base64url sin relleno, en su forma canónica.",
+			"type": "string",
+			"pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$"
+		},
+		"licensee_name": {
+			"description": "Nombre o razón social del cliente.",
+			"type": "string",
+			"minLength": 1,
+			"maxLength": 190,
+			"pattern": "^[^\\x00-\\x1f\\x7f]*[^\\s\\x00-\\x1f\\x7f][^\\x00-\\x1f\\x7f]*$"
+		},
+		"license_type": {
+			"enum": ["perpetual", "subscription", "trial"]
+		},
+		"billing_period": {
+			"description": "Periodo de cobro de una suscripción. Vacío en perpetua y prueba.",
+			"enum": ["monthly", "quarterly", "semiannual", "annual", null]
+		},
+		"license_status": {
+			"enum": ["active", "revoked"]
+		},
+		"status_reason": {
+			"description": "Vacío si está activa. Si está revocada: se transfirió a otra computadora, se liberó o la revocó el propietario.",
+			"enum": ["transferred", "deactivated", "revoked", null]
+		},
+		"license_revision": {
+			"description": "Contador global por licencia. Aumenta en cada firma y nunca se reutiliza.",
+			"type": "integer",
+			"minimum": 1
+		},
+		"issued_at": {
+			"description": "Momento de la firma.",
+			"$ref": "#/$defs/instant"
+		},
+		"period_starts_at": {
+			"description": "Inicio del periodo vigente. En perpetua, la activación.",
+			"$ref": "#/$defs/instant"
+		},
+		"expires_at": {
+			"description": "Instante exclusivo de vencimiento. Vacío solo en perpetua.",
+			"anyOf": [{ "$ref": "#/$defs/instant" }, { "type": "null" }]
+		},
+		"grace_days": {
+			"description": "Días de tolerancia después del vencimiento: 5 en suscripción y 0 en prueba y perpetua.",
+			"enum": [0, 5]
+		},
+		"updates_until": {
+			"description": "Última fecha de publicación de versiones a las que tiene derecho la instalación.",
+			"$ref": "#/$defs/instant"
+		},
+		"plan": {
+			"description": "Solo informativo. Los derechos los marca «limits».",
+			"type": "object",
+			"required": ["plan_id", "name", "custom"],
+			"properties": {
+				"plan_id": { "$ref": "#/$defs/key" },
+				"name": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 190,
+					"pattern": "^[^\\x00-\\x1f\\x7f]*[^\\s\\x00-\\x1f\\x7f][^\\x00-\\x1f\\x7f]*$"
+				},
+				"custom": {
+					"description": "Verdadero si los cupos de la licencia se ajustaron y ya no siguen a su plan.",
+					"type": "boolean"
+				}
+			}
+		},
+		"limits": {
+			"description": "Cupos de sesiones simultáneas. En V1 no existe «sin límite».",
+			"type": "object",
+			"required": ["cash_registers", "order_takers", "kitchen_displays"],
+			"properties": {
+				"cash_registers": { "$ref": "#/$defs/limit" },
+				"order_takers": { "$ref": "#/$defs/limit" },
+				"kitchen_displays": { "$ref": "#/$defs/limit" }
+			}
+		},
+		"features": {
+			"description": "Módulos habilitados, como «clave: true». Vacío en V1. El cliente ignora las claves que no conoce.",
+			"type": "object",
+			"propertyNames": { "$ref": "#/$defs/key" },
+			"additionalProperties": { "const": true }
+		}
+	},
+	"allOf": [
+		{
+			"description": "Perpetua: no vence, sin periodo de cobro y sin tolerancia.",
+			"if": {
+				"properties": { "license_type": { "const": "perpetual" } },
+				"required": ["license_type"]
+			},
+			"then": {
+				"properties": {
+					"billing_period": { "const": null },
+					"expires_at": { "const": null },
+					"grace_days": { "const": 0 }
+				}
+			}
+		},
+		{
+			"description": "Suscripción: con periodo de cobro, vencimiento y 5 días de tolerancia.",
+			"if": {
+				"properties": { "license_type": { "const": "subscription" } },
+				"required": ["license_type"]
+			},
+			"then": {
+				"properties": {
+					"billing_period": { "enum": ["monthly", "quarterly", "semiannual", "annual"] },
+					"expires_at": { "$ref": "#/$defs/instant" },
+					"grace_days": { "const": 5 }
+				}
+			}
+		},
+		{
+			"description": "Prueba: con vencimiento, sin periodo de cobro y sin tolerancia.",
+			"if": {
+				"properties": { "license_type": { "const": "trial" } },
+				"required": ["license_type"]
+			},
+			"then": {
+				"properties": {
+					"billing_period": { "const": null },
+					"expires_at": { "$ref": "#/$defs/instant" },
+					"grace_days": { "const": 0 }
+				}
+			}
+		},
+		{
+			"description": "Activa: sin motivo.",
+			"if": {
+				"properties": { "license_status": { "const": "active" } },
+				"required": ["license_status"]
+			},
+			"then": {
+				"properties": { "status_reason": { "const": null } }
+			}
+		},
+		{
+			"description": "Revocada: siempre con su motivo.",
+			"if": {
+				"properties": { "license_status": { "const": "revoked" } },
+				"required": ["license_status"]
+			},
+			"then": {
+				"properties": { "status_reason": { "enum": ["transferred", "deactivated", "revoked"] } }
+			}
+		}
+	],
+	"$defs": {
+		"uuid": {
+			"description": "UUID en minúsculas.",
+			"type": "string",
+			"pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+		},
+		"instant": {
+			"description": "Instante RFC 3339 en UTC terminado en «Z», con 0 a 9 decimales. Nunca una hora local con desfase.",
+			"type": "string",
+			"pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\\.[0-9]{1,9})?Z$"
+		},
+		"key": {
+			"description": "Identificador de plan o de módulo.",
+			"type": "string",
+			"pattern": "^[a-z][a-z0-9_]{1,63}$"
+		},
+		"limit": {
+			"type": "integer",
+			"minimum": 0,
+			"maximum": 999
+		}
+	}
+}

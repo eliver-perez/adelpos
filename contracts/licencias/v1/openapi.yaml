@@ -1,0 +1,729 @@
+openapi: 3.1.0
+jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
+info:
+  title: API de licencias de AD-EL POS
+  version: '1.0'
+  summary: API en línea del contrato de licencias V1.0 entre el servidor de licencias y AD-EL POS.
+  description: |
+    Especificación formal de la sección 8 del contrato de licencias V1.0
+    (`docs/CONTRATO_LICENCIAS_ADEL_POS.md`). Si este archivo y el contrato difieren, manda el contrato.
+
+    **Reglas comunes**
+
+    - Todas las peticiones son `POST`, por HTTPS, con `Content-Type: application/json` y un cuerpo
+      de 16 KiB como máximo.
+    - Cada petición lleva exactamente los campos indicados: ni faltantes ni sobrantes.
+    - Los reintentos se identifican por `product_id` y `request_id`. Un reintento idéntico recibe
+      exactamente la misma respuesta. Reutilizar un `request_id` con otro contenido recibe
+      `409 REQUEST_CONFLICT`.
+    - Los errores tienen siempre el formato `Error`. AD-EL POS decide por `code`; `message` es
+      solo informativo.
+    - `request_id` de un error: el que envió el cliente si es un UUID válido; `null` en el desafío
+      y cuando falta o no es válido.
+
+    **Errores de transporte**
+
+    Llevan el código `INVALID_REQUEST` con su HTTP estándar: `404` si la ruta no existe, `405` si
+    el método no es `POST` (con el encabezado `Allow: POST`), `415` si el tipo de contenido no es
+    JSON y `413` si el cuerpo pasa de 16 KiB.
+
+    **Transferencia por autoservicio**
+
+    `POST /v1/activations/transfer` (sección 8.4) recibe los mismos campos que activar y responde
+    igual cuando tiene éxito. Solo puede haber una transferencia por autoservicio pendiente de
+    confirmar: mientras la computadora anterior no consulte (`refresh`) o se desactive, otra
+    transferencia recibe `409 TRANSFER_LIMIT`.
+servers:
+  - url: https://licensing.sicrat.com
+    description: Servidor de pruebas. Firma con llaves del entorno `test`.
+tags:
+  - name: Activaciones
+    description: Activar, consultar y liberar la licencia de una instalación.
+paths:
+  /v1/activations/challenge:
+    post:
+      tags: [Activaciones]
+      operationId: createChallenge
+      summary: Pedir un desafío
+      description: |
+        Cada desafío es de un solo uso, dura 5 minutos y solo sirve para la acción, el producto y
+        la instalación que lo pidieron.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChallengeRequest'
+            examples:
+              activar:
+                value:
+                  action: activate
+                  product_id: adel_pos
+                  server_id: 22222222-2222-4222-8222-222222222222
+                  activation_id: null
+              transferir:
+                value:
+                  action: transfer
+                  product_id: adel_pos
+                  server_id: 66666666-6666-4666-8666-666666666666
+                  activation_id: null
+              consultar:
+                value:
+                  action: refresh
+                  product_id: adel_pos
+                  server_id: 22222222-2222-4222-8222-222222222222
+                  activation_id: 33333333-3333-4333-8333-333333333333
+      responses:
+        '200':
+          description: Desafío creado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChallengeResponse'
+              examples:
+                desafio:
+                  value:
+                    challenge_id: 55555555-5555-4555-8555-555555555555
+                    nonce: 3q2-7wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+                    expires_at: '2026-11-16T06:35:00.000000Z'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '413':
+          $ref: '#/components/responses/InvalidRequest'
+        '415':
+          $ref: '#/components/responses/InvalidRequest'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/TemporaryUnavailable'
+  /v1/activations:
+    post:
+      tags: [Activaciones]
+      operationId: activate
+      summary: Activar
+      description: |
+        Activa la licencia del código comercial en la instalación. En la primera activación de una
+        licencia empieza su primer periodo.
+
+        Si la misma instalación (mismo `server_id` y misma llave, con una activación vigente de
+        esa licencia) vuelve a activar, recibe su revisión vigente: no es una transferencia.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActivationRequest'
+            examples:
+              activar:
+                value:
+                  request_id: 44444444-4444-4444-8444-444444444441
+                  product_id: adel_pos
+                  license_key: K7M-9R3X-6TVP-8CHD
+                  server_id: 22222222-2222-4222-8222-222222222222
+                  installation_public_key: QBDclj1ZjqhgQl7bGqAcZppsXkiD6Da4oeGCVepMWYw
+                  challenge_id: 55555555-5555-4555-8555-555555555555
+                  proof: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+                  app_version: 0.12.0
+      responses:
+        '200':
+          $ref: '#/components/responses/License'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/InvalidProof'
+        '403':
+          description: '`REVOKED`: el propietario revocó la licencia.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                revocada:
+                  value:
+                    error:
+                      code: REVOKED
+                      message: La licencia fue revocada.
+                      request_id: 44444444-4444-4444-8444-444444444441
+                      details: {}
+        '404':
+          description: |
+            `LICENSE_NOT_FOUND`: código inexistente, retirado o de otro producto. La respuesta es la
+            misma en todos los casos.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                desconocida:
+                  value:
+                    error:
+                      code: LICENSE_NOT_FOUND
+                      message: El código y el producto no corresponden a una licencia.
+                      request_id: 44444444-4444-4444-8444-444444444441
+                      details: {}
+        '409':
+          description: |
+            `ACTIVATION_LIMIT`: la licencia ya está activa en otra instalación; `details.transfer_available`
+            indica si puede transferirse por autoservicio. `REQUEST_CONFLICT`: el `request_id` ya se
+            usó con otro contenido.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                otraInstalacion:
+                  value:
+                    error:
+                      code: ACTIVATION_LIMIT
+                      message: La licencia ya está activa en otra computadora.
+                      request_id: 44444444-4444-4444-8444-444444444441
+                      details:
+                        transfer_available: true
+                transferenciaPendiente:
+                  value:
+                    error:
+                      code: ACTIVATION_LIMIT
+                      message: La licencia ya está activa en otra computadora.
+                      request_id: 44444444-4444-4444-8444-444444444441
+                      details:
+                        transfer_available: false
+                conflicto:
+                  value:
+                    error:
+                      code: REQUEST_CONFLICT
+                      message: El identificador de la solicitud ya se usó con otro contenido.
+                      request_id: 44444444-4444-4444-8444-444444444441
+                      details: {}
+        '413':
+          $ref: '#/components/responses/InvalidRequest'
+        '415':
+          $ref: '#/components/responses/InvalidRequest'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/TemporaryUnavailable'
+  /v1/activations/transfer:
+    post:
+      tags: [Activaciones]
+      operationId: transfer
+      summary: Transferir por autoservicio
+      description: |
+        Mueve la licencia del código comercial a esta instalación (sección 8.4). Recibe los mismos
+        campos que activar y responde igual cuando tiene éxito: la revisión `active` de la
+        activación nueva. En la misma transacción, la activación anterior recibe su revisión de
+        cierre `revoked` / `transferred`, que conocerá al consultar.
+
+        Las reglas se aplican en este orden:
+
+        1. Código inexistente, retirado o de otro producto: `404 LICENSE_NOT_FOUND`.
+        2. Licencia revocada: `403 REVOKED`.
+        3. La misma instalación ya está activa: recibe su revisión vigente. No es una transferencia.
+        4. Sin ninguna activación vigente: es una activación normal, que no cuenta como
+           transferencia. Si es la primera activación, empieza el primer periodo.
+        5. Con una transferencia por autoservicio pendiente de confirmar: `409 TRANSFER_LIMIT`.
+        6. Si no, la transferencia queda pendiente hasta que la computadora anterior se autentica
+           con `refresh` o `deactivate` y recibe su revisión de cierre.
+
+        Transferir nunca cambia las fechas de la licencia: la revisión nueva lleva las mismas
+        fechas, cupos, plan y módulos. Una prueba o suscripción vencida se transfiere, pero sigue
+        vencida.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActivationRequest'
+            examples:
+              transferir:
+                value:
+                  request_id: 44444444-4444-4444-8444-444444444444
+                  product_id: adel_pos
+                  license_key: K7M-9R3X-6TVP-8CHD
+                  server_id: 66666666-6666-4666-8666-666666666666
+                  installation_public_key: QBDclj1ZjqhgQl7bGqAcZppsXkiD6Da4oeGCVepMWYw
+                  challenge_id: 55555555-5555-4555-8555-555555555555
+                  proof: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+                  app_version: 0.12.0
+      responses:
+        '200':
+          $ref: '#/components/responses/License'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/InvalidProof'
+        '403':
+          description: '`REVOKED`: el propietario revocó la licencia.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                revocada:
+                  value:
+                    error:
+                      code: REVOKED
+                      message: La licencia fue revocada.
+                      request_id: 44444444-4444-4444-8444-444444444444
+                      details: {}
+        '404':
+          description: |
+            `LICENSE_NOT_FOUND`: código inexistente, retirado o de otro producto. La respuesta es la
+            misma en todos los casos.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                desconocida:
+                  value:
+                    error:
+                      code: LICENSE_NOT_FOUND
+                      message: El código y el producto no corresponden a una licencia.
+                      request_id: 44444444-4444-4444-8444-444444444444
+                      details: {}
+        '409':
+          description: |
+            `TRANSFER_LIMIT`: hay una transferencia por autoservicio pendiente de confirmar; en
+            AD-EL POS, «Comunícate con soporte». El intento genera una alerta en el panel.
+            `REQUEST_CONFLICT`: el `request_id` ya se usó con otro contenido.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                transferenciaPendiente:
+                  value:
+                    error:
+                      code: TRANSFER_LIMIT
+                      message: Hay una transferencia pendiente de confirmar.
+                      request_id: 44444444-4444-4444-8444-444444444444
+                      details: {}
+                conflicto:
+                  value:
+                    error:
+                      code: REQUEST_CONFLICT
+                      message: El identificador de la solicitud ya se usó con otro contenido.
+                      request_id: 44444444-4444-4444-8444-444444444444
+                      details: {}
+        '413':
+          $ref: '#/components/responses/InvalidRequest'
+        '415':
+          $ref: '#/components/responses/InvalidRequest'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/TemporaryUnavailable'
+  /v1/activations/refresh:
+    post:
+      tags: [Activaciones]
+      operationId: refresh
+      summary: Consultar actualización
+      description: |
+        Devuelve la revisión vigente de la activación, que puede ser más nueva por un cambio de
+        derechos o por una revocación. Si la activación ya terminó, devuelve su revisión de cierre.
+
+        Si terminó por una transferencia por autoservicio pendiente, esta consulta la confirma: la
+        computadora anterior demostró con su llave que es ella y recibió su cierre, y el contador
+        de transferencias pendientes vuelve a 0. Una segunda consulta no cambia nada.
+
+        Esta consulta no es obligatoria para operar: AD-EL POS la hace en segundo plano cuando
+        tiene internet.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExistingActivationRequest'
+            examples:
+              consultar:
+                value:
+                  request_id: 44444444-4444-4444-8444-444444444442
+                  product_id: adel_pos
+                  server_id: 22222222-2222-4222-8222-222222222222
+                  activation_id: 33333333-3333-4333-8333-333333333333
+                  challenge_id: 55555555-5555-4555-8555-555555555555
+                  proof: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+                  app_version: 0.12.0
+      responses:
+        '200':
+          $ref: '#/components/responses/License'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/InvalidProof'
+        '409':
+          $ref: '#/components/responses/RequestConflict'
+        '413':
+          $ref: '#/components/responses/InvalidRequest'
+        '415':
+          $ref: '#/components/responses/InvalidRequest'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/TemporaryUnavailable'
+  /v1/activations/deactivate:
+    post:
+      tags: [Activaciones]
+      operationId: deactivate
+      summary: Desactivar (liberar la licencia)
+      description: |
+        Libera la licencia y devuelve la revisión de cierre. Después se puede activar en otra
+        computadora con el mismo código. Solo una desactivación confirmada por el servidor libera
+        la licencia.
+
+        Si la activación ya había terminado, por el motivo que sea, responde `200` con la revisión
+        de cierre que ya existe. El motivo está en `status_reason` de la licencia firmada. Si
+        terminó por una transferencia por autoservicio pendiente, la confirma, igual que `refresh`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExistingActivationRequest'
+            examples:
+              desactivar:
+                value:
+                  request_id: 44444444-4444-4444-8444-444444444443
+                  product_id: adel_pos
+                  server_id: 22222222-2222-4222-8222-222222222222
+                  activation_id: 33333333-3333-4333-8333-333333333333
+                  challenge_id: 55555555-5555-4555-8555-555555555555
+                  proof: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+                  app_version: 0.12.0
+      responses:
+        '200':
+          description: Licencia liberada, con su revisión de cierre.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeactivationResponse'
+              examples:
+                liberada:
+                  value:
+                    activation_id: 33333333-3333-4333-8333-333333333333
+                    deactivated_at: '2026-11-20T18:00:00.000000Z'
+                    status: deactivated
+                    license_jws: eyJhbGciOiJFZERTQSJ9.e30.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+                    server_time: '2026-11-20T18:00:00.000000Z'
+                    request_id: 44444444-4444-4444-8444-444444444443
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/InvalidProof'
+        '409':
+          $ref: '#/components/responses/RequestConflict'
+        '413':
+          $ref: '#/components/responses/InvalidRequest'
+        '415':
+          $ref: '#/components/responses/InvalidRequest'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/TemporaryUnavailable'
+components:
+  responses:
+    License:
+      description: La licencia firmada vigente de la activación.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/LicenseResponse'
+          examples:
+            licencia:
+              value:
+                license_jws: eyJhbGciOiJFZERTQSJ9.e30.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+                server_time: '2026-11-16T06:30:00.000000Z'
+                request_id: 44444444-4444-4444-8444-444444444441
+    InvalidRequest:
+      description: |
+        `INVALID_REQUEST`: campos faltantes, sobrantes o con formato incorrecto. También los errores
+        de transporte (`413` y `415`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            invalida:
+              value:
+                error:
+                  code: INVALID_REQUEST
+                  message: La solicitud no es válida.
+                  request_id: null
+                  details: {}
+    InvalidProof:
+      description: |
+        `INVALID_PROOF`: desafío inválido, vencido o ya usado, prueba de posesión incorrecta o
+        identidad desconocida.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            prueba:
+              value:
+                error:
+                  code: INVALID_PROOF
+                  message: No se pudo autenticar la solicitud.
+                  request_id: 44444444-4444-4444-8444-444444444442
+                  details: {}
+    RequestConflict:
+      description: '`REQUEST_CONFLICT`: el `request_id` ya se usó con otro contenido.'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            conflicto:
+              value:
+                error:
+                  code: REQUEST_CONFLICT
+                  message: El identificador de la solicitud ya se usó con otro contenido.
+                  request_id: 44444444-4444-4444-8444-444444444442
+                  details: {}
+    RateLimited:
+      description: '`RATE_LIMITED`: límite de intentos. Incluye el encabezado `Retry-After`.'
+      headers:
+        Retry-After:
+          description: Segundos que hay que esperar antes de reintentar.
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            limite:
+              value:
+                error:
+                  code: RATE_LIMITED
+                  message: Demasiadas solicitudes. Intenta nuevamente más tarde.
+                  request_id: null
+                  details: {}
+    TemporaryUnavailable:
+      description: '`TEMPORARY_UNAVAILABLE`: falla temporal. Nunca afecta a una licencia válida ya instalada.'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            falla:
+              value:
+                error:
+                  code: TEMPORARY_UNAVAILABLE
+                  message: El servicio no está disponible temporalmente.
+                  request_id: null
+                  details: {}
+  schemas:
+    Uuid:
+      description: UUID. Se acepta en mayúsculas o minúsculas y se conserva como llegó.
+      type: string
+      pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+    ServerId:
+      description: Identidad de la instalación. UUID versión 4, solo en minúsculas.
+      type: string
+      pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+    ProductId:
+      description: Producto. Para AD-EL POS es siempre `adel_pos`.
+      type: string
+      pattern: '^[a-z][a-z0-9_]{1,63}$'
+    Instant:
+      description: Instante RFC 3339 en UTC terminado en `Z`. El servidor emite seis decimales.
+      type: string
+      pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6}Z$'
+    PublicKey:
+      description: Llave pública Ed25519 de licencias de la instalación, 32 bytes en base64url sin relleno.
+      type: string
+      pattern: '^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$'
+    Proof:
+      description: |
+        Prueba de posesión: firma Ed25519, 64 bytes en base64url sin relleno, del mensaje
+        `"ADELPOS-LIC-V1\n" + action + "\n" + challenge_id + "\n" + nonce + "\n" + product_id + "\n" + server_id + "\n" + (activation_id o "-")`.
+        En `activate` se verifica con la `installation_public_key` enviada; en `refresh` y
+        `deactivate`, con la llave vinculada a la activación.
+      type: string
+      pattern: '^[A-Za-z0-9_-]{85}[AQgw]$'
+    AppVersion:
+      description: Versión de AD-EL POS que hace la petición.
+      type: string
+      minLength: 1
+      maxLength: 100
+    LicenseJws:
+      description: |
+        Licencia firmada: JWS Compact con encabezado exacto
+        `{"alg":"EdDSA","kid":"<kid>","typ":"adelpos-lic+jws"}`. Su contenido cumple
+        `LicenseContent`. Es el mismo texto que lleva un archivo `.lic`.
+      type: string
+      pattern: '^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{86}$'
+    LicenseContent:
+      description: Contenido de la licencia firmada (sección 4 del contrato).
+      $ref: 'license.schema.json'
+    ChallengeRequest:
+      type: object
+      additionalProperties: false
+      required: [action, product_id, server_id, activation_id]
+      properties:
+        action:
+          enum: [activate, transfer, refresh, deactivate]
+        product_id:
+          $ref: '#/components/schemas/ProductId'
+        server_id:
+          $ref: '#/components/schemas/ServerId'
+        activation_id:
+          description: '`null` en `activate` y `transfer`; obligatorio en `refresh` y `deactivate`.'
+          anyOf:
+            - $ref: '#/components/schemas/Uuid'
+            - type: 'null'
+    ChallengeResponse:
+      type: object
+      additionalProperties: false
+      required: [challenge_id, nonce, expires_at]
+      properties:
+        challenge_id:
+          $ref: '#/components/schemas/Uuid'
+        nonce:
+          description: 32 bytes aleatorios en base64url sin relleno.
+          type: string
+          pattern: '^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$'
+        expires_at:
+          $ref: '#/components/schemas/Instant'
+    ActivationRequest:
+      description: Petición de `activate` y de `transfer`.
+      type: object
+      additionalProperties: false
+      required:
+        - request_id
+        - product_id
+        - license_key
+        - server_id
+        - installation_public_key
+        - challenge_id
+        - proof
+        - app_version
+      properties:
+        request_id:
+          $ref: '#/components/schemas/Uuid'
+        product_id:
+          $ref: '#/components/schemas/ProductId'
+        license_key:
+          description: Código comercial. Nunca se escribe en los registros del servidor.
+          type: string
+          minLength: 1
+          maxLength: 256
+        server_id:
+          $ref: '#/components/schemas/ServerId'
+        installation_public_key:
+          $ref: '#/components/schemas/PublicKey'
+        challenge_id:
+          $ref: '#/components/schemas/Uuid'
+        proof:
+          $ref: '#/components/schemas/Proof'
+        app_version:
+          $ref: '#/components/schemas/AppVersion'
+    ExistingActivationRequest:
+      description: Petición de `refresh` y de `deactivate`.
+      type: object
+      additionalProperties: false
+      required:
+        - request_id
+        - product_id
+        - server_id
+        - activation_id
+        - challenge_id
+        - proof
+        - app_version
+      properties:
+        request_id:
+          $ref: '#/components/schemas/Uuid'
+        product_id:
+          $ref: '#/components/schemas/ProductId'
+        server_id:
+          $ref: '#/components/schemas/ServerId'
+        activation_id:
+          $ref: '#/components/schemas/Uuid'
+        challenge_id:
+          $ref: '#/components/schemas/Uuid'
+        proof:
+          $ref: '#/components/schemas/Proof'
+        app_version:
+          $ref: '#/components/schemas/AppVersion'
+    LicenseResponse:
+      type: object
+      additionalProperties: false
+      required: [license_jws, server_time, request_id]
+      properties:
+        license_jws:
+          $ref: '#/components/schemas/LicenseJws'
+        server_time:
+          $ref: '#/components/schemas/Instant'
+        request_id:
+          $ref: '#/components/schemas/Uuid'
+    DeactivationResponse:
+      type: object
+      additionalProperties: false
+      required: [activation_id, deactivated_at, status, license_jws, server_time, request_id]
+      properties:
+        activation_id:
+          $ref: '#/components/schemas/Uuid'
+        deactivated_at:
+          description: Momento en que terminó la activación.
+          $ref: '#/components/schemas/Instant'
+        status:
+          const: deactivated
+        license_jws:
+          description: Revisión de cierre de la activación.
+          $ref: '#/components/schemas/LicenseJws'
+        server_time:
+          $ref: '#/components/schemas/Instant'
+        request_id:
+          $ref: '#/components/schemas/Uuid'
+    ErrorCode:
+      description: Códigos de error del contrato, con su HTTP.
+      enum:
+        - INVALID_REQUEST
+        - INCOMPATIBLE_SCHEMA
+        - INVALID_PROOF
+        - REVOKED
+        - LICENSE_NOT_FOUND
+        - ACTIVATION_LIMIT
+        - TRANSFER_LIMIT
+        - REQUEST_CONFLICT
+        - RATE_LIMITED
+        - TEMPORARY_UNAVAILABLE
+      x-http-status:
+        INVALID_REQUEST: 400
+        INCOMPATIBLE_SCHEMA: 400
+        INVALID_PROOF: 401
+        REVOKED: 403
+        LICENSE_NOT_FOUND: 404
+        ACTIVATION_LIMIT: 409
+        TRANSFER_LIMIT: 409
+        REQUEST_CONFLICT: 409
+        RATE_LIMITED: 429
+        TEMPORARY_UNAVAILABLE: 503
+    Error:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message, request_id, details]
+          properties:
+            code:
+              $ref: '#/components/schemas/ErrorCode'
+            message:
+              description: Texto informativo. No está pensado para mostrarse tal cual.
+              type: string
+              minLength: 1
+            request_id:
+              anyOf:
+                - $ref: '#/components/schemas/Uuid'
+                - type: 'null'
+            details:
+              description: Datos adicionales del error. Vacío si no aplica.
+              type: object
+              properties:
+                transfer_available:
+                  description: Solo en `ACTIVATION_LIMIT`. Si la licencia puede transferirse por autoservicio.
+                  type: boolean
