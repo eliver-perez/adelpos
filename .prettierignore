@@ -18,3 +18,9 @@ android/**/build/
 android/.gradle/
 android/.kotlin/
 android/core/data/schemas/
+# Etapa L1 (licencias): copias exactas, de solo lectura, de contracts/v1/, del contrato V1.0 y de la guía de
+# integración de la etiqueta v1.0.0 del servidor de licencias. Nunca se formatean: contracts/licencias/ORIGEN.md
+# guarda su SHA-256. ORIGEN.md y los demás documentos de docs/licencias/ sí siguen con Prettier.
+contracts/licencias/v1/
+docs/licencias/CONTRATO_LICENCIAS_ADEL_POS.md
+docs/licencias/INTEGRACION_ADEL_POS.md

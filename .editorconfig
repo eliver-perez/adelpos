@@ -29,3 +29,14 @@ max_line_length = 100
 
 [android/**.xml]
 indent_size = 4
+
+# Etapa L1 (licencias): copias exactas del servidor de licencias (contracts/licencias/ORIGEN.md). El editor no les
+# agrega el salto de línea final (los .lic y .licreq no lo tienen) ni les quita espacios: cualquier cambio rompe su
+# SHA-256.
+[{contracts/licencias/v1/**,docs/licencias/CONTRATO_LICENCIAS_ADEL_POS.md,docs/licencias/INTEGRACION_ADEL_POS.md}]
+charset = unset
+end_of_line = unset
+insert_final_newline = unset
+indent_style = unset
+indent_size = unset
+trim_trailing_whitespace = unset
