@@ -1659,3 +1659,542 @@ campos de `Service`. `go-unit` pasó sobre el árbol fusionado.
 - **La conexión con el gestor de licencias** (`LimitsSource` con `licensing.Manager.Status()` y `LocalClock`) la hace la
   Fase C. Hasta entonces, `etapa-l1` rechaza toda captura, toda apertura de turno y la entrada a Preparación (falla
   cerrada, como se pidió): ninguna prueba de interfaz corre sobre `etapa-l1` antes de esa conexión.
+
+---
+
+## Revisión R1 · Verificación de licencias (§10 del contrato) y su almacén
+
+La hizo el revisor independiente R1 en `$SP/wt/l1-r1`, rama `etapa-l1-r1`, sobre `27cb24c` (la Fase A fusionada). Se
+revisó `git diff 1ceee93..27cb24c`: `backend/internal/licensing/`, `backend/internal/localsetup/license_key.go`, el
+arranque (`cmd/ad-el-pos-server/license.go` y `main.go`) y `scripts/sync-metadata.mjs` con `config/licencias/`.
+
+- `ISO_TAG=R1`, sin Go temporal y sin emuladores.
+- Ninguna llamada a `licensing.sicrat.com`. No se leyeron los códigos de licencia de prueba ni se imprimió ninguna
+  llave privada.
+- No se cambió código de producción: solo pruebas nuevas.
+
+### Hallazgos
+
+Las pruebas «…Defect…» **fallan hasta que se corrija su hallazgo**. Por eso `go-unit` falla hoy en
+`./internal/licensing`, solo por esas tres pruebas.
+
+| N.º      | Gravedad | Dónde                                                                                                                                                                                      | Escenario (entrada → resultado incorrecto)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | Prueba (commit)                                                                                                                                                   | Corrección propuesta                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| -------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **R1-2** | **Alta** | `manager.go:232` (`checkMachine`), `manager.go:311` (recuperación), `store.go:207` y `store.go:226`                                                                                        | Se copia la carpeta de datos a otra computadora y se **borra o daña `estado.json`**, o se le quita `machine_fingerprint` → la huella nueva se registra como si fuera la primera vez y `vigente.lic` se recupera → la copia queda **Vigente** y sin `Copied`. Tiene la misma identidad y la misma llave, así que también funciona **en línea**: el servidor de licencias ve una sola instalación en dos computadoras y nunca lo puede corregir. La §1.1 de la especificación se anula borrando un archivo de una carpeta que es de la cuenta del servicio, sin `sudo`.                                                                                                                                                                                                                                                                                                                                    | `TestReviewR1DefectCopiedFolderWithoutStateIsNotDetected`, `review_r1_defects_test.go` (`419b0d8`, `82f6a4a`): borrado, dañado y sin huella                       | 1. La huella no debe depender solo de `estado.json`: hay que guardarla junto con la llave de licencias, en el mismo paso en que se crea (por ejemplo, un registro aparte o un encabezado PEM). 2. Si la llave existe y falta la huella o no es válida, se falla cerrado (`Copied` o `MachineUnverified`), nunca se registra una nueva. 3. El registro debería ser un MAC con la llave de licencias, no un SHA-256 con un prefijo público, para que no se pueda calcular a mano.                                                                                       |
+| **R1-1** | Media    | `manager.go:167-172` (Load deja `persistent=false` y un estado vacío), `manager.go:544-550` (Accept prepara la carpeta y escribe)                                                          | Un `estado.json` que la cuenta del servicio no puede leer → `Load` no lo toca (Decisión propuesta 7 de la A). El primer `Accept` lo **reemplaza** con un estado vacío más la licencia recibida. En la prueba: después del cierre `deactivated` (r2), `Accept` de la r1 activa → **aceptada**. Además, `accepted_revisions` queda en r1 y la última hora confiable baja del 10/01/2027 al `issued_at` (16/11/2026). Al reiniciar, la licencia liberada está Vigente. Puede pasar sin mala intención: en macOS el servicio corre con la cuenta del usuario, así que basta un `estado.json` que dejó un proceso con `sudo`; en Windows, un antivirus con el archivo abierto. La consulta automática de la Fase B llamará a `Accept` al arrancar. Lo mismo pasa si `ensureDirectory` falla en `Load` (el estado nunca se lee) o si un estado dañado no se pudo apartar (esto se comprobó leyendo el código). | `TestReviewR1DefectAcceptOverwritesAnUnreadableState`, `review_r1_defects_unix_test.go` (`5ef1ab8`, `82f6a4a`)                                                    | 1. Recordar si el estado se leyó: leído, faltante o dañado ya apartado. 2. Si no se leyó, `Accept` lo vuelve a leer bajo el mutex. Si sigue ilegible, responde `ErrStateNotSaved` sin escribir nada. 3. `persist` no debe escribir un estado que nunca se leyó.                                                                                                                                                                                                                                                                                                       |
+| **R1-3** | Media    | `store.go:203-227` (faltante o dañado → estado nuevo, sin historial), `manager.go:311` (`vigente.lic` como «primera revisión»), `manager.go:525` (el historial sale solo de `estado.json`) | Se aceptan la r1 activa y el cierre r2, y se deja en `vigente.lic` el `.lic` de antes de liberar. Después, una de tres: se **borra**, se **daña** o se **edita** `estado.json` (se baja la revisión y su `sha256`, que se calcula con `shasum`). Resultado: al arrancar vuelve la **r1 Vigente**, y además importar a mano el `.lic` anterior se acepta (§10.4). Funciona mientras la computadora no consulte en línea, porque `refresh` devuelve otra vez el cierre. Es parecido a la limitación aceptada de la §9.2, pero se puede hacer después de recibir el cierre, y se deshace también una revocación del propietario. El mismo efecto, sin mala intención: un `estado.json` de un formato futuro (al bajar de versión) se aparta como dañado y se pierde el historial.                                                                                                                           | `TestReviewR1DefectDeletedStateBringsBackAnOldRevision`, `review_r1_defects_test.go` (`419b0d8`, `82f6a4a`): borrado, dañado y editado, al arrancar y al importar | 1. Guardar una segunda copia de la revisión más alta de cada `license_id` (revisión y `sha256`) fuera de `estado.json`. Propuesta: en la base, con el máximo de las dos copias. La base viaja en los respaldos, pero restaurar uno solo bajaría su copia, no la de `identity/`, y borrar `estado.json` no borraría la de la base. 2. Opcional: un MAC del estado con la llave de licencias, para que una edición a mano se trate como daño. 3. Que «dañado» no reinicie el historial si la otra copia lo tiene. **Decisión del coordinador**: toca L1-D9 y la `0028`. |
+| R1-4     | Baja     | `scripts/sync-metadata.mjs:31-37`                                                                                                                                                          | `sync-check` solo recorre `config/licencias/`. Una copia **huérfana**, por ejemplo `backend/internal/licensing/llaves-production.json` sin su fuente, pasa `sync-check` (que dice «Metadatos coherentes.») y hace compilar la versión de producción. Pasa lo mismo si se borra la fuente y queda la copia. Se comprobó a mano en el árbol y se borró el archivo; no hay commit.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Reproducción manual, sin commit                                                                                                                                   | En `--check`, listar también `backend/internal/licensing/llaves-*.json` y fallar si alguno no tiene su fuente idéntica.                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| R1-5     | Baja     | `verify.go:227-233` (igual que la referencia)                                                                                                                                              | En el contenido firmado, una clave repetida se acepta y gana la última: dos `limits` dan el segundo, con 999. También se aceptan datos después del objeto (`{…} {"basura":true}`). En el encabezado no pasa, porque se compara exacto. Hoy no se puede explotar: solo firma el servidor de licencias, y `json_encode` de PHP no repite claves.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Reproducción manual en una prueba temporal, ya borrada                                                                                                            | Endurecimiento opcional: rechazar las claves repetidas y el contenido sobrante. Se aparta de la referencia, así que es mejor proponerlo para la V1.1. Lo decide el coordinador.                                                                                                                                                                                                                                                                                                                                                                                       |
+| R1-6     | Baja     | `.gitignore`                                                                                                                                                                               | `identity/license-key.pem` y `identity/licencia/` solo quedan fuera de git dentro de `.local/`. No hay una regla de seguridad para otra carpeta de datos dentro del repositorio, como sí la hay para las llaves de firma de Android.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | —                                                                                                                                                                 | Agregar `**/identity/license-key.pem` y `**/identity/licencia/`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+
+### Observaciones (sin número, para decidir o para otras fases)
+
+- **Decisión propuesta 9 de la A**: otra licencia válida para la instalación (otro `license_id`) reemplaza a la
+  vigente, aunque sea un **cierre**. Si se importa por error el cierre de una licencia anterior, una instalación con
+  licencia Vigente queda Revocada. El contrato lo permite («la última licencia válida aceptada»). Las Fases B y E
+  deberían confirmar con el usuario antes de reemplazar la vigente por otra licencia.
+- **Un `.lic` con salto de línea final** se rechaza (`malformed_jws`), igual que la referencia. La Fase B decide si
+  quita los espacios del archivo importado. Si lo hace, el `sha256` de la regla «idéntica byte por byte» debe salir
+  siempre del texto ya recortado.
+- **Time Machine y el Asistente de Migración**: no hay ninguna exclusión (`tmutil`). Restaurar `identity/licencia`
+  desde Time Machine en la misma Mac devuelve revisiones anteriores. Es la «instantánea antigua» de la §12 del
+  contrato, y además restaura la base. El Asistente de Migración a otra Mac sí se detecta por la huella, mientras no
+  ocurra R1-2.
+- **El disco se escribe con el mutex tomado**: `Accept`, `ObserveTime(TimeFromServer)` y `Flush` cada minuto. En
+  macOS, `Sync` es `F_FULLFSYNC`, así que `Status()` espera esa escritura. Que lo tenga en cuenta la puerta de la
+  Fase C, que llama a `Status()` en cada operación.
+- **Los casos de revisión de `vectors.json`** se recorren con el `Verifier`, igual que la referencia, no con el
+  almacén. El almacén lo cubren `TestManagerRevisionNeverGoesBack` y estas pruebas.
+
+### Lo que se comprobó y está bien
+
+- **§10, paso por paso**: `verify.go` es la referencia sin cambios de lógica. El `diff` con
+  `contracts/licencias/v1/verify/license.go` solo cambia los cupos a `int`, separa `checkRevision` y quita `describe`.
+  - **Encabezado**: se compara exacto, byte por byte.
+  - **`kid`**: debe ser del entorno compilado. Aunque se cuele una llave de otro entorno, `key.Environment` se comprueba
+    otra vez.
+  - **Firma Ed25519**: sobre `encabezado.contenido` tal como llegaron.
+  - **base64url**: estricto y canónico; se vuelve a codificar y se compara.
+  - **Contenido de la §4**: tipos, campos obligatorios, `schema_version` que empieza con `1.`, cupos de 0 a 999 solo
+    como enteros JSON, instantes UTC con «Z» y de 0 a 9 decimales, y las reglas por tipo y estado.
+  - **Destinatario y entorno**: se comparan con `server_id` y con la llave pública.
+  - **Revisión**: debe ser mayor que la aceptada, o igual solo si su `sha256` es idéntico.
+  - **Guardado**: temporal, `fsync` y renombrado, todo antes de cambiar la memoria. Si no se guarda, no se acepta.
+- **Intentos de engaño rechazados** (`TestReviewR1HeaderAndEncodingAreExact`, `…SignatureIsNotMalleable` y
+  `…ContentIsStrict`, `ca5db48`):
+  - relleno, espacios, saltos de línea, alfabeto estándar, bits de relleno no canónicos, cuatro segmentos y todo en
+    mayúsculas;
+  - `typ` distinto, `alg` en mayúsculas, campo `crit`, `kid` o `alg` repetidos, otro orden, `kid` con el escape JSON de «-» (barra invertida, `u002d`)
+    y `KID` en mayúsculas, todos con firma válida;
+  - firma maleable `S + L`, también como «misma revisión»;
+  - cupos de 1000, −1, `3.0`, `3e0` o `"3"`;
+  - instantes con desfase, sin zona, con `z`, con 10 decimales, el 30 de febrero o el segundo 60;
+  - `schema_version` `1`, `2.0` o `01.0`, y otros tipos y formatos incorrectos.
+- **Los 67 casos de `vectors.json`** pasan, y ninguno se ajustó:
+  - el SHA-256 de `vectors.json` es el de `ORIGEN.md` y el de la etiqueta `v1.0.0`;
+  - `diff -r` contra el clon no muestra diferencias;
+  - el verificador de referencia da «OK: 20 licencias, 17 casos negativos, 10 casos de revisión, 13 estados
+    temporales, 4 pruebas de posesión y 3 solicitudes .licreq»;
+  - la prueba de AD-EL POS lee los resultados esperados del archivo y además comprueba que `SignProof` dé la prueba
+    publicada.
+- **El entorno**:
+  - `go build -tags adelpos_production ./cmd/ad-el-pos-server` falla por `llaves-production.json`, y
+    `TestProductionBuildFailsWithoutProductionKeys` pasa;
+  - en producción, `WithTestKeys` y `OffsetClock` fallan por la constante, y `DefaultServerURL` es `""`;
+  - `licensing.sicrat.com` solo aparece en `trust_development.go`;
+  - la compilación no confía en las llaves de `vectors.json`, y solo `test_mode` las agrega. Se comprobó por el
+    resultado de la verificación: `unknown_kid` sin `test_mode` y `other_installation` con él
+    (`TestReviewR1FixtureTrustOnlyWithTestMode` y `TestReviewR1FixtureKeysAreNotTrustedByTheBuild`);
+  - `test_mode` exige una base `adel_pos_test_*`, y en el `host`, `RefuseRealDataDir`;
+  - el formato de `config/licencias/llaves-test.json` es exactamente el de `SigningKeys::publicKeys()` del servidor
+    de licencias.
+- **El almacén**:
+  - los permisos son 0700 y 0600;
+  - los temporales se descartan;
+  - si hay un corte entre `estado.json` y `vigente.lic`, manda `estado.json`;
+  - un archivo alterado, de otra llave o de otra instalación se ignora;
+  - `Copied` se detecta con `estado.json` intacto;
+  - si la huella no se puede leer, se reintenta tres veces y falla cerrado.
+- **La llave de licencias**:
+  - se crea una sola vez y nunca reemplaza una existente;
+  - un estado sin llave da error;
+  - la identidad 0.14.0 no se toca;
+  - `EnsureIdentity` no regenera una identidad cuando la carpeta tiene la llave o `licencia/`.
+- **Los secretos**:
+  - ningún registro ni error lleva la llave privada, el JWS completo ni el identificador del equipo;
+  - `Options.PrivateKey` no se expone;
+  - `identity/` no está en ningún respaldo, porque solo se respalda la base;
+  - la Fase A no maneja el código comercial, así que su registro se revisa en la Fase B.
+
+### Lo que no se pudo verificar
+
+- **Windows**: la ACL de `fileacl` en `identity/licencia`, la lectura real de `MachineGuid`, el renombrado encima del
+  archivo y el caso del antivirus de R1-1. Solo se comprobaron `GOOS=windows` build y vet.
+- **R1-1 cuando falla `ensureDirectory` en `Load`**: se vio solo en el código. Como usuario sin `root` no se puede
+  hacer fallar `chmod` en una carpeta propia.
+- **La compilación de producción con llaves reales**: todavía no existen.
+- **La Fase B**: la importación del `.lic`, las respuestas de la API y el código comercial.
+
+### Pruebas ejecutadas
+
+| Prueba                                                                                                                                                                                 | Resultado                                                                                                                                                                                                                                                                         |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Verificador de referencia (`go run -C contracts/licencias/v1/verify . ../fixtures/vectors.json`)                                                                                       | OK, los 67 casos                                                                                                                                                                                                                                                                  |
+| `TestContractVectors -v`                                                                                                                                                               | 67 subpruebas de caso aprobadas                                                                                                                                                                                                                                                   |
+| `TestReviewR1HeaderAndEncodingAreExact`, `…SignatureIsNotMalleable`, `…ContentIsStrict`, `…FixtureKeysAreNotTrustedByTheBuild` y `TestReviewR1FixtureTrustOnlyWithTestMode` (en `cmd`) | Aprobadas                                                                                                                                                                                                                                                                         |
+| `TestReviewR1DefectAcceptOverwritesAnUnreadableState` (R1-1)                                                                                                                           | **Falla**, como se esperaba                                                                                                                                                                                                                                                       |
+| `TestReviewR1DefectCopiedFolderWithoutStateIsNotDetected` (R1-2), las 3 subpruebas                                                                                                     | **Falla**, como se esperaba                                                                                                                                                                                                                                                       |
+| `TestReviewR1DefectDeletedStateBringsBackAnOldRevision` (R1-3), las 3 subpruebas                                                                                                       | **Falla**, como se esperaba                                                                                                                                                                                                                                                       |
+| `ISO_TAG=R1 iso.sh … go-unit`                                                                                                                                                          | vet normal e `integration`: aprobado. `test -race`: todos los paquetes aprobados salvo `./internal/licensing`, que falla solo por las tres pruebas de arriba. El arnés se detiene ahí, así que `GOOS=windows` build y vet (normal e `integration`) se corrieron aparte: aprobados |
+| `ISO_TAG=R1 ISO_RUN=… go-int ./internal/licensing` (sin las pruebas de los hallazgos)                                                                                                  | Estado 0                                                                                                                                                                                                                                                                          |
+| `go build -tags adelpos_production ./cmd/ad-el-pos-server`                                                                                                                             | Falla por `llaves-production.json`, como se esperaba                                                                                                                                                                                                                              |
+| R1-4 a mano: una copia huérfana con `sync-check` y la compilación de producción                                                                                                        | `sync-check` la aprueba y la compilación compila. El archivo se borró                                                                                                                                                                                                             |
+| `format`, `fmt-check`, `sync-check` y `gofmt -l`                                                                                                                                       | Aprobados. Los MD5 de `docs/etapas/`, el contrato, la guía y `contracts/` son iguales antes y después                                                                                                                                                                             |
+
+No hizo falta `go-int ./cmd/ad-el-pos-server`, porque no se agregaron pruebas de integración ahí, y no se tomó el
+candado.
+
+### Commits (rama `etapa-l1-r1`)
+
+- `ca5db48` etapa L1 revisión R1: pruebas adversariales del verificador de la §10 (pasan)
+- `5ef1ab8` etapa L1 revisión R1: R1-1, Accept reemplaza un estado.json que no se pudo leer (prueba que falla)
+- `419b0d8` etapa L1 revisión R1: R1-2 y R1-3, borrar estado.json anula la huella y la revisión aceptada (pruebas
+  que fallan)
+- `82f6a4a` etapa L1 revisión R1: R1-3 también con estado.json dañado o editado e importando el .lic anterior
+
+Archivos: `backend/internal/licensing/review_r1_test.go`, `review_r1_defects_test.go`,
+`review_r1_defects_unix_test.go` y `backend/cmd/ad-el-pos-server/review_r1_license_test.go`.
+
+---
+
+## Fase B · Cliente en línea y sin internet
+
+La hizo el agente del núcleo en `$SP/wt/l1-a`, rama `etapa-l1-a`, desde `406e730`, con `ISO_TAG=LA`. En el camino trajo
+`etapa-l1` con la Fase D (`dcb6cd3`) e hizo las correcciones de la revisión R1.
+
+- Sin Go temporal y sin emuladores.
+- Ninguna llamada a `licensing.sicrat.com`: todo contra el servidor de licencias simulado, en loopback.
+- No se leyeron los códigos de licencia de prueba.
+
+### Qué se hizo
+
+- **Cliente en línea** (`backend/internal/licensing/client.go`, §8 del contrato):
+  - **Transporte**: HTTPS con TLS verificado (TLS 1.2 o más), JSON, cuerpos de 16 KiB como máximo, 15 s por intento, sin
+    redirecciones y sin proxy.
+  - **Cada operación**: pide su desafío y firma la prueba de posesión (`SignProof`, que da la prueba publicada en
+    `vectors.json`). Las operaciones son `Activate`, `Transfer`, `Refresh` y `Deactivate`, una a la vez.
+  - **Reintentos**: hasta tres intentos con **el mismo cuerpo y el mismo `request_id`**. Se reintentan las fallas de red,
+    `TEMPORARY_UNAVAILABLE` y `RATE_LIMITED` con un `Retry-After` de 5 s o menos. Un `Retry-After` más largo se
+    devuelve con sus segundos.
+  - **Se decide por `error.code`** (`*ServerError`), nunca por el HTTP ni por el `message`.
+  - **La respuesta**: cada `license_jws` pasa por `Manager.Accept` (§10). Una licencia que no pasa se ignora
+    (`*ResponseRejectedError`) y sigue la instalada.
+  - **Hora confiable** (L1-D26): solo el `server_time` de una respuesta correcta la alimenta. Correcta quiere decir 200,
+    con su forma, su `request_id` y su licencia aceptada.
+  - **Errores sin respuesta** (red, TLS, plazo, respuesta inesperada): `*TransportError` con su motivo. Nunca llegan a
+    `Accept`, así que nunca afectan la licencia instalada.
+  - **En `test_mode`** (L1-D18): solo loopback, salvo `ADEL_LICENSE_ALLOW_REMOTE=1`. Se comprueba en dos lugares: la
+    dirección al crear el cliente y, además, cada conexión ya resuelta (`loopbackOnly`).
+- **La consulta en segundo plano** (`worker.go`):
+  - la primera, entre 1 y 5 minutos después de arrancar;
+  - después, cada 24 h ± 1 h;
+  - si falla, en 1 hora o en lo que pida `Retry-After`;
+  - solo con una activación instalada que no sea un cierre, y nunca con la instalación copiada.
+  - Arranca en `serveHTTP` y se apaga en orden.
+- **Sin internet** (`offline.go`):
+  - `Manager.OfflineRequest` arma el `.licreq` de `activate` (código opcional), `renew` y `deactivate`. Lleva los campos
+    en el orden de los casos y JSON compacto, así que es **idéntico byte por byte** a los de `vectors.json`. Antes de
+    entregarlo se comprueba con `VerifyOfflineRequest`.
+  - `Manager.ImportLicense` acepta un `.lic` con la §10. Antes quita los espacios, los saltos de línea y el BOM de
+    alrededor; el `sha256` sale del JWS ya recortado.
+- **El código comercial** (L1-D4, `keyformat.go`): 15 símbolos de `23456789ABCDEFGHJKMNPQRSTUVWXYZ` en grupos 3-4-4-4,
+  con guiones opcionales y sin distinguir mayúsculas. Se normaliza antes de enviarlo. Nunca se registra ni se audita.
+- **Rutas `license/*`** (`administration/license.go`, con su rama en `routes.go`). Las operaciones en línea corren
+  después de confirmar la autenticación (`completeDeferred`, en `reports.go`): la red nunca retiene una conexión de la
+  base ni un lock. Se auditan en una transacción corta aparte. El plazo de estas rutas es de 75 s (`http.go`).
+
+  | Ruta                                                  | Permiso                       | Qué hace                                                                                          |
+  | ----------------------------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------- |
+  | `GET license/status`                                  | cualquier sesión              | Estado completo (`LicenseStatus`)                                                                 |
+  | `GET license/status` sin `Authorization`              | credencial del dispositivo    | Resumen `{state, environment, copied}`. Es una rama en `dispatch`, antes de `authenticateSession` |
+  | `POST license/activate {license_key}`                 | `license.manage`              | §8.3                                                                                              |
+  | `POST license/transfer {license_key, confirmed}`      | `license.manage`              | §8.4; `confirmed: true` es obligatorio                                                            |
+  | `POST license/refresh`                                | `license.manage`              | «Buscar actualización»                                                                            |
+  | `POST license/deactivate {confirmed}`                 | `license.manage`              | «Liberar esta licencia»                                                                           |
+  | `POST license/offline-request {action, license_key?}` | `license.manage`              | `{action, request_id, filename, content}`                                                         |
+  | `POST license/import {license}`                       | `license.manage`              | El `.lic`; el rechazo se audita aunque no cambie nada                                             |
+  | `POST license/identity/regenerate {confirmed}`        | `license.manage` y solo local | L1-D11, ver abajo                                                                                 |
+
+- **La identidad nueva de una instalación copiada** (L1-D11). Solo se hace con `copied`, si no responde 409
+  `IDENTITY_REGENERATION_NOT_NEEDED`, y solo por la escucha local, si no responde 403 `LICENSE_IDENTITY_LOCAL_ONLY`.
+  1. Revoca las terminales emparejadas por red, con sus sesiones (`identity_regenerated`) y sus credenciales de envío.
+  2. `localsetup.RegenerateIdentity` aparta `identity/` completa a `identity-reemplazada-AAAAMMDD-HHMMSS/` y crea
+     `server_id`, certificado, llave de licencias y registro de la huella nuevos. Si algo falla, la anterior vuelve a
+     su lugar.
+  3. `Manager.SwitchInstallation` pasa el gestor a la identidad nueva, **con la misma última hora confiable**
+     (L1-D25).
+  4. Responde `restart_required: true`: la escucha de red sigue con el certificado anterior hasta reiniciar.
+  5. Se audita `license.identity_regenerated`.
+- **Antes de ir a la red** se comprueba si la identidad está disponible (`Manager.SigningProblem`): con la instalación
+  copiada, 409 `LICENSE_INSTALLATION_COPIED`.
+- **El permiso** `license.manage` («Administrar la licencia», L1-D21):
+  - en la sección «Fase B» de la `0028`, solo para el rol `administrator`;
+  - en `permissions.go` y en `permission_catalog_entries.go`, en el grupo Sistema;
+  - no entra en ninguna capacidad de la vista sencilla ni en ningún rol de fábrica.
+- **Versión 0.15.0 y esquema 28**: ya venían de la Fase D. Al unir quedaron iguales.
+- **Capacidad** `license-v1` (L1-D22), con su prueba en `clientversion_test.go`.
+- **Contrato v1**:
+  - `getLicenseStatus` en `openapi.json`, con `LicenseStatus` y `LicenseDeviceSummary` y la seguridad «sesión» o «solo
+    el dispositivo»;
+  - su paso en `TestContractV1`, con y sin sesión;
+  - la sección «Licencia del servidor principal» en `docs/API_V1.md`, con la tabla de códigos;
+  - las rutas del escritorio en `API_CONTRACTS.md`.
+- **`server.json`**: `license_server_url` opcional (https), y `newLicenseClient` en `cmd/ad-el-pos-server/license.go`.
+- **Registro de movimientos**: los nombres de las acciones de la licencia en `desktop/src/services/auditActions.ts`.
+  Además, `license.seat_released` de la Fase D, que no tenía nombre y hacía fallar `auditActions.test.ts`.
+
+### La interfaz para la Fase C (L1-D5)
+
+```go
+// En administration: service.LicenseServer.ServerTime(ctx)
+func (client *licensing.Client) ServerTime(ctx context.Context) (licensing.ServerTime, error)
+
+type ServerTime struct {
+	Time   time.Time // la hora del servidor de licencias, en UTC
+	Source string    // licensing.ServerTimeFromRefresh o licensing.ServerTimeFromChallenge
+}
+```
+
+- **Con una activación instalada** (y la identidad utilizable) usa `refresh`. Su `server_time` es contractual, y como
+  toda respuesta correcta también sube la última hora confiable y puede traer una revisión nueva.
+- **Sin activación**, o con la instalación copiada, pide un desafío de `activate`, que no se usa. La hora es su
+  `expires_at` menos 300 s, y no alimenta la última hora confiable (L1-D26). Para la §6.3 decide la Fase C, con
+  `Manager.ReplaceTrustedTime`.
+- **Errores**: los del cliente (`*ServerError`, `*TransportError`, `*ResponseRejectedError`, `ErrIdentityUnavailable`).
+  `licenseFault` de `administration/license.go` los traduce a los códigos de L1-D17.
+
+### Herramientas de prueba para las Fases E y F (`backend/cmd/license-test`)
+
+- **Qué es**: un programa aparte del servidor, con dos órdenes: `issue` y `server`.
+- **Exige `ADEL_TEST_MODE=1`**. Nunca llama al servidor real: firma con las llaves públicas de `vectors.json`.
+- **Nunca llega a un instalador ni a producción**:
+  - todas sus fuentes llevan `//go:build !adelpos_production`;
+  - `guard_test.go` comprueba que `./cmd/ad-el-pos-server` no depende de `internal/licensetest` ni de esta orden, que
+    `build-macos-pkg.sh`, `build-windows.ps1`, `windows/dev.mjs` y `dev.sh` solo compilan el servidor, y que con la
+    etiqueta de producción no compila.
+- **El Go temporal debe confiar en esas llaves**. Necesita:
+  - `test_mode: true`;
+  - `ADEL_TEST_LICENSE_TRUST=<ruta absoluta de contracts/licencias/v1/fixtures/vectors.json>`;
+  - para activar en línea, además, `"license_server_url": "https://127.0.0.1:<puerto>"` en su `server.json` y
+    `ADEL_TEST_LICENSE_CA=<el PEM de --ca-out>`.
+  - Hoy `iso.sh server-up` no pasa esas variables: **hay que agregarlas al arnés** o arrancar el Go temporal a mano.
+
+**`issue`: un `.lic` de prueba** para poner el Go temporal en cualquier estado con `POST license/import`.
+
+```sh
+cd backend
+ADEL_TEST_MODE=1 ADEL_TEST_LICENSE_TRUST="$PWD/../contracts/licencias/v1/fixtures/vectors.json" \
+  go run ./cmd/license-test issue --identity "$ISO_SERVER_IDENTITY" \
+  --type subscription --expires-at -2d --revision 2 --license-id 7a0c5a4e-0000-4000-8000-000000000001 \
+  --output "$SP/run-E/tolerancia.lic"
+# {"event":"issued","output":".../tolerancia.lic","license_id":"7a0c…","license_revision":2}
+```
+
+| Opción                                                                                     | Valor (por omisión)                                                                                                    |
+| ------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
+| `--identity <carpeta identity>`                                                            | La del Go temporal (`ISO_SERVER_IDENTITY`). Se lee su `server_id` y su llave pública. O `--server-id` y `--public-key` |
+| `--type`                                                                                   | `perpetual`, `subscription` o `trial` (`perpetual`)                                                                    |
+| `--expires-at`, `--issued-at`, `--period-starts-at`, `--updates-until`                     | RFC 3339 o un desfase desde ahora (`-2d`, `36h`, `-90m`). Suscripción: +1 mes; prueba: +15 días                        |
+| `--grace-days`                                                                             | El del tipo (5 en suscripción, 0 en los demás). Otro valor falla, porque el contrato lo rechaza                        |
+| `--plan`                                                                                   | `basico`, `elemental` o `premium` (`elemental`, 3/3/3)                                                                 |
+| `--cash-registers`, `--order-takers`, `--kitchen-displays`                                 | Los del plan. Con otro valor la licencia queda personalizada                                                           |
+| `--status`, `--reason`                                                                     | `active` o `revoked`, con `deactivated`, `transferred` o `revoked` (`revoked`)                                         |
+| `--revision`, `--license-id`, `--activation-id`, `--licensee`, `--kid`, `--billing-period` | `1`, nuevos, «Restaurante de prueba», `adelpos-test-fixture-a`, `monthly`                                              |
+| `--output`                                                                                 | Sin él, el `.lic` va en `output` de la línea JSON                                                                      |
+
+- **Los estados**: vigente (`--expires-at 10d`), tolerancia (`-2d`), vencida (`-6d` en suscripción, o una prueba con
+  `-1d`), revocada (`--status revoked`), 0 comanderos (`--order-takers 0`) y plan básico (`--plan basico`).
+- **La revisión**: con el mismo `--license-id`, cada `.lic` nuevo necesita una revisión mayor que la anterior (§10.4).
+  Si no, `LICENSE_FILE_INVALID` con `stale_revision`. Usa otro `--license-id` por escenario o sube `--revision`.
+
+**`server`: el servidor de licencias simulado** como proceso, con TLS y solo en loopback.
+
+```sh
+ADEL_TEST_MODE=1 ADEL_TEST_LICENSE_TRUST="$PWD/../contracts/licencias/v1/fixtures/vectors.json" \
+  go run ./cmd/license-test server --listen 127.0.0.1:8475 --ca-out "$SP/run-E/licencias-ca.pem"
+# {"event":"ready","url":"https://127.0.0.1:8475","ca":".../licencias-ca.pem"}   (SIGTERM: {"event":"stopped"})
+```
+
+Cumple la API del contrato:
+
+- el desafío es de un solo uso, de 5 minutos;
+- la prueba de posesión se verifica;
+- la revisión es global por licencia;
+- la misma instalación que vuelve a activar recibe su revisión vigente;
+- la transferencia queda pendiente hasta que la computadora anterior consulte o libere;
+- los cierres llegan con su motivo;
+- un reintento idéntico recibe la misma respuesta y uno distinto, `REQUEST_CONFLICT`;
+- los errores de transporte son 404, 405, 413 y 415.
+
+**Cada código comercial** con el formato de L1-D4 es una licencia distinta del simulador. Son códigos inventados del
+simulador, no licencias reales. Su **primer grupo** decide el comportamiento:
+
+| Prefijo | Comportamiento                                                                                                                |
+| ------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `PRP`   | Perpetua, Plan elemental (3, 3 y 3)                                                                                           |
+| `BSC`   | Perpetua, Plan básico (1, 0 y 0)                                                                                              |
+| `MNS`   | Suscripción mensual desde la primera activación, 5 días de tolerancia                                                         |
+| `PRB`   | Prueba de 15 días, Plan básico                                                                                                |
+| `GRC`   | Suscripción vencida hace 2 días (tolerancia)                                                                                  |
+| `VNC`   | Suscripción vencida hace 40 días (vencida)                                                                                    |
+| `RVK`   | 403 `REVOKED`                                                                                                                 |
+| `ACT`   | Activa en otra computadora: 409 `ACTIVATION_LIMIT` con `transfer_available: true`; la transferencia funciona                  |
+| `ACN`   | Activa en otra computadora con una transferencia pendiente: `transfer_available: false`, y transferir da 409 `TRANSFER_LIMIT` |
+| `TMP`   | 503 `TEMPORARY_UNAVAILABLE`                                                                                                   |
+| `RAT`   | 429 `RATE_LIMITED` con `Retry-After: 30`                                                                                      |
+| `PRF`   | 401 `INVALID_PROOF`                                                                                                           |
+| otro    | 404 `LICENSE_NOT_FOUND`                                                                                                       |
+
+Ejemplos: `PRP-2222-2222-2222`, `MNS-2223-2222-2222` y `ACT-2222-2222-2222`. Usa solo `23456789ABCDEFGHJKMNPQRSTUVWXYZ`.
+
+**Controles** (POST con JSON en la misma dirección, salvo `estado`):
+
+| Control                      | Cuerpo                                                   | Efecto                                                                                           |
+| ---------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `/_prueba/siguiente-error`   | `{"accion","codigo","retry_after","transfer_available"}` | El siguiente error de esa acción (`challenge`, `activate`, `transfer`, `refresh` o `deactivate`) |
+| `/_prueba/perder-siguiente`  | `{"accion"}`                                             | La siguiente respuesta se guarda y se pierde (el cliente reintenta)                              |
+| `/_prueba/alterar-siguiente` | `{}`                                                     | La siguiente licencia llega con la firma alterada                                                |
+| `/_prueba/hora`              | `{"desfase":"-2h"}`                                      | La hora del servidor (para la §6.3 de la Fase C)                                                 |
+| `/_prueba/revocar`           | `{"license_key"}`                                        | La revocación del panel (prueba 8 de la guía)                                                    |
+| `/_prueba/renovar`           | `{"license_key","meses"}`                                | Una revisión nueva con más vigencia (prueba 7)                                                   |
+| `GET /_prueba/estado`        | —                                                        | Licencias, revisión, activación y transferencia pendiente                                        |
+
+**Android (Fase F)**: el teléfono lee `GET license/status` con solo su credencial (el resumen) o con su sesión. El
+estado del Go temporal se pone con `issue` + `license/import`, desde la computadora principal y con la sesión del
+administrador.
+
+### Correcciones de la revisión R1
+
+Tomé las pruebas del revisor con `cherry-pick` de `ca5db48`, `5ef1ab8`, `419b0d8` y `82f6a4a` (aquí `85062de`,
+`4a18e00`, `c03adcf` y `dc52145`). Ninguna se ajustó y **las siete pasan**.
+
+| Hallazgo                                   | Corrección                                                                                                                | Pruebas                                                                                                                                                  |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **R1-2**, la huella anulada                | Ver abajo                                                                                                                 | La del revisor (las tres subpruebas) y `TestMachineRecordFailsClosed`: sin registro, alterado o de otra instalación                                      |
+| **R1-1**, estado ilegible                  | Ver abajo                                                                                                                 | La del revisor, `TestUnreadableStateIsReadAgainBeforeWriting` y `TestUnreadableStateIsNeverReplaced`                                                     |
+| **R1-3**, volver a una revisión superada   | Ver abajo                                                                                                                 | La del revisor (borrado, dañado y editado), `TestRevisionFloorUsesBothCopies`, `TestDatabaseRevisionCopyNeverGoesBack` (`go-int`) y `TestStageL1Upgrade` |
+| **R1-4**, copia de llaves huérfana         | `sync-metadata.mjs`: con `--check`, una `backend/internal/licensing/llaves-*.json` sin su fuente falla; `sync` la borra   | A mano: una `llaves-production.json` huérfana hace fallar `sync-check` y `sync` la borra                                                                 |
+| **R1-6**, `.gitignore`                     | `**/identity/license-key.pem`, `**/identity/license-machine.json`, `**/identity/licencia/` y `**/identity-reemplazada-*/` | `git check-ignore` de las tres primeras rutas                                                                                                            |
+| **R1-5**, claves repetidas en el contenido | No se cambia, para no ser más estricto que el verificador de referencia                                                   | Propuesta para la V1.1                                                                                                                                   |
+
+- **R1-2, la huella firmada**:
+  - **Dónde vive**: en `identity/license-machine.json` (`machine_record.go`), firmada con la llave Ed25519 y atada al
+    `server_id` y a la llave pública. Mensaje `ADELPOS-EQUIPO-REGISTRO-V1\n…`.
+  - **Cuándo se crea**: `EnsureLicenseKey` crea primero el registro y al final la llave. El enlace de la llave es el
+    punto de confirmación: un corte deja a lo más un registro sin llave, que se reemplaza en el siguiente intento.
+    Sin poder leer la huella no se crea nada.
+  - **Al arrancar**: con la llave y sin registro válido (falta, está alterado o es de otra instalación) o con otra
+    huella, se falla cerrado: `Copied`, «Sin activar» o «Sin activar con datos» (L1-D26).
+  - **Nunca se vuelve a crear solo**: el único camino es la identidad nueva.
+  - **Ya no se registra la huella por faltar en `estado.json`**. El campo sigue ahí, informativo.
+  - **Qué no protege**: quien tiene la llave privada (la misma carpeta, los mismos permisos) puede firmar otro registro.
+    Es el administrador del equipo (§12 del contrato).
+  - **Efecto en instalaciones de prueba**: un Go temporal o una instalación de desarrollo que creó la llave con la
+    Fase A, antes de esta corrección, no tiene registro. Queda como copiada y necesita la identidad nueva. La Mac real
+    sigue en 0.14.0, sin llave: con la 0.15.0 crea las dos juntas.
+- **R1-1, el estado ilegible**:
+  - El gestor recuerda si leyó `estado.json` (`stateLoaded`).
+  - Toda escritura lo vuelve a intentar bajo el mutex: `Accept`, `ObserveTime` del `server_time`, `Flush`,
+    `ReplaceTrustedTime`, la consulta en segundo plano y la carpeta que no se pudo preparar.
+  - Si sigue ilegible: `ErrStateNotSaved` sin escribir nada.
+  - Al poder leerlo, conserva la hora observada en memoria y recupera la licencia.
+- **R1-3, la segunda copia de las revisiones**:
+  - **La tabla**: `app.license_revisions` (`license_id`, revisión, `sha256`), en la sección «Fase A (revisión R1)» al
+    principio de la `0028`. `PoolProbe` la lee y la escribe; nunca baja (`ON CONFLICT … WHERE`).
+  - **La revisión mínima aceptable** es el máximo de las dos copias. Al arrancar y en `Accept`, la licencia guardada y
+    `vigente.lic` deben ser exactamente esa revisión.
+  - **La recuperación** desde `vigente.lic` como «primera revisión» solo vale si ninguna de las dos copias conoce la
+    licencia.
+  - **Al aceptar** se escribe primero la copia de la base: si falla, no se acepta. Si la base no se pudo leer al
+    arrancar, `Accept` la vuelve a leer y, si sigue sin poder, no acepta.
+  - **La prueba de subida** (`TestStageL1Upgrade`) comprueba la tabla vacía y sus restricciones. Las pruebas de subida
+    anteriores (`stageA1Snapshot`, `stage9HRowCounts` y la de la etapa 8) excluyen lo nuevo de la `0028`.
+
+### Decisiones propuestas
+
+1. **Las herramientas de prueba son un programa aparte**, `cmd/license-test`, y no órdenes del servidor como
+   `legacy-synthetic`. Así no llegan a ningún instalador, aunque el `.pkg` sea de desarrollo. Una prueba lo comprueba.
+2. **La autoridad del servidor simulado** (`ADEL_TEST_LICENSE_CA`, solo con `test_mode` y en desarrollo): el cliente
+   sigue verificando TLS también en las pruebas, en lugar de admitir `http`.
+3. **Los códigos nuevos de la gestión**:
+   - `LICENSE_INSTALLATION_COPIED` (409);
+   - `LICENSE_STATE_NOT_SAVED` (503);
+   - `IDENTITY_REGENERATION_NOT_NEEDED` (409);
+   - `LICENSE_IDENTITY_LOCAL_ONLY` (403);
+   - `IDENTITY_UNAVAILABLE` con `details.reason` (`identity` o `machine_unverified`);
+   - `LICENSE_NOT_ACTIVATED` (el de la puerta) para consultar, liberar y renovar sin activación.
+4. **Cuándo se reintenta**: tres intentos con el mismo cuerpo ante una falla de red, `TEMPORARY_UNAVAILABLE` o
+   `RATE_LIMITED` con `Retry-After` de 5 s o menos. Un `Retry-After` mayor se devuelve como `LICENSE_SERVER_BUSY`, con
+   sus segundos.
+5. **La identidad nueva solo con `copied`**, y la escucha de red no se cambia en caliente: `restart_required: true`.
+   Entre la identidad nueva y el reinicio, emparejar una terminal fijaría el certificado anterior. El escritorio (Fase
+   E) debe pedir «Reiniciar» enseguida.
+6. **`transfer` y `deactivate` piden `confirmed: true`** en el cuerpo, además de la confirmación en pantalla.
+7. **La consulta en segundo plano no se audita** (solo deja la bitácora). Una revocación que llega así aparece en el
+   estado. Lo audita la Fase C con `license.changed` si hace falta.
+
+### Archivos
+
+- **Paquete `backend/internal/licensing/`**:
+  - el cliente y sin internet: `client.go`, `worker.go`, `offline.go`, `keyformat.go`;
+  - R1: `machine_record.go`, y los cambios en `manager.go` y `datapresence.go` (también la parte de R1).
+  - pruebas: `client_test.go` (paquete externo), `offline_test.go`, `review_r1_fixes_test.go`,
+    `no_real_server_test.go`, `store_unix_test.go` y las del revisor.
+- **Herramientas de prueba**:
+  - `backend/internal/licensetest/` (`fixtures.go`, `issue.go`, `server.go`, `control.go`, `tls.go` y
+    `server_test.go`);
+  - `backend/cmd/license-test/` (`main.go`, `main_test.go` y `guard_test.go`).
+- **`backend/internal/administration/`**:
+  - `license.go` y `license_acceptance_test.go`;
+  - bloques propios en `routes.go`, `reports.go` (`completeDeferred`), `http.go` (el plazo) y `service.go` (el campo
+    `LicenseServer` y el resumen sin sesión en `dispatch`);
+  - `permissions.go` y `permission_catalog_entries.go`.
+- **`backend/internal/localsetup/`**:
+  - `identity_regenerate.go`;
+  - `license_key.go`: el registro de la huella, con la nueva firma `EnsureLicenseKey(dir, fingerprint)`.
+- **`backend/cmd/ad-el-pos-server/`**: `license.go` (`newLicenseClient` y las ayudas de prueba) y `main.go` (el cliente
+  y su trabajador).
+- **Configuración y contrato**:
+  - `backend/internal/config/config.go` (`license_server_url`) y `backend/internal/httpapi/router.go` (`license-v1`);
+  - `backend/migrations/0028_licencias.sql` (las secciones «Fase A (revisión R1)» y «Fase B», antes de la «Fase D»);
+  - `backend/internal/apicontract/openapi.json` y `contract_integration_test.go`, `docs/API_V1.md` y `API_CONTRACTS.md`.
+- **Pruebas de la base**: `backend/internal/database/stagel1_upgrade_test.go`, `stagea1_upgrade_test.go`,
+  `stage9h_upgrade_test.go` y `existing_install_test.go`.
+- **Otros**: `desktop/src/services/auditActions.ts`, `scripts/sync-metadata.mjs` y `.gitignore`.
+
+### Pruebas (realmente ejecutadas)
+
+| Prueba                                                                                            | Resultado                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| ------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cliente contra el servidor simulado (`TestClient*`: 9 pruebas)                                    | Aprobadas. Cubren cada código de error, el reintento con el mismo cuerpo y `request_id` (respuesta perdida y repetida), `Retry-After` (corto se espera, largo se devuelve), `ACTIVATION_LIMIT` true y false, `TRANSFER_LIMIT`, el JWS alterado (su `server_time` no cuenta), `TEMPORARY_UNAVAILABLE` sin cambiar la licencia, red y TLS, `ServerTime` por desafío y por `refresh`, la consulta en segundo plano y el loopback en `test_mode` |
+| `.licreq` (`TestOfflineRequestsMatchTheContractFixtures`, `TestManagerOfflineRequests`)           | Aprobadas: las tres acciones idénticas byte por byte a `vectors.json` y verificadas con la referencia                                                                                                                                                                                                                                                                                                                                        |
+| `TestImportLicenseFile` y `TestNormalizeLicenseKey`                                               | Aprobadas                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| El simulador (`TestSimulatedServerFollowsTheContract`)                                            | Aprobada: 404, 405 con `Allow`, 415, 413, campo sobrante, reintento idéntico, `REQUEST_CONFLICT`, desafío usado y `Retry-After`                                                                                                                                                                                                                                                                                                              |
+| `license-test` (`TestLicenseTestRequiresTestMode`, `…Issue`, `…Server`, `TestTestToolsNeverShip`) | Aprobadas                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `TestNoAutomatedTestCallsTheRealLicenseServer` (§9.1)                                             | Aprobada. A mano, con una especificación temporal que nombraba el servidor real, falló como debía (se borró)                                                                                                                                                                                                                                                                                                                                 |
+| Las pruebas del revisor R1 (7) y las de las correcciones                                          | Aprobadas                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `go-int ./internal/administration`, con `TestLicenseRoutes`                                       | Estado 0, el paquete completo (274 s)                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `go-int ./cmd/ad-el-pos-server`, con el candado                                                   | Estado 0 (67 s); el candado se liberó                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `go-int ./internal/database`                                                                      | Estado 0, con `TestStageL1Upgrade` (Fases A-R1, B y D)                                                                                                                                                                                                                                                                                                                                                                                       |
+| `go-int ./internal/apicontract`                                                                   | Estado 0 (`TestContractV1` con `getLicenseStatus` y `TestPlainLanguageMessages`)                                                                                                                                                                                                                                                                                                                                                             |
+| `go-int ./internal/licensing`                                                                     | Estado 0                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `go-unit` (vet normal e `integration`, `test -race`, `GOOS=windows` build y vet)                  | Aprobado                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `vitest src/services/auditActions.test.ts`                                                        | 5 de 5                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `format`, `fmt-check` y `sync-check`                                                              | Aprobados                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| MD5 de `docs/etapas/`, del contrato, de la guía y de `contracts/`                                 | Iguales antes y después                                                                                                                                                                                                                                                                                                                                                                                                                      |
+
+### Lo no verificado
+
+- **Windows**: la ACL de `license-machine.json` y la lectura real de `MachineGuid`. Solo `GOOS=windows` vet.
+- **El servidor simulado como proceso, contra un Go temporal real**: `TestLicenseTestServer` lo prueba con un gestor en
+  el mismo proceso, pero no se arrancó el Go temporal con `license_server_url`. Es de la Fase E.
+- **Activar contra `licensing.sicrat.com`**: es de la Fase G.
+- **Reiniciar la escucha de red después de la identidad nueva**: solo se responde `restart_required`.
+
+### Para el coordinador
+
+- **La unión `755f0b8`** dejó la `0028` con un separador de conflicto. Se corrigió en `0d75e56`: hay que fusionar la
+  rama entera, no la unión sola.
+- **Los números de decisión**: el mensaje de `df8f1e3` usa L1-D27 a L1-D29, la numeración del primer aviso. Los
+  comentarios del código ya no llevan números, solo los hallazgos R1-1 a R1-3.
+- **Conectar `Seats` con el gestor**: `licenseseats` ya está en `etapa-l1`, pero `main.go` todavía le pasa
+  `Limits: nil`. Conectar `application.License.Status()` (`Limits` y `HasLicense()`) es de la Fase C o del coordinador,
+  como dice el comentario de `main.go`.
+- **El arnés**: para las Fases E y F hay que agregar a `iso.sh server-up` `ADEL_TEST_LICENSE_TRUST`,
+  `ADEL_TEST_LICENSE_CA` y `license_server_url`.
+
+### Commits (rama `etapa-l1-a`, desde `406e730`)
+
+- `fd2c9d0` cliente del servidor de licencias (en línea, sin internet y consulta en segundo plano)
+- `4913923` servidor de licencias simulado y orden license-test, solo de pruebas, y pruebas del cliente
+- `f703972` license_server_url en server.json e identidad nueva de una instalación copiada
+- `6645495` rutas license/*, permiso license.manage (0028, sección «Fase B»), capacidad license-v1 y versión 0.15.0
+- `85062de`, `4a18e00`, `c03adcf` y `dc52145`: las pruebas de la revisión R1 (cherry-pick)
+- `df8f1e3` correcciones de R1-1, R1-2 y R1-3
+- `7417221` sync-check con una copia de llaves sin fuente (R1-4) y `.gitignore` (R1-6)
+- `755f0b8` trae etapa-l1 con la Fase D
+- `e861692` los comentarios nombran los hallazgos en lugar de números de decisión
+- `0d75e56` la 0028 unida bien y la prueba de subida de 27 a 28
+- `df9e868` contrato v1 con getLicenseStatus, TestContractV1, docs/API_V1.md y API_CONTRACTS.md
+- `7c9ccc8` nombres del Registro de movimientos para la licencia (y license.seat_released)
+- `3c109d6` pruebas de las rutas license/* y la copia comprobada antes de ir a la red
+- `75cb9d0` prueba de que ninguna prueba automática nombra ni llama al servidor real (§9.1)
+
+### Decisiones del coordinador sobre la revisión R1 y la Fase B
+
+La Fase B y las correcciones de R1 están fusionadas en `5cd23dd`; `go-unit` pasó sobre el árbol fusionado. El mensaje del
+commit `df8f1e3` nombra estas decisiones como L1-D27 a L1-D29, la numeración de un aviso anterior. Valen las de aquí.
+
+- **L1-D29 · R1-2 (alta).** La huella del equipo va en `identity/license-machine.json`, firmada con la llave de licencias
+  y atada al `server_id`. Si el registro falta, está alterado o es de otra huella, la instalación queda como copiada (falla
+  cerrada). No protege contra quien tiene la llave privada: es la §12 del contrato.
+- **L1-D30 · R1-1 (media).** Con un estado ilegible no se escribe nada (`ErrStateNotSaved`).
+- **L1-D31 · R1-3 (media).** Hay una segunda copia del historial de revisiones en `app.license_revisions`, sección «Fase A
+  (revisión R1)» de la `0028`. La revisión mínima es el máximo de las dos copias, así que ni restaurar un respaldo viejo ni
+  borrar el archivo devuelven una revisión superada. L1-D9 sigue igual.
+- **L1-D32 · R1-4 y R1-6 (bajas).** `sync-check` detecta copias de llaves sin fuente, y `.gitignore` excluye la llave, el
+  registro de la huella y el estado de la licencia.
+- **L1-D33 · R1-5 (baja).** No se cambia: así no somos más estrictos que el verificador de referencia. **Propuesta para la
+  V1.1**: que el contenido firmado rechace claves repetidas y datos después del objeto.
+- **L1-D34 · Se aceptan las seis decisiones propuestas de la Fase B**:
+  - las herramientas `license-test` son un programa aparte;
+  - `ADEL_TEST_LICENSE_CA`, solo en `test_mode` y en desarrollo;
+  - los códigos nuevos de la gestión de la licencia;
+  - tres intentos, y un `Retry-After` de más de 5 s se devuelve como `LICENSE_SERVER_BUSY`;
+  - `confirmed: true` en `transfer` y `deactivate`;
+  - «Reiniciar» después de la identidad nueva.
+- **Para las Fases C, E, F y G**:
+  - Las instalaciones de prueba creadas con la Fase A (llave sin registro de huella) quedan como copiadas: se crean
+    nuevas.
+  - El arnés pasa las ayudas de prueba de la licencia a `server-up`: lo hace el coordinador.
+  - La conexión de los cupos con la licencia la hace la Fase C.
