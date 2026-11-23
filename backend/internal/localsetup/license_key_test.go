@@ -155,7 +155,7 @@ func testFingerprint() (string, error) {
 	return strings.Repeat("ab", 32), nil
 }
 
-// Revisión R1 (R1-2, L1-D27): la llave se crea junto con el registro firmado de la huella de este equipo; con la
+// Revisión R1 (R1-2): la llave se crea junto con el registro firmado de la huella de este equipo; con la
 // llave ya creada el registro nunca se crea otra vez; un registro sin llave (una creación interrumpida) se reemplaza.
 func TestLicenseKeyIsCreatedWithItsMachineRecord(t *testing.T) {
 	directory := filepath.Join(t.TempDir(), IdentityFolder)

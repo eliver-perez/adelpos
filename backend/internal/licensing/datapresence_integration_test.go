@@ -160,7 +160,7 @@ func TestDatabaseProbeCountsOnlyOperations(t *testing.T) {
 	}
 }
 
-// Revisión R1 (R1-3, L1-D29): la copia del historial de revisiones en la base sube y nunca baja.
+// Revisión R1 (R1-3): la copia del historial de revisiones en la base sube y nunca baja.
 func TestDatabaseRevisionCopyNeverGoesBack(t *testing.T) {
 	pool := testDatabase(t)
 	ctx := context.Background()

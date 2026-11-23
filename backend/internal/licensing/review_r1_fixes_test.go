@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// Correcciones de la revisión R1 (decisiones L1-D27 a L1-D29), además de las pruebas del revisor.
+// Correcciones de la revisión R1 (hallazgos R1-1, R1-2 y R1-3), además de las pruebas del revisor.
 
 // R1-2: el registro de la huella vive junto a la llave, firmado con ella. Si falta, está alterado o es de otra
 // instalación, la instalación se trata como copiada aunque estado.json esté intacto, y nunca se registra otra huella.

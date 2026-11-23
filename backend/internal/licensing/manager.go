@@ -26,7 +26,7 @@ type DatabaseProbe interface {
 	// falso si no hay ninguna. Solo inicia la última hora confiable cuando todavía no existe.
 	LatestActivity(ctx context.Context) (time.Time, bool, error)
 	// AcceptedRevisions es la segunda copia del historial de revisiones aceptadas, en la base (revisión R1, hallazgo
-	// R1-3; L1-D29): por license_id, la revisión más alta y su sha256.
+	// R1-3): por license_id, la revisión más alta y su sha256.
 	AcceptedRevisions(ctx context.Context) (map[string]AcceptedRevision, error)
 	// RecordAcceptedRevision sube esa copia para una licencia aceptada (nunca la baja).
 	RecordAcceptedRevision(ctx context.Context, licenseID string, revision int64, sha256 string) error
@@ -115,7 +115,7 @@ type Manager struct {
 	// persistent indica que hay identidad y la carpeta se pudo preparar.
 	persistent bool
 	// stateLoaded indica que se conoce el estado del disco (leído, inexistente o dañado ya apartado). Sin él no se
-	// escribe nada: un estado que no se pudo leer no se reemplaza (revisión R1, hallazgo R1-1; L1-D28). Cada escritura
+	// escribe nada: un estado que no se pudo leer no se reemplaza (revisión R1, hallazgo R1-1). Cada escritura
 	// lo vuelve a intentar.
 	stateLoaded bool
 	// databaseRevisions es la copia del historial de revisiones de la base (R1-3); databaseLoaded, que se leyó.
@@ -240,7 +240,7 @@ func (manager *Manager) Load(ctx context.Context) error {
 }
 
 // checkMachine lee la huella del equipo (tres intentos) y la compara con el registro firmado de identity/
-// (machine_record.go; revisión R1, hallazgo R1-2, L1-D27). No depende de estado.json: si el registro falta, está
+// (machine_record.go; revisión R1, hallazgo R1-2). No depende de estado.json: si el registro falta, está
 // alterado o es de otra huella, falla cerrado (Copied). Nunca registra una huella nueva.
 func (manager *Manager) checkMachine() {
 	delay := manager.options.MachineRetryDelay
@@ -377,7 +377,7 @@ func (manager *Manager) loadLicense(recoverFromFile bool) bool {
 }
 
 // floor es la revisión mínima aceptable de una licencia: la más alta de las dos copias del historial (estado.json y
-// la base; R1-3, L1-D29). Si se restaura un respaldo viejo de la base, manda la de identity/; si se borra o se
+// la base; revisión R1, hallazgo R1-3). Si se restaura un respaldo viejo de la base, manda la de identity/; si se borra o se
 // edita estado.json, manda la de la base. Con la misma revisión en las dos, manda la de identity/.
 func (manager *Manager) floor(licenseID string) *Accepted {
 	best := manager.state.accepted(licenseID)
@@ -655,7 +655,7 @@ func (manager *Manager) Accept(jws string) (Status, error) {
 	}
 
 	// Se prepara el estado nuevo y se guarda antes de cambiar la memoria: si no se puede guardar, la licencia
-	// no se acepta (§10.5). Primero la copia de la base y después estado.json (L1-D29): si falla la de la base, no se
+	// no se acepta (§10.5). Primero la copia de la base y después estado.json (R1-3): si falla la de la base, no se
 	// acepta; si falla estado.json después, la base ya tiene la revisión y la misma licencia se puede aceptar otra vez.
 	next := manager.state.clone()
 	if err := next.recordAccepted(license); err != nil {

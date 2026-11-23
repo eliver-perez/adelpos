@@ -112,7 +112,7 @@ func latestActivity(ctx context.Context, querier rowQuerier) (time.Time, bool, e
 	return latest.UTC(), true, nil
 }
 
-// --- Copia del historial de revisiones aceptadas (revisión R1, hallazgo R1-3; L1-D29) ------------------------------
+// --- Copia del historial de revisiones aceptadas (revisión R1, hallazgo R1-3) ---------------------------------
 //
 // app.license_revisions (0028, sección «Fase A (revisión R1)») guarda, por license_id, la revisión más alta aceptada
 // y su sha256: una segunda copia de lo que guarda estado.json. La revisión mínima aceptable es el máximo de las dos

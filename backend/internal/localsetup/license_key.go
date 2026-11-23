@@ -53,7 +53,7 @@ var errLicenseKeyDamaged = errors.New("la llave de licencias de la instalación 
 
 // EnsureLicenseKey carga la llave de licencias de la carpeta de la identidad o, si no existe y todavía no hay
 // estado de licencia, la crea junto con el registro firmado de la huella de este equipo (licensing.MachineRecordFile,
-// revisión R1, L1-D27). fingerprint lee la huella (licensing.ReadMachineFingerprint): sin ella no se crea nada y se
+// revisión R1, hallazgo R1-2). fingerprint lee la huella (licensing.ReadMachineFingerprint): sin ella no se crea nada y se
 // vuelve a intentar en el siguiente arranque. Con la llave ya creada, el registro nunca se toca aquí: si falta o no
 // vale, el gestor de la licencia trata la instalación como copiada. La carpeta de la identidad ya debe existir
 // (EnsureIdentity).

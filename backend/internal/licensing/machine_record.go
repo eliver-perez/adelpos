@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// Registro firmado de la huella del equipo (revisión R1, hallazgo R1-2; decisión del coordinador L1-D27).
+// Registro firmado de la huella del equipo (revisión R1, hallazgo R1-2).
 //
 // La huella con que se compara el equipo al arrancar no vive en estado.json: borrar o dañar ese archivo la anularía y
 // una carpeta copiada a otra computadora quedaría vigente. Vive en identity/license-machine.json, junto a la llave de
