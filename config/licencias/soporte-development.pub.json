@@ -1,0 +1,9 @@
+{
+  "environment": "development",
+  "keys": [
+    {
+      "kid": "adelpos-soporte-development-20261123",
+      "public_key": "k4dgb1b8apc8QfDQparWJ2ZgZOxjmE_CNUvj64hwb5c"
+    }
+  ]
+}

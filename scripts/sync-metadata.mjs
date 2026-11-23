@@ -28,8 +28,10 @@ for (const name of ['backend/internal/product/metadata.json', 'desktop/src/gener
 // Etapa L1 (licencias): las llaves públicas de confianza de cada entorno (config/licencias/llaves-<entorno>.json)
 // se embeben en el servidor Go con go:embed, que no puede leer fuera de backend/. config/licencias/ es la
 // fuente; backend/internal/licensing/ guarda la copia. Procedimiento: docs/licencias/ROTAR_LLAVES.md.
+// Etapa L1 (Fase C): también la llave pública de soporte de cada entorno de compilación
+// (config/licencias/soporte-<entorno>.pub.json), para el desbloqueo sin internet (docs/licencias/DESBLOQUEO_SOPORTE.md).
 const keyFiles = (await readdir(path.join(root, 'config/licencias')))
-  .filter((name) => /^llaves-[a-z]+\.json$/.test(name))
+  .filter((name) => /^llaves-[a-z]+\.json$/.test(name) || /^soporte-[a-z]+\.pub\.json$/.test(name))
   .sort();
 for (const name of keyFiles) {
   const keys = JSON.parse(await read(`config/licencias/${name}`));
