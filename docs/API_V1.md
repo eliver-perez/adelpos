@@ -867,6 +867,46 @@ decide; el cliente solo muestra el mensaje o arma el suyo con `details`.
   ocupa cada terminal; `POST devices/{id}/seat/release` libera su comandero o su cocina y cierra sus sesiones;
   `devices/sessions-summary` conserva `by_kind` y agrega `seats` con `in_use` y `limit` por cupo (`limited: true`).
 
+## Licencia: estado, hora del equipo y rechazos (etapa L1, Fase C)
+
+Go es la única autoridad de la licencia y de la hora: las terminales y Android solo muestran lo que responde, por el
+código de error y nunca por el `message` del servidor de licencias (Android no habla con él). La tabla de la §6 del
+contrato de licencias ([licencias/CONTRATO_LICENCIAS_ADEL_POS.md](licencias/CONTRATO_LICENCIAS_ADEL_POS.md)) se aplica
+en el servidor, en cada operación, antes que los cupos.
+
+- **El estado** llega en `license` (`LicenseSummary`) de `getIdentity` (`GET /auth/me`) y `getRecoveryState`
+  (`GET /restaurant/state`); un servidor anterior no lo envía.
+  - `state`: `active` (Vigente), `grace` (Tolerancia), `expired` (Vencida), `revoked` (Revocada, con
+    `revocation_reason`), `not_activated` (Sin activar) o `not_activated_with_data` (Sin activar con datos). `copied`:
+    la carpeta de datos se copió de otra computadora.
+  - `days_until_expiry` (Vigente con vencimiento) y `grace_days_remaining` (Tolerancia: días antes de que se bloquee la
+    captura) ya vienen calculados.
+  - `clock` (`LicenseClock`): la hora de la computadora principal. Con `blocked: true` el cliente muestra el aviso fijo
+    «No se puede registrar: la computadora principal tiene la fecha y hora incorrectas. Avisa al encargado.».
+- **El aviso**: cuando cambia el estado o el bloqueo por la hora, el canal de eventos (`streamEvents`) publica
+  `license.changed` (ámbito `configuration`, sin agregado) a **todas** las personas que lo leen, sin importar sus
+  permisos; el cliente vuelve a leer `getIdentity` o `getRecoveryState`.
+- **Qué se permite en cada estado** (tabla de la §6): capturar (abrir cuenta, borrador, enviar, modificar lo enviado y
+  el pedido sin conexión) solo en Vigente y Tolerancia; cobrar, cancelar y descuentos sobre lo capturado, cerrar turno,
+  cocina y administración también en Vencida y Revocada; abrir turno en Vencida y Revocada solo con cuentas pendientes
+  de cobro; sin activar, nada de lo anterior. Reportes, historial, respaldos, la sesión y la licencia, siempre.
+- **Rechazos de la licencia**: **409** `LICENSE_NOT_ACTIVATED`, `LICENSE_EXPIRED` o `LICENSE_REVOKED`
+  (`LicenseRejection`), con `details.operation` (la fila de la tabla) y, según el código, `details.state` y
+  `details.copied`, `details.expires_at` y `details.grace_ended_at`, o `details.reason`. Android muestra «La licencia
+  del sistema no permite capturar pedidos. Avisa al encargado.». No se guardó nada: un pedido de la cola queda
+  rechazado con su motivo y no se reintenta sin fin.
+- **Hora incorrecta**: **409** `SYSTEM_CLOCK_INVALID` (`SystemClockInvalid`): la computadora principal tiene la fecha y
+  hora más de 10 minutos antes de la última actividad registrada. Se rechaza todo lo que registra con fecha, **también
+  cobrar**; reportes, historial, respaldos, la sesión, la entrada con PIN, los avisos de platillos listos y el canal
+  de eventos siguen. `details` es `LicenseClock`, con las dos fechas completas en la zona horaria del restaurante. No
+  empieza con `LICENSE`: no es un problema de licencia. Se puede reenviar cuando el reloj se corrija (el bloqueo se
+  quita solo).
+- **Escritorio, solo en la computadora principal** (no son parte del contrato de Android): `POST license/time-check`
+  («Comprobar la hora con internet»; `409 LICENSE_TIME_MISMATCH` con `details.server_time` si no coincide),
+  `POST license/support-request` (código de solicitud del desbloqueo de soporte) y `POST license/support-unlock`
+  (`{response, source}`; `400 SUPPORT_UNLOCK_INVALID` con `details.reason`: `used`, `other_installation`, `expired`,
+  `altered` o `not_requested`). Ver [licencias/DESBLOQUEO_SOPORTE.md](licencias/DESBLOQUEO_SOPORTE.md).
+
 ## Códigos de error más frecuentes
 
 | Código                                                   | Estado | Qué hacer                                                                                                                  |
@@ -901,3 +941,6 @@ decide; el cliente solo muestra el mensaje o arma el suyo con `details`.
 | `OFFLINE_CREDENTIAL_INVALID`                             | 401    | Conservar el pedido y pedir al mesero que entre con su PIN con conexión.                                                   |
 | `OFFLINE_CREDENTIAL_NOT_ALLOWED`                         | 401    | La credencial de envío solo se usa en `submitOfflineOrder`.                                                                |
 | `LICENSE_SEAT_UNAVAILABLE`                               | 409    | Sin cupo de la licencia (`details.seat`, `in_use`, `limit`): mostrar el mensaje; en la cola, marcar el pedido rechazado.   |
+| `LICENSE_NOT_ACTIVATED`                                  | 409    | La licencia no está activada: mostrar «La licencia del sistema no permite capturar pedidos.».                              |
+| `LICENSE_EXPIRED`, `LICENSE_REVOKED`                     | 409    | Licencia vencida o revocada: el mismo mensaje; lo abierto se sigue cobrando en la caja.                                    |
+| `SYSTEM_CLOCK_INVALID`                                   | 409    | Hora incorrecta en la computadora principal: mostrar su mensaje y el aviso fijo.                                           |
