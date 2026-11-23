@@ -18,8 +18,8 @@ import (
 	"local/ad-el-pos/server/internal/documents"
 	"local/ad-el-pos/server/internal/kitchen"
 	"local/ad-el-pos/server/internal/legacyimport"
-	"local/ad-el-pos/server/internal/licensing"
 	"local/ad-el-pos/server/internal/licenseseats"
+	"local/ad-el-pos/server/internal/licensing"
 	"local/ad-el-pos/server/internal/maintenance"
 	"local/ad-el-pos/server/internal/reports"
 )

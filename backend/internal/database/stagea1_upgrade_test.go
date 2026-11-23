@@ -142,10 +142,12 @@ func stageA1Snapshot(ctx context.Context, t *testing.T, pool *pgxpool.Pool, tabl
 	t.Helper()
 	filter := ""
 	switch table {
+	// El permiso de la 0025 (etapa A1) y el de la 0028 (etapa L1, Fase B: license.manage, en stagel1_upgrade_test.go)
+	// se comprueban aparte.
 	case "permissions":
-		filter = " WHERE key<>'waiter_devices.use'"
+		filter = " WHERE key NOT IN ('waiter_devices.use','license.manage')"
 	case "role_permissions":
-		filter = " WHERE permission_key<>'waiter_devices.use'"
+		filter = " WHERE permission_key NOT IN ('waiter_devices.use','license.manage')"
 	case "document_template_versions":
 		columns = withoutColumn(columns, "note")
 	}

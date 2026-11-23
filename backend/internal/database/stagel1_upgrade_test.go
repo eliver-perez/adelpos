@@ -19,9 +19,10 @@ import (
 )
 
 // Etapa L1: actualización desde el esquema 27 con roles, usuarios, terminales, sesiones y turnos de caja abiertos, en
-// arqueo y cerrados. La sección «Fase D» de la 0028 crea app.license_seats con sus restricciones e índices y ocupa el
-// cupo de caja de la terminal que abrió cada turno activo (L1-D3), y ninguno más. Ninguna fila de ninguna tabla
-// existente cambia. Deja la base vacía.
+// arqueo y cerrados. La sección «Fase A (revisión R1)» de la 0028 crea app.license_revisions vacía; la «Fase B», el
+// permiso license.manage concedido solo al rol administrator; la «Fase D» crea app.license_seats con sus restricciones
+// e índices y ocupa el cupo de caja de la terminal que abrió cada turno activo (L1-D3), y ninguno más. Ninguna otra
+// fila de ninguna tabla existente cambia. Deja la base vacía.
 func TestStageL1Upgrade(t *testing.T) {
 	dsn := os.Getenv("ADEL_TEST_DATABASE_URL")
 	u, err := url.Parse(dsn)
@@ -78,6 +79,50 @@ func TestStageL1Upgrade(t *testing.T) {
 		}
 	}
 	checkStageL1Seats(ctx, t, pool)
+	checkStageL1LicenseRevisions(ctx, t, pool)
+	checkStageL1Permission(ctx, t, pool)
+}
+
+// checkStageL1LicenseRevisions: la segunda copia del historial de revisiones (revisión R1, hallazgo R1-3) nace vacía,
+// con su llave primaria y sus restricciones.
+func checkStageL1LicenseRevisions(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	var rows int
+	if err := pool.QueryRow(ctx, "SELECT count(*)::int FROM app.license_revisions").Scan(&rows); err != nil || rows != 0 {
+		t.Fatalf("license_revisions nace vacía: %d %v", rows, err)
+	}
+	valid := "INSERT INTO app.license_revisions(license_id,license_revision,sha256) VALUES ('11111111-1111-4111-8111-111111111111',2,'" + strings.Repeat("a", 64) + "')"
+	if _, err := pool.Exec(ctx, valid); err != nil {
+		t.Fatal(err)
+	}
+	invalid := map[string]string{
+		"repetida":         valid,
+		"revisión 0":       "INSERT INTO app.license_revisions(license_id,license_revision,sha256) VALUES ('22222222-2222-4222-8222-222222222222',0,'" + strings.Repeat("a", 64) + "')",
+		"sha256 inválido":  "INSERT INTO app.license_revisions(license_id,license_revision,sha256) VALUES ('22222222-2222-4222-8222-222222222222',1,'ABC')",
+		"sin sha256":       "INSERT INTO app.license_revisions(license_id,license_revision) VALUES ('22222222-2222-4222-8222-222222222222',1)",
+		"license_id vacío": "INSERT INTO app.license_revisions(license_id,license_revision,sha256) VALUES ('',1,'" + strings.Repeat("a", 64) + "')",
+	}
+	for name, statement := range invalid {
+		if _, err := pool.Exec(ctx, statement); err == nil {
+			t.Fatalf("license_revisions acepta %s", name)
+		}
+	}
+	if _, err := pool.Exec(ctx, "DELETE FROM app.license_revisions"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// checkStageL1Permission: «Administrar la licencia» con la descripción de Go, solo para el rol administrator (L1-D21).
+func checkStageL1Permission(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	var description, holders string
+	err := pool.QueryRow(ctx, `SELECT p.description,
+            coalesce((SELECT string_agg(r.code,',' ORDER BY r.code) FROM app.role_permissions rp JOIN app.roles r ON r.id=rp.role_id
+                WHERE rp.permission_key='license.manage'),'')
+        FROM app.permissions p WHERE p.key='license.manage'`).Scan(&description, &holders)
+	if err != nil || description != "Administrar la licencia" || holders != "administrator" {
+		t.Fatalf("license.manage: %q %q %v", description, holders, err)
+	}
 }
 
 // Una instalación en el esquema 27: dos cajas físicas con su terminal; el turno de la Caja 1 abierto por su terminal,

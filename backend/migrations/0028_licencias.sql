@@ -40,11 +40,6 @@ INSERT INTO app.permissions(key, description) VALUES
     ('license.manage', 'Administrar la licencia');
 INSERT INTO app.role_permissions(role_id, permission_key)
 SELECT id, 'license.manage' FROM app.roles WHERE code = 'administrator';
-=======
--- Etapa L1: la única migración de la etapa (integración con el servidor de licencias; esquema 28). Cada fase agrega aquí
--- su propia sección con el encabezado «Fase X» (decisión L1-D23 del coordinador). Es transaccional (el migrador aplica
--- todas las pendientes en una sola transacción). No toca ventas, pagos, cortes, cuentas, pedidos, sesiones, usuarios,
--- roles ni terminales: solo agrega lo que dice cada sección.
 
 -- =====================================================================================================================
 -- Fase D · Cupos de la licencia (§5 de la especificación, §7 del contrato; decisiones L1-D2, L1-D3, L1-D7 y L1-D13)
