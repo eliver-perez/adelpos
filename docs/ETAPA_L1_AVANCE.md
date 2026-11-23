@@ -1067,3 +1067,238 @@ Ninguna es una parada. Las dudas 1 a 3, las que podían ser una decisión de neg
     - las revisiones R2 (hora) y R3 (cupos);
     - la Fase G contra `licensing.sicrat.com`, en cuanto esté el cliente.
   - Cada agente en su árbol, con su `ISO_TAG` y sus puertos.
+
+---
+
+## Fase A · Núcleo: llave, verificador y estado
+
+Hizo la fase el agente del núcleo, en `$SP/wt/l1-a`, rama `etapa-l1-a`, desde `etapa-l1` (`1ceee93`), con `ISO_TAG=LA`.
+
+- Sin Go temporal y sin emuladores.
+- Ninguna llamada a `licensing.sicrat.com`.
+- No se leyeron los códigos de licencia de prueba.
+- La Fase A no guarda nada en la base: no hay `0028` ni cambio de versión.
+
+### Qué se hizo
+
+- **Verificador (§10)**, en `backend/internal/licensing/verify.go`, `protocol.go` y `state.go`:
+  - adaptado del de referencia (`contracts/licencias/v1/verify`), con el mismo orden de comprobaciones y los mismos
+    códigos de rechazo (`invalid_signature`, `stale_revision`…);
+  - lo único que cambia: los cupos se entregan como `int`, y la regla de la revisión queda aparte (`checkRevision`)
+    para usarla con el historial guardado;
+  - suma `SignProof`, la firma de la prueba de posesión que usará la Fase B.
+- **Estado**: los seis estados de la §6 y la §5.6 (`status.go`, `state.go`), calculados en memoria con
+  `ahora_efectivo = máximo(reloj, última hora confiable)`.
+- **Entorno compilado** (L1-D18):
+  - `trust_development.go` (`!adelpos_production`) embebe `llaves-test.json`. Entorno de firma `test`, `DefaultServerURL`
+    = la del servidor de pruebas.
+  - `trust_production.go` (`adelpos_production`) embebe `llaves-production.json`, que no existe. **`go build -tags
+adelpos_production` no compila** («pattern llaves-production.json: no matching files found»). Su `DefaultServerURL`
+    queda vacía.
+  - `CheckStartup` (`licensing.go:24`) compara el entorno compilado con `server.json` y también comprueba las llaves
+    embebidas.
+- **Llaves**:
+  - `config/licencias/llaves-test.json` es exactamente la lista de §1.2: `adelpos-test-202611-1` con su pública;
+  - `scripts/sync-metadata.mjs` copia cada `config/licencias/llaves-<entorno>.json` a `backend/internal/licensing/`,
+    y `sync-check` lo vigila;
+  - un archivo con una llave de otro entorno, un `kid` repetido o una llave inválida impide arrancar.
+- **Almacén** `identity/licencia/` (`store.go`), L1-D9:
+  - **`estado.json`** guarda la licencia vigente (su JWS), la revisión más alta de cada `license_id`, la última hora
+    confiable con su fuente, la huella del equipo y la identidad dueña. Es el punto de confirmación: archivo temporal,
+    `fsync` y renombrado.
+  - **`vigente.lic`** es la copia tal como viaja, escrita después. Si no coincide, al arrancar se vuelve a escribir.
+  - **Permisos**: carpeta 0700 y archivos 0600; en Windows, la ACL de `fileacl`.
+  - **Al arrancar**, la licencia guardada vuelve a pasar la §10 completa (L1-D20): primero la de `estado.json` y después
+    la de `vigente.lic`. Las dos deben ser exactamente la revisión aceptada. Así un archivo alterado, de otra llave o de
+    otra instalación se ignora y queda la última válida.
+  - **`estado.json` dañado** se aparta (`estado.json.danado-AAAAMMDD-HHMMSS`) y la licencia se recupera de
+    `vigente.lic`. Si no se puede leer (permisos), no se toca.
+- **Huella del equipo** (`machine*.go`), L1-D10:
+  - IOPlatformUUID con `/usr/sbin/ioreg` en macOS; MachineGuid en Windows, con `x/sys/windows/registry` y
+    `WOW64_64KEY`, sin dependencias nuevas; `/etc/machine-id` en otros sistemas, solo para compilar;
+  - solo se guarda `SHA-256("ADELPOS-EQUIPO-V1\n" + id)`;
+  - tres intentos y falla cerrada.
+- **Instalación copiada** (L1-D11, solo la detección): con otra huella, la licencia guardada se ignora sin borrarla.
+  - El estado es «Sin activar con datos» con `Copied`, o «Sin activar» con `Copied` si la base no tiene operaciones,
+    como dice 0.5.3.
+  - `Accept` responde `ErrCopiedInstallation`. Confirmar y regenerar son de la Fase B.
+- **«Sin activar con datos»** (`datapresence.go`):
+  - **Qué cuenta como operación**: al menos una fila en `app.restaurant_accounts`, `app.cash_shifts`, `app.payments`,
+    `app.inventory_movements` o `app.legacy_sales`. No cuentan la configuración, el catálogo, los usuarios, las
+    terminales, las sesiones ni la auditoría.
+  - **Cómo se consulta**: un `SELECT EXISTS … OR EXISTS …` en una transacción `READ ONLY`, con `lock_timeout` de 2 s y
+    plazo de 5 s. Solo toma AccessShare y no espera los locks del negocio (lo prueba la integración con 7820148305 y la
+    fila tomada).
+  - Se consulta al arrancar y cada minuto mientras dé falso. Cuando da verdadero, ya no se repite, porque las
+    operaciones no se borran.
+- **Última hora confiable** (L1-D15):
+  - `server_time` e `issued_at` se guardan de inmediato;
+  - el reloj local (cada minuto, en `Run`) y las operaciones, en memoria; se guardan cada minuto y al apagar;
+  - `max(audit_events.occurred_at)` solo la inicia cuando falta;
+  - `ReplaceTrustedTime` es lo único que la baja, y solo con `internet_check` (§6.3) o `support_unlock` (§6.4).
+- **Llave de licencias** (`localsetup/license_key.go`):
+  - `identity/license-key.pem`, Ed25519 en PKCS#8, 0600;
+  - se crea una sola vez: un temporal 0600 se enlaza con el nombre definitivo, y el enlace nunca reemplaza un archivo;
+  - con `licencia/estado.json` o `vigente.lic` y sin llave, `EnsureLicenseKey` da error y no la crea;
+  - una llave dañada no se reemplaza.
+- **Arranque**:
+  - `cmd/ad-el-pos-server/license.go` y `main.go:261`: después de la identidad, en `serveHTTP`, que comparten `serve`, el
+    `host` de macOS y el de Windows;
+  - el trabajador `License.Run` se apaga en orden (`main.go:381`);
+  - sin identidad o sin llave, el servidor sigue atendiendo «Sin activar», con `IdentityUnavailable`, y no escribe
+    nada en `identity/licencia`.
+  - **Ayudas de prueba**, solo con `test_mode` y en desarrollo (L1-D16 y L1-D18): `ADEL_TEST_LICENSE_TRUST` (la ruta
+    de un `vectors.json`) y `ADEL_TEST_CLOCK_FILE` (un desfase con formato de duración de Go, como `-36h`).
+- **Documento**: `docs/licencias/ROTAR_LLAVES.md`.
+- `scripts/database.py`: `./internal/licensing` en la tupla de integración.
+
+### La interfaz para las Fases B, C y D (no cambia sin avisar)
+
+`administration.Service.License *licensing.Manager` (`service.go:70`), siempre con valor en `serve` y en el `host`.
+
+| Método                                                                                            | Qué hace                                                                                                                                                                                 |
+| ------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Status() licensing.Status`                                                                       | El estado en memoria, sin base ni internet (`manager.go:392`)                                                                                                                            |
+| `TrustedTime() time.Time`                                                                         | La última hora confiable; cero si no hay                                                                                                                                                 |
+| `ObserveTime(t time.Time, fuente licensing.TimeSource)`                                           | Solo sube. Fuentes: `TimeFromServer`, `TimeFromLicense`, `TimeFromClock`, `TimeFromOperation` y `TimeFromAudit`                                                                          |
+| `ReplaceTrustedTime(t time.Time, motivo licensing.ReplaceReason) (anterior time.Time, err error)` | Solo `ReplaceByInternetCheck` (§6.3) y `ReplaceBySupportUnlock` (§6.4). La baja, la guarda de inmediato y devuelve la anterior para la auditoría. Si no se puede guardar, no cambia nada |
+| `Accept(jws string) (licensing.Status, error)`                                                    | §10 y guardado. Un rechazo es un `*licensing.VerifyError` con `Code`; además `ErrIdentityUnavailable`, `ErrCopiedInstallation`, `ErrMachineUnverified` y `ErrStateNotSaved`              |
+| `LocalClock() time.Time`                                                                          | El reloj inyectado (`Options.Now`), para que la puerta y los cupos usen el mismo reloj simulado                                                                                          |
+| `Load(ctx)`, `Run(ctx)`, `Flush()`                                                                | Arranque, trabajador de cada minuto y guardado pendiente                                                                                                                                 |
+
+`licensing.Status` (`status.go:55`):
+
+- **`State`**: `active` (Vigente), `grace` (Tolerancia), `expired` (Vencida), `revoked` (Revocada), `not_activated`
+  (Sin activar) o `not_activated_with_data` (Sin activar con datos). Son los valores de `vectors.json` y de
+  `details.state` de 0.6.2.
+- **Indicadores**:
+  - `Copied`;
+  - `MachineUnverified`, la huella que no se pudo leer, con su propio mensaje;
+  - `IdentityUnavailable`;
+  - `RevocationReason` (`deactivated`, `transferred` o `revoked`).
+- **El entorno**: `Environment` (`test` o `production`, el compilado).
+- **El cliente y el plan**:
+  - `LicenseID`, `ActivationID`, `LicenseeName`, `LicenseType`, `BillingPeriod` y `Revision`;
+  - `Plan{PlanID, Name, Custom}`, `Features` (una copia);
+  - `IssuedAt`, `PeriodStartsAt` y `UpdatesUntil`.
+- **`Limits{CashRegisters, OrderTakers, KitchenDisplays}`**, en `int`.
+  - Sin licencia válida, los tres valen 0.
+  - En una licencia Vencida o Revocada siguen siendo los de la licencia: la puerta (C) decide si se puede ocupar un
+    cupo.
+- **Fechas**: `ExpiresAt`, `GraceDays`, `GraceEndsAt` (exclusivo) y `Perpetual` (`ExpiresAt` y `GraceEndsAt` en nil).
+- **`EffectiveNow`** y **`TrustedTime`**.
+- **`HasLicense()`** es verdadero en Vigente, Tolerancia, Vencida y Revocada. Es «hay licencia válida» para el
+  `LimitsSource` de la Fase D.
+
+**Nombres libres para la Fase C**: `operations.go`, `clock.go` y `unlock.go` no existen. Para la solicitud de desbloqueo,
+el campo nuevo de `storedState` va en `store.go`. `estado.json` se lee sin `DisallowUnknownFields`, así que agregar un
+campo es compatible.
+
+### Decisiones propuestas
+
+1. **Los estados se nombran con los valores del contrato** (`active`, `grace`, `expired`, `revoked`) y con los de
+   0.6.2 (`not_activated` y `not_activated_with_data`), no en español: son los de `vectors.json` y los de la API. El
+   texto en español es de las pantallas.
+2. **`estado.json` es el punto de confirmación y lleva el JWS. `vigente.lic` es su copia.** Por qué: un solo
+   renombrado confirma todo, así que nunca hay un par a medias. Además, si uno de los dos archivos se altera, queda la
+   otra copia válida. `vigente.lic` solo se acepta como primera revisión si `estado.json` faltaba o estaba dañado (la
+   recuperación).
+3. **La huella se registra la primera vez que arranca la 0.15.0**, no solo al aceptar una licencia. Así una carpeta
+   copiada se detecta también antes de activar. `Accept` se niega con `Copied` (L1-D11, punto 2) y con
+   `MachineUnverified`.
+4. **Sin identidad o sin llave, el gestor no escribe nada en `identity/licencia`.** Si escribiera, una llave que falló
+   al crearse quedaría como «estado sin llave» para siempre. «Estado» es `estado.json` o `vigente.lic`; una carpeta
+   vacía no cuenta.
+5. **Qué cuenta como operación y cómo se consulta**: lo de arriba. La venta importada del sistema anterior cuenta,
+   porque se consulta en los reportes.
+6. **La última hora confiable al crear la base**: la `0002` deja un registro de auditoría con la hora de la migración,
+   así que una base nueva inicia la hora confiable con esa hora. Es correcto, porque ya pasó.
+7. **Un `estado.json` ilegible por permisos no se aparta.** El gestor sigue en memoria y no escribe nada. Solo se aparta
+   un contenido inválido.
+8. **Sin ninguna licencia válida al arrancar, la guardada no se borra**: queda para soporte. Importar otra vez el `.lic`
+   válido la vuelve a instalar.
+9. **Otra licencia válida para esta instalación** (otro `license_id`) reemplaza a la vigente. La revisión más alta de
+   la anterior se conserva. El contrato no lo prohíbe.
+10. **La prueba de la compilación de producción** también compila con un overlay de llaves simuladas, fuera de la
+    carpeta. Así se demuestra que lo único que falta son las llaves. Esa prueba se retira en el paso a producción.
+11. **El formato de las ayudas de prueba**:
+    - `ADEL_TEST_LICENSE_TRUST` es la ruta de un `vectors.json`; solo se agregan las llaves del entorno `test`;
+    - `ADEL_TEST_CLOCK_FILE` contiene una duración de Go y se vuelve a leer cada segundo;
+    - las dos solo funcionan con `test_mode` y en desarrollo; en producción, `WithTestKeys` y `OffsetClock` fallan.
+
+**Para la Fase B** (no es una decisión de la A):
+
+- Al regenerar la identidad, conviene copiar la última hora confiable al `estado.json` nuevo. Si no, regenerar la
+  identidad reiniciaría la protección de la hora.
+- Solo debe llegar a `ObserveTime(TimeFromServer)` el `server_time` de una respuesta correcta.
+
+**Diferencia con la especificación**: la §1.1 dice «Sin activar con datos» para una copia, y 0.5.3 (L1-D11) agrega «o Sin
+activar si la base no tiene operaciones». Se siguió L1-D11. El contrato no lo trata (§15).
+
+### Archivos
+
+- **`backend/internal/licensing/`**:
+  - código: `licensing.go`, `status.go`, `verify.go`, `protocol.go`, `state.go`, `trust.go`, `trust_development.go`,
+    `trust_production.go`, `llaves-test.json` (la copia), `store.go`, `machine.go`, `machine_darwin.go`,
+    `machine_windows.go`, `machine_other.go`, `datapresence.go`, `manager.go` y `testclock.go`;
+  - pruebas: `vectors_test.go`, `manager_test.go`, `store_unix_test.go`, `trust_test.go`, `machine*_test.go`,
+    `production_build_test.go`, `testclock_test.go`, `licensing_test.go`, `datapresence_integration_test.go` y
+    `private_{unix,windows}_test.go`.
+- **`backend/internal/localsetup/`**: `license_key.go` y `license_key_test.go`.
+- **`backend/cmd/ad-el-pos-server/`**: `license.go`, `license_test.go` y `main.go` (`:261`, `:376-391`).
+- **`backend/internal/administration/service.go:66-70`**: el campo `License`, en un bloque de la Fase A.
+- **`config/licencias/llaves-test.json`** y `scripts/sync-metadata.mjs`.
+- **`scripts/database.py`**: la tupla de paquetes.
+- **`docs/licencias/ROTAR_LLAVES.md`**.
+
+### Pruebas (realmente ejecutadas)
+
+| Prueba                                                                                | Resultado                                                                                                                                                                                                                                             |
+| ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TestContractVectors`: los **67 casos** de `vectors.json` (20 + 17 + 10 + 13 + 4 + 3) | Aprobada: 67 subpruebas de caso. Además, la prueba de posesión que firma AD-EL POS es idéntica a la publicada, y un `.licreq` con la firma de otro contenido no verifica                                                                              |
+| El almacén: persistencia, corte a la mitad, permisos y revisión                       | Aprobadas: temporales descartados, corte entre los dos archivos, `estado.json` a medias recuperado de `vigente.lic`, 0700/0600, revisión menor o igual con otros bytes rechazada (también en el almacén y tras reiniciar) y estado ilegible sin tocar |
+| Alterado, de otra llave o de otra instalación                                         | Aprobada: al aceptarlo y en el disco (`vigente.lic` y `estado.json`), queda la última válida, y sin ninguna válida, «Sin activar» sin borrar nada                                                                                                     |
+| La identidad                                                                          | Aprobadas: una 0.14.0 crea la llave una vez y no toca la identidad; un estado sin llave da error y no la crea; una llave dañada no se reemplaza                                                                                                       |
+| La huella                                                                             | Aprobadas: otra huella con datos → «Sin activar con datos» con `Copied` (sin datos, «Sin activar»); tres intentos y falla cerrada; lectura real de `ioreg` en esta Mac, estable y sin mostrar el valor                                                |
+| Estados en el gestor, la hora confiable y «Sin activar con datos»                     | Aprobadas: los límites exactos, el reloj atrasado, `ObserveTime`, `ReplaceTrustedTime`, `Run` y la consulta cada minuto                                                                                                                               |
+| `TestProductionBuildFailsWithoutProductionKeys`                                       | Aprobada: `go build -tags adelpos_production ./internal/licensing ./cmd/ad-el-pos-server` falla por `llaves-production.json`, y con el overlay compila                                                                                                |
+| Arranque (`TestLoadLicenseAtStartup` y `TestLicenseTestHooksRequireTestMode`)         | Aprobadas                                                                                                                                                                                                                                             |
+| `ISO_TAG=LA iso.sh … go-unit`                                                         | **Aprobado**, en las dos corridas (vet normal e `integration`, `test -race` y `GOOS=windows` build y vet)                                                                                                                                             |
+| `go-int ./internal/licensing`                                                         | **Estado 0**: la consulta de operaciones y de la última actividad contra la base 55499                                                                                                                                                                |
+| `go-int ./cmd/ad-el-pos-server`, con el candado                                       | **Estado 0**, en dos corridas (70 s y 64 s); el candado se liberó                                                                                                                                                                                     |
+| `format`, `fmt-check` y `sync-check`                                                  | Aprobados; MD5 de `docs/etapas/`, del contrato, de la guía y de `contracts/` iguales antes y después                                                                                                                                                  |
+
+### Lo no verificado
+
+- **La lectura real de MachineGuid y las ACL de Windows**: solo se compilan (`GOOS=windows` vet). Se ejecutan en la
+  Fase W.
+- **La compilación de producción con llaves reales**: no existen.
+- **El `host` de Windows**: no se ejecutó; comparte `serveHTTP` con el de macOS.
+- **La revisión independiente R1** del verificador y del almacén: pendiente, según el plan.
+
+### Commits (rama `etapa-l1-a`)
+
+- `fd31224` etapa L1 fase A: interfaz del gestor de licencias (Status, cupos, hora confiable)
+- `3939268` etapa L1 fase A: verificador de la §10, estado temporal y llaves del entorno compilado
+- `3bf7977` etapa L1 fase A: almacén identity/licencia, huella del equipo y gestor de la licencia
+- `d442503` etapa L1 fase A: llave Ed25519 de licencias de la instalación (identity/license-key.pem)
+- `6f93547` etapa L1 fase A: carga del gestor de la licencia al arrancar (serve y host de macOS y Windows)
+- `90ce38b` etapa L1 fase A: docs/licencias/ROTAR_LLAVES.md (§3 de la guía de integración)
+- `6c48592` etapa L1 fase A: el almacén no reemplaza un estado ilegible ni borra la licencia ignorada
+
+### Decisiones del coordinador sobre la Fase A
+
+Fusionada en `27cb24c`.
+
+- **L1-D25 · Se aceptan las diez decisiones propuestas del agente.** Las principales:
+  - los estados con los valores del contrato;
+  - `estado.json` como punto de confirmación;
+  - la huella registrada en el primer arranque de la 0.15.0;
+  - qué cuenta como operación: cuentas, turnos, pagos, movimientos de inventario o ventas importadas;
+  - las ayudas `ADEL_TEST_LICENSE_TRUST` y `ADEL_TEST_CLOCK_FILE`, solo con `test_mode` y en desarrollo.
+- **L1-D26 · Una copia sin operaciones queda «Sin activar», con `Copied`**, y no «Sin activar con datos».
+  - Manda el contrato (§6: «Sin activar» es la base sin operaciones).
+  - El mensaje de la §1.1 («Esta instalación se copió de otra computadora…») se muestra igual, por `Copied`.
+- **Para la Fase B**:
+  - al regenerar la identidad se conserva la última hora confiable;
+  - solo cuenta como hora confiable el `server_time` de una respuesta correcta.
