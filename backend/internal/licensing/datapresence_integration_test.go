@@ -1,0 +1,161 @@
+//go:build integration
+
+package licensing
+
+import (
+	"context"
+	"net/url"
+	"os"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"local/ad-el-pos/server/internal/database"
+)
+
+// testDatabase abre la base temporal (exige un nombre adel_pos_test_*), la deja vacía y la migra.
+func testDatabase(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	dsn := os.Getenv("ADEL_TEST_DATABASE_URL")
+	parsed, err := url.Parse(dsn)
+	if err != nil || !strings.HasPrefix(parsed.Path, "/adel_pos_test_") {
+		t.Fatal("Se requiere una base temporal exclusiva")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	if _, err := pool.Exec(ctx, "DROP SCHEMA IF EXISTS app CASCADE; DROP TABLE IF EXISTS public.schema_migrations"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	return pool
+}
+
+// actorRows crea un usuario y una terminal: configuración, que no cuenta como operación.
+func actorRows(t *testing.T, ctx context.Context, querier interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}) (string, string) {
+	t.Helper()
+	var role, user, device string
+	if err := querier.QueryRow(ctx, `INSERT INTO app.roles(name) VALUES ('Prueba de licencias') RETURNING id`).Scan(&role); err != nil {
+		t.Fatal(err)
+	}
+	if err := querier.QueryRow(ctx, `INSERT INTO app.users(username, display_name, role_id)
+        VALUES ('licencias', 'Licencias', $1) RETURNING id`, role).Scan(&user); err != nil {
+		t.Fatal(err)
+	}
+	if err := querier.QueryRow(ctx, `INSERT INTO app.devices(name, secret_hash)
+        VALUES ('Caja de prueba', 'hash-de-prueba-licencias') RETURNING id`).Scan(&device); err != nil {
+		t.Fatal(err)
+	}
+	return user, device
+}
+
+// «Qué cuenta como operación» (datapresence.go): la configuración y la auditoría no; una cuenta o un turno
+// sí. La consulta no toma ni espera los locks del negocio.
+func TestDatabaseProbeCountsOnlyOperations(t *testing.T) {
+	pool := testDatabase(t)
+	ctx := context.Background()
+	probe := PoolProbe{Pool: pool}
+
+	found, err := probe.HasOperations(ctx)
+	if err != nil || found {
+		t.Fatalf("una base recién migrada no tiene operaciones: %v %v", found, err)
+	}
+	// La migración deja su propio registro de auditoría (0002): esa es la primera actividad.
+	if _, present, err := probe.LatestActivity(ctx); err != nil || !present {
+		t.Fatalf("la migración deja la primera actividad: %v %v", present, err)
+	}
+
+	// Configuración y auditoría: no son operaciones.
+	if _, err := pool.Exec(ctx, `INSERT INTO app.establishment(name, timezone) VALUES ('Licencias', 'America/Monterrey')`); err != nil {
+		t.Fatal(err)
+	}
+	user, device := actorRows(t, ctx, pool)
+	occurred := time.Now().UTC().Add(time.Hour).Truncate(time.Microsecond)
+	if _, err := pool.Exec(ctx, `INSERT INTO app.audit_events(occurred_at, actor_id, actor_username, actor_kind, action, entity_type, success)
+        VALUES ($1, $2, 'licencias', 'user', 'setup.completed', 'establishment', true)`, occurred, user); err != nil {
+		t.Fatal(err)
+	}
+	if found, err := probe.HasOperations(ctx); err != nil || found {
+		t.Fatalf("la configuración y la auditoría no son operaciones: %v %v", found, err)
+	}
+	latest, present, err := probe.LatestActivity(ctx)
+	if err != nil || !present || !latest.Equal(occurred) {
+		t.Fatalf("la última actividad es la más reciente de la auditoría: %v %v %v", latest, present, err)
+	}
+
+	// Cada tipo de operación, en una transacción que se deshace.
+	operations := map[string]func(pgx.Tx) error{
+		"cuenta": func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, `INSERT INTO app.restaurant_accounts(mode, name, price_list_id, opened_by, assigned_user_id, device_id)
+                VALUES ('takeaway', 'Para llevar', (SELECT id FROM app.catalog_price_lists WHERE is_default), $1, $1, $2)`, user, device)
+			return err
+		},
+		"turno de caja": func(tx pgx.Tx) error {
+			var register, operation string
+			if err := tx.QueryRow(ctx, `INSERT INTO app.registers(name) VALUES ('Caja de licencias') RETURNING id`).Scan(&register); err != nil {
+				return err
+			}
+			if err := tx.QueryRow(ctx, `INSERT INTO app.restaurant_operations(id, actor_id, device_id, route, fingerprint, response)
+                VALUES (gen_random_uuid(), $1, $2, 'payments/shifts', 'prueba', '{}') RETURNING id`, user, device).Scan(&operation); err != nil {
+				return err
+			}
+			_, err := tx.Exec(ctx, `INSERT INTO app.cash_shifts(id, register_id, opening_float, opened_by, opened_device_id, operation_id)
+                VALUES (gen_random_uuid(), $1, 0, $2, $3, $4)`, register, user, device, operation)
+			return err
+		},
+	}
+	for name, insert := range operations {
+		transaction, err := pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := insert(transaction); err != nil {
+			_ = transaction.Rollback(ctx)
+			t.Fatalf("%s: %v", name, err)
+		}
+		found, err := hasOperations(ctx, transaction)
+		_ = transaction.Rollback(ctx)
+		if err != nil || !found {
+			t.Fatalf("%s cuenta como operación: %v %v", name, found, err)
+		}
+	}
+	if found, err := probe.HasOperations(ctx); err != nil || found {
+		t.Fatal("lo deshecho no queda")
+	}
+
+	// Una cuenta confirmada: la base tiene operaciones, también mientras otra conexión tiene el lock exclusivo
+	// de la operación del restaurante (7820148305) y la fila bloqueada.
+	var account string
+	if err := pool.QueryRow(ctx, `INSERT INTO app.restaurant_accounts(mode, name, price_list_id, opened_by, assigned_user_id, device_id)
+        VALUES ('takeaway', 'Para llevar', (SELECT id FROM app.catalog_price_lists WHERE is_default), $1, $1, $2) RETURNING id`, user, device).Scan(&account); err != nil {
+		t.Fatal(err)
+	}
+	holder, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Rollback(ctx)
+	if _, err := holder.Exec(ctx, `SELECT pg_advisory_xact_lock(7820148305)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := holder.Exec(ctx, `SELECT 1 FROM app.restaurant_accounts WHERE id = $1 FOR UPDATE`, account); err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now()
+	found, err = probe.HasOperations(ctx)
+	if err != nil || !found {
+		t.Fatalf("con operaciones: %v %v", found, err)
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("la consulta esperó a los locks del negocio (%s)", elapsed)
+	}
+}

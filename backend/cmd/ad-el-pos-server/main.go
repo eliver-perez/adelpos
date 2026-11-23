@@ -252,6 +252,18 @@ func serveHTTP(ctx context.Context, logger *slog.Logger, cfg config.Config, pool
 	if application.ScheduledBackups != nil && identityErr == nil {
 		application.ScheduledBackups.InstallationID = serverIdentity.ServerID
 	}
+	// Etapa L1, fase A: el gestor de la licencia, con la llave de licencias de la identidad (license.go). Se carga
+	// antes de atender peticiones y nunca impide arrancar.
+	licenseIdentity := &serverIdentity
+	if identityErr != nil {
+		licenseIdentity = nil
+	}
+	application.License = loadLicense(ctx, logger, licenseOptions{
+		identityDir: network.IdentityDir,
+		identity:    licenseIdentity,
+		database:    licensing.PoolProbe{Pool: pool},
+		testMode:    testMode,
+	})
 	if err := config.CheckNetworkAddress(network.Address, cfg.ListenAddress); err != nil {
 		return err
 	}
@@ -361,6 +373,13 @@ func serveHTTP(ctx context.Context, logger *slog.Logger, cfg config.Config, pool
 		defer close(pairingCleanupDone)
 		(&administration.PairingCleaner{Pool: pool, Logger: logger}).Run(workerContext)
 	}()
+	// Etapa L1, fase A: el trabajador del gestor de la licencia toma la hora local cada minuto como hora confiable
+	// y la guarda; al apagarse la guarda por última vez.
+	licenseDone := make(chan struct{})
+	go func() {
+		defer close(licenseDone)
+		application.License.Run(workerContext)
+	}()
 	defer func() {
 		stopWorker()
 		<-workerDone
@@ -370,6 +389,7 @@ func serveHTTP(ctx context.Context, logger *slog.Logger, cfg config.Config, pool
 		<-discoveryDone
 		<-pairingCleanupDone
 		<-legacyDone
+		<-licenseDone
 	}()
 	stopped := make(chan error, 2)
 	go func() {

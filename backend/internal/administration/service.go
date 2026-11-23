@@ -18,6 +18,7 @@ import (
 	"local/ad-el-pos/server/internal/documents"
 	"local/ad-el-pos/server/internal/kitchen"
 	"local/ad-el-pos/server/internal/legacyimport"
+	"local/ad-el-pos/server/internal/licensing"
 	"local/ad-el-pos/server/internal/maintenance"
 	"local/ad-el-pos/server/internal/reports"
 )
@@ -62,6 +63,11 @@ type Service struct {
 	// Legacy es la migración del sistema anterior (etapa 9H, fase C; legacy_migration.go): subidas, corridas y su
 	// trabajador, que arranca main.go. Sin valor, las rutas de la migración responden 503.
 	Legacy *legacyimport.Manager
+	// License es el gestor de la licencia del servidor principal (etapa L1, fase A; internal/licensing): estado,
+	// cupos de la licencia y última hora confiable. Lo carga main.go al arrancar, después de la identidad. Lo usan
+	// las rutas license/* (Fase B), la puerta de la §6 y la hora (Fase C) y los cupos (Fase D). Sin valor
+	// (pruebas que no lo necesitan) no hay licencia.
+	License *licensing.Manager
 	// Logger recibe el detalle técnico de los fallos que la interfaz explica sin términos técnicos.
 	Logger      *slog.Logger
 	reportsOnce sync.Once

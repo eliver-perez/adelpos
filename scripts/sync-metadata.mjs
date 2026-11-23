@@ -1,4 +1,4 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -25,6 +25,16 @@ async function output(name, value) {
 }
 for (const name of ['backend/internal/product/metadata.json', 'desktop/src/generated/product.json'])
   await output(name, json(product));
+// Etapa L1 (licencias): las llaves públicas de confianza de cada entorno (config/licencias/llaves-<entorno>.json)
+// se embeben en el servidor Go con go:embed, que no puede leer fuera de backend/. config/licencias/ es la
+// fuente; backend/internal/licensing/ guarda la copia. Procedimiento: docs/licencias/ROTAR_LLAVES.md.
+const keyFiles = (await readdir(path.join(root, 'config/licencias')))
+  .filter((name) => /^llaves-[a-z]+\.json$/.test(name))
+  .sort();
+for (const name of keyFiles) {
+  const keys = JSON.parse(await read(`config/licencias/${name}`));
+  await output(`backend/internal/licensing/${name}`, json(keys));
+}
 await output(
   'desktop/src/generated/connection.json',
   json(JSON.parse(await read('config/terminal.development.json'))),
