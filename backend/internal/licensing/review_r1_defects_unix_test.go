@@ -59,7 +59,7 @@ func TestReviewR1DefectAcceptOverwritesAnUnreadableState(t *testing.T) {
 		t.Fatal(err)
 	}
 	state := h.readState()
-	if record := state.Accepted["11111111-1111-4111-8111-111111111111"]; record.Revision != 2 {
+	if record := state.Accepted[closedLicenseID]; record.Revision != 2 {
 		t.Errorf("la revisión más alta aceptada se perdió: quedó la %d", record.Revision)
 	}
 	if state.TrustedTime == nil || state.TrustedTime.Before(trusted) {

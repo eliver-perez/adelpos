@@ -41,36 +41,65 @@ func TestReviewR1DefectCopiedFolderWithoutStateIsNotDetected(t *testing.T) {
 			h.machine = machineOther
 			tamper(h)
 			status := h.start().Status()
-			if status.HasLicense() || !status.Copied {
+			// Corregido, la licencia no se usa y el estado lo explica (Copied, o la huella sin comprobar).
+			if status.HasLicense() || !(status.Copied || status.MachineUnverified) {
 				t.Fatalf("la licencia de la carpeta copiada sigue en uso en otra computadora: estado %s, Copied %v", status.State, status.Copied)
 			}
 		})
 	}
 }
 
-// Hallazgo R1-3 · Retroceso de revisión borrando estado.json: la revisión más alta aceptada solo vive en
-// estado.json. Si falta (o está dañado), vigente.lic se acepta como «primera revisión», aunque sea una revisión
-// anterior a la ya aceptada. Basta copiar el .lic activo de antes de liberar la licencia y borrar estado.json
-// para volver a operar con una licencia que ya se liberó (y que se puede activar en otra computadora).
+// Hallazgo R1-3 · Retroceso de revisión tocando estado.json: la revisión más alta aceptada solo vive en
+// estado.json. Si falta o está dañado, vigente.lic se acepta como «primera revisión», aunque sea anterior a la ya
+// aceptada; y como el historial desapareció, importar a mano el .lic anterior también se acepta. Editarlo (bajar
+// la revisión y su sha256) tiene el mismo efecto. Basta conservar el .lic activo de antes de liberar la licencia
+// para volver a operar con una licencia que ya se liberó y que se puede activar en otra computadora.
 func TestReviewR1DefectDeletedStateBringsBackAnOldRevision(t *testing.T) {
-	h := newHarness(t)
-	manager := h.start()
-	h.accept(manager, "subscription-monthly")
-	closed := h.accept(manager, "closing-deactivated")
-	if closed.State != StateRevoked || closed.Revision != 2 {
-		t.Fatalf("la licencia quedó liberada: %+v", closed)
+	cases := map[string]func(h *harness){
+		"estado.json borrado": func(h *harness) {
+			if err := os.Remove(filepath.Join(h.directory, stateFileName)); err != nil {
+				h.t.Fatal(err)
+			}
+		},
+		"estado.json dañado": func(h *harness) {
+			if err := os.WriteFile(filepath.Join(h.directory, stateFileName), []byte("{"), 0600); err != nil {
+				h.t.Fatal(err)
+			}
+		},
+		"estado.json editado": func(h *harness) {
+			old := h.fixtures.license(h.t, "subscription-monthly")
+			state := h.readState()
+			state.Accepted[closedLicenseID] = acceptedRecord{Revision: 1, SHA256: old.SHA256}
+			state.License = old.JWS
+			h.writeState(state)
+		},
 	}
+	for name, tamper := range cases {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			manager := h.start()
+			h.accept(manager, "subscription-monthly")
+			closed := h.accept(manager, "closing-deactivated")
+			if closed.State != StateRevoked || closed.Revision != 2 || closed.LicenseID != closedLicenseID {
+				t.Fatalf("la licencia quedó liberada: %+v", closed)
+			}
 
-	// El usuario de la cuenta del servicio (dueña de la carpeta de datos) borra estado.json y deja en vigente.lic
-	// el .lic de antes de liberar.
-	if err := os.WriteFile(filepath.Join(h.directory, licenseFileName), []byte(h.jws("subscription-monthly")), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Remove(filepath.Join(h.directory, stateFileName)); err != nil {
-		t.Fatal(err)
-	}
-	status := h.start().Status()
-	if status.State == StateActive || status.Revision < 2 {
-		t.Fatalf("§10.4: una revisión anterior a la aceptada no vuelve a valer (estado %s, revisión %d)", status.State, status.Revision)
+			// La cuenta del servicio (dueña de la carpeta de datos, sin sudo) deja en vigente.lic el .lic de antes de
+			// liberar y toca estado.json.
+			if err := os.WriteFile(filepath.Join(h.directory, licenseFileName), []byte(h.jws("subscription-monthly")), 0600); err != nil {
+				t.Fatal(err)
+			}
+			tamper(h)
+			restarted := h.start()
+			if status := restarted.Status(); status.HasLicense() && status.Revision < 2 {
+				t.Errorf("§10.4: al arrancar vuelve a valer una revisión anterior a la aceptada (estado %s, revisión %d)", status.State, status.Revision)
+			}
+			if status, err := restarted.Accept(h.jws("subscription-monthly")); err == nil {
+				t.Errorf("§10.4: importar el .lic anterior se acepta (estado %s, revisión %d)", status.State, status.Revision)
+			}
+		})
 	}
 }
+
+// closedLicenseID es la licencia de «subscription-monthly» y de su cierre «closing-deactivated».
+const closedLicenseID = "11111111-1111-4111-8111-111111111111"
