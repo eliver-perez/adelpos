@@ -380,6 +380,13 @@ func serveHTTP(ctx context.Context, logger *slog.Logger, cfg config.Config, pool
 		defer close(licenseDone)
 		application.License.Run(workerContext)
 	}()
+	// Etapa L1, fase C: el vigilante de la licencia y de la hora (administration/license_monitor.go) revisa al arrancar
+	// y cada 15 s, audita cada bloqueo y desbloqueo por la hora del equipo y avisa a las terminales con license.changed.
+	licenseMonitorDone := make(chan struct{})
+	go func() {
+		defer close(licenseMonitorDone)
+		application.RunLicenseMonitor(workerContext)
+	}()
 	defer func() {
 		stopWorker()
 		<-workerDone
@@ -390,6 +397,7 @@ func serveHTTP(ctx context.Context, logger *slog.Logger, cfg config.Config, pool
 		<-pairingCleanupDone
 		<-legacyDone
 		<-licenseDone
+		<-licenseMonitorDone
 	}()
 	stopped := make(chan error, 2)
 	go func() {
