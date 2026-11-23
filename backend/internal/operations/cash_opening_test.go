@@ -112,7 +112,7 @@ func testCashOpening(t *testing.T, fixture *cashFixture) {
 	})
 
 	t.Run("C3_el_turno_persiste_al_reiniciar_go", func(t *testing.T) {
-		restarted := &administration.Service{Pool: fixture.pool, ProvisioningFile: fixture.service.ProvisioningFile}
+		restarted := &administration.Service{Pool: fixture.pool, ProvisioningFile: fixture.service.ProvisioningFile, Seats: fixture.service.Seats}
 		original := fixture.service
 		fixture.service = restarted
 		current := decodeResponse[struct {

@@ -21,6 +21,7 @@ import (
 	"local/ad-el-pos/server/internal/administration"
 	"local/ad-el-pos/server/internal/catalog"
 	"local/ad-el-pos/server/internal/database"
+	"local/ad-el-pos/server/internal/licenseseats/seatstest"
 	"local/ad-el-pos/server/internal/ordering"
 )
 
@@ -48,7 +49,7 @@ func TestStageThreeAcceptance(t *testing.T) {
 	if err := os.WriteFile(filename, []byte(provisioning), 0600); err != nil {
 		t.Fatal(err)
 	}
-	service := &administration.Service{Pool: pool, ProvisioningFile: filename}
+	service := &administration.Service{Pool: pool, ProvisioningFile: filename, Seats: seatstest.Roomy()}
 	deviceID, deviceToken, sessionToken := "", "", ""
 	currentTest := t
 	run := func(name string, execute func(*testing.T)) {
