@@ -271,6 +271,8 @@ func serveHTTP(ctx context.Context, logger *slog.Logger, cfg config.Config, pool
 		database:    licensing.PoolProbe{Pool: pool},
 		testMode:    testMode,
 	}))
+	// Etapa L1, fase B: el cliente del servidor de licencias (rutas license/* y consulta en segundo plano).
+	application.LicenseServer = newLicenseClient(logger, application.License, cfg.LicenseServerURL, testMode)
 	if err := config.CheckNetworkAddress(network.Address, cfg.ListenAddress); err != nil {
 		return err
 	}
@@ -387,6 +389,13 @@ func serveHTTP(ctx context.Context, logger *slog.Logger, cfg config.Config, pool
 		defer close(licenseDone)
 		application.License.Run(workerContext)
 	}()
+	// Etapa L1, fase B: la consulta de la licencia en segundo plano (al arrancar, entre 1 y 5 minutos después, y una vez
+	// al día); nunca bloquea nada y no hace nada sin una activación instalada.
+	licenseRefreshDone := make(chan struct{})
+	go func() {
+		defer close(licenseRefreshDone)
+		application.LicenseServer.RunBackground(workerContext, licensing.DefaultSchedule())
+	}()
 	// Etapa L1, fase C: el vigilante de la licencia y de la hora (administration/license_monitor.go) revisa al arrancar
 	// y cada 15 s, audita cada bloqueo y desbloqueo por la hora del equipo y avisa a las terminales con license.changed.
 	licenseMonitorDone := make(chan struct{})
@@ -404,6 +413,7 @@ func serveHTTP(ctx context.Context, logger *slog.Logger, cfg config.Config, pool
 		<-pairingCleanupDone
 		<-legacyDone
 		<-licenseDone
+		<-licenseRefreshDone
 		<-licenseMonitorDone
 	}()
 	stopped := make(chan error, 2)

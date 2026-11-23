@@ -290,6 +290,21 @@ export const auditActionLabels: Record<string, string> = {
   get 'kitchen.print.precheck_requested'() {
     return `${precheckName().label} ${precheckName().sent} a imprimir`;
   },
+  // Etapa L1 (fase B): la licencia del servidor principal (administration/license.go).
+  'license.activated': 'Licencia activada',
+  'license.activation_failed': 'No se pudo activar la licencia',
+  'license.transferred': 'Licencia transferida a esta computadora',
+  'license.transfer_failed': 'No se pudo transferir la licencia',
+  'license.refreshed': 'Licencia actualizada',
+  'license.refresh_failed': 'No se pudo buscar la actualización de la licencia',
+  'license.deactivated': 'Licencia liberada',
+  'license.deactivation_failed': 'No se pudo liberar la licencia',
+  'license.offline_request_created': 'Solicitud de licencia sin internet creada',
+  'license.imported': 'Archivo de licencia importado',
+  'license.import_rejected': 'Archivo de licencia rechazado',
+  'license.identity_regenerated': 'Identidad nueva de la computadora principal',
+  // Etapa L1 (fase D): «Liberar cupo» en Terminales (administration/license_seats.go).
+  'license.seat_released': 'Cupo de la licencia liberado',
 };
 
 // unknownAuditAction es lo que dice la columna «Operación» con una acción que esta versión no conoce

@@ -48,7 +48,7 @@ func (clock *testClock) set(instant string) {
 	clock.current = parsed
 }
 
-// fakeDatabase simula la consulta de la base.
+// fakeDatabase simula la consulta de la base, con la copia del historial de revisiones (R1-3).
 type fakeDatabase struct {
 	mutex          sync.Mutex
 	operations     bool
@@ -56,6 +56,36 @@ type fakeDatabase struct {
 	latest         time.Time
 	activityCalls  int
 	failure        error
+	revisions      map[string]AcceptedRevision
+	revisionFail   error
+}
+
+func (database *fakeDatabase) AcceptedRevisions(context.Context) (map[string]AcceptedRevision, error) {
+	database.mutex.Lock()
+	defer database.mutex.Unlock()
+	if database.revisionFail != nil {
+		return nil, database.revisionFail
+	}
+	copied := map[string]AcceptedRevision{}
+	for licenseID, revision := range database.revisions {
+		copied[licenseID] = revision
+	}
+	return copied, nil
+}
+
+func (database *fakeDatabase) RecordAcceptedRevision(_ context.Context, licenseID string, revision int64, sha256 string) error {
+	database.mutex.Lock()
+	defer database.mutex.Unlock()
+	if database.revisionFail != nil {
+		return database.revisionFail
+	}
+	if database.revisions == nil {
+		database.revisions = map[string]AcceptedRevision{}
+	}
+	if previous, exists := database.revisions[licenseID]; !exists || previous.Revision < revision {
+		database.revisions[licenseID] = AcceptedRevision{Revision: revision, SHA256: sha256}
+	}
+	return nil
 }
 
 func (database *fakeDatabase) HasOperations(context.Context) (bool, error) {
@@ -90,13 +120,31 @@ type harness struct {
 
 func newHarness(t *testing.T) *harness {
 	t.Helper()
-	return &harness{
+	h := &harness{
 		t:         t,
 		fixtures:  loadFixtures(t),
 		directory: filepath.Join(t.TempDir(), "identity", "licencia"),
 		clock:     newTestClock("2026-11-21T12:00:00Z"),
 		machine:   machineOriginal,
 		database:  &fakeDatabase{},
+	}
+	// El registro firmado de la huella de la computadora original, como lo crea la llave de licencias (R1-2).
+	writeTestMachineRecord(t, h.fixtures, filepath.Dir(h.directory), "installation-fixture-a", machineOriginal)
+	return h
+}
+
+// writeTestMachineRecord firma el registro de la huella de una instalación de los archivos de prueba.
+func writeTestMachineRecord(t *testing.T, loaded fixtures, identityDir, installation, machineID string) {
+	t.Helper()
+	if err := os.MkdirAll(identityDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	normalized, err := normalizeMachineID(machineID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteMachineRecord(identityDir, loaded.privateKeys[installation], loaded.installations[installation].ServerID, MachineFingerprint(normalized), time.Now()); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -666,8 +714,10 @@ func TestManagerWithoutIdentity(t *testing.T) {
 func TestManagerUsesOnlyItsTrustedKeys(t *testing.T) {
 	loaded := loadFixtures(t)
 	installation := loaded.installations["installation-fixture-a"]
+	identityDir := t.TempDir()
+	writeTestMachineRecord(t, loaded, identityDir, "installation-fixture-a", machineOriginal)
 	manager := NewManager(Options{
-		Directory:    filepath.Join(t.TempDir(), "licencia"),
+		Directory:    filepath.Join(identityDir, "licencia"),
 		Installation: &installation,
 		MachineID: func() (string, error) {
 			return machineOriginal, nil

@@ -1,4 +1,4 @@
-import { readdir, readFile, writeFile } from 'node:fs/promises';
+import { readdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -36,6 +36,19 @@ const keyFiles = (await readdir(path.join(root, 'config/licencias')))
 for (const name of keyFiles) {
   const keys = JSON.parse(await read(`config/licencias/${name}`));
   await output(`backend/internal/licensing/${name}`, json(keys));
+}
+// Revisión R1 (R1-4): una copia sin su fuente (por ejemplo, una llaves-production.json huérfana, que haría compilar
+// la versión de producción) hace fallar sync-check; sync la borra.
+const keyCopies = (await readdir(path.join(root, 'backend/internal/licensing'))).filter((name) =>
+  /^llaves-[a-z]+\.json$/.test(name),
+);
+for (const name of keyCopies) {
+  if (keyFiles.includes(name)) continue;
+  if (check)
+    throw new Error(
+      `Llaves sin fuente: backend/internal/licensing/${name} no está en config/licencias. Ejecuta ./scripts/dev.sh sync`,
+    );
+  await unlink(path.join(root, 'backend/internal/licensing', name));
 }
 await output(
   'desktop/src/generated/connection.json',

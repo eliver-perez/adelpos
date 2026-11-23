@@ -39,6 +39,9 @@ var Permissions = []Permission{
 	{"audit.read", "Consultar el registro de movimientos"},
 	// Etapa A1 (fase B, A1-D2): entrar con PIN en los dispositivos de meseros (migración 0025, misma descripción).
 	{"waiter_devices.use", "Entrar con PIN en teléfonos y tabletas de meseros"},
+	// Etapa L1 (fase B, L1-D21): activar, transferir, consultar, liberar e importar la licencia, la solicitud sin
+	// internet y la identidad nueva de una instalación copiada (migración 0028, misma descripción).
+	{"license.manage", "Administrar la licencia"},
 }
 
 func init() {

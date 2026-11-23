@@ -4198,3 +4198,48 @@ sessions_closed}`: Terminales › «Liberar cupo». Libera el cupo de comandero 
   su turno). Terminal inexistente, `404`.
 - **Escritorio**: el puente nativo y las pantallas (Terminales, Preparación, Configuración › Licencia) son de la Fase E,
   escondidos por la capacidad `license-v1`.
+
+## Etapa L1 · licencia del servidor principal (Fase B, esquema 28; servidor 0.15.0)
+
+Cliente del servidor de licencias en línea y sin internet (§3 de la especificación; contrato de licencias §8 a §10;
+decisiones L1-D4, L1-D5, L1-D11, L1-D17, L1-D18, L1-D21 a L1-D23). Archivo `administration/license.go`, paquete
+`internal/licensing` (`client.go`, `offline.go`, `worker.go`). Capacidad `license-v1`. Solo el servidor Go principal habla
+con el servidor de licencias; ninguna ruta devuelve el `message` del servidor de licencias ni registra el código
+comercial.
+
+- **`GET license/status`**, con cualquier sesión (no pide permiso): el estado completo `LicenseStatus` del contrato v1
+  (`docs/API_V1.md`), con `can_manage` e `identity_regeneration_available`. Con solo la credencial del dispositivo, el
+  resumen `{state, environment, copied}`.
+- **Con `license.manage`** («Administrar la licencia», solo el rol Administrador de fábrica; migración 0028, sección
+  «Fase B»). Las operaciones en línea corren después de confirmar la autenticación (`completeDeferred`), con su
+  auditoría en una transacción corta aparte; el plazo de las rutas de la licencia es de 75 s.
+  - `POST license/activate {license_key}`: activar (§8.3). El código se valida y se normaliza (L1-D4: 15 símbolos de
+    `23456789ABCDEFGHJKMNPQRSTUVWXYZ` en grupos 3-4-4-4, guiones opcionales, sin distinguir mayúsculas). Responde el
+    estado. Auditoría `license.activated` o `license.activation_failed` (con el código de error, nunca el comercial).
+  - `POST license/transfer {license_key, confirmed: true}`: transferir a esta computadora (§8.4), después de
+    `LICENSE_ACTIVATION_LIMIT` con `details.transfer_available: true` y la confirmación del usuario. Auditoría
+    `license.transferred` o `license.transfer_failed`.
+  - `POST license/refresh`: «Buscar actualización» (§8.5). Auditoría `license.refreshed` o `license.refresh_failed`.
+  - `POST license/deactivate {confirmed: true}`: «Liberar esta licencia» (§8.6); queda «Revocada» con
+    `deactivated`. Auditoría `license.deactivated` o `license.deactivation_failed`.
+  - `POST license/offline-request {action, license_key?}`: la solicitud `.licreq` de `activate` (código opcional),
+    `renew` o `deactivate` (§9.1). Responde `{action, request_id, filename, content}`; el escritorio guarda `content`
+    como archivo con el diálogo nativo. Auditoría `license.offline_request_created` (acción y `request_id`).
+  - `POST license/import {license}`: importar el `.lic` (§9.2), verificado con la §10 como una respuesta en línea; se
+    quitan los espacios, saltos de línea y BOM de alrededor. Responde el estado. Rechazo: 400 `LICENSE_FILE_INVALID`
+    con `details.reason` (`invalid_signature`, `other_installation`, `stale_revision`…), auditado como
+    `license.import_rejected`; correcto, `license.imported`.
+  - `POST license/identity/regenerate {confirmed: true}`: «Crear una identidad nueva para esta computadora» (L1-D11),
+    **solo por la escucha local** (`LICENSE_IDENTITY_LOCAL_ONLY`, 403) y solo en una instalación copiada
+    (`IDENTITY_REGENERATION_NOT_NEEDED`, 409). Revoca las terminales emparejadas por red (sesiones
+    `identity_regenerated`, credenciales de envío `device_revoked`), aparta `identity/` a
+    `identity-reemplazada-AAAAMMDD-HHMMSS/` y crea `server_id`, certificado y llave de licencias nuevos, con su registro
+    firmado de la huella; el gestor pasa a la identidad nueva con la misma última hora confiable. Responde
+    `{server_id, revoked_terminals, restart_required: true, status}`: la escucha de red sigue con el certificado
+    anterior hasta reiniciar el servidor. Auditoría `license.identity_regenerated` (`server_id` y huellas SPKI
+    anteriores y nuevos, terminales revocadas).
+- **Códigos** (L1-D17): los de la tabla de `docs/API_V1.md`, sección «Licencia del servidor principal».
+- **Consulta en segundo plano**: entre 1 y 5 minutos después de arrancar y cada 24 h ± 1 h; con falla, en 1 hora o lo
+  que pida `Retry-After`. Solo con una activación que no sea un cierre; nunca bloquea nada.
+- **Configuración**: `license_server_url` opcional en `server.json` (https). Con `test_mode`, el cliente solo habla con
+  loopback, salvo `ADEL_LICENSE_ALLOW_REMOTE=1` (L1-D18, solo la Fase G).

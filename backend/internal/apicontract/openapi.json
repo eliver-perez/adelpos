@@ -34,6 +34,10 @@
     },
     {
       "name": "Cocina"
+    },
+    {
+      "name": "Licencia",
+      "description": "Etapa L1: el estado de la licencia del servidor principal. Android y las terminales solo lo muestran; nunca hablan con el servidor de licencias."
     }
   ],
   "security": [
@@ -2671,6 +2675,55 @@
           }
         },
         "tags": ["Cocina"]
+      }
+    },
+    "/license/status": {
+      "get": {
+        "operationId": "getLicenseStatus",
+        "summary": "Estado de la licencia",
+        "description": "Etapa L1 (fase B, capacidad license-v1): el estado de la licencia del servidor principal, calculado por Go (contrato de licencias §5.6 y §6). Con sesión, el estado completo (LicenseStatus): ver el estado no pide permiso (L1-D21). Con solo la credencial del dispositivo (sin Authorization), el resumen (LicenseDeviceSummary), para el teléfono o la tableta en «¿Quién eres?». state: active (vigente), grace (tolerancia), expired (vencida), revoked (revocada, con revocation_reason), not_activated (sin activar) o not_activated_with_data (sin activar con datos). copied: la instalación se copió de otra computadora. Las fechas van en UTC. Android no habla con el servidor de licencias: muestra el estado y los códigos de error de las operaciones.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Estado completo (con sesión) o resumen (solo la credencial del dispositivo).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/LicenseStatus"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LicenseDeviceSummary"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Licencia"],
+        "security": [
+          {
+            "deviceId": [],
+            "deviceToken": [],
+            "session": []
+          },
+          {
+            "deviceId": [],
+            "deviceToken": []
+          }
+        ]
       }
     }
   },
@@ -6016,6 +6069,215 @@
         },
         "required": ["error"],
         "description": "Etapa L1 (Fase D): no hay cupo de la licencia para la operación. details.seat es el cupo que falta (cash_registers, cajas; order_takers, comanderos; kitchen_displays, pantallas de cocina), details.in_use cuántos están en uso en otras terminales y details.limit el de la licencia (0 a 999; en V1 no existe «sin límite»). message ya lo dice en español sencillo, por ejemplo «No hay cupo de comandero libre (3 de 3 en uso). Pide que se cierre la sesión de otra terminal.». La operación no se aplicó y su operation_id no quedó registrado: es un rechazo definitivo de ese envío, no un error para reintentar sin fin."
+      },
+      "LicenseDeviceSummary": {
+        "type": "object",
+        "description": "Resumen del estado de la licencia con solo la credencial del dispositivo.",
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "active",
+              "grace",
+              "expired",
+              "revoked",
+              "not_activated",
+              "not_activated_with_data"
+            ]
+          },
+          "environment": {
+            "type": "string",
+            "enum": ["test", "production"],
+            "description": "test: servidor de licencias de pruebas (versiones de desarrollo)."
+          },
+          "copied": {
+            "type": "boolean"
+          }
+        },
+        "required": ["state", "environment", "copied"],
+        "additionalProperties": false
+      },
+      "LicenseStatus": {
+        "type": "object",
+        "description": "Estado completo de la licencia (con sesión).",
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "active",
+              "grace",
+              "expired",
+              "revoked",
+              "not_activated",
+              "not_activated_with_data"
+            ]
+          },
+          "environment": {
+            "type": "string",
+            "enum": ["test", "production"]
+          },
+          "copied": {
+            "type": "boolean",
+            "description": "La instalación se copió de otra computadora: hay que crear una identidad nueva y activar o transferir."
+          },
+          "machine_unverified": {
+            "type": "boolean",
+            "description": "No se pudo comprobar esta computadora (reiniciar el servidor; si sigue, soporte)."
+          },
+          "identity_unavailable": {
+            "type": "boolean",
+            "description": "Falta la identidad del servidor o su llave de licencias."
+          },
+          "revocation_reason": {
+            "type": ["string", "null"],
+            "enum": ["deactivated", "transferred", "revoked", null],
+            "description": "Solo en revoked: liberada, transferida o revocada por el propietario."
+          },
+          "license": {
+            "type": ["object", "null"],
+            "description": "La licencia vigente, o null sin licencia válida.",
+            "properties": {
+              "license_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "activation_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "licensee_name": {
+                "type": "string"
+              },
+              "license_type": {
+                "type": "string",
+                "enum": ["perpetual", "subscription", "trial"]
+              },
+              "billing_period": {
+                "type": ["string", "null"],
+                "enum": ["monthly", "quarterly", "semiannual", "annual", null]
+              },
+              "license_revision": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "plan": {
+                "type": "object",
+                "properties": {
+                  "plan_id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "custom": {
+                    "type": "boolean"
+                  }
+                },
+                "required": ["plan_id", "name", "custom"]
+              },
+              "limits": {
+                "type": "object",
+                "description": "Cupos de la licencia (0 a 999).",
+                "properties": {
+                  "cash_registers": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "order_takers": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "kitchen_displays": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "required": ["cash_registers", "order_takers", "kitchen_displays"]
+              },
+              "features": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "boolean"
+                }
+              },
+              "issued_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "period_starts_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "updates_until": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "perpetual": {
+                "type": "boolean"
+              },
+              "expires_at": {
+                "type": ["string", "null"],
+                "format": "date-time"
+              },
+              "grace_days": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "grace_ends_at": {
+                "type": ["string", "null"],
+                "format": "date-time",
+                "description": "Fin de la tolerancia (exclusivo): desde ahí, vencida."
+              }
+            },
+            "required": [
+              "license_id",
+              "activation_id",
+              "licensee_name",
+              "license_type",
+              "billing_period",
+              "license_revision",
+              "plan",
+              "limits",
+              "features",
+              "issued_at",
+              "period_starts_at",
+              "updates_until",
+              "perpetual",
+              "expires_at",
+              "grace_days",
+              "grace_ends_at"
+            ]
+          },
+          "server_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "effective_now": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Máximo de la hora de la computadora principal y la última hora confiable, con que se calculó el estado."
+          },
+          "can_manage": {
+            "type": "boolean",
+            "description": "Quien consulta tiene «Administrar la licencia» (license.manage)."
+          },
+          "identity_regeneration_available": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "state",
+          "environment",
+          "copied",
+          "machine_unverified",
+          "identity_unavailable",
+          "revocation_reason",
+          "license",
+          "server_id",
+          "effective_now",
+          "can_manage",
+          "identity_regeneration_available"
+        ]
       },
       "LicenseClock": {
         "type": "object",

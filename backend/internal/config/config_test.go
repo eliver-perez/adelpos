@@ -228,3 +228,21 @@ func TestNetworkListenAddress(t *testing.T) {
 		t.Fatal("sin escucha de red el archivo no cambia")
 	}
 }
+
+// Etapa L1, fase B: license_server_url es opcional y, si viene, https sin usuario, consulta ni fragmento.
+func TestLicenseServerURL(t *testing.T) {
+	for _, valid := range []string{"", "https://127.0.0.1:8471", "https://licencias.example.test/base"} {
+		config := validConfig()
+		config.LicenseServerURL = valid
+		if err := config.Validate(); err != nil {
+			t.Fatalf("%q: %v", valid, err)
+		}
+	}
+	for _, invalid := range []string{"http://127.0.0.1:8471", "https://", "https://usuario@127.0.0.1", "https://127.0.0.1/?a=1", "https://127.0.0.1/#x", "127.0.0.1:8471"} {
+		config := validConfig()
+		config.LicenseServerURL = invalid
+		if err := config.Validate(); err == nil {
+			t.Fatalf("%q debe rechazarse", invalid)
+		}
+	}
+}
