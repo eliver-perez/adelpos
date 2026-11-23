@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -82,6 +83,9 @@ type Fixture struct {
 	machine  string
 	signing  ed25519.PrivateKey
 	revision int64
+	// private es la llave de licencias de la instalación de prueba (semilla pública de vectors.json): firma el registro
+	// de la huella y las pruebas de posesión del cliente.
+	private ed25519.PrivateKey
 }
 
 type vectorKey struct {
@@ -94,6 +98,7 @@ type vectorKey struct {
 type vectorInstallation struct {
 	Name      string `json:"name"`
 	ServerID  string `json:"server_id"`
+	SeedHex   string `json:"seed_hex"`
 	PublicKey string `json:"public_key"`
 }
 
@@ -157,14 +162,36 @@ func New(t *testing.T, clock *Clock) *Fixture {
 			PublicKey: fixture.signing.Public().(ed25519.PublicKey)}
 	}
 	for _, installation := range vectors.Installations {
-		if installation.Name == installationName {
-			fixture.Installation = licensing.Installation{ServerID: installation.ServerID, PublicKey: installation.PublicKey}
+		if installation.Name != installationName {
+			continue
 		}
+		seed, err := hex.DecodeString(installation.SeedHex)
+		if err != nil || len(seed) != ed25519.SeedSize {
+			t.Fatal("semilla de la instalación de prueba inválida")
+		}
+		fixture.private = ed25519.NewKeyFromSeed(seed)
+		fixture.Installation = licensing.Installation{ServerID: installation.ServerID, PublicKey: installation.PublicKey}
 	}
-	if fixture.signing == nil || fixture.Installation.ServerID == "" {
+	if fixture.signing == nil || fixture.Installation.ServerID == "" ||
+		licensing.EncodeSupportPublicKey(fixture.private.Public().(ed25519.PublicKey)) != fixture.Installation.PublicKey {
 		t.Fatal("faltan la llave o la instalación de prueba en vectors.json")
 	}
+	// El registro firmado de la huella de la computadora original, junto a la llave (como lo crea
+	// localsetup.EnsureLicenseKey): con otra huella la instalación es una copia.
+	identityDir := filepath.Dir(fixture.Directory)
+	if err := os.MkdirAll(identityDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := licensing.WriteMachineRecord(identityDir, fixture.private, fixture.Installation.ServerID,
+		licensing.MachineFingerprint(strings.ToLower(MachineID)), clock.Now()); err != nil {
+		t.Fatal(err)
+	}
 	return fixture
+}
+
+// PrivateKey es la llave de licencias de la instalación de prueba, para armar el cliente del servidor de licencias.
+func (fixture *Fixture) PrivateKey() ed25519.PrivateKey {
+	return fixture.private
 }
 
 // SetMachine cambia el identificador del equipo (OtherMachineID simula la carpeta copiada a otra computadora).
@@ -188,6 +215,7 @@ func (fixture *Fixture) Start() *licensing.Manager {
 	manager := licensing.NewManager(licensing.Options{
 		Directory:         fixture.Directory,
 		Installation:      &installation,
+		PrivateKey:        fixture.private,
 		Trust:             &trust,
 		Now:               fixture.Clock.Now,
 		MachineID:         fixture.machineID,

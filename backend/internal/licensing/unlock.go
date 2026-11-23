@@ -398,10 +398,11 @@ func supportWindowOpen(created, now time.Time) bool {
 func (manager *Manager) SupportRequest(renew bool) (SupportRequestInfo, error) {
 	manager.mutex.Lock()
 	defer manager.mutex.Unlock()
-	installation := manager.options.Installation
-	if installation == nil || !manager.persistent {
-		return SupportRequestInfo{}, ErrIdentityUnavailable
+	// Como toda escritura del estado: sin identidad no hay solicitud, y sin el estado del disco no se escribe (R1-1).
+	if err := manager.ensureStateLocked(); err != nil {
+		return SupportRequestInfo{}, err
 	}
+	installation := manager.options.Installation
 	now := manager.now()
 	if pending := manager.state.Support.pending(); pending != nil && !renew && supportWindowOpen(pending.CreatedAt, now) {
 		return pending.info(true), nil
@@ -477,10 +478,10 @@ func (manager *Manager) AcceptSupportUnlock(response string, trust SupportTrust)
 	}
 	manager.mutex.Lock()
 	defer manager.mutex.Unlock()
-	installation := manager.options.Installation
-	if installation == nil || !manager.persistent {
-		return SupportUnlockResult{}, ErrIdentityUnavailable
+	if err := manager.ensureStateLocked(); err != nil {
+		return SupportUnlockResult{}, err
 	}
+	installation := manager.options.Installation
 	content := verified.content
 	if content.InstallationTag != SupportInstallationTag(installation.ServerID) {
 		return SupportUnlockResult{}, supportRejected(SupportReasonOtherInstallation)
