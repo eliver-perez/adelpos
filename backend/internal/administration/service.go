@@ -18,6 +18,7 @@ import (
 	"local/ad-el-pos/server/internal/documents"
 	"local/ad-el-pos/server/internal/kitchen"
 	"local/ad-el-pos/server/internal/legacyimport"
+	"local/ad-el-pos/server/internal/licenseseats"
 	"local/ad-el-pos/server/internal/licensing"
 	"local/ad-el-pos/server/internal/maintenance"
 	"local/ad-el-pos/server/internal/reports"
@@ -68,6 +69,10 @@ type Service struct {
 	// las rutas license/* (Fase B), la puerta de la §6 y la hora (Fase C) y los cupos (Fase D). Sin valor
 	// (pruebas que no lo necesitan) no hay licencia.
 	License *licensing.Manager
+	// Seats aplica los cupos de la licencia (etapa L1, Fase D; license_seats.go e internal/licenseseats). Sin valor, o
+	// sin fuente de límites, no hay licencia válida y ninguna operación que pide cupo procede (falla cerrada): main.go
+	// lo crea siempre y las pruebas inyectan uno con los cupos y el reloj que necesitan (licenseseats/seatstest).
+	Seats *licenseseats.Manager
 	// Etapa L1, Fase C (license_gate.go, license_clock.go y license_monitor.go): la puerta de la licencia y la
 	// protección de la hora. LicenseServerClock da la hora del servidor de licencias para «Comprobar la hora con
 	// internet» (§6.3; lo implementa el cliente de la Fase B; sin valor, esa ruta responde 503). SupportTrust son las
@@ -386,8 +391,11 @@ func (service *Service) dispatch(ctx context.Context, tx pgx.Tx, request Request
 		if err != nil {
 			return nil, err
 		}
-		return runProtected(ctx, tx, principal, request, route, func(work pgx.Tx) (any, error) {
-			return service.protected(ctx, work, request, principal, route)
+		// Etapa L1 (Fase D): el pedido de la cola pide cupo como cualquier captura (license_seats.go).
+		return service.withSeats(ctx, tx, request, principal, route, func() (any, error) {
+			return runProtected(ctx, tx, principal, request, route, func(work pgx.Tx) (any, error) {
+				return service.protected(ctx, work, request, principal, route)
+			})
 		})
 	}
 	// Agente de impresión de la terminal (etapa 9G, fase E; print_agent.go): solo con la credencial de la terminal,
@@ -404,9 +412,13 @@ func (service *Service) dispatch(ctx context.Context, tx pgx.Tx, request Request
 	if err != nil {
 		return nil, err
 	}
-	// Las denegaciones y acciones de soporte también forman parte del historial de seguridad.
-	result, err := runProtected(ctx, tx, principal, request, route, func(work pgx.Tx) (any, error) {
-		return service.protected(ctx, work, request, principal, route)
+	// Las denegaciones y acciones de soporte también forman parte del historial de seguridad. Etapa L1 (Fase D): los
+	// cupos de la licencia se aplican aquí, en un solo punto, después de autenticar y en la misma transacción
+	// (license_seats.go; la clasificación es licenseseats.ForOperation).
+	result, err := service.withSeats(ctx, tx, request, principal, route, func() (any, error) {
+		return runProtected(ctx, tx, principal, request, route, func(work pgx.Tx) (any, error) {
+			return service.protected(ctx, work, request, principal, route)
+		})
 	})
 	if err == nil && request.Method == "GET" && principal.Support {
 		err = audit(ctx, tx, principal, "support.read", strings.Split(route, "/")[0], nil, nil, nil, true)

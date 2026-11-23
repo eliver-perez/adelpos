@@ -754,10 +754,13 @@ func testPairingAndTerminals(t *testing.T, env *delegationEnvironment) {
             WHERE s.revoked_at IS NULL AND s.expires_at > now() AND d.revoked_at IS NULL AND d.kind='desktop'`)
 		value := summary(env.admin)
 		byKind := value["by_kind"].(map[string]any)
-		if byKind["desktop"] != float64(expected) || byKind["android"] != float64(0) || byKind["kitchen"] != float64(0) || value["limited"] != false {
+		// Desde la etapa L1 (Fase D, L1-D22) by_kind se conserva y los cupos de la licencia van en seats, con limited true.
+		seats, _ := value["seats"].(map[string]any)
+		if byKind["desktop"] != float64(expected) || byKind["android"] != float64(0) || byKind["kitchen"] != float64(0) ||
+			value["limited"] != true || len(seats) != 3 {
 			t.Fatalf("conteo por tipo: %v (se esperaban %d de escritorio)", value, expected)
 		}
-		// Un comandero Android con sesión activa cuenta aparte; no se limita nada.
+		// Un comandero Android con sesión activa cuenta aparte en by_kind.
 		var androidID, userID string
 		if err := env.pool.QueryRow(env.ctx, "SELECT id FROM app.users WHERE username='caja.emparejada9g'").Scan(&userID); err != nil {
 			t.Fatal(err)

@@ -29,6 +29,7 @@ import (
 	"local/ad-el-pos/server/internal/kitchen"
 	"local/ad-el-pos/server/internal/lanlistener"
 	"local/ad-el-pos/server/internal/legacyimport"
+	"local/ad-el-pos/server/internal/licenseseats"
 	"local/ad-el-pos/server/internal/licensing"
 	"local/ad-el-pos/server/internal/localsetup"
 	"local/ad-el-pos/server/internal/maintenance"
@@ -218,6 +219,25 @@ func newApplication(pool *pgxpool.Pool, configFile string, backups maintenance.B
 		Queues: kitchen.HostQueueInspector{},
 		// Vista previa del logotipo en el diseñador de documentos (etapa 9B).
 		Rasters: identity.NewRasters(pool),
+		// Cupos de la licencia (etapa L1, Fase D; internal/licenseseats). Los límites llegan por la interfaz
+		// licenseseats.LimitsSource y la hora por Options.Now. En esta fase todavía no hay gestor de licencias: sin
+		// fuente no hay licencia válida y ninguna operación que pide cupo procede (falla cerrada; nunca un «sin
+		// límite» que pudiera llegar a un instalador). La Fase C lo conecta al fusionar con la Fase A, en cuanto el
+		// gestor de licencias (licensing.Manager) esté cargado y antes de atender peticiones:
+		//
+		//	application.Seats = licenseseats.NewManager(licenseseats.Options{
+		//		Limits: licenseseats.LimitsFunc(func() (licenseseats.Limits, bool) {
+		//			status := manager.Status()
+		//			valid := status.State != licensing.StateNotActivated && status.State != licensing.StateNotActivatedWithData
+		//			return licenseseats.Limits{CashRegisters: status.Limits.CashRegisters,
+		//				OrderTakers: status.Limits.OrderTakers, KitchenDisplays: status.Limits.KitchenDisplays}, valid
+		//		}),
+		//		Now: manager.LocalClock,
+		//	})
+		//
+		// Con una licencia vencida o revocada los cupos siguen siendo los de esa licencia (la puerta de la Fase C decide
+		// qué se permite en cada estado).
+		Seats: licenseseats.NewManager(licenseseats.Options{Limits: nil}),
 	}
 	// Respaldos programados y «Respaldar ahora» (etapa 9G, fase F): el mismo respaldo de la instalación (pg_dump con
 	// serve; el de internal/standalone en el host), con su trabajador diario en serveHTTP.

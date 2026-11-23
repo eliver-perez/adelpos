@@ -20,6 +20,7 @@ import (
 	"local/ad-el-pos/server/internal/administration"
 	"local/ad-el-pos/server/internal/database"
 	"local/ad-el-pos/server/internal/httpapi"
+	"local/ad-el-pos/server/internal/licenseseats/seatstest"
 )
 
 type terminal struct {
@@ -50,7 +51,7 @@ func TestStageTwoAcceptance(t *testing.T) {
 	if err := os.WriteFile(filename, []byte(provisioning), 0600); err != nil {
 		t.Fatal(err)
 	}
-	service := &administration.Service{Pool: pool, ProvisioningFile: filename}
+	service := &administration.Service{Pool: pool, ProvisioningFile: filename, Seats: seatstest.Roomy()}
 	handler := httpapi.New(func(ctx context.Context) database.Health {
 		return database.Probe(ctx, pool)
 	}, nil, slog.New(slog.NewJSONHandler(io.Discard, nil)), service)
@@ -135,7 +136,7 @@ func TestStageTwoAcceptance(t *testing.T) {
 		primary.session = text(response, "session_token")
 		call(oldSession, "GET", "users", nil, 401)
 		// El servicio reiniciado es el que atiende en adelante (la etapa 9F le inyecta un respaldo controlado).
-		service = &administration.Service{Pool: pool, ProvisioningFile: filename}
+		service = &administration.Service{Pool: pool, ProvisioningFile: filename, Seats: seatstest.Roomy()}
 		handler = httpapi.New(func(ctx context.Context) database.Health {
 			return database.Probe(ctx, pool)
 		}, nil, slog.New(slog.NewJSONHandler(io.Discard, nil)), service)
