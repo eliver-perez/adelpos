@@ -220,6 +220,14 @@ func (service *Service) licenseRoutes(ctx context.Context, tx pgx.Tx, request Re
 	if service.License == nil {
 		return nil, licenseFault(licensing.ErrIdentityUnavailable)
 	}
+	// Sin identidad, con la instalación copiada o sin huella no se va a la red (ni se firma una solicitud): primero
+	// hay que resolver eso (L1-D11). Importar un .lic y la identidad nueva tienen sus propias comprobaciones.
+	switch route {
+	case "license/activate", "license/transfer", "license/refresh", "license/deactivate", "license/offline-request":
+		if err := service.License.SigningProblem(); err != nil {
+			return nil, licenseFault(err)
+		}
+	}
 	switch route {
 	case "license/activate":
 		var input struct {

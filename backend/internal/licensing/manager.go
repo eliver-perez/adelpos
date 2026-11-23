@@ -863,3 +863,10 @@ func (manager *Manager) CurrentMachine() (string, bool) {
 	defer manager.mutex.Unlock()
 	return manager.machine, manager.machine != ""
 }
+
+// SigningProblem dice por qué no se puede firmar con la identidad (sin identidad, copiada o sin huella), o nil. Las
+// rutas lo comprueban antes de ir a la red.
+func (manager *Manager) SigningProblem() error {
+	_, _, err := manager.signingIdentity()
+	return err
+}
