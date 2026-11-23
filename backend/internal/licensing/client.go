@@ -214,17 +214,7 @@ func loopbackHost(host string) bool {
 func newHTTPClient(options ClientOptions) *http.Client {
 	dialer := &net.Dialer{Timeout: 10 * time.Second}
 	if options.TestMode && !options.AllowRemote {
-		dialer.Control = func(network, address string, _ syscall.RawConn) error {
-			host, _, err := net.SplitHostPort(address)
-			if err != nil {
-				return err
-			}
-			ip := net.ParseIP(host)
-			if ip == nil || !ip.IsLoopback() {
-				return errRemoteNotAllowed
-			}
-			return nil
-		}
+		dialer.Control = loopbackOnly
 	}
 	transport := &http.Transport{
 		Proxy:                 nil,
@@ -246,6 +236,19 @@ func newHTTPClient(options ClientOptions) *http.Client {
 }
 
 var errRemoteNotAllowed = errors.New("destino no permitido en el modo de pruebas")
+
+// loopbackOnly es el control de la conexión en test_mode: solo direcciones de loopback, ya resueltas.
+func loopbackOnly(_ string, address string, _ syscall.RawConn) error {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return errRemoteNotAllowed
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || !ip.IsLoopback() {
+		return errRemoteNotAllowed
+	}
+	return nil
+}
 
 func sleepContext(ctx context.Context, wait time.Duration) error {
 	timer := time.NewTimer(wait)
