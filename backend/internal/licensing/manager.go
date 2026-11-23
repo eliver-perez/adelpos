@@ -620,3 +620,98 @@ func (manager *Manager) tick(ctx context.Context) {
 	}
 	_ = manager.Flush()
 }
+
+// --- Fase B: lo que el cliente en línea, los .licreq y la identidad nueva necesitan del gestor --------------------
+
+// signingIdentity es la identidad con que se firma una prueba de posesión o un .licreq. No se firma nada sin
+// identidad, con la instalación copiada (L1-D11: antes hay que crear una identidad nueva) ni sin huella comprobada.
+func (manager *Manager) signingIdentity() (Installation, ed25519.PrivateKey, error) {
+	manager.mutex.Lock()
+	defer manager.mutex.Unlock()
+	switch {
+	case manager.options.Installation == nil || len(manager.options.PrivateKey) != ed25519.PrivateKeySize:
+		return Installation{}, nil, ErrIdentityUnavailable
+	case manager.copied:
+		return Installation{}, nil, ErrCopiedInstallation
+	case manager.machineUnverified:
+		return Installation{}, nil, ErrMachineUnverified
+	}
+	return *manager.options.Installation, manager.options.PrivateKey, nil
+}
+
+// installation es la identidad cargada, aunque no se pueda firmar con ella.
+func (manager *Manager) installation() (Installation, bool) {
+	manager.mutex.Lock()
+	defer manager.mutex.Unlock()
+	if manager.options.Installation == nil {
+		return Installation{}, false
+	}
+	return *manager.options.Installation, true
+}
+
+// currentActivation es el activation_id de la licencia instalada que se usa (también una revisión de cierre). Falso
+// sin licencia válida o con la licencia ignorada (copia o huella sin comprobar).
+func (manager *Manager) currentActivation() (string, bool) {
+	_, activationID, ok := manager.currentLicenseIDs()
+	return activationID, ok
+}
+
+func (manager *Manager) currentLicenseIDs() (string, string, bool) {
+	manager.mutex.Lock()
+	defer manager.mutex.Unlock()
+	if manager.license == nil || manager.copied || manager.machineUnverified || manager.options.Installation == nil {
+		return "", "", false
+	}
+	return manager.license.LicenseID, manager.license.ActivationID, true
+}
+
+// ServerID es el server_id de la identidad cargada (vacío sin identidad).
+func (manager *Manager) ServerID() string {
+	installation, _ := manager.installation()
+	return installation.ServerID
+}
+
+// Directory es la carpeta identity/licencia del gestor.
+func (manager *Manager) Directory() string {
+	manager.mutex.Lock()
+	defer manager.mutex.Unlock()
+	return manager.store.directory
+}
+
+// SwitchInstallation pasa el gestor a una identidad nueva (license/identity/regenerate, L1-D11), sin reiniciar:
+// otra carpeta de estado, sin licencia, con la huella de este equipo y **la misma última hora confiable** (L1-D25:
+// crear una identidad nueva no reinicia la protección de la hora). La carpeta anterior ya se apartó con la identidad
+// anterior y no se vuelve a usar.
+func (manager *Manager) SwitchInstallation(directory string, installation Installation, private ed25519.PrivateKey) error {
+	manager.mutex.Lock()
+	defer manager.mutex.Unlock()
+	if manager.machine == "" {
+		return ErrMachineUnverified
+	}
+	store := stateStore{directory: directory}
+	if err := store.ensureDirectory(); err != nil {
+		return err
+	}
+	next := newStoredState()
+	next.ServerID = installation.ServerID
+	next.InstallationPublicKey = installation.PublicKey
+	next.MachineFingerprint = manager.machine
+	if manager.state.TrustedTime != nil {
+		next.raiseTrustedTime(*manager.state.TrustedTime, manager.state.TrustedSource)
+	}
+	if err := store.write(next, manager.now()); err != nil {
+		return ErrStateNotSaved
+	}
+	identity := installation
+	manager.options.Installation = &identity
+	manager.options.PrivateKey = private
+	manager.options.IdentityProblem = ""
+	manager.store = store
+	manager.state = next
+	manager.dirty = false
+	manager.persistent = true
+	manager.license = nil
+	manager.copied = false
+	manager.logger.Info("license_installation_switched", "server_id", installation.ServerID)
+	return nil
+}
