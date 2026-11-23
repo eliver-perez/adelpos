@@ -31,6 +31,9 @@
     },
     {
       "name": "Emparejamiento"
+    },
+    {
+      "name": "Cocina"
     }
   ],
   "security": [
@@ -1045,7 +1048,7 @@
       "post": {
         "operationId": "openAccount",
         "summary": "Abrir una cuenta con su primer producto",
-        "description": "Crea la cuenta y su borrador inicial en una sola operación idempotente (accounts.open; con items, también orders.capture, catalog.read y catalog.prices.read). Con seen_account_ids responde 409 TABLE_HAS_ACCOUNT si la mesa tiene cuentas abiertas que la terminal no veía.",
+        "description": "Crea la cuenta y su borrador inicial en una sola operación idempotente (accounts.open; con items, también orders.capture, catalog.read y catalog.prices.read). Con seen_account_ids responde 409 TABLE_HAS_ACCOUNT si la mesa tiene cuentas abiertas que la terminal no veía. Etapa L1 (Fase D, cupos de la licencia): crear o modificar un pedido ocupa un cupo de la terminal: el de caja si su caja tiene un turno activo (aunque lo abriera otra terminal) y, si no, el de comandero (uno por terminal: varios meseros con su PIN en una tableta ocupan uno). Sin cupo, 409 LICENSE_SEAT_UNAVAILABLE. Un reintento con una operation_id ya registrada no vuelve a pedir cupo.",
         "parameters": [
           {
             "$ref": "#/components/parameters/ClientVersion"
@@ -1061,6 +1064,23 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Bill"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Etapa L1 (Fase D): sin cupo de la licencia (LICENSE_SEAT_UNAVAILABLE con LicenseSeatUnavailable): la terminal no tiene turno de caja activo en su caja y no hay cupo de comandero, o su caja tiene turno activo y no hay cupo de caja para ella. No se guardó nada. Otros conflictos de la operación, con Error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/LicenseSeatUnavailable"
+                    },
+                    {
+                      "$ref": "#/components/schemas/Error"
+                    }
+                  ]
                 }
               }
             }
@@ -1157,7 +1177,7 @@
       "put": {
         "operationId": "saveDraft",
         "summary": "Guardar el borrador",
-        "description": "Sustituye el borrador con la revisión vigente de la cuenta (409 ACCOUNT_CONFLICT si otra terminal la cambió). Idempotente con operation_id.",
+        "description": "Sustituye el borrador con la revisión vigente de la cuenta (409 ACCOUNT_CONFLICT si otra terminal la cambió). Idempotente con operation_id. Etapa L1 (Fase D, cupos de la licencia): crear o modificar un pedido ocupa un cupo de la terminal: el de caja si su caja tiene un turno activo (aunque lo abriera otra terminal) y, si no, el de comandero (uno por terminal: varios meseros con su PIN en una tableta ocupan uno). Sin cupo, 409 LICENSE_SEAT_UNAVAILABLE. Un reintento con una operation_id ya registrada no vuelve a pedir cupo.",
         "parameters": [
           {
             "$ref": "#/components/parameters/ClientVersion"
@@ -1182,6 +1202,23 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Bill"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Etapa L1 (Fase D): sin cupo de la licencia (LICENSE_SEAT_UNAVAILABLE con LicenseSeatUnavailable): la terminal no tiene turno de caja activo en su caja y no hay cupo de comandero, o su caja tiene turno activo y no hay cupo de caja para ella. No se guardó nada. Otros conflictos de la operación, con Error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/LicenseSeatUnavailable"
+                    },
+                    {
+                      "$ref": "#/components/schemas/Error"
+                    }
+                  ]
                 }
               }
             }
@@ -1264,7 +1301,7 @@
       "post": {
         "operationId": "confirmDraft",
         "summary": "Confirmar (enviar) el borrador",
-        "description": "Confirma el borrador si la huella sigue siendo la del cálculo visto (409 QUOTE_CHANGED si cambió un precio o el borrador). Idempotente con operation_id; cocina recibe el pedido.",
+        "description": "Confirma el borrador si la huella sigue siendo la del cálculo visto (409 QUOTE_CHANGED si cambió un precio o el borrador). Idempotente con operation_id; cocina recibe el pedido. Etapa L1 (Fase D, cupos de la licencia): crear o modificar un pedido ocupa un cupo de la terminal: el de caja si su caja tiene un turno activo (aunque lo abriera otra terminal) y, si no, el de comandero (uno por terminal: varios meseros con su PIN en una tableta ocupan uno). Sin cupo, 409 LICENSE_SEAT_UNAVAILABLE. Un reintento con una operation_id ya registrada no vuelve a pedir cupo.",
         "parameters": [
           {
             "$ref": "#/components/parameters/ClientVersion"
@@ -1289,6 +1326,23 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Bill"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Etapa L1 (Fase D): sin cupo de la licencia (LICENSE_SEAT_UNAVAILABLE con LicenseSeatUnavailable): la terminal no tiene turno de caja activo en su caja y no hay cupo de comandero, o su caja tiene turno activo y no hay cupo de caja para ella. No se guardó nada. Otros conflictos de la operación, con Error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/LicenseSeatUnavailable"
+                    },
+                    {
+                      "$ref": "#/components/schemas/Error"
+                    }
+                  ]
                 }
               }
             }
@@ -1463,7 +1517,7 @@
       "post": {
         "operationId": "editUnits",
         "summary": "Modificar una partida enviada",
-        "description": "Aplica la modificación calculada por previewEdit si la huella sigue igual (409 QUOTE_CHANGED si no), con su motivo (5 a 500 caracteres). Requiere los permisos de previewEdit; queda registrado quién lo hizo y cocina recibe el aviso de modificación. Mismas reglas de pagos, revisión y cuenta cerrada que cancelUnits. Idempotente con operation_id.",
+        "description": "Aplica la modificación calculada por previewEdit si la huella sigue igual (409 QUOTE_CHANGED si no), con su motivo (5 a 500 caracteres). Requiere los permisos de previewEdit; queda registrado quién lo hizo y cocina recibe el aviso de modificación. Mismas reglas de pagos, revisión y cuenta cerrada que cancelUnits. Idempotente con operation_id. Etapa L1 (Fase D, cupos de la licencia): crear o modificar un pedido ocupa un cupo de la terminal: el de caja si su caja tiene un turno activo (aunque lo abriera otra terminal) y, si no, el de comandero (uno por terminal: varios meseros con su PIN en una tableta ocupan uno). Sin cupo, 409 LICENSE_SEAT_UNAVAILABLE. Un reintento con una operation_id ya registrada no vuelve a pedir cupo.",
         "parameters": [
           {
             "$ref": "#/components/parameters/ClientVersion"
@@ -1530,6 +1584,23 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Bill"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Etapa L1 (Fase D): sin cupo de la licencia (LICENSE_SEAT_UNAVAILABLE con LicenseSeatUnavailable): la terminal no tiene turno de caja activo en su caja y no hay cupo de comandero, o su caja tiene turno activo y no hay cupo de caja para ella. No se guardó nada. Otros conflictos de la operación, con Error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/LicenseSeatUnavailable"
+                    },
+                    {
+                      "$ref": "#/components/schemas/Error"
+                    }
+                  ]
                 }
               }
             }
@@ -1670,7 +1741,7 @@
       "post": {
         "operationId": "submitOfflineOrder",
         "summary": "Pedido capturado sin conexión",
-        "description": "Para la aplicación Android: el pedido de la cola con la versión del catálogo con que se capturó, la hora de captura, el destino y el precio por unidad que vio el mesero. Sin cambios se acepta y se confirma (cocina lo recibe). Con cambios responde 409 ORDER_REQUIRES_CONFIRMATION con la lista; se acepta al reenviarlo con la misma operation_id y confirmation (la catalog_version vigente que devolvió el rechazo y los cambios que vio el mesero), siempre con los precios del servidor. Requiere orders.confirm, orders.capture, accounts.read, catalog.read y catalog.prices.read (y accounts.open para una mesa). Etapa A1: en lugar de la sesión acepta la credencial de envío del mesero (X-Offline-Credential, de pinLogin) junto con la del dispositivo, para que la cola salga aunque la sesión haya vencido; Go valida al recibir el dispositivo, el usuario activo, su PIN vigente (misma pin_version), waiter_devices.use y los permisos de la operación. Si la credencial ya no vale (PIN cambiado o quitado, usuario desactivado o sin waiter_devices.use, credencial reemplazada): 401 OFFLINE_CREDENTIAL_INVALID; el pedido se conserva y el mesero entra con su PIN con conexión. Sesión y credencial juntas: 400. Etapa A1 (A1-D6): con account_id, replaces_draft_items dice qué renglones del borrador de la cuenta sustituye el pedido (tal como los vio el dispositivo); al aceptarlo Go los quita del borrador en la misma transacción (removed_draft_item_ids) y avisa a las demás terminales como un guardado del borrador. Un renglón cambiado, quitado o ya enviado desde otra terminal es un cambio más (draft_item_changed, draft_item_removed, draft_item_sent) que el mesero confirma con la misma operation_id o corrige. A1-D18 (el servidor nunca repite lo que ya entró): una partida con el id de un renglón del borrador de la cuenta lo sustituye aunque no venga en replaces_draft_items (igual, o guardado por última vez por el mismo mesero en el mismo dispositivo: se quita; cambiado en otra terminal: draft_item_changed); una partida ya enviada a cocina es draft_item_sent y al confirmarlo se envía lo demás (si no queda nada, 200 sin pedido nuevo, already_sent_item_ids); la misma operation_id de un confirmDraft ya aplicado en esa cuenta por el mismo usuario y dispositivo es 409 OFFLINE_ORDER_ALREADY_ACCEPTED (origin confirm_draft) sin mandar nada (con otra cuenta, una mesa, otro usuario u otra operación, IDEMPOTENCY_CONFLICT); un pedido a una mesa cuyas partidas ya están en una cuenta abierta de esa mesa es items_in_account con account_id. Etapa A2 (Para llevar): con destination.takeaway abre un pedido para llevar nuevo (mode takeaway, sin mesa, origin «Para llevar», el cliente y el teléfono del destino, responsable = el mesero de la sesión o de la credencial de envío) y exige además accounts.open y takeaway.manage. Mismas reglas de la clave: un reintento con la misma operation_id devuelve el mismo pedido (nunca abre otro) y, si sus partidas ya están en un pedido para llevar abierto (la apertura en línea entró y su respuesta se perdió), responde items_in_account con su account_id para reenviarlo con la misma operation_id a destination.account_id.",
+        "description": "Para la aplicación Android: el pedido de la cola con la versión del catálogo con que se capturó, la hora de captura, el destino y el precio por unidad que vio el mesero. Sin cambios se acepta y se confirma (cocina lo recibe). Con cambios responde 409 ORDER_REQUIRES_CONFIRMATION con la lista; se acepta al reenviarlo con la misma operation_id y confirmation (la catalog_version vigente que devolvió el rechazo y los cambios que vio el mesero), siempre con los precios del servidor. Requiere orders.confirm, orders.capture, accounts.read, catalog.read y catalog.prices.read (y accounts.open para una mesa). Etapa A1: en lugar de la sesión acepta la credencial de envío del mesero (X-Offline-Credential, de pinLogin) junto con la del dispositivo, para que la cola salga aunque la sesión haya vencido; Go valida al recibir el dispositivo, el usuario activo, su PIN vigente (misma pin_version), waiter_devices.use y los permisos de la operación. Si la credencial ya no vale (PIN cambiado o quitado, usuario desactivado o sin waiter_devices.use, credencial reemplazada): 401 OFFLINE_CREDENTIAL_INVALID; el pedido se conserva y el mesero entra con su PIN con conexión. Sesión y credencial juntas: 400. Etapa A1 (A1-D6): con account_id, replaces_draft_items dice qué renglones del borrador de la cuenta sustituye el pedido (tal como los vio el dispositivo); al aceptarlo Go los quita del borrador en la misma transacción (removed_draft_item_ids) y avisa a las demás terminales como un guardado del borrador. Un renglón cambiado, quitado o ya enviado desde otra terminal es un cambio más (draft_item_changed, draft_item_removed, draft_item_sent) que el mesero confirma con la misma operation_id o corrige. A1-D18 (el servidor nunca repite lo que ya entró): una partida con el id de un renglón del borrador de la cuenta lo sustituye aunque no venga en replaces_draft_items (igual, o guardado por última vez por el mismo mesero en el mismo dispositivo: se quita; cambiado en otra terminal: draft_item_changed); una partida ya enviada a cocina es draft_item_sent y al confirmarlo se envía lo demás (si no queda nada, 200 sin pedido nuevo, already_sent_item_ids); la misma operation_id de un confirmDraft ya aplicado en esa cuenta por el mismo usuario y dispositivo es 409 OFFLINE_ORDER_ALREADY_ACCEPTED (origin confirm_draft) sin mandar nada (con otra cuenta, una mesa, otro usuario u otra operación, IDEMPOTENCY_CONFLICT); un pedido a una mesa cuyas partidas ya están en una cuenta abierta de esa mesa es items_in_account con account_id. Etapa A2 (Para llevar): con destination.takeaway abre un pedido para llevar nuevo (mode takeaway, sin mesa, origin «Para llevar», el cliente y el teléfono del destino, responsable = el mesero de la sesión o de la credencial de envío) y exige además accounts.open y takeaway.manage. Mismas reglas de la clave: un reintento con la misma operation_id devuelve el mismo pedido (nunca abre otro) y, si sus partidas ya están en un pedido para llevar abierto (la apertura en línea entró y su respuesta se perdió), responde items_in_account con su account_id para reenviarlo con la misma operation_id a destination.account_id. Etapa L1 (Fase D): el pedido ocupa el cupo de comandero del dispositivo como cualquier captura. Sin cupo, 409 LICENSE_SEAT_UNAVAILABLE (LicenseSeatUnavailable): el pedido no entró y su operation_id no quedó registrado; es definitivo para ese envío y el dispositivo no lo reintenta solo (lo marca rechazado con el mensaje).",
         "parameters": [
           {
             "$ref": "#/components/parameters/ClientVersion"
@@ -1691,7 +1762,7 @@
             }
           },
           "409": {
-            "description": "Requiere confirmación (ORDER_REQUIRES_CONFIRMATION); la clave ya entró, del mismo usuario y terminal, como pedido sin conexión con otro contenido o como «Enviar a cocina» en la misma cuenta (OFFLINE_ORDER_ALREADY_ACCEPTED, con el resultado y su origin); o la clave es de otro usuario, otra terminal u otra operación (IDEMPOTENCY_CONFLICT).",
+            "description": "Requiere confirmación (ORDER_REQUIRES_CONFIRMATION); la clave ya entró, del mismo usuario y terminal, como pedido sin conexión con otro contenido o como «Enviar a cocina» en la misma cuenta (OFFLINE_ORDER_ALREADY_ACCEPTED, con el resultado y su origin); o la clave es de otro usuario, otra terminal u otra operación (IDEMPOTENCY_CONFLICT). Etapa L1: sin cupo de comandero (LICENSE_SEAT_UNAVAILABLE, LicenseSeatUnavailable).",
             "content": {
               "application/json": {
                 "schema": {
@@ -1701,6 +1772,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/OfflineOrderAlreadyAccepted"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LicenseSeatUnavailable"
                     },
                     {
                       "$ref": "#/components/schemas/Error"
@@ -2492,6 +2566,76 @@
         "tags": ["Emparejamiento"],
         "security": []
       }
+    },
+    "/kitchen/display-mode": {
+      "post": {
+        "operationId": "setKitchenDisplayMode",
+        "summary": "Entrar o salir de Preparación (modo Cocina)",
+        "description": "Etapa L1 (Fase D, L1-D7): la terminal de escritorio que muestra Cocina › Preparación ocupa un cupo de pantalla de cocina de la licencia (kitchen_displays) mientras está ahí. Con active true al entrar (ocupa el cupo, ligado a la sesión que entra; repetirlo no ocupa otro) y false al salir (lo libera; nunca falla por la licencia). También se libera al cerrar esa sesión. Sin cupo, 409 LICENSE_SEAT_UNAVAILABLE (por ejemplo, en el plan básico, sin pantallas de cocina). Requiere kitchen.states.read; un teléfono o tableta de meseros no tiene Preparación (400). No lleva operation_id: repetirlo deja el mismo estado.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "active": {
+                    "type": "boolean"
+                  }
+                },
+                "required": ["active"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "La terminal entró a Preparación (active true) o salió (false).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "active": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": ["active"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Sin cupo de pantalla de cocina (LICENSE_SEAT_UNAVAILABLE con LicenseSeatUnavailable).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/LicenseSeatUnavailable"
+                    },
+                    {
+                      "$ref": "#/components/schemas/Error"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Cocina"]
+      }
     }
   },
   "components": {
@@ -2554,7 +2698,7 @@
     },
     "responses": {
       "Error": {
-        "description": "Error. 400 datos inválidos, 401 terminal o sesión (DEVICE_*, SESSION_*), 403 sin permiso, 404 no existe, 409 conflicto (ACCOUNT_CONFLICT, QUOTE_CHANGED, IDEMPOTENCY_CONFLICT, PRODUCT_SOLD_OUT…), 426 CLIENT_UPDATE_REQUIRED, 429 demasiados intentos (LOGIN_THROTTLED, PIN_LOCKED con details.locked_until y details.requires_unlock). Etapa A1: 400 CLIENT_KIND_MISMATCH; 401 PIN_INVALID, OFFLINE_CREDENTIAL_INVALID y OFFLINE_CREDENTIAL_NOT_ALLOWED; 403 PIN_DEVICE_NOT_ALLOWED; 503 PIN_LOGIN_BUSY. Desde la etapa A1, una cuenta que ya no está abierta responde 400 OPERATION_VALIDATION con details AccountNotOpenDetails (reason account_not_open). Etapa A2: 409 BALANCE_PENDING y ALREADY_DELIVERED en deliverTakeaway. Etapa A2 (parte C): 409 PRINTER_NOT_CONFIGURED y PRINTER_UNAVAILABLE (PrinterRejection, con details.scope «device» en un dispositivo android) y PRINT_NOT_FAILED en printPrecheck y retryDocument. Etapa A2 (parte D): 403 READY_ALERTS_DEVICE_NOT_ALLOWED en los avisos de platillos listos.",
+        "description": "Error. 400 datos inválidos, 401 terminal o sesión (DEVICE_*, SESSION_*), 403 sin permiso, 404 no existe, 409 conflicto (ACCOUNT_CONFLICT, QUOTE_CHANGED, IDEMPOTENCY_CONFLICT, PRODUCT_SOLD_OUT…), 426 CLIENT_UPDATE_REQUIRED, 429 demasiados intentos (LOGIN_THROTTLED, PIN_LOCKED con details.locked_until y details.requires_unlock). Etapa A1: 400 CLIENT_KIND_MISMATCH; 401 PIN_INVALID, OFFLINE_CREDENTIAL_INVALID y OFFLINE_CREDENTIAL_NOT_ALLOWED; 403 PIN_DEVICE_NOT_ALLOWED; 503 PIN_LOGIN_BUSY. Desde la etapa A1, una cuenta que ya no está abierta responde 400 OPERATION_VALIDATION con details AccountNotOpenDetails (reason account_not_open). Etapa A2: 409 BALANCE_PENDING y ALREADY_DELIVERED en deliverTakeaway. Etapa A2 (parte C): 409 PRINTER_NOT_CONFIGURED y PRINTER_UNAVAILABLE (PrinterRejection, con details.scope «device» en un dispositivo android) y PRINT_NOT_FAILED en printPrecheck y retryDocument. Etapa A2 (parte D): 403 READY_ALERTS_DEVICE_NOT_ALLOWED en los avisos de platillos listos. Etapa L1 (Fase D): 409 LICENSE_SEAT_UNAVAILABLE (LicenseSeatUnavailable) sin cupo de la licencia en openAccount, saveDraft, confirmDraft, editUnits, submitOfflineOrder y setKitchenDisplayMode; 409 LICENSE_NOT_ACTIVATED sin licencia válida.",
         "content": {
           "application/json": {
             "schema": {
@@ -5788,6 +5932,46 @@
         },
         "required": ["cursor", "active", "day_ends_at", "settings", "alerts"],
         "description": "Avisos de platillos listos de un dispositivo desde un cursor."
+      },
+      "LicenseSeatUnavailable": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "const": "LICENSE_SEAT_UNAVAILABLE"
+              },
+              "message": {
+                "type": "string"
+              },
+              "request_id": {
+                "type": "string"
+              },
+              "details": {
+                "type": "object",
+                "properties": {
+                  "seat": {
+                    "enum": ["cash_registers", "order_takers", "kitchen_displays"]
+                  },
+                  "in_use": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 999
+                  }
+                },
+                "required": ["seat", "in_use", "limit"]
+              }
+            },
+            "required": ["code", "message", "details"]
+          }
+        },
+        "required": ["error"],
+        "description": "Etapa L1 (Fase D): no hay cupo de la licencia para la operación. details.seat es el cupo que falta (cash_registers, cajas; order_takers, comanderos; kitchen_displays, pantallas de cocina), details.in_use cuántos están en uso en otras terminales y details.limit el de la licencia (0 a 999; en V1 no existe «sin límite»). message ya lo dice en español sencillo, por ejemplo «No hay cupo de comandero libre (3 de 3 en uso). Pide que se cierre la sesión de otra terminal.». La operación no se aplicó y su operation_id no quedó registrado: es un rechazo definitivo de ese envío, no un error para reintentar sin fin."
       }
     }
   }

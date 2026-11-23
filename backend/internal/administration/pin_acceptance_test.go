@@ -24,6 +24,7 @@ import (
 	"local/ad-el-pos/server/internal/administration"
 	"local/ad-el-pos/server/internal/database"
 	"local/ad-el-pos/server/internal/httpapi"
+	"local/ad-el-pos/server/internal/licenseseats/seatstest"
 	productinfo "local/ad-el-pos/server/internal/product"
 )
 
@@ -129,7 +130,7 @@ func newPinEnvironment(t *testing.T, ctx context.Context, pool *pgxpool.Pool) (*
 	if err := os.WriteFile(tokenFile, []byte(provisioning), 0600); err != nil {
 		t.Fatal(err)
 	}
-	service := &administration.Service{Pool: pool, ProvisioningFile: tokenFile}
+	service := &administration.Service{Pool: pool, ProvisioningFile: tokenFile, Seats: seatstest.Roomy()}
 	handler := httpapi.New(func(ctx context.Context) database.Health {
 		return database.Probe(ctx, pool)
 	}, nil, slog.New(slog.NewJSONHandler(io.Discard, nil)), service)

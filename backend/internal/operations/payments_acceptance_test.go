@@ -576,7 +576,7 @@ func testPayments(t *testing.T, base *restaurantFixture) {
 			t.Fatal("Marcar como entregado al liquidar no registró la entrega")
 		}
 		// 50: un servicio nuevo sobre la misma base conserva saldos y pagos.
-		restarted := &administration.Service{Pool: fixture.pool, ProvisioningFile: fixture.service.ProvisioningFile}
+		restarted := &administration.Service{Pool: fixture.pool, ProvisioningFile: fixture.service.ProvisioningFile, Seats: fixture.service.Seats}
 		original := fixture.service
 		fixture.service = restarted
 		if fixture.finance(t, takeaway.Account.ID).Paid != "50.00" {

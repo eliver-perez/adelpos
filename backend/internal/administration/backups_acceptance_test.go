@@ -23,6 +23,7 @@ import (
 	"local/ad-el-pos/server/internal/backupschedule"
 	"local/ad-el-pos/server/internal/database"
 	"local/ad-el-pos/server/internal/httpapi"
+	"local/ad-el-pos/server/internal/licenseseats/seatstest"
 )
 
 // scheduledTarget sustituye al respaldo de la instalación en las rutas de respaldos: escribe un archivo pequeño, lo
@@ -179,7 +180,7 @@ func TestStage9GBackupRoutes(t *testing.T) {
 	}
 	target := &scheduledTarget{directory: filepath.Join(server, "backups"), server: server}
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	service := &administration.Service{Pool: pool, ProvisioningFile: tokenFile, Logger: logger}
+	service := &administration.Service{Pool: pool, ProvisioningFile: tokenFile, Logger: logger, Seats: seatstest.Roomy()}
 	service.ScheduledBackups = backupschedule.NewRunner(pool, target, logger)
 	handler := httpapi.New(func(ctx context.Context) database.Health {
 		return database.Probe(ctx, pool)

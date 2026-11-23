@@ -29,6 +29,7 @@ import (
 	"local/ad-el-pos/server/internal/legacyimport"
 	"local/ad-el-pos/server/internal/legacypkg"
 	"local/ad-el-pos/server/internal/legacysynth"
+	"local/ad-el-pos/server/internal/licenseseats/seatstest"
 )
 
 const legacyPassphrase = "frase de paso de las rutas 9H"
@@ -72,7 +73,7 @@ func TestStage9HLegacyMigrationRoutes(t *testing.T) {
 	server := filepath.Join(root, "datos-servidor")
 	target := &scheduledTarget{directory: filepath.Join(server, "backups"), server: server}
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	service := &administration.Service{Pool: pool, ProvisioningFile: tokenFile, Logger: logger}
+	service := &administration.Service{Pool: pool, ProvisioningFile: tokenFile, Logger: logger, Seats: seatstest.Roomy()}
 	service.ScheduledBackups = backupschedule.NewRunner(pool, target, logger)
 	service.EnableLegacyMigration(filepath.Join(server, "legacy-import"))
 	workers, stopWorkers := context.WithCancel(context.Background())
