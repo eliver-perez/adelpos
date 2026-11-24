@@ -4192,10 +4192,15 @@ devices/{id}/configuration`.
   licencia (0 sin licencia válida).
 - **`POST devices/{id}/seat/release`** (`devices.manage`, `{}`) → `{released: ["order_takers" | "kitchen_displays"],
 sessions_closed}`: Terminales › «Liberar cupo». Libera el cupo de comandero o de cocina de esa terminal y cierra sus
-  sesiones (`revoke_reason` `seat_released`; las credenciales de envío de sus meseros siguen vigentes), con la auditoría
+  sesiones (`revoke_reason` `seat_released`; las credenciales de envío de sus meseros siguen vigentes: un pedido de su
+  cola pide cupo otra vez y, si lo obtiene, lo ocupa 15 minutos), con la auditoría
   `license.seat_released` (antes: la terminal; después: lo liberado y las sesiones cerradas). Si no ocupa ninguno de los
   dos, `409 LICENSE_SEAT_NOT_HELD` con `details.seats` (si solo ocupa una caja, el mensaje dice que se libera al cerrar
   su turno). Terminal inexistente, `404`.
+- **Revisión R3 (L1-D36 a L1-D39)**: el comandero cuenta por actividad (15 minutos), también el del pedido de la cola
+  de una tableta sin sesión, y se borra al cerrarse la última sesión de esa terminal (cerrar sesión, revocar la sesión o
+  la terminal, cambiar la contraseña o el PIN, desactivar al usuario, la sesión vencida), con «Liberar cupo» y al abrir
+  turno. `POST devices/{id}/revoke` libera además su comandero y su cocina (la caja sigue hasta cerrar el turno).
 - **Escritorio**: el puente nativo y las pantallas (Terminales, Preparación, Configuración › Licencia) son de la Fase E,
   escondidos por la capacidad `license-v1`.
 
