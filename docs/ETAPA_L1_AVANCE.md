@@ -3931,3 +3931,459 @@ Resultado: **12/12 en Chromium y 12/12 en WebKit**, con los cupos por actividad 
     propuesta para la V1.1.
 - **Para la Fase H**: toda corrida de Playwright sobre `etapa-l1` con el arnés aislado lleva `ISO_LICENSE_SIM=1` e
   `ISO_UNLICENSED_PORT`; sin ellos, el Go temporal no se activa.
+
+---
+
+## Revisión R2 · La protección de la hora (§6 de la especificación)
+
+La hizo el revisor independiente R2 en `$SP/wt/l1-r2`, rama `etapa-l1-r2`, sobre `1b2670e2` (la cabeza de la Fase C, con
+las Fases A y D). Se revisó lo de la hora en `git log 406e730..1b2670e2`:
+
+- `licensing/clock.go`, `unlock.go` y la parte de la hora de `operations.go`;
+- `administration/license_gate.go`, `license_clock.go` y `license_monitor.go`;
+- `cmd/soporte-desbloqueo/`;
+- y del gestor y el almacén de la Fase A, lo que alimenta, guarda y reemplaza la última hora confiable.
+
+Además, por indicación del coordinador, se leyó el adaptador `LicenseClientClock` y la comprobación fuera de la
+transacción de `etapa-l1` (`91f17ba`). Las cinco pruebas que fallan se corrieron también sobre `91f17ba`, en un árbol
+temporal ya borrado.
+
+- `ISO_TAG=R2`, sin Go temporal y sin emuladores. Ninguna llamada a `licensing.sicrat.com`.
+- No se cambió la hora de la Mac: todo con relojes simulados.
+- No se leyó ni se usó la llave privada de soporte de desarrollo: las pruebas usan llaves de prueba propias.
+- No se cambió código de producción: solo pruebas nuevas. MD5 de `docs/etapas/`, el contrato y `contracts/` iguales
+  antes y después de `format`.
+
+### Hallazgos
+
+Las pruebas «…Defect…» **fallan hasta que se corrija su hallazgo**. Por eso hoy `go-unit` falla en `./internal/licensing`,
+y `go-int` en `./internal/operations` y `./internal/licenseseats`, solo por esas pruebas.
+
+| N.º      | Gravedad                          | Dónde                                                                                                                                                                                                                                                                                                           | Escenario (entrada → resultado incorrecto)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Prueba (commit)                                                                                                                                                           | Corrección propuesta                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| -------- | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **R2-1** | **Media**                         | `license_clock.go:158` (`ReplaceTrustedTime`) antes de `:163` (`futureOperations`) y `:169` (auditoría); `license_clock.go:321` (`AcceptSupportUnlock`, que escribe en `unlock.go:517`) antes de `:343`. En `etapa-l1`: `completeTimeCheck` (igual orden en su transacción corta) y `supportUnlock` sin cambios | Las dos únicas formas de **bajar** la hora confiable la escriben en `estado.json` de inmediato. Su auditoría va después, en una transacción. Si después de escribir el archivo falla la consulta de operaciones futuras, la auditoría o el commit, la transacción se revierte. Causas posibles: se agota el plazo, porque en la Fase C el servidor de licencias puede consumir 8 de los 10 s; una desconexión de la base; un lock. En la prueba, la inserción en `audit_events` espera un lock hasta que se agota el plazo. Resultado: la hora ya bajó, también en disco, pero **no queda `license.clock_corrected` con los dos valores ni la lista de operaciones con fecha futura**, ni `license.support_unlocked`. La §6.3 exige «se registra en la auditoría con los dos valores». La persona ve un **503 genérico** aunque el cambio sí se aplicó. En la §6.4, además, la respuesta de un solo uso ya quedó gastada: al reintentar, «Esta respuesta de soporte ya se usó». El vigilante solo anota después `clock_unblocked`, sin el valor anterior ni las operaciones. **Se reproduce igual en `etapa-l1`.** | `TestReviewR2DefectClockLoweringIsNotAtomicWithItsAudit`, `internal/operations/review_r2_clock_integration_test.go` (`52e38063`, `1daf12cd`), por la API v1               | Que la baja y su auditoría sean una sola cosa. **Opción A**: preparar todo antes de escribir el archivo (consultar las operaciones futuras y armar la auditoría) y escribir la auditoría en una transacción corta propia, confirmada **antes** de `ReplaceTrustedTime`. Si la escritura del archivo falla después, se anota otro registro de «no se aplicó». **Opción B**: si algo falla después de escribir, devolver la hora anterior (`ReplaceTrustedTime(previous)`) y, en la §6.4, el número a pendiente. En las dos, la respuesta no debe ser un error si el cambio quedó aplicado. |
+| R2-2     | Baja                              | `licenseseats/store.go:26` (`last_activity_at > cutoff`); también afecta las sesiones emitidas durante el salto (`expires_at` con `time.Now`)                                                                                                                                                                   | Es el caso difícil de la §6.3, y lo que pide la revisión: «qué pasa si el reloj salta hacia adelante y vuelve». La fecha salta dos días al futuro y una tableta captura (`last_activity_at` = +48 h). Se corrige el reloj y la tableta ya no captura. **16 minutos reales después** su comandero sigue «en uso» (1 de 1) y otra tableta recibe `LICENSE_SEAT_UNAVAILABLE` («No hay cupo de comandero libre (1 de 1 en uso)»). Dura hasta que el reloj real alcance la fecha del salto, o hasta cerrar la sesión o usar «Liberar cupo». El usuario ve un problema de **licencia** causado por la **hora**. Toca también a R3. **Se reproduce igual en `etapa-l1`.**                                                                                                                                                                                                                                                                                                                                                                                                                                                 | `TestReviewR2DefectSeatActivityFromAClockJumpOutlivesTheCorrection`, `internal/licenseseats/review_r2_seats_integration_test.go` (`4e2cf376`)                             | En `inUseCondition`, comparar `LEAST(last_activity_at, now)` con el corte: una actividad «en el futuro» cuenta como de ahora y vence a los 15 minutos. Opcional: al reemplazar la hora confiable (§6.3 y §6.4), llevar a la hora nueva los `last_activity_at` posteriores.                                                                                                                                                                                                                                                                                                                |
+| R2-3     | Baja (límite §12; para el avance) | `license_clock.go:122` (piso), `manager.go:337` (`loadLicense` sube a `issued_at`) y `store.go:32` (`estado.json` sin firma)                                                                                                                                                                                    | **El límite que anota el autor es así**, con dos precisiones. 1. El piso es `issued_at − 10 min`, no `issued_at`. 2. **No hace falta un servidor falso.** `estado.json` es de la cuenta que corre el servicio (en macOS, la del usuario que instaló, sin `sudo`). Basta editar `last_trusted_time` y reiniciar: al cargar, la licencia sube la hora a su `issued_at` y ahí queda. Más abajo sí se bloquea. Con una **perpetua**, `issued_at` es el de la activación y puede ser de hace meses, porque `refresh` devuelve la misma revisión. Combinado con R1-3 (un `vigente.lic` viejo y el historial editado), el piso es el `issued_at` de una revisión más vieja. Para explotarlo hay que atrasar el reloj (en macOS pide un administrador) y aislar la red del servidor de licencias, porque la consulta diaria vuelve a subir la hora. No encontré otra forma de bajar la hora: ni las fuentes (`ObserveTime` solo sube), ni un respaldo, ni un reinicio, ni la §6.4 sin firma.                                                                                                                               | `TestReviewR2LimitEditingTheStateLowersTrustedTimeToTheLicenseIssuedAt`, `internal/licensing/review_r2_clock_test.go` (`7b557100`), **pasa**: documenta el comportamiento | Escribir el límite completo en el avance: «quien puede editar `identity/licencia` y atrasar el reloj baja la hora hasta el `issued_at` de la licencia cargada». Si se quiere endurecer, hacer como R1-3 propone para las revisiones: una segunda copia de la hora confiable en la base y usar el máximo de las dos. `ReplaceTrustedTime` reemplazaría las dos. **Decisión del coordinador.**                                                                                                                                                                                              |
+| R2-4     | Baja                              | `manager.go:265` (`seedTrustedTime`) y `manager.go:606` (`tick`)                                                                                                                                                                                                                                                | `max(audit_events.occurred_at)` inicia la hora confiable solo en `Load` y solo si falta (L1-D15). Si esa consulta falla en ese arranque (plazo de 5 s, `lock_timeout` de 2 s, base lenta), no se reintenta. Al minuto, `tick` toma el reloj local como primera hora confiable. En la prueba, la base tiene actividad hasta las 15:00 y el reloj dice 12:00 → hora confiable 12:00, **sin bloqueo**, también tras reiniciar. Pasa la primera vez que arranca la 0.15.0 (todavía sin `estado.json`), o tras un `estado.json` dañado.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | `TestReviewR2DefectTrustedTimeSeedIsNotRetried`, `review_r2_clock_test.go` (`7b557100`)                                                                                   | Recordar que la semilla quedó pendiente. Mientras lo esté, `tick` la reintenta **antes** de observar el reloj, y no observa el reloj ni las operaciones hasta tener respuesta de la base (con actividad o sin ella).                                                                                                                                                                                                                                                                                                                                                                      |
+| R2-5     | Baja                              | `unlock.go:398` (`SupportRequest`) y `:473` (`AcceptSupportUnlock`): no miran `copied` ni `machineUnverified`; `Accept` sí (`manager.go:516`)                                                                                                                                                                   | Se copia la carpeta de datos a otra computadora con una solicitud pendiente. **La misma respuesta de un solo uso se acepta en las dos**: tienen la misma identidad y el mismo número pendiente. La §6.4 dice «solo en esa instalación». Hoy el efecto es pequeño, porque la copia está «Sin activar» y no registra nada con fecha.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | `TestReviewR2DefectCopiedFolderAcceptsTheSameSupportResponse`, `review_r2_clock_test.go` (`7b557100`)                                                                     | Que `SupportRequest` y `AcceptSupportUnlock` respondan `ErrCopiedInstallation` y `ErrMachineUnverified` como `Accept`, con su mensaje en `license_clock.go`.                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| R2-6     | Baja                              | `service.go:282` (`runProtected`) con `LICENSE_LOCAL_ONLY` (403, `license_clock.go:57`)                                                                                                                                                                                                                         | Las tres rutas de la hora pedidas desde una terminal de red responden 403 dentro de `runProtected`. Por eso cada intento queda en la auditoría como **`access.denied`** («acceso denegado»), un problema de permisos, aunque el mensaje para la persona sí es claro. La propia puerta usa 409 justo para no caer ahí (comentario de `license_gate.go:42`). Comprobado leyendo el código.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Sin prueba (lectura del código)                                                                                                                                           | Usar 409 para `LICENSE_LOCAL_ONLY`, o devolverlo antes de `runProtected`, como `ENROLLMENT_LOCAL_ONLY` en `dispatch`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+
+### Observaciones (sin número, para decidir o para otras fases)
+
+- **Escrituras que siguen con la hora incorrecta, fuera de la lista literal de L1-D14.** Revisé las 405 operaciones de la
+  prueba de completitud: toda escritura sin fecha está en esa lista, salvo estas cinco. Ninguna registra una operación
+  del negocio. Conviene escribirlo en el avance.
+  - `setup` y `devices/enroll`: Decisión propuesta 4, aceptada.
+  - `sessions/{id}/revoke` y «Liberar cupo» (L1-D6).
+  - `kitchen/display-mode`: solo el cupo.
+- **La §6.3 también baja la hora cuando no hay bloqueo** (`license_clock.go:157`). Con el reloj bien y unos segundos
+  adelantado respecto al servidor, «Comprobar la hora» baja la hora unos segundos y deja un `license.clock_corrected`
+  sin motivo. Sería más claro reemplazarla solo si está más de un margen por delante del `server_time`.
+- **El `issued_at` de la respuesta de soporte se lee y no se usa** (`unlock.go:321`). No es un defecto: el número de un
+  solo uso y la ventana de 24 h ya garantizan que sea reciente. Una respuesta firmada «con fecha futura» se acepta.
+  - Si su `new_trusted_time` queda por delante del reloj, el bloqueo sigue hasta corregir el reloj.
+  - Así lo dice `DESBLOQUEO_SOPORTE.md`, y la herramienta avisa al firmarla.
+- **Un salto al futuro también cambia el estado de la licencia**: `ahora_efectivo` usa la hora confiable (§5.6).
+  - Una suscripción cerca de su vencimiento aparece en Tolerancia o Vencida mientras dure el bloqueo, y el vigilante
+    anota `license.state_changed`.
+  - `SYSTEM_CLOCK_INVALID` lleva `license_ok: false`, y la pantalla de la Fase E mostraría «dos problemas».
+  - Conviene que la pantalla diga que corregir la hora puede resolver también el de la licencia.
+- **En `etapa-l1` (`91f17ba`)**:
+  - `LicenseClientClock` traduce bien los errores de la Fase B, y la red ya no retiene la transacción, que es un
+    cambio positivo.
+  - `ServerTime` con activación usa `refresh`, y su `server_time` solo sube la hora (después de verificar la
+    licencia). Un servidor falso que repite la licencia vigente con otra hora pasa esa verificación: por eso el piso
+    de R2-3 es lo único que lo limita.
+  - El plazo de la consulta subió de 8 a 60 s (`timeCheckTimeout`). En la prueba, la petición de la §6.4 con la
+    auditoría bloqueada tardó 75 s en fallar: deduzco que las rutas `license/*` tienen un plazo mayor que 10 s (no lo
+    leí en `http.go`).
+- **Trabajadores en segundo plano durante un bloqueo** (comprobado leyendo el código): el de inventario procesa
+  solicitudes ya registradas, con su `occurred_at`. `ReconcileCancellations`, «Agotado» y las liberaciones programadas
+  dependen del reloj atrasado, así que se disparan más tarde, no antes. No encontré registros nuevos con fecha atrasada
+  creados por ellos.
+
+### Lo que se comprobó y está bien
+
+- **De dónde sale la hora confiable y que solo suba**:
+  - `ObserveTime` solo sube (`store.go:124`).
+  - `server_time` e `issued_at` se guardan de inmediato. El reloj (`tick`, cada minuto) y las operaciones con fecha
+    aceptadas (la puerta, `license_gate.go:139`) se guardan cada minuto y al apagar: `main.go` espera a `licenseDone`.
+  - `ReplaceTrustedTime` solo acepta los motivos de la §6.3 y la §6.4.
+  - `max(audit_events)` solo la inicia cuando falta (salvo R2-4).
+- **Un reinicio y un respaldo restaurado no la bajan**: está en `identity/licencia`, que no viaja en los respaldos. La
+  semilla no se repite si ya existe.
+- **El salto hacia adelante y la vuelta**: en un minuto la hora confiable sube al salto, y al corregir el reloj se
+  bloquea. Se quita con la §6.3, con la §6.4 o cuando el reloj alcanza la hora confiable menos el margen. Salvo R2-2.
+- **La regla y el margen**: `CheckClock` bloquea con `local < última − 10 min`, con el límite exacto probado. No guarda
+  nada: el bloqueo se quita en cuanto el reloj se corrige.
+- **El bloqueo**: la puerta revisa la hora antes que el estado, en los dos puntos de `dispatch`. Así cubre la entrada
+  con PIN, la credencial de envío, el agente de impresión, los avisos y toda ruta con sesión.
+  - **Lo que registra con fecha** (`Dated`): F1, F2 (también cobrar, L1-D1), F3, F4, F5 con escritura, F7 y toda
+    escritura desconocida (F1 con fecha).
+  - **Lo que sigue**: las lecturas, previas, reportes, exportaciones, respaldos, licencia, `auth/*`, preferencias,
+    «Reiniciar», el SSE y el agente de impresión.
+  - Las rutas que no pasan por `dispatch` (SSE y avisos) son lecturas.
+  - `HEAD` cuenta como lectura, y no encontré ningún manejador que lo trate como escritura (búsqueda en el código).
+  - Solo hay un servidor Go que decide: las terminales usan su hora.
+- **El vigilante**: revisa al arrancar, cada 15 s y cuando la puerta ve un bloqueo, en una transacción propia. Audita
+  `license.clock_blocked` y `license.clock_unblocked` con las dos fechas y sus textos en la zona del restaurante.
+- **§6.3**:
+  - Sin cliente responde 503.
+  - Si no coincide, 409 `LICENSE_TIME_MISMATCH` con la hora del servidor, y se audita.
+  - Si coincide, reemplaza la hora y lista las operaciones futuras sin cambiarlas (salvo R2-1).
+  - El piso del `issued_at` funciona: un `server_time` falso por debajo de `issued_at − 10 min` responde 502 y no cambia
+    nada.
+  - El `server_time` llega por la interfaz y se compara con el reloj leído después de la respuesta.
+- **§6.4**:
+  - Se acepta una sola vez, también tras reiniciar, solo con el número pendiente y solo con la etiqueta de esta
+    instalación, dentro de 24 h medidas con el reloj local.
+  - Una solicitud reemplazada responde `not_requested`.
+  - Todo esto se rechaza como `altered` sin gastar la solicitud (`TestReviewR2SupportUnlockRejectsForgeries`, pasa):
+    el entorno de otra versión en una respuesta con firma válida, una licencia pegada en su lugar, otro `typ`, un
+    encabezado con espacios, el relleno de base64, un campo desconocido, una hora sin zona o anterior al origen, y
+    otra llave o un `kid` que no es de soporte.
+  - La herramienta nunca muestra la privada, exige 0600 y comprueba la respuesta con la pública compilada.
+  - Una compilación de producción no compila sin `soporte-production.pub.json`: lo dice la prueba del autor; no la
+    volví a correr.
+- **Los mensajes**: `SYSTEM_CLOCK_INVALID` no empieza con `LICENSE_`, dice la causa en español sencillo y lleva las dos
+  fechas completas, `license_state` y `license_ok`. Los rechazos de la §6.4 dicen qué hacer en cada caso.
+
+### Lo que no se pudo verificar
+
+- **La §6.3 contra el servidor de licencias real**: solo con un `server_time` simulado y leyendo el cliente de la Fase B.
+- **La pantalla de la hora, el aviso fijo y Android** (Fases E y F). En particular, que la cola sin conexión de Android
+  conserve un pedido rechazado con `SYSTEM_CLOCK_INVALID`, en lugar de descartarlo.
+- **El host de Windows**, y `F_FULLFSYNC` con el mutex tomado bajo carga (anotado por R1).
+
+### Pruebas ejecutadas
+
+| Prueba                                                                  | Árbol                     | Resultado                                                                 |
+| ----------------------------------------------------------------------- | ------------------------- | ------------------------------------------------------------------------- |
+| `ISO_TAG=R2 ISO_RUN=TestReviewR2 iso.sh … go-int ./internal/operations` | `etapa-l1-r2` y `91f17ba` | Falla solo R2-1 (las dos subpruebas), como se espera                      |
+| `… go-int ./internal/licenseseats`                                      | `etapa-l1-r2` y `91f17ba` | Falla solo R2-2, como se espera                                           |
+| `… go-int ./internal/licensing` (`TestReviewR2…`)                       | `etapa-l1-r2` y `91f17ba` | Fallan R2-4 y R2-5, como se espera; pasan `…Limit…` y `…RejectsForgeries` |
+| `format`, `fmt-check` y `go vet -tags=integration` de los tres paquetes | `etapa-l1-r2`             | Aprobados; MD5 iguales antes y después                                    |
+
+No se corrió `go-int ./cmd/ad-el-pos-server`: ninguna prueba nueva está ahí, así que no hizo falta el candado.
+
+### Commits (rama `etapa-l1-r2`)
+
+- `52e38063` revisión R2 de la etapa L1: la baja de la hora confiable (§6.3 y §6.4) se guarda antes que su auditoría
+  (R2-1, prueba que falla)
+- `4e2cf376` revisión R2 de la etapa L1: el comandero que capturó durante un salto del reloj al futuro no se libera al
+  corregirlo (R2-2, prueba que falla)
+- `7b557100` revisión R2 de la etapa L1: semilla de la hora confiable sin reintento (R2-4), carpeta copiada con
+  desbloqueo de soporte (R2-5), piso del issued_at y respuestas de soporte falsificadas
+- `1daf12cd` revisión R2 de la etapa L1: la prueba de R2-1 va por la API v1 y vale también en etapa-l1, donde la
+  comprobación con internet corre fuera de la petición
+
+### Correcciones de la revisión R2
+
+Las hizo el agente de las correcciones de R2 en `$SP/wt/l1-fr2`, rama `etapa-l1-fr2`, desde `etapa-l1` (`c0217c0`), con
+`ISO_TAG=FR`. Un primer agente tomó las pruebas del revisor y se detuvo por el límite de uso; este agente hizo todo lo
+demás.
+
+- Sin Go temporal ni emuladores. Ninguna llamada a `licensing.sicrat.com`. No se leyeron los códigos de licencia de
+  prueba ni la llave de soporte de desarrollo: las pruebas usan llaves propias. La hora de la Mac no se tocó: todo con
+  relojes simulados.
+- MD5 de `docs/etapas/`, el contrato, la guía copiada y `contracts/` iguales antes y después de `format` (54 archivos).
+- Las pruebas del revisor se tomaron con `cherry-pick` (aquí `f9a48a42`, `2bf0fe6c`, `3a81e8eb` y `88ae45b9`). **R2-2 no
+  se corrigió aquí**: su prueba queda con `t.Skip("R2-2 la corrige la Fase D")` en un commit aparte (`00eefa68`), sin
+  otro cambio. Al unir, vale la versión de `etapa-l1`.
+
+#### Qué se hizo
+
+| Hallazgo                                   | Corrección                                                                                                                                                                             | Pruebas                                                                                                                                |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| **R2-1** (media), la baja sin su auditoría | La §6.3 y la §6.4 confirman su auditoría **antes** de bajar la hora. Si la baja falla después, se audita que no se aplicó y se responde con error. En la §6.4 la respuesta no se gasta | La del revisor (ajustada, ver abajo), `TestSupportUnlockIsNotSpentWhenNotSaved` y `TestReplaceTrustedTimeNotSavedKeepsBothCopies`      |
+| **R2-3** (baja), `estado.json` editado     | Segunda copia de la última hora confiable en `app.license_trusted_time`. Vale el **máximo** de las dos. La §6.3 y la §6.4 bajan las dos                                                | `TestTrustedTimeUsesBothCopies`, `TestDatabaseTrustedTimeCopy` (`go-int`), `TestStageL1Upgrade` y la del límite del revisor (ajustada) |
+| **R2-4** (baja), semilla sin reintento     | La lectura de la base queda pendiente y el trabajador la reintenta cada minuto **antes** de observar el reloj. Mientras tanto, el reloj local no se vuelve la primera hora confiable   | La del revisor y `TestPendingSeedDoesNotTrustTheLocalClock`                                                                            |
+| **R2-5** (baja), carpeta copiada           | `SupportRequest`, `CheckSupportUnlock` y `AcceptSupportUnlock` responden `ErrCopiedInstallation` y `ErrMachineUnverified`, como `Accept`                                               | La del revisor y `TestSupportUnlockOnlyInTheOriginalInstallation`                                                                      |
+| **R2-6** (baja), `access.denied`           | `LICENSE_LOCAL_ONLY` es **409**                                                                                                                                                        | `TestStageL1LicenseGateWithoutSession`: las tres rutas desde la red, 409, y ningún `access.denied` nuevo                               |
+
+##### R2-1: la baja y su auditoría van juntas
+
+El orden de las dos rutas (`administration/license_clock.go`, comentario del principio):
+
+1. Se comprueba y se prepara todo **sin cambiar nada**:
+   - en la §6.3, la hora del servidor de licencias, el piso del `issued_at` y las operaciones con fecha futura;
+   - en la §6.4, la respuesta, con `licensing.Manager.CheckSupportUnlock` (`unlock.go:488`), que no escribe nada.
+2. La auditoría con los dos valores (`license.clock_corrected` o `license.support_unlocked`) se **confirma** en su
+   propia transacción corta. Si no se puede confirmar, no se baja nada; en la §6.4 la respuesta sigue sin usar.
+3. Solo entonces se baja la hora, en sus dos copias: `ReplaceTrustedTime` (`manager.go:817`) o `AcceptSupportUnlock`
+   (`unlock.go:503`).
+4. Si la baja falla, se vuelve a auditar **la misma acción** con `success: false`, `applied: false` y el motivo
+   (`auditNotApplied`, `license_clock.go:142`). Se responde con error: `503 LICENSE_STATE_NOT_SAVED`, o
+   `400 SUPPORT_UNLOCK_INVALID` si la solicitud cambió en medio. La hora no cambió.
+
+Detalles:
+
+- **La §6.4 ahora corre después de confirmar la petición** (`completeDeferred`, igual que la §6.3): `supportUnlock` solo
+  autoriza y devuelve un `*supportUnlockAttempt`, y `completeSupportUnlock` (`license_clock.go:486`) hace el resto.
+  `administration/reports.go` lleva el caso nuevo en `completeDeferred`, con un comentario de la revisión R2. Quien
+  llame a `Execute` sin `ServeHTTP` recibe el intento sin completar, igual que con la §6.3. Ninguna prueba lo hacía.
+- **Los rechazos de la §6.4** se siguen auditando como `license.support_unlock_rejected` con su motivo. Los nuevos
+  motivos de la auditoría son `installation_copied` y `machine_unverified` (R2-5).
+- **Antes de preparar la baja de la §6.3**, se guarda en las dos copias la hora confiable que está en memoria
+  (`_ = manager.Flush()`, `license_clock.go:219`). Así, el valor anterior que registra la auditoría es el que queda
+  guardado si la baja no se aplica. Las operaciones con fecha solo se guardan cada minuto.
+- **Lo único que puede quedar**: si el servidor se apaga entre la auditoría y la baja, queda una auditoría de una baja
+  que no se aplicó. Nunca una baja sin su auditoría.
+- **El orden dentro de la baja** (`replaceTrustedTimeLocked`, `manager.go:500`): primero la copia de la base y después
+  `estado.json` (con el número de soporte marcado como usado en la misma escritura).
+  - Si falla la de la base, no cambia nada.
+  - Si falla `estado.json` después, la base ya bajó, pero vale el máximo de las dos: tampoco cambió nada. La copia de
+    la base se vuelve a subir en el momento o, si no se puede, en el siguiente minuto.
+
+##### R2-3: la segunda copia de la última hora confiable
+
+- **La tabla**: `app.license_trusted_time`, en la sección «Fase A (revisión R1)» de la `0028`, punto 2
+  (`0028_licencias.sql:38`). Tiene una sola fila (`id = 1`), con la hora, su fuente y `updated_at`. La fuente tiene una
+  restricción con los nombres de `internal/licensing` (`server_time`, `issued_at`, `local_clock`, `operation`, `audit`,
+  `internet_check` y `support_unlock`). El encabezado de la migración y el de la sección lo mencionan.
+- **`PoolProbe`** (`datapresence.go:174`):
+  - `TrustedTimeCopy` la lee en una transacción de solo lectura.
+  - `RaiseTrustedTimeCopy` la sube y nunca la baja (`ON CONFLICT … WHERE trusted_time < EXCLUDED.trusted_time`).
+  - `ReplaceTrustedTimeCopy` la reemplaza, también hacia atrás.
+  - Las dos escrituras van en una transacción corta, con `lock_timeout` de 2 s y el plazo de 5 s.
+- **La interfaz `DatabaseProbe`** suma esos tres métodos. Solo la implementan `PoolProbe` y el falso de las pruebas de
+  `licensing`. Ninguna otra fase la implementa.
+- **El gestor** (`manager.go`, sección «La última hora confiable en la base»):
+  - Al arrancar (`Load`) se lee la copia de la base y `estado.json` sube hasta ella.
+  - **Cada minuto** (`Flush`), y al apagar, la copia de la base sube hasta `estado.json`. Esa escritura corre **sin el
+    mutex** del gestor, así que `Status` nunca espera a la base. Un segundo mutex (`timeMutex`, `manager.go:151`) ordena
+    las lecturas y escrituras de la copia: una subida o una lectura que empezó antes de una baja nunca llega después de
+    ella. Se toma siempre antes que el mutex.
+  - Las horas se comparan al microsegundo, como las guarda PostgreSQL.
+  - Una fuente desconocida en `estado.json` (editada a mano) se copia como `local_clock`, para que la copia se pueda
+    seguir subiendo.
+- **La semilla de la auditoría** (L1-D15) se usa ahora si falta **alguna** de las dos copias: la primera vez que arranca
+  la 0.15.0, un `estado.json` dañado o borrado, o una base de antes de la `0028`. Con las dos copias no se vuelve a
+  leer: la corrección de la §6.3 sigue pudiendo bajarla.
+- **Respaldos**: la tabla viaja en los respaldos (`app`). Restaurar uno viejo baja solo esa copia, y en el siguiente
+  minuto vuelve a subir. Restaurar un respaldo hecho **durante** un salto al futuro trae la copia de ese salto y vuelve
+  a bloquear. Esa base también trae la actividad con fecha futura, así que es coherente: se resuelve con la §6.3 o la
+  §6.4, como la primera vez.
+
+**Lo que queda sin proteger** (§12 del contrato):
+
+- **Quien puede escribir en la base** (con la cuenta de PostgreSQL de AD-EL POS) y además editar `estado.json` baja la
+  hora hasta el `issued_at` de la licencia cargada. Así lo documenta la prueba del límite, ajustada. Con una perpetua,
+  ese piso puede ser de hace meses. Con R1-3 y un `vigente.lic` viejo, es el de una revisión más vieja. La auditoría
+  (`audit_events`), que es la semilla, también está en la base.
+- **Una instantánea completa y vieja** de la computadora (Time Machine con `identity/` y la base) baja las dos copias:
+  es la «instantánea antigua» de la §12.
+- **Hasta un minuto**: la copia de la base sube cada minuto. Editar `estado.json` justo después de una operación pierde
+  a lo más ese minuto, dentro del margen de 10 minutos.
+- **Mientras la base no responda** al arrancar, vale solo `estado.json`, hasta que el trabajador la pueda leer (R2-4).
+- **Sigue igual**: hay que atrasar el reloj (en macOS pide un administrador) y aislar la red del servidor de
+  licencias, porque la consulta diaria vuelve a subir la hora. El piso de la §6.3 contra un servidor falso sigue en
+  el `issued_at − 10 min`.
+
+##### R2-4: la semilla se reintenta
+
+- Si la lectura de la base falla al arrancar (la copia o `max(audit_events)`), no es un error del arranque: queda en la
+  bitácora (`license_activity_unavailable`) y la lectura queda **pendiente** (`databaseTimeLoaded`).
+- `tick` la reintenta cada minuto **antes** de observar el reloj (`retryDatabaseTime`, `manager.go:431`). La consulta
+  corre sin el mutex.
+- Mientras esté pendiente y no haya ninguna hora confiable, `ObserveTime` no toma el reloj local ni las operaciones
+  (`manager.go:794`). Las operaciones que se acepten mientras tanto quedan en la auditoría, que es la semilla.
+- El `server_time` y el `issued_at` sí se toman: no son el reloj local.
+- Si `estado.json` ya tenía una hora confiable, el reloj se sigue observando: solo sube.
+- La §6.3 o la §6.4 dan la lectura por hecha, porque fijan la hora en las dos copias.
+
+##### R2-5: el desbloqueo, solo en la instalación original
+
+- `supportInstallationProblemLocked` (`unlock.go:446`) se niega sin identidad, con la carpeta copiada y sin la huella
+  comprobada, como `Accept`. Después vuelve a leer el estado si hace falta (R1-1).
+- Lo usan `SupportRequest`, `CheckSupportUnlock` y `AcceptSupportUnlock`.
+- **Los mensajes** están en `supportInstallationFault` (`license_clock.go:99`):
+  - copiada: **409** `LICENSE_INSTALLATION_COPIED`, «Esta instalación se copió de otra computadora. Crea una identidad
+    nueva para esta computadora en la pantalla de la licencia y después pide el código de desbloqueo.»;
+  - sin huella: **503** `IDENTITY_UNAVAILABLE` con `details.reason: "machine_unverified"`, como en la Fase B.
+
+##### R2-6: desde otra terminal, 409
+
+- `LICENSE_LOCAL_ONLY` es **409** (`license_clock.go:71`), con el mismo mensaje: «Esto se hace en la computadora
+  principal, en la pantalla de la fecha y hora.».
+- Un 409 sin `Commit` revierte la petición y no pasa por la auditoría de `runProtected`. Antes, cada intento quedaba
+  como `access.denied`.
+
+##### Documentación
+
+- `docs/API_V1.md`: en las rutas del escritorio de la hora, el 409 `LICENSE_LOCAL_ONLY`, el 409
+  `LICENSE_INSTALLATION_COPIED` y la auditoría antes de la baja, con el 503 si no se aplicó.
+- `docs/licencias/DESBLOQUEO_SOPORTE.md`: el 409 desde otra terminal, «solo en la instalación original» y las dos
+  copias.
+- Las rutas de la hora no están en `openapi.json`: son del escritorio, no del contrato de Android.
+
+#### Aviso del coordinador (Fase D, L1-D49)
+
+`LicenseSeats` conecta `licenseseats.Options.ClockTrusted` como `!manager.Clock().Blocked`. **Estas correcciones no
+cambian `Clock()` ni `Blocked`**: siguen siendo `CheckClock(reloj local, última hora confiable)`. `Blocked` es verdadero
+solo en «Hora del equipo incorrecta».
+
+Lo único que cambia es de dónde sale la última hora confiable, que ahora es el máximo de las dos copias:
+
+- editar `estado.json` hacia atrás ya no quita un bloqueo;
+- con la semilla pendiente, no se bloquea nada hasta que la base responda, igual que antes sin hora confiable.
+
+#### Decisiones propuestas
+
+1. **«No se aplicó» es la misma acción con `success: false`**, `applied: false` y el motivo (`not_saved` o el de un
+   rechazo), no una acción nueva.
+   - Así el Registro de movimientos ya la nombra («Última actividad corregida con la hora de internet» o «Desbloqueo de
+     soporte aplicado», marcada como fallida).
+   - No hay que tocar `desktop/src/services/auditActions.ts`, cuya prueba exige un nombre para cada acción de Go.
+2. **La §6.4 corre después de confirmar la petición** (`completeDeferred`), como la §6.3. Es la forma de confirmar la
+   auditoría antes de escribir `estado.json` sin una segunda transacción dentro de la de la petición.
+3. **La semilla de la auditoría se usa si falta alguna de las dos copias** (amplía L1-D15). Si solo faltara
+   `estado.json`, una copia de la base atrasada (porque su escritura venía fallando) quedaría como la única referencia.
+4. **R2-4**: mientras la semilla está pendiente y no hay hora confiable, se ignoran el reloj local **y** las
+   operaciones. El `server_time` y el `issued_at` sí cuentan.
+5. **Se guarda la hora en memoria antes de preparar la baja de la §6.3**, para que el valor anterior auditado sea el
+   guardado.
+6. **La copia de la base sube cada minuto sin el mutex del gestor**, con un segundo mutex para el orden. Así `Status`
+   nunca espera a la base.
+7. **R2-5**: la carpeta copiada responde `LICENSE_INSTALLATION_COPIED` (409) con su texto propio. Sin la huella,
+   `IDENTITY_UNAVAILABLE` (503), como en la Fase B. Los dos casos se auditan como `license.support_unlock_rejected` con
+   `installation_copied` o `machine_unverified`.
+
+#### Pruebas ajustadas
+
+Se ajustaron porque la corrección cambia lo que comprobaban. A las del revisor no se les quitó ninguna aserción del
+hallazgo.
+
+- **`TestReviewR2DefectClockLoweringIsNotAtomicWithItsAudit`** (`operations`), primera subprueba.
+  - **Por qué**: con la corrección, la petición fallida ya no baja la hora. La segunda subprueba no podía preparar su
+    actividad «a +30 h», porque la hora confiable seguía a +48 h y la puerta la rechazaba con `SYSTEM_CLOCK_INVALID`.
+    Esa subprueba solo funcionaba con el defecto.
+  - **Qué se agregó**, al final de la primera: la persona vuelve a intentar sin el lock. La baja se aplica, con un
+    `license.clock_corrected` y en las dos copias (las dos juntas). Así la segunda parte de la hora corregida, como
+    antes.
+- **`TestReviewR2LimitEditingTheStateLowersTrustedTimeToTheLicenseIssuedAt`** pasa a llamarse
+  **`TestReviewR2LimitEditingBothCopiesLowersTrustedTimeToTheLicenseIssuedAt`** (`licensing`).
+  - Documentaba que editar `estado.json` bajaba la hora, y R2-3 lo impide.
+  - Ahora comprueba que editar solo `estado.json` ya no la baja, y que editar las dos copias sí la baja hasta el
+    `issued_at`. Ese es el límite que queda.
+  - Más abajo del piso se bloquea, igual que antes.
+- **`TestStageL1LicenseGate`** (`operations`, Fase C), ayuda `alwaysAvailable`: exigía `support-request` 200 en todos
+  los estados, también en la carpeta copiada. Ahora, en la copiada, exige `409 LICENSE_INSTALLATION_COPIED` de la ruta
+  (R2-5). La puerta la sigue dejando pasar.
+- **`TestStageL1LicenseGateWithoutSession`** (`administration`, Fase C): `LICENSE_LOCAL_ONLY` pasa de 403 a 409, en las
+  tres rutas, y sin `access.denied` nuevo (R2-6).
+
+#### Archivos
+
+- `backend/internal/licensing/manager.go`: interfaz `DatabaseProbe`, `TrustedCopy`, `timeMutex`, la sección «La última
+  hora confiable en la base», `Load`, `ObserveTime`, `ReplaceTrustedTime`, `Flush` y `tick`.
+- `backend/internal/licensing/unlock.go`: `SupportRequest`, `supportInstallationProblemLocked`, `CheckSupportUnlock`,
+  `AcceptSupportUnlock` y `prepareSupportUnlockLocked`.
+- `backend/internal/licensing/datapresence.go`: los tres métodos de `PoolProbe`.
+- `backend/migrations/0028_licencias.sql`: encabezado y sección «Fase A (revisión R1)», punto 2.
+- `backend/internal/administration/license_clock.go` y `reports.go` (un caso en `completeDeferred`).
+- Pruebas:
+  - `licensing`: `review_r2_fixes_test.go` y `review_r2_fixes_unix_test.go` (nuevos), el falso de `manager_test.go`,
+    `review_r2_clock_test.go` y `datapresence_integration_test.go`;
+  - `database`: `stagel1_upgrade_test.go` y `stage9h_upgrade_test.go` (excluye la tabla nueva);
+  - `administration`: `license_gate_acceptance_test.go`;
+  - `operations`: `review_r2_clock_integration_test.go` y `stagel1_license_gate_test.go` (`alwaysAvailable`);
+  - `licenseseats`: `review_r2_seats_integration_test.go` (solo el `t.Skip`).
+- `docs/API_V1.md` y `docs/licencias/DESBLOQUEO_SOPORTE.md`.
+
+#### Pruebas (realmente ejecutadas)
+
+| Prueba                                                                                                                                            | Resultado                                                                                                                                                                                                                                                                                                                          |
+| ------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `go test -race ./internal/licensing` (fuera del arnés, durante el trabajo)                                                                        | Aprobada                                                                                                                                                                                                                                                                                                                           |
+| `ISO_TAG=FR iso.sh … go-int ./internal/licensing ./internal/database`, y otra vez con `ISO_RUN='TestDatabaseTrustedTimeCopy\|TestStageL1Upgrade'` | Aprobadas                                                                                                                                                                                                                                                                                                                          |
+| `… go-int ./internal/administration` (incluye `TestStageL1LicenseGateWithoutSession` con R2-6)                                                    | Aprobada (280 s)                                                                                                                                                                                                                                                                                                                   |
+| `… go-int ./internal/operations`, corrida completa                                                                                                | Falló solo `TestStageL1LicenseGate`. Su ayuda `alwaysAvailable` exigía `support-request` 200 también en la carpeta copiada, lo que R2-5 cambia; las otras cuatro subpruebas fallaron en cascada. Se ajustó la ayuda (`af3f86be`). Todo lo demás del paquete pasó, también `TestReviewR2DefectClockLoweringIsNotAtomicWithItsAudit` |
+| `… go-int ./internal/operations` con `ISO_RUN='TestStageL1LicenseGate$'`, después del ajuste                                                      | Aprobada                                                                                                                                                                                                                                                                                                                           |
+| `… go-int ./internal/operations` con `ISO_RUN='TestReviewR2\|TestStageL1'`                                                                        | Aprobadas la del revisor y la de la puerta. `TestStageL1LicenseSeats` dio una vez 503 en la entrada con PIN, con la carga de la máquina en 38 por otros agentes. Esa prueba no usa el gestor de licencias ni las rutas cambiadas                                                                                                   |
+| `… go-int ./internal/operations` con `ISO_RUN='TestStageL1LicenseSeats'`, sola                                                                    | Aprobada (78 s)                                                                                                                                                                                                                                                                                                                    |
+| `… go-int ./cmd/ad-el-pos-server`, con el candado `$SP/l1/candado-cmd` desde un script de bash que lo libera siempre                              | Aprobada (64 s); candado liberado                                                                                                                                                                                                                                                                                                  |
+| `… go-int ./internal/licenseseats` con `ISO_RUN='TestReviewR2'`                                                                                   | La de R2-2 se omite (`t.Skip`)                                                                                                                                                                                                                                                                                                     |
+| `go-unit` (vet normal e `integration`, `test -race` de todo, `GOOS=windows` build y vet)                                                          | Aprobado                                                                                                                                                                                                                                                                                                                           |
+| `go test ./internal/apicontract ./internal/administration -run 'TestDocumented\|TestWaiter'`, después de cambiar `API_V1.md`                      | Aprobadas                                                                                                                                                                                                                                                                                                                          |
+| `format`, `fmt-check` (tres veces) y `sync-check`                                                                                                 | Aprobados. MD5 de lo protegido iguales antes y después                                                                                                                                                                                                                                                                             |
+
+Las pruebas del revisor pasan: R2-1 (las dos subpruebas, con el ajuste de arriba), R2-4 y R2-5. También
+`…RejectsForgeries` y la del límite, ajustada. La de R2-2 queda omitida.
+
+**No se corrió** la suite del escritorio ni la de Android: no cambió nada de ellos.
+
+#### Lo no verificado
+
+- **El escritorio (Fase E) con los códigos nuevos de estas rutas**: `409 LICENSE_LOCAL_ONLY` (antes 403) y
+  `409 LICENSE_INSTALLATION_COPIED` en `support-request` y `support-unlock`.
+  - En `desktop/src` de esta rama no aparecen ni los códigos ni las rutas de la hora: la pantalla de la hora es de la
+    Fase E, que trabaja aparte.
+  - Si esa pantalla decide por el estado 403, hay que ajustarla. Android no usa estas rutas.
+- **El corte de luz entre la auditoría y la baja** (queda una auditoría sin baja): comprobado leyendo el código, sin
+  prueba.
+- **Windows**: las pruebas con permisos de carpeta son solo de Unix; el resto es igual en las dos plataformas.
+- **Con el reloj y la base reales**: todo con relojes simulados y la base temporal 55499.
+
+#### Para el coordinador
+
+- **`LICENSE_IDENTITY_LOCAL_ONLY`** (Fase B, `license/identity/regenerate` desde la red) sigue siendo **403**. Tiene el
+  mismo efecto que R2-6: queda como `access.denied`. No lo cambié porque no es de este encargo.
+- **Las observaciones de R2 sin número** no se tocaron, entre ellas que la §6.3 también baja la hora cuando está solo
+  unos segundos por delante.
+- **Al unir con `etapa-l1`**:
+  - en `review_r2_seats_integration_test.go`, quédate con la versión de `etapa-l1`;
+  - la `0028` solo cambia en su encabezado y en la sección «Fase A (revisión R1)»; no toqué la «Fase D»;
+  - `reports.go` lleva tres renglones nuevos en `completeDeferred`, después del caso de `*timeCheck`.
+
+#### Commits (rama `etapa-l1-fr2`)
+
+- `00eefa68` etapa L1 corrección R2: la prueba de R2-2 queda omitida en esta rama (la corrige la Fase D en licenseseats)
+- `6ab6081b` etapa L1 corrección R2: segunda copia de la última hora confiable en la base (R2-3), semilla reintentada
+  (R2-4), desbloqueo de soporte que se comprueba antes de aplicarse y solo en la instalación original (R2-1 y R2-5)
+- `ef589715` etapa L1 corrección R2: la §6.3 y la §6.4 confirman su auditoría antes de bajar la hora y registran si no
+  se aplicó (R2-1); LICENSE_LOCAL_ONLY es 409 y no queda como acceso denegado (R2-6)
+- `e4463658` etapa L1 corrección R2: API_V1.md y DESBLOQUEO_SOPORTE.md con el 409 desde otra terminal, la carpeta
+  copiada y la auditoría antes de bajar la hora
+- `af3f86be` etapa L1 corrección R2: en la prueba de la puerta, la carpeta copiada ya no pide el código de desbloqueo de
+  soporte (R2-5)
+
+Antes, las pruebas del revisor: `f9a48a42`, `2bf0fe6c`, `3a81e8eb` y `88ae45b9`.
+
+### Decisiones del coordinador sobre la revisión R2 y sus correcciones
+
+Las correcciones se fusionaron en `f7fcbff`. En `review_r2_seats_integration_test.go` quedó la versión de `etapa-l1`
+(la de R2-2 ajustada, sin `t.Skip`). R2-2 ya estaba en la Fase D (L1-D43).
+
+- **L1-D42 · R2-1: la baja de la hora va con su auditoría.**
+  - En la §6.3 y en la §6.4, primero se comprueba todo y se confirma la auditoría en su propia transacción. Después se
+    bajan las dos copias.
+  - Si la baja falla, se audita la misma acción con `success: false`, se responde 503, la hora no cambia y la
+    respuesta de soporte no se gasta.
+- **L1-D44 · R2-3: segunda copia de la última hora confiable en la base** (`app.license_trusted_time`, sección «Fase A
+  (revisión R1)» de la `0028`).
+  - Vale el máximo de las dos copias. La §6.3 y la §6.4 bajan las dos.
+  - Sigue sin protección (§12):
+    - quien escribe en la base y además edita `estado.json` baja la hora hasta el `issued_at` de la licencia;
+    - una instantánea vieja de toda la computadora baja las dos copias.
+- **L1-D45 · R2-4: la semilla se reintenta.** Mientras está pendiente, ni el reloj local ni las operaciones se vuelven
+  la primera hora confiable.
+- **L1-D46 · R2-5: una instalación copiada no hace desbloqueo de soporte.** Responde 409 `LICENSE_INSTALLATION_COPIED`
+  y, sin huella, 503 `IDENTITY_UNAVAILABLE`.
+- **L1-D54 · R2-6: las rutas de la hora desde otra terminal responden 409 `LICENSE_LOCAL_ONLY`** y ya no quedan como
+  `access.denied`. El escritorio arma sus textos por el código, no por el estado HTTP, así que no cambia.
+- **L1-D55 · Se aceptan las siete decisiones propuestas del agente**:
+  - «no se aplicó» es la misma acción con `success: false`;
+  - la §6.4 corre después de confirmar la petición;
+  - la semilla se usa si falta cualquiera de las dos copias (amplía L1-D15);
+  - con la semilla pendiente solo cuentan el `server_time` y el `issued_at`;
+  - se guarda la hora en memoria antes de bajarla;
+  - la copia de la base se escribe con un mutex propio;
+  - los códigos de R2-5.
+- **L1-D56 · `LICENSE_IDENTITY_LOCAL_ONLY` (Fase B) recibe el mismo trato que R2-6**: 409 y sin `access.denied`. Lo
+  hace la Fase H.
+- **L1-D57 · La §6.3 sigue como la escribe la especificación.** Con el reloj bien, «Comprobar la hora» reemplaza la
+  hora confiable por el `server_time` aunque solo difieran unos segundos, y lo deja en la auditoría.
+- **L1-D58 · Un salto al futuro también puede cambiar el estado de la licencia.** Con el bloqueo por la hora y la
+  licencia en Tolerancia o Vencida, la pantalla de la fecha y hora dice que corregir la hora puede resolver también el
+  aviso de la licencia. Lo hace la Fase H.
