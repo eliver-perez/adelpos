@@ -9,6 +9,8 @@ mod export;
 mod installation;
 // Etapa 9H, fase D: asistente de migración del sistema anterior (diálogos, lector, subida e informe).
 mod legacy_migration;
+// Etapa L1, Fase E: solicitud sin internet, archivo de licencia y respuesta de soporte con los diálogos nativos.
+mod license_files;
 mod menu;
 mod pairing;
 // Etapa 9G, fase E: agente de impresión de las impresoras USB de esta terminal.
@@ -342,6 +344,9 @@ fn main() {
             legacy_migration::legacy_upload_package,
             legacy_migration::legacy_upload_cancel,
             legacy_migration::legacy_save_report,
+            license_files::license_save_request,
+            license_files::license_import_file,
+            license_files::license_import_unlock_file,
         ])
         .build(tauri::generate_context!())
         .expect("No se pudo iniciar la aplicación de escritorio")

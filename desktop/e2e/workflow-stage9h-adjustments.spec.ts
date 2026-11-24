@@ -466,8 +466,9 @@ test('el mismo usuario con sesión en dos terminales a la vez; iniciar de nuevo 
   const row = pageA.locator('tbody tr').filter({ hasText: terminalName });
   await expect(row).toContainText('Administrador', { timeout: 10000 });
   await expect(row).toContainText('En línea');
-  const summary = pageA.getByRole('region', { name: 'Sesiones activas por tipo de terminal' });
-  await expect(summary).toContainText('Escritorio');
+  // Etapa L1 (Fase E, §5): el resumen de los cupos de la licencia reemplaza al de sesiones por tipo de terminal.
+  const summary = pageA.getByRole('region', { name: 'Cupos de la licencia' });
+  await expect(summary).toContainText('Comanderos');
   await views(pageA, testInfo, '9h-mismo-usuario-dos-terminales', async () => {
     await expect(row).toBeVisible();
   });

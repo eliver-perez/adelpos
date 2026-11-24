@@ -35,6 +35,10 @@ fn main() {
             "legacy_upload_package",
             "legacy_upload_cancel",
             "legacy_save_report",
+            // Etapa L1: archivos de la licencia (license_files.rs).
+            "license_save_request",
+            "license_import_file",
+            "license_import_unlock_file",
         ]));
     tauri_build::try_build(attributes).expect("No se pudo preparar la aplicación Tauri");
 }

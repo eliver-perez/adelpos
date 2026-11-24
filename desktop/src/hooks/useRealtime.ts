@@ -7,6 +7,7 @@ import type { InventoryChange } from './useInventoryEvents';
 import { identityChangeEvent } from '../services/documentIdentity';
 import { templatesChangeEvent } from '../services/documents';
 import type { TemplatesChange } from '../services/documents';
+import { licenseChangeEvent } from '../services/license';
 
 interface Change {
   id: string;
@@ -79,6 +80,9 @@ export function useRealtime(identityKey: string, enabled: boolean) {
       // edita; el evento solo lleva el identificador de la plantilla.
       const templates: TemplatesChange = { templates: [] };
       let templatesChanged = !!message.reset;
+      // Etapa L1 (Fase C): license.changed avisa que cambió la licencia o el bloqueo por la hora; la sesión vuelve a
+      // leer su estado.
+      let licenseChanged = !!message.reset;
       for (const event of message.events ?? []) {
         if (event.version !== 1) {
           changed = true;
@@ -103,6 +107,9 @@ export function useRealtime(identityKey: string, enabled: boolean) {
           inventoryChanged = true;
           inventory.kinds.push(event.kind);
         }
+        if (event.kind === 'license.changed') {
+          licenseChanged = true;
+        }
       }
       if (seen.current.size > 5000) seen.current.clear();
       if (message.cursor !== undefined) cursor.current = message.cursor;
@@ -117,6 +124,9 @@ export function useRealtime(identityKey: string, enabled: boolean) {
       }
       if (inventoryChanged) {
         window.dispatchEvent(new CustomEvent(inventoryChangeEvent, { detail: inventory }));
+      }
+      if (licenseChanged) {
+        window.dispatchEvent(new CustomEvent(licenseChangeEvent));
       }
     };
     void invoke<number>('events_start', { channel, after: cursor.current, stationId: null })

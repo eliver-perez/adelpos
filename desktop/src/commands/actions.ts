@@ -470,6 +470,7 @@ const screenKeywords: Partial<Record<ScreenID, string[]>> = {
   sessions: ['sesiones'],
   system: ['sistema'],
   settings: ['configuración', 'establecimiento', 'hora de inicio del día', 'funciones'],
+  license: ['licencia', 'activar', 'plan', 'cupos', 'vencimiento'],
   devices: ['terminales', 'equipos', 'pantalla inicial'],
   registers: ['cajas físicas'],
   audit: ['registro de movimientos', 'auditoría', 'bitácora', 'historial'],
@@ -531,8 +532,9 @@ export function commandEntries(
     if (coveredByActions.includes(entry.id) || !screenAuthorized(entry, context.permissions)) {
       continue;
     }
-    // Etapa 9G: la pantalla de «Solo servidor» no se ofrece en las demás modalidades.
-    if (entry.serverOnly) {
+    // Etapa 9G: la pantalla de «Solo servidor» no se ofrece en las demás modalidades. Etapa L1: la de la fecha y
+    // hora se abre sola o desde su aviso.
+    if (entry.serverOnly || entry.hiddenFromPalette) {
       continue;
     }
     const route = breadcrumbOf(entry.id)

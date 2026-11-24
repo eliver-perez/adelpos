@@ -1,4 +1,5 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
+import { changesLicenseState, licenseChangeEvent, licenseErrorText } from './license';
 
 export type Operation =
   | 'kitchen_outputs'
@@ -37,6 +38,19 @@ export type Operation =
   | 'kitchen_job'
   | 'kitchen_retry_job'
   | 'kitchen_resolve_job'
+  // Etapa L1 (Fase E): Preparación avisa al entrar y al salir (cupo de pantalla de cocina).
+  | 'kitchen_display_mode'
+  // Etapa L1 (Fase E): licencia del servidor principal (services/licenseOperations.ts). La solicitud sin internet y
+  // los archivos (.lic y la respuesta de soporte) son operaciones propias de Rust (license_files.rs), no rutas.
+  | 'license_status'
+  | 'license_activate'
+  | 'license_transfer'
+  | 'license_refresh'
+  | 'license_deactivate'
+  | 'license_identity_regenerate'
+  | 'license_time_check'
+  | 'license_support_request'
+  | 'license_support_unlock'
   | 'restaurant_draft_preview'
   | 'setup_status'
   // Etapa 9G (§5.1): versión del servidor, para avisar si es más viejo de lo que necesita la aplicación.
@@ -128,6 +142,8 @@ export type Operation =
   | 'reject_device_pairing'
   | 'device_configuration'
   | 'devices_sessions_summary'
+  // Etapa L1 (Fase E): «Liberar cupo» de comandero o de pantalla de cocina en Terminales.
+  | 'devices_seat_release'
   | 'sessions'
   | 'revoke_session'
   | 'audit'
@@ -464,25 +480,37 @@ export async function api<T>(
     throw new APIError('CONNECTION_ERROR', message);
   }
   if (response.status >= 400) {
-    const body = response.body as {
-      error?: { code?: string; message?: string; details?: unknown };
-    };
-    const error = new APIError(
-      body.error?.code ?? 'API_ERROR',
-      body.error?.message ?? 'No se pudo completar la operación.',
-      response.status,
-      body.error?.details,
-    );
-    const invalidatesSession =
-      error.code.startsWith('SESSION_') || error.code.startsWith('DEVICE_');
-    if (response.status === 401 && invalidatesSession) {
-      window.dispatchEvent(new CustomEvent('session-invalid', { detail: error }));
-    }
-    // Etapa 9G (§5.1): el servidor ya no acepta esta versión de la aplicación; useSession muestra el aviso.
-    if (response.status === 426 && error.code === 'CLIENT_UPDATE_REQUIRED') {
-      window.dispatchEvent(new CustomEvent(clientUpdateEvent, { detail: error }));
-    }
-    throw error;
+    throw rejectionOf(response);
   }
   return response.body as T;
+}
+
+// rejectionOf convierte una respuesta de error de Go (de api_request o de una operación propia de Rust que devuelve
+// {status, body}) en el APIError de la aplicación y avisa a la sesión si corresponde.
+export function rejectionOf(
+  response: { status: number; body: unknown },
+  fallback = 'No se pudo completar la operación.',
+) {
+  const body = (response.body ?? {}) as {
+    error?: { code?: string; message?: string; details?: unknown };
+  };
+  const code = body.error?.code ?? 'API_ERROR';
+  // Etapa L1 (Fase E): los rechazos de la licencia, de los cupos y de la hora se dicen con los textos de
+  // services/license.ts, a partir del código y de sus details (nunca con el message del servidor de licencias).
+  const message = licenseErrorText(code, body.error?.details) ?? body.error?.message ?? fallback;
+  const error = new APIError(code, message, response.status, body.error?.details);
+  const invalidatesSession = error.code.startsWith('SESSION_') || error.code.startsWith('DEVICE_');
+  if (response.status === 401 && invalidatesSession) {
+    window.dispatchEvent(new CustomEvent('session-invalid', { detail: error }));
+  }
+  // Etapa 9G (§5.1): el servidor ya no acepta esta versión de la aplicación; useSession muestra el aviso.
+  if (response.status === 426 && error.code === 'CLIENT_UPDATE_REQUIRED') {
+    window.dispatchEvent(new CustomEvent(clientUpdateEvent, { detail: error }));
+  }
+  // Etapa L1: un rechazo por la hora o por el estado de la licencia hace que la sesión vuelva a leer el estado, para
+  // que el aviso fijo (o la pantalla de la fecha y hora) aparezca enseguida.
+  if (changesLicenseState(error.code)) {
+    window.dispatchEvent(new CustomEvent(licenseChangeEvent, { detail: error }));
+  }
+  return error;
 }
