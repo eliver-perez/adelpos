@@ -1094,7 +1094,9 @@ fn settle(state: &TerminalState, status: u16, mut body: Value) -> Result<HTTPRes
     Ok(HTTPResult { status, body })
 }
 
-async fn call(
+// call envía una petición JSON a Go con las credenciales de la terminal y aplica la misma invalidación de credenciales
+// que api_request. Desde la etapa L1 (Fase E) también la usan los archivos de la licencia (license_files.rs).
+pub(crate) async fn call(
     state: &TerminalState,
     method: Method,
     path: &str,
