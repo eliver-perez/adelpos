@@ -1,7 +1,9 @@
 package com.adelpos.meseros.core.data.waiter
 
+import com.adelpos.meseros.core.data.api.ApiErrors
 import com.adelpos.meseros.core.data.api.ApiJson
 import com.adelpos.meseros.core.data.api.ApiOutcome
+import com.adelpos.meseros.core.data.license.LicenseStatusRepository
 import com.adelpos.meseros.core.data.waiter.db.RestaurantSnapshotEntity
 import com.adelpos.meseros.core.data.waiter.db.WaiterDao
 import com.adelpos.meseros.core.data.waiter.db.WaiterPermissionsEntity
@@ -10,6 +12,7 @@ import com.adelpos.meseros.core.domain.connection.LinkState
 import com.adelpos.meseros.core.domain.error.AppError
 import com.adelpos.meseros.core.domain.error.AppResult
 import com.adelpos.meseros.core.domain.realtime.RealtimeFeed
+import com.adelpos.meseros.core.domain.realtime.RealtimeKinds
 import com.adelpos.meseros.core.domain.realtime.RealtimeScopes
 import com.adelpos.meseros.core.domain.realtime.events
 import com.adelpos.meseros.core.domain.realtime.rebuilds
@@ -55,6 +58,8 @@ import kotlinx.serialization.builtins.ListSerializer
  * @param link el estado único de conexión (etapa A3, A3-D1): al volver a «En línea» se vuelve a
  *   leer, y una lectura sin respuesta con «En línea» se repite sola a los [retryMillis] (la
  *   pantalla dice «Sin conexión» solo con el estado único, nunca por una lectura vieja).
+ * @param license etapa L1: cada lectura de `restaurant/state` dice cómo está la licencia y la hora
+ *   de la computadora principal; el evento `license.changed` hace volver a leer.
  */
 class RestaurantRepository(
     private val dao: WaiterDao,
@@ -67,6 +72,7 @@ class RestaurantRepository(
     private val link: StateFlow<LinkState>? = null,
     private val retryMillis: Long = RETRY_AFTER_NO_ANSWER_MILLIS,
     private val newId: () -> String = { UUID.randomUUID().toString() },
+    private val license: LicenseStatusRepository? = null,
 ) : RestaurantSource {
     private val mutableView = MutableStateFlow(RestaurantView.EMPTY)
     private val mutablePermissions = MutableStateFlow(WaiterPermissions.UNKNOWN)
@@ -126,6 +132,13 @@ class RestaurantRepository(
                 event.aggregateId?.let { changes.tryEmit(it) }
                 refreshSoon()
             }
+        }
+        // Etapa L1: cambió la licencia o el bloqueo por la hora; el evento no trae datos (se vuelve
+        // a leer el estado, que los trae).
+        scope.launch {
+            feed
+                .events(RealtimeScopes.CONFIGURATION, setOf(RealtimeKinds.LICENSE_CHANGED))
+                .collect { refreshSoon() }
         }
         scope.launch { feed.rebuilds().collect { refreshSoon() } }
     }
@@ -217,7 +230,7 @@ class RestaurantRepository(
                         ACCOUNT_CONFLICT -> DiscardAccountResult.Changed
                         else -> {
                             failure(outcome, userId)
-                            DiscardAccountResult.Failed(outcome.problem.message)
+                            DiscardAccountResult.Failed(ApiErrors.shownMessage(outcome.problem))
                         }
                     }
                 is ApiOutcome.NoAnswer -> DiscardAccountResult.NoConnection
@@ -243,6 +256,7 @@ class RestaurantRepository(
     }
 
     private suspend fun applyState(userId: String, state: RecoveryStateDto) {
+        license?.apply(state.license)
         val permissions = WaiterPermissions(state.user.permissions.toSet())
         mutablePermissions.value = permissions
         dao.savePermissions(

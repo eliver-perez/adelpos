@@ -57,11 +57,16 @@ import com.adelpos.meseros.core.capture.pending.reviewTitle
 import com.adelpos.meseros.core.domain.access.ActiveWaiter
 import com.adelpos.meseros.core.domain.access.DeviceStatus
 import com.adelpos.meseros.core.domain.connection.ConnectionSummary
+import com.adelpos.meseros.core.domain.license.ClockNotice
+import com.adelpos.meseros.core.domain.license.GraceNotice
+import com.adelpos.meseros.core.domain.license.LicenseNotices
 import com.adelpos.meseros.core.domain.waiter.DeviceHome
 import com.adelpos.meseros.core.domain.waiter.OrderState
 import com.adelpos.meseros.core.domain.waiter.WaiterAction
 import com.adelpos.meseros.core.ui.components.ActiveWaiterMenu
 import com.adelpos.meseros.core.ui.components.AdelTopBar
+import com.adelpos.meseros.core.ui.components.LicenseClockBanner
+import com.adelpos.meseros.core.ui.components.LicenseGraceBadge
 import com.adelpos.meseros.core.ui.components.LocalTopBarBack
 import com.adelpos.meseros.core.ui.components.LocalUserActivity
 import com.adelpos.meseros.core.ui.components.TAG_TOP_BAR_BACK
@@ -72,6 +77,7 @@ import com.adelpos.meseros.core.ui.layout.PaneLayout
 import com.adelpos.meseros.core.ui.layout.TAG_PANE_BACK
 import com.adelpos.meseros.core.ui.layout.currentNavigationPlacement
 import com.adelpos.meseros.core.ui.layout.currentPaneLayout
+import com.adelpos.meseros.core.ui.layout.currentTopBarHasRoom
 import com.adelpos.meseros.core.ui.theme.AdelTheme
 import com.adelpos.meseros.feature.access.AccessActions
 import com.adelpos.meseros.feature.access.AccessContent
@@ -192,6 +198,7 @@ fun AdelPosNavigation(
     val navigationPlacement = currentNavigationPlacement()
     val waiter = activeWaiter?.takeIf { status is DeviceStatus.Ready }
     val readyAlerts = readyAlerts()
+    val licenseNotices = licenseNotices()
     // Un aviso tocado en «Selecciona tu usuario»: se le pide el PIN a su mesero (etapa A2, §4.4).
     val pendingOpen by readyAlerts.pendingOpen.collectAsStateWithLifecycle()
     // Cada mesero empieza su propia navegación: lo que capturó otro no se ve aquí.
@@ -256,28 +263,41 @@ fun AdelPosNavigation(
     Scaffold(
         modifier = Modifier.fillMaxSize().testTag(TAG_APP_ROOT),
         topBar = {
-            AdelTopBar(
-                title = title,
-                connection = connection,
-                onBack = onBack,
-                // Con un panel abierto en el teléfono la flecha hace lo que hacía su «Volver a …»
-                // (las pruebas de punta a punta lo buscan por esa etiqueta).
-                backTag = if (topBarBack.panelOpen) TAG_PANE_BACK else TAG_TOP_BAR_BACK,
-                // Etapa A3 (§4.5): el logotipo junto al título en la pantalla de entrada.
-                logo = waiter == null && status is DeviceStatus.Ready,
-                actions = {
-                    if (waiter != null) {
-                        ActiveWaiterMenu(
-                            name = waiter.profile.name,
-                            initial = waiter.profile.initial,
-                            colorHex = waiter.profile.color,
-                            onSwitchWaiter = onSwitchWaiter,
-                            offline = !waiter.hasServerSession,
-                            onAlertsHelp = { readyAlerts.helpRequested.value = true },
-                        )
-                    }
-                },
-            )
+            Column {
+                AdelTopBar(
+                    title = title,
+                    connection = connection,
+                    onBack = onBack,
+                    // Con un panel abierto en el teléfono la flecha hace lo que hacía su «Volver a
+                    // …»
+                    // (las pruebas de punta a punta lo buscan por esa etiqueta).
+                    backTag = if (topBarBack.panelOpen) TAG_PANE_BACK else TAG_TOP_BAR_BACK,
+                    // Etapa A3 (§4.5): el logotipo junto al título en la pantalla de entrada.
+                    logo = waiter == null && status is DeviceStatus.Ready,
+                    actions = {
+                        // Etapa L1 (§8): la licencia en tolerancia, discreto; con poco ancho, solo
+                        // el
+                        // ícono (al tocarlo dice cuántos días quedan).
+                        licenseNotices.grace?.let { notice ->
+                            LicenseGraceBadge(notice, showText = currentTopBarHasRoom())
+                        }
+                        if (waiter != null) {
+                            ActiveWaiterMenu(
+                                name = waiter.profile.name,
+                                initial = waiter.profile.initial,
+                                colorHex = waiter.profile.color,
+                                onSwitchWaiter = onSwitchWaiter,
+                                offline = !waiter.hasServerSession,
+                                onAlertsHelp = { readyAlerts.helpRequested.value = true },
+                            )
+                        }
+                    },
+                )
+                // Etapa L1 (§6.2): el aviso fijo de la hora incorrecta, en todas las pantallas
+                // mientras
+                // Go lo diga.
+                licenseNotices.clock?.let { notice -> LicenseClockBanner(notice) }
+            }
         },
         bottomBar = {
             // En vertical, abajo; con poca altura o en horizontal, el riel lateral (a un lado del
@@ -332,6 +352,19 @@ fun AdelPosNavigation(
             }
         }
     }
+}
+
+/** Los avisos de la licencia que se muestran ahora (etapa L1), con lo último que dijo Go. */
+private data class ShownLicenseNotices(val clock: ClockNotice?, val grace: GraceNotice?)
+
+@Composable
+private fun licenseNotices(): ShownLicenseNotices {
+    val application = LocalContext.current.applicationContext as AdelPosApplication
+    val summary by application.container.licenseStatus.summary.collectAsStateWithLifecycle()
+    return ShownLicenseNotices(
+        clock = LicenseNotices.clock(summary),
+        grace = LicenseNotices.grace(summary),
+    )
 }
 
 /** El aviso de platillos listos del proceso (etapa A2, Fase D). */

@@ -11,6 +11,7 @@ import com.adelpos.meseros.core.data.api.ClientIdentity
 import com.adelpos.meseros.core.data.db.AppDatabase
 import com.adelpos.meseros.core.data.discovery.HttpsServerProbe
 import com.adelpos.meseros.core.data.discovery.NsdServerBrowser
+import com.adelpos.meseros.core.data.license.LicenseStatusRepository
 import com.adelpos.meseros.core.data.network.ConnectionMonitor
 import com.adelpos.meseros.core.data.network.ServerLinkMonitor
 import com.adelpos.meseros.core.data.preferences.DevicePreferencesRepository
@@ -213,7 +214,16 @@ class AppContainer(context: Context, private val settings: Settings = Settings()
             // Etapa A2, Fase D: detiene el canal y el servicio de avisos, borra el cursor y los
             // avisos ya mostrados y quita los avisos a la vista.
             register("avisos de platillos listos") { readyAlerts.eraseDeviceData() }
+            // Etapa L1: lo último que dijo Go de la licencia es de ese servidor (solo en memoria).
+            register("estado de la licencia") { licenseStatus.forget() }
         }
+
+    /**
+     * Etapa L1: lo último que dijo Go de la licencia y de la hora de la computadora principal, para
+     * el aviso fijo de la hora y el discreto de la tolerancia en la barra (lo alimentan las
+     * lecturas de `restaurant/state` y `auth/me` del modo Mesero).
+     */
+    val licenseStatus: LicenseStatusRepository = LicenseStatusRepository()
 
     private val serverBrowser: NsdServerBrowser by lazy {
         NsdServerBrowser(appContext, serviceType = { settings.discoveryServiceType })
@@ -334,6 +344,7 @@ class AppContainer(context: Context, private val settings: Settings = Settings()
             serverLink = serverLink,
             serverReachable = serverReachable,
             foreground = appForeground.inForeground,
+            license = licenseStatus,
         )
     }
 

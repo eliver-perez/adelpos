@@ -27,6 +27,9 @@ object RealtimeScopes {
     const val CATALOG = "catalog"
     const val RESTAURANT = "restaurant"
     const val TAKEAWAY = "takeaway"
+
+    /** Etapa L1: el de `license.changed` (llega a todos, sin importar sus permisos). */
+    const val CONFIGURATION = "configuration"
 }
 
 /** Tipos de evento conocidos; un tipo que no se conoce se ignora (contrato v1). */
@@ -35,6 +38,12 @@ object RealtimeKinds {
     const val PRODUCT_SOLD_OUT = "catalog.product.sold_out"
     const val PRODUCT_AVAILABLE = "catalog.product.available"
     const val ACCOUNT_PREPARATION_CHANGED = "restaurant.account.preparation_changed"
+
+    /**
+     * Etapa L1: cambió el estado de la licencia o el bloqueo por la hora de la computadora
+     * principal; sin datos: se vuelve a leer `restaurant/state` o `auth/me`.
+     */
+    const val LICENSE_CHANGED = "license.changed"
 }
 
 /** Por qué hay que reconstruir el estado en lugar de seguir evento por evento. */

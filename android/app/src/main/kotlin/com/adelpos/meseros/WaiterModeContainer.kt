@@ -1,6 +1,7 @@
 package com.adelpos.meseros
 
 import android.os.SystemClock
+import com.adelpos.meseros.core.data.license.LicenseStatusRepository
 import com.adelpos.meseros.core.data.waiter.CaptureRepository
 import com.adelpos.meseros.core.data.waiter.CustomerEditSender
 import com.adelpos.meseros.core.data.waiter.OrderQueueRepository
@@ -45,6 +46,7 @@ import kotlinx.coroutines.launch
  * @param linkState la red de Android: solo dispara «volvió la red» de la cola (su regla no cambia).
  * @param serverLink el estado único de conexión (etapa A3, A3-D1): Mesas vuelve a leer al volver y
  *   la precuenta lo pregunta en el momento; [serverReachable] es el mismo estado como «En línea».
+ * @param license etapa L1: el estado de la licencia que traen `restaurant/state` y `auth/me`.
  */
 class WaiterModeContainer(
     private val dao: WaiterDao,
@@ -59,6 +61,7 @@ class WaiterModeContainer(
     private val serverLink: ServerLink,
     private val serverReachable: StateFlow<Boolean>,
     private val foreground: StateFlow<Boolean>,
+    private val license: LicenseStatusRepository? = null,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var started = false
@@ -101,6 +104,7 @@ class WaiterModeContainer(
             scope = scope,
             elapsedClock = SystemClock::elapsedRealtime,
             link = serverLink.state,
+            license = license,
         )
 
     val sentLines: SentLineRepository = SentLineRepository(server, api)
@@ -127,6 +131,7 @@ class WaiterModeContainer(
             connected = serverReachable,
             scope = scope,
             confirmConnection = serverLink::confirm,
+            license = license,
         )
 
     fun start() {

@@ -3,6 +3,8 @@ package com.adelpos.meseros.core.data.waiter
 import com.adelpos.meseros.core.data.api.ApiErrors
 import com.adelpos.meseros.core.data.api.ApiJson
 import com.adelpos.meseros.core.data.api.ApiOutcome
+import com.adelpos.meseros.core.data.license.LicenseStatusRepository
+import com.adelpos.meseros.core.data.license.LicenseSummaryDto
 import com.adelpos.meseros.core.data.waiter.db.RestaurantSnapshotEntity
 import com.adelpos.meseros.core.data.waiter.db.WaiterDao
 import com.adelpos.meseros.core.domain.waiter.DeviceHome
@@ -35,6 +37,8 @@ import kotlinx.serialization.SerializationException
 data class IdentityDto(
     val terminal: IdentityTerminalDto? = null,
     val establishment: IdentityEstablishmentDto? = null,
+    // Etapa L1: la licencia y la hora de la computadora principal (los avisos de la barra).
+    val license: LicenseSummaryDto? = null,
 )
 
 @Serializable
@@ -122,6 +126,7 @@ class PrecheckRepository(
     private val confirmConnection: suspend () -> Boolean = { connected.value },
     private val wallClock: () -> Long = System::currentTimeMillis,
     private val retryDelayMillis: Long = RETRY_DELAY_MILLIS,
+    private val license: LicenseStatusRepository? = null,
 ) : PrecheckService {
     private val mutableSetup = MutableStateFlow(PrecheckSetup.UNKNOWN)
     private var started = false
@@ -165,6 +170,8 @@ class PrecheckRepository(
                     ),
                 )
                 mutableSetup.value = saved.toSetup()
+                // Etapa L1: la misma lectura dice cómo está la licencia y la hora.
+                license?.apply(outcome.value.license)
             }
             is ApiOutcome.Rejected -> reportAccess(outcome, userId)
             // Sin respuesta: se queda lo último que se leyó.
@@ -268,7 +275,7 @@ class PrecheckRepository(
         return PrintAnswer.Rejected(
             status = outcome.problem.status,
             code = outcome.problem.code,
-            message = outcome.problem.message,
+            message = ApiErrors.shownMessage(outcome.problem),
         )
     }
 
