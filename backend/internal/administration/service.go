@@ -258,6 +258,13 @@ func (service *Service) Execute(ctx context.Context, request Request) (any, erro
 			return nil, err
 		}
 	}
+	// Etapa L1, Fase D (hallazgo R2-2, L1-D43; license_seats.go): el rechazo por falta de cupo revierte la transacción
+	// entera, también la actividad con fecha futura que los cupos bajaron a «ahora». Se baja otra vez en una transacción
+	// propia, ya revertida la de la petición (que tenía esas filas bloqueadas).
+	if seatUnavailable(operationError) {
+		_ = transaction.Rollback(ctx)
+		service.settleFutureSeatActivity(ctx)
+	}
 	return result, operationError
 }
 

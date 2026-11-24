@@ -69,7 +69,10 @@ func ClassifyGateOperation(method, route string) GateOperation {
 //     Vencida o Revocada). En Vencida y Revocada siguen siendo los de esa licencia: la puerta decide antes qué se
 //     permite en cada estado (abrir turno con cuentas pendientes, Preparación). Sin licencia válida no se ocupa ningún
 //     cupo (falla cerrada; la puerta ya respondió LICENSE_NOT_ACTIVATED con su details);
-//   - la hora es la del reloj del gestor (LocalClock), el mismo de la puerta y el simulado de las pruebas (L1-D16).
+//   - la hora es la del reloj del gestor (LocalClock), el mismo de la puerta y el simulado de las pruebas (L1-D16);
+//   - Fase D, hallazgo R2-2 (L1-D43): esa hora es confiable mientras la protección de la hora no esté en «Hora del
+//     equipo incorrecta» (Clock().Blocked). Solo entonces los cupos bajan a «ahora» la actividad de comandero con fecha
+//     futura.
 //
 // Se lee en cada asignación, así que una licencia nueva con otros cupos vale desde la siguiente operación. main.go lo
 // conecta en serveHTTP (serve y el host de macOS y de Windows) en cuanto carga el gestor, antes de atender peticiones.
@@ -90,6 +93,9 @@ func LicenseSeats(manager *licensing.Manager) *licenseseats.Manager {
 			}, true
 		}),
 		Now: manager.LocalClock,
+		ClockTrusted: func() bool {
+			return !manager.Clock().Blocked
+		},
 	})
 }
 

@@ -102,6 +102,28 @@ func operationRecorded(ctx context.Context, tx pgx.Tx, body json.RawMessage) (bo
 	return recorded, err
 }
 
+// seatUnavailable dice si la operación se rechazó por falta de cupo (409 LICENSE_SEAT_UNAVAILABLE de seatFault).
+func seatUnavailable(err error) bool {
+	var fault *Fault
+	return errors.As(err, &fault) && fault.Code == "LICENSE_SEAT_UNAVAILABLE"
+}
+
+// settleFutureSeatActivity guarda, después de un rechazo por falta de cupo, la actividad de comandero con fecha futura
+// bajada a «ahora» (hallazgo R2-2, L1-D43; licenseseats.SettleFutureActivity), en una transacción corta propia que solo
+// toma 7820148311. Sin esto, el rechazo revierte lo que bajó claim, cada intento vuelve a encontrar esa actividad en el
+// futuro y el cupo sigue «en uso» hasta que el reloj real alcance la fecha del salto: la otra tableta nunca entra.
+//
+// Así el cupo vence 15 minutos reales después del primer intento con la hora corregida. Si falla, el rechazo se responde
+// igual (el siguiente intento lo vuelve a hacer) y el detalle va al registro.
+func (service *Service) settleFutureSeatActivity(ctx context.Context) {
+	err := pgx.BeginFunc(ctx, service.Pool, func(tx pgx.Tx) error {
+		return service.seats().SettleFutureActivity(ctx, tx)
+	})
+	if err != nil && service.Logger != nil {
+		service.Logger.Warn("license_seats_settle_failed", "reason", err.Error())
+	}
+}
+
 // seatFault traduce el rechazo de los cupos a su error público (L1-D17, todos 409 para que no entren en la auditoría de
 // los 403). El mensaje va en español sencillo para los clientes anteriores a la etapa; los nuevos deciden por el código.
 func seatFault(err error) error {

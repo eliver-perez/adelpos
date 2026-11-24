@@ -128,6 +128,11 @@ type Options struct {
 	// (issueSession y authenticateSession; hoy time.Now). Sin valor, time.Now. Con él se decide si sigue vigente la sesión
 	// de una pantalla de cocina, para que un desfase del reloj de los cupos no la dé por vencida (revisión R3, R3-2).
 	SessionNow func() time.Time
+	// ClockTrusted dice si la hora de Go (Now) es confiable en este momento: la protección de la hora de la Fase C no
+	// está en «Hora del equipo incorrecta». Sin valor, siempre lo es. Solo con la hora confiable se baja a «ahora» una
+	// actividad de comandero registrada en el futuro (hallazgo R2-2, L1-D43): con el reloj atrasado, «ahora» es la hora
+	// equivocada y bajarla liberaría antes de tiempo el cupo de una terminal que sí está capturando.
+	ClockTrusted func() bool
 	// OrderTakerIdle sustituye los 15 minutos del comandero (solo las pruebas). Sin valor, OrderTakerIdle.
 	OrderTakerIdle time.Duration
 }
@@ -135,20 +140,25 @@ type Options struct {
 // Manager aplica los cupos dentro de la transacción de cada petición (store.go). Es seguro para uso concurrente: no
 // guarda estado propio, todo está en app.license_seats.
 type Manager struct {
-	limits     LimitsSource
-	now        func() time.Time
-	sessionNow func() time.Time
-	idle       time.Duration
+	limits       LimitsSource
+	now          func() time.Time
+	sessionNow   func() time.Time
+	clockTrusted func() bool
+	idle         time.Duration
 }
 
 // NewManager prepara el gestor de cupos.
 func NewManager(options Options) *Manager {
-	manager := &Manager{limits: options.Limits, now: options.Now, sessionNow: options.SessionNow, idle: options.OrderTakerIdle}
+	manager := &Manager{limits: options.Limits, now: options.Now, sessionNow: options.SessionNow,
+		clockTrusted: options.ClockTrusted, idle: options.OrderTakerIdle}
 	if manager.now == nil {
 		manager.now = time.Now
 	}
 	if manager.sessionNow == nil {
 		manager.sessionNow = time.Now
+	}
+	if manager.clockTrusted == nil {
+		manager.clockTrusted = func() bool { return true }
 	}
 	if manager.idle <= 0 {
 		manager.idle = OrderTakerIdle
@@ -179,6 +189,12 @@ func (manager *Manager) Window() (now, cutoff time.Time) {
 // después (revisión R3, R3-2).
 func (manager *Manager) SessionNow() time.Time {
 	return manager.sessionNow()
+}
+
+// ClockTrusted dice si la hora de Go es confiable en este momento (Options.ClockTrusted): solo entonces se baja a
+// «ahora» una actividad de comandero registrada en el futuro (hallazgo R2-2, L1-D43).
+func (manager *Manager) ClockTrusted() bool {
+	return manager.clockTrusted()
 }
 
 // times es la hora de Go, el corte del comandero y la hora de las sesiones.

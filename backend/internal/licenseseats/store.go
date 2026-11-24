@@ -17,7 +17,9 @@ import (
 //     abierto y el cupo sigue ocupado hasta cerrarlo (§7 del contrato);
 //   - comandero: hubo actividad de captura después del corte. Cuenta por actividad y no por sesión (revisión R3, R3-1):
 //     el pedido que entrega la cola de una tableta sin sesión, con la credencial de envío, también ocupa su cupo. Al
-//     cerrarse la última sesión de la terminal la fila se borra (ReleaseClosedSessions, ReleaseDevice);
+//     cerrarse la última sesión de la terminal la fila se borra (ReleaseClosedSessions, ReleaseDevice). Una actividad
+//     con fecha futura (capturada con el reloj adelantado) cuenta como actividad de ahora: aquí sigue en uso, y claim,
+//     Renew y SettleFutureActivity la bajan a «ahora» y la guardan, para que venza 15 minutos reales después (R2-2);
 //   - cocina: la sesión que entró a Preparación sigue vigente, con el reloj de las sesiones (R3-2).
 func inUseCondition(alias, cutoff, sessionNow string) string {
 	return `CASE ` + alias + `.kind
@@ -48,6 +50,50 @@ func takeLock(ctx context.Context, tx pgx.Tx) error {
 	return err
 }
 
+// settleFutureActivity baja a now la actividad de los comanderos registrada después de now (hallazgo R2-2, L1-D43), con
+// el lock de los cupos ya tomado y solo si la hora de Go es confiable.
+//
+// El caso es el de la §6.3: la fecha saltó al futuro, una tableta capturó con esa fecha y después se corrigió el reloj.
+// Comparar esa fecha con el corte la dejaría «en uso» hasta que el reloj real la alcance. Como no se sabe cuándo ocurrió
+// en realidad (el único reloj que tenía era el adelantado), cuenta como actividad de ahora, que es lo más que puede
+// haber durado: se guarda now y vence 15 minutos reales después, como cualquier captura. Nunca la deja vencida antes de
+// tiempo, porque una fila con now sigue en uso. Se guarda (no basta comparar least(actividad, now) en la consulta, que
+// sería siempre «ahora» y nunca vencería).
+//
+// Con la hora en «Hora del equipo incorrecta» no se toca: entonces no se sabe si la equivocada es la actividad o la
+// hora de ahora (el reloj pudo atrasarse), y bajarla liberaría antes de tiempo el cupo de una terminal que sí captura.
+func (manager *Manager) settleFutureActivity(ctx context.Context, tx pgx.Tx, now time.Time) error {
+	if !manager.clockTrusted() {
+		return nil
+	}
+	_, err := tx.Exec(ctx, `UPDATE app.license_seats SET last_activity_at = $1
+        WHERE kind = $2 AND last_activity_at > $1`, now, kindOrderTaker)
+	return err
+}
+
+// SettleFutureActivity aplica settleFutureActivity en una transacción propia, fuera de la de una petición (Execute de
+// administration, después de un rechazo por falta de cupo): el rechazo revierte la transacción entera y con ella lo que
+// claim había bajado, y sin esto cada intento volvería a encontrar la actividad en el futuro. Primero comprueba sin el
+// lock si hay algo que bajar; solo entonces toma 7820148311, el único lock de esta transacción.
+func (manager *Manager) SettleFutureActivity(ctx context.Context, tx pgx.Tx) error {
+	if !manager.clockTrusted() {
+		return nil
+	}
+	var pending bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT FROM app.license_seats WHERE kind = $1 AND last_activity_at > $2)`,
+		kindOrderTaker, manager.now()).Scan(&pending); err != nil {
+		return err
+	}
+	if !pending {
+		return nil
+	}
+	now, _, _, err := manager.lock(ctx, tx)
+	if err != nil {
+		return err
+	}
+	return manager.settleFutureActivity(ctx, tx, now)
+}
+
 // lock toma el lock de los cupos y devuelve las horas leídas ya con el lock: así dos asignaciones nunca se intercalan y
 // la segunda ve la hora y las filas de la primera.
 func (manager *Manager) lock(ctx context.Context, tx pgx.Tx) (now, cutoff, sessionNow time.Time, err error) {
@@ -66,6 +112,10 @@ func (manager *Manager) lock(ctx context.Context, tx pgx.Tx) (now, cutoff, sessi
 // una fila que no vaya a contar (R3-1): la del comandero cuenta por la actividad que se escribe ahora, la de la caja
 // por su turno activo (la operación tiene 7820148305) y la de la cocina por la sesión que entra, que se comprueba
 // vigente en la misma sentencia (si se cerró mientras llegaba la petición, ErrSessionClosed).
+//
+// Antes de contar, la actividad de comandero con fecha futura se baja a now (R2-2, settleFutureActivity): así cuenta como
+// de ahora y la terminal que vuelve a capturar renueva con la hora corregida. Si el cupo se rechaza, la transacción se
+// revierte y lo vuelve a bajar SettleFutureActivity en una propia.
 func (manager *Manager) claim(ctx context.Context, tx pgx.Tx, deviceID string, seat Seat, shiftID, sessionID string) error {
 	now, cutoff, sessionNow, err := manager.lock(ctx, tx)
 	if err != nil {
@@ -74,6 +124,9 @@ func (manager *Manager) claim(ctx context.Context, tx pgx.Tx, deviceID string, s
 	limits, valid := manager.Limits()
 	if !valid {
 		return ErrNoValidLicense
+	}
+	if err := manager.settleFutureActivity(ctx, tx, now); err != nil {
+		return err
 	}
 	var others int
 	var held, sessionOpen bool
@@ -173,12 +226,19 @@ func (manager *Manager) OpenShift(ctx context.Context, tx pgx.Tx, deviceID strin
 // tiene exclusivo (captura y pedido sin conexión), así que nunca se intercalan: si la asignación fue antes, la previa lee
 // su hora después y ve el cupo tan vencido como lo vio la asignación; si la previa fue antes, la asignación ve la
 // actividad renovada. Los borrados (liberar, cerrar sesión, abrir turno, el barrido) chocan en la fila: si el borrado va
-// primero, la previa no encuentra nada; si va después, la borra. La hora nunca retrocede (greatest).
+// primero, la previa no encuentra nada; si va después, la borra.
+//
+// La actividad queda en now, también si estaba en el futuro (hallazgo R2-2, L1-D43): la tableta que capturó con el reloj
+// adelantado y sigue trabajando con la hora corregida renueva con la hora de ahora, y su cupo vence 15 minutos reales
+// después de su última previa, no cuando el reloj real alcance la fecha del salto. Solo con la hora confiable: en «Hora
+// del equipo incorrecta» (las previas pasan la puerta porque no registran nada con fecha) la hora de ahora puede ser la
+// equivocada, así que la actividad nunca retrocede (greatest), como antes.
 func (manager *Manager) Renew(ctx context.Context, tx pgx.Tx, deviceID string) error {
 	now, cutoff, _ := manager.times()
-	_, err := tx.Exec(ctx, `UPDATE app.license_seats SET last_activity_at = greatest(last_activity_at, $1)
+	_, err := tx.Exec(ctx, `UPDATE app.license_seats
+        SET last_activity_at = CASE WHEN $5::boolean THEN $1::timestamptz ELSE greatest(last_activity_at, $1::timestamptz) END
         WHERE device_id = $3 AND kind = $4 AND last_activity_at > $2`,
-		now, cutoff, deviceID, kindOrderTaker)
+		now, cutoff, deviceID, kindOrderTaker, manager.clockTrusted())
 	return err
 }
 
