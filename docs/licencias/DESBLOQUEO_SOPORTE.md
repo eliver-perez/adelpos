@@ -15,7 +15,14 @@ corrigió. Ahora la hora real queda «antes» de la última actividad y corregir
 
 1. **«Comprobar la hora con internet»** (`POST license/time-check`): si la hora del servidor de licencias coincide con el
    reloj, la última hora confiable baja a esa hora. Necesita internet.
+   - Con una licencia activada en línea, la hora sale de la consulta de esa activación. Si el servidor de licencias la
+     rechaza (por ejemplo, una activación que ya no conoce), la persona ve el texto de su código y usa el desbloqueo de
+     soporte (L1-D53).
 2. **«Desbloqueo de soporte»**, sin internet: este procedimiento.
+
+Como el estado de la licencia se calcula con la última hora confiable, un salto al futuro también puede mostrar una
+suscripción en Tolerancia o Vencida. Al bajar la hora, por cualquiera de las dos salidas, Go vuelve a calcularlo, y la
+pantalla de la hora lo dice (L1-D58).
 
 ## Paso a paso
 
