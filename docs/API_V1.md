@@ -885,10 +885,17 @@ licencias (contrato de licencias §1). El escritorio y Android **solo muestran**
       `revocation_reason`: `deactivated`, `transferred` o `revoked`), `not_activated` o `not_activated_with_data`
       (sin activar, con datos).
     - `license`: plan, cliente, cupos (`limits`), vencimiento (`expires_at`, o `perpetual`), `grace_days` y
-      `grace_ends_at`; `null` sin licencia válida.
+      `grace_ends_at`; `null` sin licencia válida. También `license_id`, `activation_id`, `licensee_name`,
+      `license_type` (`perpetual`, `subscription` o `trial`), `billing_period`, `license_revision`, `plan`
+      (`plan_id`, `name` y `custom`), `features`, `issued_at`, `period_starts_at` y `updates_until`, tal como los firmó
+      el servidor de licencias.
     - `copied`: la instalación se copió de otra computadora. `machine_unverified` e `identity_unavailable`: no se pudo
       comprobar la computadora o falta su identidad.
     - `environment`: `test` en las versiones de desarrollo (servidor de licencias de pruebas).
+    - `server_id`; `effective_now`, la hora con que Go calculó el estado (el máximo del reloj de la computadora
+      principal y la última hora confiable, §5.6 del contrato de licencias); `can_manage`, si quien consulta tiene
+      «Administrar la licencia», e `identity_regeneration_available`, si esa persona puede crear una identidad nueva (una
+      instalación copiada, en la computadora principal).
   - **Con solo la credencial del dispositivo** (sin `Authorization`), el resumen `LicenseDeviceSummary`: `state`,
     `environment` y `copied`. Sirve al teléfono o la tableta en «¿Quién eres?».
 - **La gestión** (activar, transferir, buscar actualización, liberar, la solicitud y el archivo sin internet, y la
@@ -926,10 +933,14 @@ en el servidor, en cada operación, antes que los cupos.
   - `state`: `active` (Vigente), `grace` (Tolerancia), `expired` (Vencida), `revoked` (Revocada, con
     `revocation_reason`), `not_activated` (Sin activar) o `not_activated_with_data` (Sin activar con datos). `copied`:
     la carpeta de datos se copió de otra computadora.
-  - `days_until_expiry` (Vigente con vencimiento) y `grace_days_remaining` (Tolerancia: días antes de que se bloquee la
+  - `license_type`, `perpetual`, `expires_at`, `grace_days` y `grace_ends_at` describen el vencimiento.
+    `days_until_expiry` (Vigente con vencimiento) y `grace_days_remaining` (Tolerancia: días antes de que se bloquee la
     captura) ya vienen calculados.
   - `clock` (`LicenseClock`): la hora de la computadora principal. Con `blocked: true` el cliente muestra el aviso fijo
-    «No se puede registrar: la computadora principal tiene la fecha y hora incorrectas. Avisa al encargado.».
+    «No se puede registrar: la computadora principal tiene la fecha y hora incorrectas. Avisa al encargado.». Trae
+    `local_time` y `last_activity_time` (la última hora confiable; `null` si todavía no hay), `margin_minutes` (10),
+    `timezone`, las dos fechas en texto para la pantalla (`local_time_text` y `last_activity_time_text`, por ejemplo
+    «lunes 23 nov 2026, 10:15»), `license_state` y `license_ok` (Vigente o Tolerancia).
 - **El aviso**: cuando cambia el estado o el bloqueo por la hora, el canal de eventos (`streamEvents`) publica
   `license.changed` (ámbito `configuration`, sin agregado) a **todas** las personas que lo leen, sin importar sus
   permisos; el cliente vuelve a leer `getIdentity` o `getRecoveryState`.
