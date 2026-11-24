@@ -66,7 +66,14 @@ no, `400 SUPPORT_UNLOCK_INVALID` con `details.reason`:
   `license.support_unlocked` (con la última hora confiable anterior y la nueva) y `license.support_unlock_rejected`
   (con el motivo).
 - Solo se acepta en la computadora principal (escucha local) y con una sesión de cualquier usuario, sin permiso
-  especial: quien esté en la caja debe poder resolverlo. La seguridad está en la firma.
+  especial: quien esté en la caja debe poder resolverlo. La seguridad está en la firma. Desde otra terminal responde
+  `409 LICENSE_LOCAL_ONLY`.
+- Solo en la instalación original: una carpeta de datos copiada a otra computadora tiene la misma identidad y la misma
+  solicitud pendiente, así que no pide ni acepta un desbloqueo (`409 LICENSE_INSTALLATION_COPIED`) hasta crear una
+  identidad nueva. Tampoco sin la huella del equipo comprobada.
+- El desbloqueo se audita antes de aplicarse: si la auditoría no se puede guardar, no cambia nada y la respuesta se puede
+  volver a pegar. Baja las dos copias de la última hora confiable: `estado.json` y la de la base
+  (`app.license_trusted_time`).
 
 ## Formatos
 

@@ -948,6 +948,13 @@ en el servidor, en cada operación, antes que los cupos.
   `POST license/support-request` (código de solicitud del desbloqueo de soporte) y `POST license/support-unlock`
   (`{response, source}`; `400 SUPPORT_UNLOCK_INVALID` con `details.reason`: `used`, `other_installation`, `expired`,
   `altered` o `not_requested`). Ver [licencias/DESBLOQUEO_SOPORTE.md](licencias/DESBLOQUEO_SOPORTE.md).
+  - Desde otra terminal, las tres responden **409** `LICENSE_LOCAL_ONLY` («Esto se hace en la computadora principal…»):
+    no es un problema de permisos y no queda como acceso denegado.
+  - En una carpeta de datos copiada de otra computadora, las dos de soporte responden **409**
+    `LICENSE_INSTALLATION_COPIED`: primero se crea una identidad nueva, como para activar.
+  - La baja de la hora (la comprobación que coincide y el desbloqueo aceptado) se audita antes de aplicarse. Si después
+    no se puede guardar, responde **503** `LICENSE_STATE_NOT_SAVED`, la hora no cambia, la respuesta de soporte sigue
+    sin usar y la auditoría registra la misma acción con `success: false` y `applied: false`.
 
 ## Códigos de error más frecuentes
 
