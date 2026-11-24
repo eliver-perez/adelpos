@@ -10,7 +10,7 @@
 #   ADELPOS_E2E_NETWORK_URL=https://127.0.0.1:8454 \
 #   ADELPOS_E2E_PROVISIONING_FILE=/ruta/al/provisioning-token \
 #   [ADELPOS_E2E_DATABASE_URL=postgresql://usuario:clave@127.0.0.1:55499/adel_pos_test_…] \
-#   scripts/android-e2e.sh [--suite access|catalog|waiter|field|takeaway|precheck|alerts|adjustments|connection|all] \
+#   scripts/android-e2e.sh [--suite access|catalog|waiter|field|takeaway|precheck|alerts|adjustments|license|connection|all] \
 #       [--steps "…"] \
 #       [--no-install] [--out <carpeta>]
 #
@@ -35,7 +35,14 @@
 #                                   Fase E de la A3 corre 60).
 #   ADELPOS_E2E_NEW_SERVER          solo con --suite all: orden que detiene el servidor temporal anterior y levanta
 #                                   uno NUEVO (otra identidad y base vacía) en las MISMAS direcciones e imprime líneas
-#                                   VARIABLE=valor con las ADELPOS_E2E_* que cambian (provisioning, base…).
+#                                   VARIABLE=valor con las ADELPOS_E2E_* que cambian (provisioning, base, reloj…).
+#   ADELPOS_E2E_LICENSE_FIXTURES    etapa L1: el vectors.json del contrato de licencias con que se firman las licencias
+#                                   de prueba (por omisión, contracts/licencias/v1/fixtures/vectors.json de este árbol).
+#                                   El servidor temporal debe confiar en esas llaves (ADEL_TEST_LICENSE_TRUST).
+#   ADELPOS_E2E_GO                  etapa L1: el `go` con que se compila backend/cmd/license-test (por omisión, el del
+#                                   PATH).
+#   ADELPOS_E2E_CLOCK_FILE          etapa L1, solo la suite license: el archivo del desfase del reloj del servidor
+#                                   temporal (su ADEL_TEST_CLOCK_FILE). Sin él, los pasos de la hora salen como OMITIDA.
 #   JAVA_HOME, ANDROID_HOME         como en scripts/dev.sh (JDK de Android Studio y SDK del usuario por omisión).
 #
 # Suite `access` (AccessOnGoTest): 1 emparejar con el código · 2 PIN incorrecto, bloqueo al quinto (cierra la entrada
@@ -123,8 +130,25 @@
 # lectura repetida por una conexión muerta. El registro de cada cambio queda en <salida>/c1_…-logcat.txt
 # (etiquetas AdelConexion y AdelLink). Con la Mac sin carga y sin Gradle compilando.
 #
+# Suite `license` (etapa L1, §8, LicenseOnGoTest, con un servidor temporal nuevo que confía en las llaves de
+# vectors.json y, para l5 y l6, con ADELPOS_E2E_CLOCK_FILE; el guion importa cada licencia de prueba y mueve el reloj
+# del servidor entre pasos, nunca el de la Mac ni el del emulador): l1 (licencia de 0 comanderos) restaurante,
+# emparejar y entrar; capturar dice «La licencia no incluye comanderos (0 de 0)…» y lo enviado queda en «Requiere tu
+# revisión» · l2 (SIN red) un pedido «Por enviar» · l3 (con red) se envía solo, Go lo rechaza por cupo y queda en
+# revisión con su motivo, sin reintentos · l4 (licencia con cupos) «Enviar de nuevo» con la misma clave: entra una vez ·
+# l5 (reloj del servidor 2 h atrás) el aviso fijo de la hora en todas las pantallas y el pedido rechazado con su texto ·
+# l6 (reloj corregido) el aviso se quita y el pedido se envía de nuevo · l7 (licencia en tolerancia) el aviso discreto
+# «Licencia: quedan 3 días» en la barra · l8 (licencia vencida) «La licencia del sistema no permite capturar pedidos».
+# Capturas de pantalla de cada paso en <salida>/screens.
+#
+# Licencia (etapa L1): desde la Fase C, un servidor sin licencia no empareja ni deja capturar ni administrar. Por eso,
+# en un solo lugar (prepare_server → ensure_test_license), si el servidor temporal dice «Sin activar», el guion le
+# importa una licencia de prueba perpetua con cupos de sobra (premium: 5 cajas, 10 comanderos y 5 pantallas de
+# cocina), firmada con las llaves de prueba de vectors.json por backend/cmd/license-test para la identidad de ESE
+# servidor (la lee de su solicitud sin internet). Nunca habla con un servidor de licencias.
+#
 # Suite `all`: con ADELPOS_E2E_NEW_SERVER, un servidor temporal nuevo para cada parte: access 1–5, access 6–7 (otra
-# identidad, sin reinstalar), catalog, waiter, field, takeaway, precheck, alerts y adjustments. Resultados en
+# identidad, sin reinstalar), catalog, waiter, field, takeaway, precheck, alerts, adjustments y license. Resultados en
 # <salida>/<suite>.
 # La suite `connection` se corre aparte.
 #
@@ -170,8 +194,9 @@ suite_class() {
         precheck) echo "PrecheckOnGoTest" ;;
         alerts) echo "AlertsOnGoTest" ;;
         adjustments) echo "AdjustmentsOnGoTest" ;;
+        license) echo "LicenseOnGoTest" ;;
         connection) echo "ConnectionOnGoTest" ;;
-        *) fail "suite desconocida: $1 (access, catalog, waiter, field, takeaway, precheck, alerts, adjustments, connection o all)" ;;
+        *) fail "suite desconocida: $1 (access, catalog, waiter, field, takeaway, precheck, alerts, adjustments, license, connection o all)" ;;
     esac
 }
 
@@ -185,6 +210,7 @@ suite_steps() {
         precheck) echo "p1 p2 p3 p4 p5 p6 p7" ;;
         alerts) echo "r1 r2 r3 r4 r5 r6 r7 r8 r10 r9" ;;
         adjustments) echo "a1 a2 a3 a4 a5 a6 a7" ;;
+        license) echo "l1 l2 l3 l4 l5 l6 l7 l8" ;;
         connection) echo "c1" ;;
     esac
 }
@@ -299,6 +325,105 @@ prepare_server() {
         MAIN_DEVICE="$(printf '%s' "$setup" | json_field device_id)"
         MAIN_TOKEN="$(printf '%s' "$setup" | json_field device_token)"
     fi
+    # Etapa L1: sin licencia, Go no empareja ni deja capturar ni administrar.
+    ensure_test_license
+}
+
+# --- Licencia de prueba (etapa L1) ---
+
+LICENSE_FIXTURES="${ADELPOS_E2E_LICENSE_FIXTURES:-$PROJECT_ROOT/contracts/licencias/v1/fixtures/vectors.json}"
+LICENSE_TOOL=""
+
+# Sesión del administrador de la terminal principal por la escucha local (la del asistente de configuración).
+admin_session() {
+    curl -fsS --max-time 10 -X POST "$LOCAL_URL/api/v1/auth/login" -H "Content-Type: application/json" \
+        -H "X-Device-ID: $MAIN_DEVICE" -H "X-Device-Token: $MAIN_TOKEN" \
+        -d '{"username":"admin","password":"admin"}' | json_field session_token
+}
+
+# Una petición a la escucha local con la sesión [session]: deja el estado HTTP en LOCAL_STATUS y la respuesta en
+# LOCAL_BODY (sin subcapa, para que lleguen a quien llama). Distinto de cero si no hubo respuesta.
+local_call() {
+    local session="$1" method="$2" path="$3" body="${4:-}" answer
+    local data=()
+    if [ -n "$body" ]; then
+        data=(-H "Content-Type: application/json" -d "$body")
+    fi
+    LOCAL_STATUS=""
+    LOCAL_BODY=""
+    answer="$(curl -sS --max-time 30 -X "$method" "$LOCAL_URL/api/v1/$path" -H "X-Device-ID: $MAIN_DEVICE" \
+        -H "X-Device-Token: $MAIN_TOKEN" -H "Authorization: Bearer $session" ${data[@]+"${data[@]}"} \
+        -w $'\n%{http_code}')" || return 1
+    LOCAL_BODY="${answer%$'\n'*}"
+    LOCAL_STATUS="${answer##*$'\n'}"
+}
+
+# backend/cmd/license-test compilado una vez por corrida en LICENSE_TOOL (solo firma con las llaves de prueba de
+# vectors.json; nunca llega a un instalador).
+ensure_license_tool() {
+    if [ -n "$LICENSE_TOOL" ]; then
+        return 0
+    fi
+    [ -f "$LICENSE_FIXTURES" ] || fail "no existe $LICENSE_FIXTURES (ADELPOS_E2E_LICENSE_FIXTURES)"
+    (cd "$PROJECT_ROOT/backend" && "${ADELPOS_E2E_GO:-go}" build -o "$OUT/license-test" ./cmd/license-test) \
+        >"$OUT/license-test-build.log" 2>&1 || {
+        tail -5 "$OUT/license-test-build.log" >&2
+        fail "no se pudo compilar backend/cmd/license-test (ADELPOS_E2E_GO)"
+    }
+    LICENSE_TOOL="$OUT/license-test"
+}
+
+# Importa en el servidor temporal una licencia de prueba para SU identidad, con las opciones de `license-test issue`
+# (sin opciones: perpetua, premium). La identidad (server_id y llave pública) sale de su solicitud sin internet de
+# activar; la licencia entra por `POST license/import`, como un archivo .lic. Devuelve distinto de cero si Go la
+# rechaza (por ejemplo, porque el servidor no confía en las llaves de vectors.json).
+import_test_license() {
+    local session identity issued license
+    session="$(admin_session)" || { echo "android-e2e: sin sesión del administrador para la licencia" >&2; return 1; }
+    local_call "$session" POST license/offline-request '{"action":"activate"}' || return 1
+    if [ "$LOCAL_STATUS" != 200 ]; then
+        echo "android-e2e: license/offline-request respondió $LOCAL_STATUS: $LOCAL_BODY" >&2
+        return 1
+    fi
+    identity="$(printf '%s' "$LOCAL_BODY" | python3 -I -c '
+import base64, json, sys
+content = json.loads(json.load(sys.stdin)["content"])
+encoded = content["payload_b64u"]
+payload = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)))
+print(payload["server_id"], payload["installation_public_key"])')" || return 1
+    ensure_license_tool
+    issued="$(ADEL_TEST_MODE=1 "$LICENSE_TOOL" issue --fixtures "$LICENSE_FIXTURES" --server-id "${identity% *}" \
+        --public-key "${identity#* }" "$@")" || { echo "android-e2e: license-test issue falló: $issued" >&2; return 1; }
+    license="$(printf '%s' "$issued" | json_field output)" || return 1
+    local_call "$session" POST license/import \
+        "$(python3 -I -c 'import json, sys; print(json.dumps({"license": sys.argv[1]}))' "$license")" || return 1
+    if [ "$LOCAL_STATUS" != 200 ]; then
+        echo "android-e2e: license/import respondió $LOCAL_STATUS: $LOCAL_BODY" >&2
+        echo "android-e2e: ¿el servidor temporal arrancó con ADEL_TEST_LICENSE_TRUST=$LICENSE_FIXTURES?" >&2
+        return 1
+    fi
+    echo "licencia de prueba importada (license-test issue $*): $(printf '%s' "$LOCAL_BODY" | python3 -I -c '
+import json, sys
+answer = json.load(sys.stdin)
+limits = (answer.get("license") or {}).get("limits") or {}
+print(answer.get("state"), "cajas", limits.get("cash_registers"), "comanderos", limits.get("order_takers"),
+      "cocina", limits.get("kitchen_displays"))')" | tee -a "${SUMMARY:-/dev/null}"
+}
+
+# Un servidor «Sin activar» queda activado con una licencia de prueba con cupos de sobra (el único lugar donde las
+# suites anteriores a la etapa L1 obtienen su licencia). Uno ya activado se deja como está.
+ensure_test_license() {
+    local session state
+    session="$(admin_session)" || fail "sin sesión del administrador de la terminal principal"
+    local_call "$session" GET license/status || fail "license/status no respondió"
+    [ "$LOCAL_STATUS" = 200 ] || fail "license/status respondió $LOCAL_STATUS: $LOCAL_BODY"
+    state="$(printf '%s' "$LOCAL_BODY" | json_field state)"
+    case "$state" in
+        not_activated | not_activated_with_data)
+            import_test_license --plan premium ||
+                fail "no se pudo activar el servidor temporal con una licencia de prueba"
+            ;;
+    esac
 }
 
 # --- Base temporal (solo lo que Go no permite por su API) ---
@@ -838,6 +963,55 @@ adjustments_step() {
         "$SUITE_OUT/screens" >/dev/null 2>&1 || echo "sin capturas que copiar" | tee -a "$SUMMARY"
 }
 
+# Etapa L1, §8: la licencia, los cupos y la hora del servidor temporal cambian desde aquí entre pasos (cada licencia de
+# prueba con su license_id nuevo; el reloj con su archivo de desfase), nunca la hora de la Mac ni la del emulador.
+server_clock() {
+    [ -n "${ADELPOS_E2E_CLOCK_FILE:-}" ] || return 1
+    printf '%s\n' "$1" >"$ADELPOS_E2E_CLOCK_FILE"
+    echo "reloj del servidor temporal: «$1»" | tee -a "$SUMMARY"
+}
+
+license_import_step() {
+    local method="$1"
+    shift
+    if import_test_license "$@"; then
+        run_step "$method"
+    else
+        echo "$SUITE_NAME $method: FALLA (no se pudo importar la licencia de prueba: license-test issue $*)" |
+            tee -a "$SUMMARY"
+        FAILED=1
+    fi
+}
+
+license_step() {
+    case "$1" in
+        l1) license_import_step l1_sinComanderosElMensajeYLaRevision --plan premium --order-takers 0 ;;
+        l2) offline_step l2_pedidoSinConexionPorEnviar ;;
+        l3) run_step l3_alVolverLaRedQuedaEnRevisionSinReintentos ;;
+        l4) license_import_step l4_volvioElCupoYSeEnviaDeNuevoConLaMismaClave --plan premium ;;
+        l5)
+            if server_clock "-2h"; then
+                run_step l5_horaIncorrectaAvisoFijoYRechazo
+            else
+                skip_step l5_horaIncorrectaAvisoFijoYRechazo "sin ADELPOS_E2E_CLOCK_FILE: el reloj del servidor no se mueve"
+            fi
+            ;;
+        l6)
+            if server_clock ""; then
+                run_step l6_horaCorregidaSeQuitaElAvisoYSeEnvia
+            else
+                skip_step l6_horaCorregidaSeQuitaElAvisoYSeEnvia "sin ADELPOS_E2E_CLOCK_FILE: el reloj del servidor no se mueve"
+            fi
+            ;;
+        l7) license_import_step l7_toleranciaAvisoDiscretoEnLaBarra --type subscription --expires-at -2d ;;
+        l8) license_import_step l8_vencidaNoPermiteCapturar --type subscription --expires-at -6d ;;
+        *) fail "paso desconocido de la suite license: $1" ;;
+    esac
+    mkdir -p "$SUITE_OUT/screens"
+    "$ADB" -s "$ANDROID_SERIAL" pull "/sdcard/Android/data/$APP_ID/files/screens/." \
+        "$SUITE_OUT/screens" >/dev/null 2>&1 || echo "sin capturas que copiar" | tee -a "$SUMMARY"
+}
+
 # Etapa A3: la conexión tolerante, minutos sin uso sin avisos falsos (con el aviso de platillos listos encendido, como
 # en la tableta del restaurante). El registro del emulador se agranda para que quepa la corrida completa.
 connection_step() {
@@ -884,6 +1058,7 @@ run_suite() {
             precheck) precheck_step "$step" ;;
             alerts) alerts_step "$step" ;;
             adjustments) adjustments_step "$step" ;;
+            license) license_step "$step" ;;
             connection) connection_step "$step" ;;
         esac
     done
@@ -899,7 +1074,7 @@ new_server() {
         name="${line%%=*}"
         case "$name" in
             ADELPOS_E2E_LOCAL_URL | ADELPOS_E2E_NETWORK_URL | ADELPOS_E2E_PROVISIONING | ADELPOS_E2E_PROVISIONING_FILE | \
-                ADELPOS_E2E_DATABASE_URL | ADELPOS_E2E_SERVER_ID)
+                ADELPOS_E2E_DATABASE_URL | ADELPOS_E2E_SERVER_ID | ADELPOS_E2E_CLOCK_FILE)
                 export "$name=${line#*=}"
                 ;;
         esac
@@ -919,7 +1094,7 @@ if [ "$SUITE" = all ]; then
     run_suite access "1 2 3 4 5" 1 "$OUT/access"
     new_server
     run_suite access "6 7" 0 "$OUT/access"
-    for part in catalog waiter field takeaway precheck alerts adjustments; do
+    for part in catalog waiter field takeaway precheck alerts adjustments license; do
         new_server
         run_suite "$part" "$(suite_steps "$part")" 1 "$OUT/$part"
     done

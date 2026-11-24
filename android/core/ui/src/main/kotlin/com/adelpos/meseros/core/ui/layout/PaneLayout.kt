@@ -44,6 +44,15 @@ fun currentPaneLayout(): PaneLayout {
 fun isHeightCompact(heightDp: Int): Boolean =
     heightDp < WindowSizeClass.HEIGHT_DP_MEDIUM_LOWER_BOUND
 
+/**
+ * Etapa L1: la barra superior tiene lugar para un aviso con texto (≥ 600 dp de ancho: la tableta o
+ * el teléfono en horizontal); en el teléfono vertical, el título necesita ese espacio.
+ */
+@Composable
+fun currentTopBarHasRoom(): Boolean =
+    currentWindowAdaptiveInfoV2().windowSizeClass.minWidthDp >=
+        WindowSizeClass.WIDTH_DP_MEDIUM_LOWER_BOUND
+
 /** [isHeightCompact] para la ventana actual. */
 @Composable
 fun currentHeightCompact(): Boolean =

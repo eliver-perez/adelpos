@@ -158,6 +158,14 @@ enum class ReviewReason {
 
     /** Go no aceptó el pedido por otro motivo (permisos, datos): el mensaje de Go lo explica. */
     REJECTED,
+
+    /**
+     * Etapa L1: la licencia, un cupo o la hora de la computadora principal no lo permitieron
+     * ([SendOutcome.NotAllowed]). Go no guardó nada: el mesero lo envía de nuevo, con la misma
+     * clave, cuando se resuelva; nunca se reintenta solo. Se guarda en Room por su nombre, dentro
+     * del JSON de la revisión (`pending_orders.review`): no cambia el esquema.
+     */
+    NOT_ALLOWED,
 }
 
 /**

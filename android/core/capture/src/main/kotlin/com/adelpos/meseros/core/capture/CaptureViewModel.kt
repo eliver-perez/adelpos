@@ -17,6 +17,7 @@ import com.adelpos.meseros.core.domain.catalog.Customization
 import com.adelpos.meseros.core.domain.catalog.LineSelection
 import com.adelpos.meseros.core.domain.error.AppError
 import com.adelpos.meseros.core.domain.error.AppResult
+import com.adelpos.meseros.core.domain.error.shownMessage
 import com.adelpos.meseros.core.domain.money.Money
 import com.adelpos.meseros.core.domain.waiter.AccountBill
 import com.adelpos.meseros.core.domain.waiter.Capture
@@ -515,8 +516,11 @@ class CaptureViewModel(
         }
     }
 
-    /** El mensaje de Go, tal cual; sin respuesta, el texto de la pantalla (null). */
-    private fun messageOf(error: AppError): String? = error.serverMessage
+    /**
+     * El mensaje de Go, tal cual (con la licencia, un cupo o la hora, el texto de su código, etapa
+     * L1); sin respuesta, el texto de la pantalla (null).
+     */
+    private fun messageOf(error: AppError): String? = error.shownMessage()
 
     override fun onCleared() {
         // Salir sin productos no deja registro.

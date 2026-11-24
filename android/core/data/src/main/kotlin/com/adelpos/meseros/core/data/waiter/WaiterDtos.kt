@@ -3,6 +3,7 @@ package com.adelpos.meseros.core.data.waiter
 import com.adelpos.meseros.core.data.api.MoneySerializer
 import com.adelpos.meseros.core.data.catalog.CustomizationDto
 import com.adelpos.meseros.core.data.catalog.LineRequestDto
+import com.adelpos.meseros.core.data.license.LicenseSummaryDto
 import com.adelpos.meseros.core.domain.money.Money
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -70,6 +71,9 @@ data class RecoveryStateDto(
     val tables: List<TableDto>? = null,
     val accounts: List<AccountDto>? = null,
     @SerialName("event_cursor") val eventCursor: Long? = null,
+    // Etapa L1 (Fase C del servidor): la licencia y la hora de la computadora principal; un
+    // servidor anterior no lo envía.
+    val license: LicenseSummaryDto? = null,
 )
 
 @Serializable
