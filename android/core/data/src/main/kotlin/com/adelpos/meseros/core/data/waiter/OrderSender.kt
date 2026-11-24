@@ -10,6 +10,7 @@ import com.adelpos.meseros.core.data.session.ServerTransport
 import com.adelpos.meseros.core.data.waiter.db.WaiterDao
 import com.adelpos.meseros.core.data.waiter.db.WaiterStorage
 import com.adelpos.meseros.core.domain.error.AppError
+import com.adelpos.meseros.core.domain.error.LicenseMessages
 import com.adelpos.meseros.core.domain.waiter.OrderReview
 import com.adelpos.meseros.core.domain.waiter.OrderSendRules
 import com.adelpos.meseros.core.domain.waiter.OrderState
@@ -342,6 +343,12 @@ class OrderSender(
 
     private fun rejected(order: PendingOrder, problem: ApiProblem): SendOutcome {
         val message = problem.message ?: GENERIC_REJECTION
+        // Etapa L1: la licencia, un cupo o la hora de la computadora principal (los cinco códigos
+        // de L1-D17). Go no guardó nada: queda marcado con su motivo y su texto, y no se reintenta
+        // solo (el mesero lo envía de nuevo con la misma clave cuando se resuelva).
+        ApiErrors.licenseRefusal(problem)?.let { refusal ->
+            return SendOutcome.NotAllowed(LicenseMessages.of(refusal))
+        }
         return when (problem.code) {
             ORDER_REQUIRES_CONFIRMATION -> {
                 val details =
@@ -394,6 +401,8 @@ class OrderSender(
             is AppError.TryLater,
             is AppError.ServerProblem -> SendOutcome.TryAgain(message)
             is AppError.PermissionDenied -> SendOutcome.Rejected(message)
+            // No llega aquí ([rejected] la atiende antes); si llegara, nunca se reintenta solo.
+            is AppError.LicenseRefused -> SendOutcome.NotAllowed(LicenseMessages.of(error.refusal))
             is AppError.Rejected ->
                 if (error.code == CLIENT_KIND_MISMATCH) {
                     SendOutcome.TryAgain(message)

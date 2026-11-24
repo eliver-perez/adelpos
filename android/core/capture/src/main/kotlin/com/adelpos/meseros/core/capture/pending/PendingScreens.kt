@@ -408,6 +408,9 @@ fun ReviewScreen(
     val review = requireNotNull(order.review)
     val removable = OrderReviewRules.removableItemIds(order)
     val alreadySent = review.alreadySentItemIds.isNotEmpty()
+    // Etapa L1: la licencia, un cupo o la hora no lo permitieron; el mesero decide cuándo enviarlo
+    // de nuevo (con la misma clave), nunca la cola sola.
+    val resendAsIs = OrderReviewRules.offersResendAsIs(review)
     LazyColumn(
         modifier =
             modifier
@@ -430,7 +433,12 @@ fun ReviewScreen(
             }
         }
         item {
-            Text(stringResource(R.string.review_intro), style = MaterialTheme.typography.bodyMedium)
+            Text(
+                stringResource(
+                    if (resendAsIs) R.string.review_intro_not_allowed else R.string.review_intro,
+                ),
+                style = MaterialTheme.typography.bodyMedium,
+            )
         }
         item {
             Text(
@@ -522,6 +530,13 @@ fun ReviewScreen(
                             enabled = !working,
                             modifier = Modifier.fillMaxWidth().testTag(TAG_REVIEW_SEND),
                         )
+                    resendAsIs ->
+                        PrimaryButton(
+                            text = stringResource(R.string.review_resend),
+                            onClick = onResend,
+                            enabled = !working,
+                            modifier = Modifier.fillMaxWidth().testTag(TAG_REVIEW_RESEND),
+                        )
                     else -> Unit
                 }
                 if (mergedTarget != null) {
@@ -593,6 +608,7 @@ const val TAG_REVIEW_CHANGE_PREFIX = "review-change-"
 const val TAG_REVIEW_REMOVE_PREFIX = "review-remove-"
 const val TAG_REVIEW_ACCEPT = "review-accept"
 const val TAG_REVIEW_SEND = "review-send"
+const val TAG_REVIEW_RESEND = "review-resend"
 const val TAG_REVIEW_NEW_ACCOUNT = "review-new-account"
 const val TAG_REVIEW_BACK_TO_CAPTURE = "review-back-to-capture"
 const val TAG_REVIEW_DISCARD = "review-discard"

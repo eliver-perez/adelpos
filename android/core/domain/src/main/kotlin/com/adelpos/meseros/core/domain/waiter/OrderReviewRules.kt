@@ -44,7 +44,10 @@ object OrderReviewRules {
 
     /**
      * «Enviar» después de corregir: si ya no queda ningún cambio, sin confirmación; si los que
-     * quedan son aceptables, con su confirmación (el mesero los vio en la misma pantalla).
+     * quedan son aceptables, con su confirmación (el mesero los vio en la misma pantalla). También
+     * «Enviar de nuevo» de un pedido que la licencia, un cupo o la hora no permitieron
+     * ([offersResendAsIs]): el mismo pedido con **la misma clave** y sin confirmación (Go no guardó
+     * nada y lo revisa todo otra vez).
      */
     fun resend(order: PendingOrder, nowMillis: Long): PendingOrder {
         check(order.state == OrderState.NEEDS_REVIEW) { "El pedido no requiere revisión" }
@@ -114,6 +117,14 @@ object OrderReviewRules {
         val sent = order.review?.alreadySentItemIds ?: return false
         return order.lines.isNotEmpty() && order.lines.all { it.item.id in sent }
     }
+
+    /**
+     * Etapa L1: «Enviar de nuevo» sin cambiar nada, solo si la licencia, un cupo o la hora de la
+     * computadora principal no lo permitieron ([ReviewReason.NOT_ALLOWED]). El mesero decide cuándo
+     * (al corregirse la hora o liberarse un cupo): la cola nunca lo reintenta sola.
+     */
+    fun offersResendAsIs(review: OrderReview): Boolean =
+        review.reason == ReviewReason.NOT_ALLOWED && review.changes.isEmpty()
 
     /** Si la revisión ofrece abrir una cuenta nueva en la mesa (la cuenta ya no está abierta). */
     fun offersNewAccount(review: OrderReview): Boolean {

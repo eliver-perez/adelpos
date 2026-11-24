@@ -114,6 +114,9 @@
     <string name="review_send_to_account">Enviar a esa cuenta</string>
     <string name="review_send_to_merged">Enviar a la cuenta en que se combinó</string>
     <string name="review_send">Enviar</string>
+    <!-- Etapa L1: la licencia, un cupo o la hora de la computadora principal no permitieron el pedido. -->
+    <string name="review_intro_not_allowed">La computadora principal no aceptó el pedido. Sigue guardado en este dispositivo: cuando se resuelva, envíalo de nuevo.</string>
+    <string name="review_resend">Enviar de nuevo</string>
     <string name="review_remove">Quitar del pedido</string>
     <string name="review_new_account">Abrir una cuenta nueva en la mesa</string>
     <string name="review_back_to_capture">Corregir en la captura</string>

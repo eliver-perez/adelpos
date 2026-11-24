@@ -8,6 +8,7 @@ import com.adelpos.meseros.core.data.waiter.db.CustomerEditEntity
 import com.adelpos.meseros.core.data.waiter.db.WaiterDao
 import com.adelpos.meseros.core.data.waiter.db.WaiterStorage
 import com.adelpos.meseros.core.domain.error.AppError
+import com.adelpos.meseros.core.domain.error.LicenseMessages
 import com.adelpos.meseros.core.domain.money.Money
 import com.adelpos.meseros.core.domain.waiter.AccountBill
 import com.adelpos.meseros.core.domain.waiter.AccountSummary
@@ -829,7 +830,8 @@ class CaptureRepository(
             }
             error is AppError.TryLater || error is AppError.ServerProblem ->
                 uncertain(captureId, problem.message)
-            else -> clearInFlight(captureId, DraftSync.REJECTED, problem.message)
+            // Etapa L1: con la licencia, un cupo o la hora, el texto sale del código.
+            else -> clearInFlight(captureId, DraftSync.REJECTED, ApiErrors.shownMessage(problem))
         }
     }
 
@@ -1069,6 +1071,11 @@ class CaptureRepository(
         if (error is AppError.PermissionDenied) {
             return SendOutcome.Rejected(problem.message ?: PERMISSION_FALLBACK)
         }
+        // Etapa L1: la licencia, un cupo o la hora no lo permitieron. El pedido sin conexión
+        // pasaría por la misma puerta de Go: queda marcado con su motivo, sin reintentarse solo.
+        if (error is AppError.LicenseRefused) {
+            return SendOutcome.NotAllowed(LicenseMessages.of(error.refusal))
+        }
         reportAccess(error, order.waiterUserId)
         return SendOutcome.ContinueOffline(problem.message)
     }
@@ -1222,7 +1229,8 @@ class CaptureRepository(
                         }
                         stillPending(ApiErrors.toAppError(problem), capture) -> return
                         else -> {
-                            edits.withLock { save(capture.copy(syncMessage = problem.message)) }
+                            val message = ApiErrors.shownMessage(problem)
+                            edits.withLock { save(capture.copy(syncMessage = message)) }
                             return
                         }
                     }
