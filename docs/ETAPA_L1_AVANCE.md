@@ -4523,3 +4523,182 @@ idéntico byte por byte (el mismo SHA-256).
 - **La prueba 7 de la guía sigue en la lista del propietario**: «Buscar actualización» con un cambio de plan mientras la
   licencia está activa. Los pasos, con la instancia `en-linea` conservada y la Prueba, están arriba, en «Lo no
   verificado».
+
+---
+
+## Fase H · Servidor, escritorio, documentos y `.pkg` 0.15.0
+
+Árbol `$SP/wt/l1-h`, rama `etapa-l1-h`, desde `cdc2ce2` (la cabeza de `etapa-l1` con todas las fases unidas).
+`ISO_TAG=HS`. Sin emuladores. Ninguna llamada a `licensing.sicrat.com`; la hora de la Mac y la instalación real, sin
+tocar; el `.pkg` no se instaló. La rama no trae `49e84aa` (Fase G2, L1-D59): la unión la hace el coordinador. Los
+documentos ya escriben la Perpetua con el plan elemental (3/3/3).
+
+### Commits
+
+Rama `etapa-l1-h`, desde `cdc2ce2` (8 commits, sin líneas de atribución):
+
+- `9384e63` LICENSE_IDENTITY_LOCAL_ONLY responde 409 y ya no queda como acceso denegado (L1-D56)
+- `623d089` la pantalla de la fecha y hora dice que corregirla puede resolver también el aviso de la licencia en
+  Tolerancia o Vencida (L1-D58)
+- `129ab49` docs/licencias con INTEGRACION.md y PASO_A_PRODUCCION.md, y ROTAR_LLAVES.md y DESBLOQUEO_SOPORTE.md completos
+- `0ffa6b8` API_V1.md con todos los campos de LicenseStatus, LicenseSummary y LicenseClock
+- `8493414` CLAUDE.md con la etapa L1
+- `16090b8` INTEGRACION.md: la sección de las herramientas y la semilla de la hora confiable (L1-D55)
+- `cab5daa` docs/VERIFICATION_STAGEL1.md
+- `7cd38b3` CLAUDE.md con el resultado de la regresión final y el `.pkg` 0.15.0
+
+Desde `623d089` (la copia de la regresión) solo cambió Markdown.
+
+### 0. Los dos cambios pequeños
+
+- **L1-D56** (`9384e63`): `regenerateIdentity` (`backend/internal/administration/license.go:430`) responde **409**
+  `LICENSE_IDENTITY_LOCAL_ONLY` desde otra terminal, como `LICENSE_LOCAL_ONLY` en R2-6. Así `runProtected` ya no lo
+  audita como `access.denied`.
+  - Prueba: `TestLicenseRoutes` (`license_acceptance_test.go:330`) exige el 409, el texto «computadora principal» y que
+    no aumente `access.denied`. Aprobada; **con el 403 anterior falla** («esperado 409, recibido 403»).
+  - `openapi.json`, `docs/API_V1.md` y `TestContractV1` no nombran esta ruta (es del escritorio). La nombraba
+    `API_CONTRACTS.md:4238` con 403: corregido. El escritorio arma su texto por el código (`license.ts:597`): sin cambio.
+- **L1-D58** (`623d089`): en la pantalla de la fecha y hora (`ClockBlockPage.tsx`), con la licencia:
+  - **Tolerancia** («Tu licencia está bien…» sigue, porque `license_ok` es verdadero): se agrega «La licencia aparece en
+    tolerancia. Si la computadora tuvo la fecha adelantada, corregir la fecha y hora también puede quitar ese aviso.»;
+  - **Vencida**: «Puede ser por la misma fecha equivocada: si la computadora tuvo la fecha adelantada, corregir la fecha
+    y hora con los pasos de arriba también puede resolver el aviso de la licencia.», en lugar de «corregir el reloj no
+    lo resuelve»;
+  - **Revocada y Sin activar** (no dependen de la fecha): siguen con «Es otro problema, aparte de la fecha y hora:
+    corregir el reloj no lo resuelve.».
+  - Los textos y la regla (`clockLicenseDependsOnDate`) están en `desktop/src/services/license.ts`. «Con los pasos de
+    arriba» porque, tras un salto al futuro, corregir el reloj no basta: la hora confiable baja con «Comprobar la hora
+    con internet» o el desbloqueo de soporte, que son los pasos 2 y 3 de la pantalla.
+  - Pruebas: cuatro nuevas en `stageL1License.test.tsx` (Vencida, Revocada, Tolerancia y Vigente); Vitest 105 archivos,
+    1 002 pruebas. `workflow-stagel1-clock` (paso 6) ajustada al texto nuevo y aprobada en la regresión.
+
+### 1. Regresión completa (una sola vez)
+
+Sobre una **copia exacta de `623d089`** (`git archive`, 1 976 archivos, en `$SP/l1/hs/copia`, con `.tools`, `.cache` y
+`node_modules` enlazados). La copia quedó **idéntica por md5** al terminar (manifiesto `$SP/l1/hs/copia-md5-antes.txt`
+y `-despues.txt`), y `md5 -q docs/etapas/*.md | md5` = `f0a12ff716ded1e1c7a80e72cc52e761` antes y después (también en
+el árbol, antes y después de cada `format`; el contrato, la guía y `contracts/` tampoco cambiaron). Guiones:
+`$SP/l1/hs-scripts/regresion-servidor.sh` y `regresion-playwright.sh`; registros en `$SP/l1/hs/reg/` y `$SP/l1/hs/pw/`.
+El servidor y Playwright corrieron en paralelo (24/11, de 09:50 a 10:48).
+
+| Prueba                                                            | Resultado                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fmt-check`                                                       | Aprobado (en la copia, «sin .git»; en el árbol, «el índice de git no tiene respaldos ni paquetes de migración»)                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `sync-check`                                                      | «Metadatos coherentes.»; `config/product.json` 0.15.0 y esquema 28                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `go-unit`                                                         | Aprobado: 39 paquetes `ok` y 7 sin pruebas de unidad; `GOOS=windows` build y vet                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `go vet -tags 'integration legacydocker'`, macOS y `GOOS=windows` | Aprobado                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Integración, los **16 paquetes** de `database.py`, con `-v`       | **16 de 16**, sin fallas: `database` 19 s, `administration` 313 s, `catalog` 26 s, `operations` 813 s, `payments` 3 s, `reports` 163 s, `reports/operational` 49 s, `designer` 28 s, `identity` 23 s, `apicontract` 53 s, `backupschedule` 10 s, `discovery` 5 s, `legacyimport` 15 s, `licensing` 13 s, `licenseseats` 5 s y `cmd/ad-el-pos-server` 72 s (candado tomado y liberado; `TestServiceHostOnMacOS` 64 s). Omitidas solo las opcionales (mediciones, impresora física, mDNS en vivo); `TestOperationalReports` corrió a las 10:16 |
+| 503 por carga (aviso del coordinador)                             | **No apareció**: `operations` completo aprobó a la primera (carga 9 al empezar)                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `vitest`                                                          | 105 archivos, **1 002 pruebas**                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `build`                                                           | Aprobado                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `cargo test --locked --offline`                                   | 115 aprobadas, 3 ignoradas                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `scripts/macos-pkg/test-scripts.sh` y `bash -n`                   | «todo correcto» (31 comprobaciones); `bash -n` de 9 guiones                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| **Playwright Chromium** completo                                  | **50 de 50 a la primera** (20,6 min), con las 4 de instalación limpia de la 9H y las 5 de la etapa                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| **Playwright WebKit** completo                                    | **50 de 50 a la primera** (20,3 min), igual                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `workflow-stagel1-clock` sola en WebKit, con `ADEL_SHOTS_DIR`     | 1 de 1; capturas en `$SP/l1/hs/capturas/` (revisé `webkit-hora-y-licencia.png`: la frase de L1-D58, tema claro)                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Ninguna llamada a `licensing.sicrat.com`                          | El Go compartido y el sin activar, con `license_server_url` = `https://127.0.0.1:8491` (el simulador); el Go limpio, con `license_server_disabled` (`remote_not_allowed`) y activado por `license/import`; ninguna bitácora nombra el servidor real                                                                                                                                                                                                                                                                                          |
+| Pantalla                                                          | Desbloqueada antes y después de cada corrida completa                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+
+**Las cuatro de «instalación limpia» de la 9H**: con un Go limpio nuevo por corrida (`iso.sh server-up`, `ISO_TAG=HSC`,
+8229 y 8501, con `ISO_LICENSE_TRUST` = `vectors.json`) y `ADEL_BROWSER_CLEAN_SERVER_URL`/`_PROVISIONING`. Ninguna
+omitida. (8221 y 8495 estaban ocupados por otro agente: no los usé.)
+
+**Ninguna falla**, así que no hubo correcciones ni repeticiones.
+
+### 2. Documentos (§10)
+
+- **`docs/licencias/INTEGRACION.md`** (nuevo): cómo está hecho (piezas, dónde se guarda cada cosa, el entorno al
+  compilar, en línea y sin internet, los trabajadores), lo que decide AD-EL POS (los 15 minutos, los 7 días, la hora, la
+  huella y el desbloqueo), los estados y la tabla de la §6, los cupos, los códigos de error (los 5 de la puerta y los 21
+  de la gestión y la hora), las herramientas de prueba y las propuestas para la V1.1.
+- **`docs/licencias/PASO_A_PRODUCCION.md`** (nuevo): dónde estamos, el servidor de licencias de producción, sus llaves,
+  la llave de soporte, la compilación de producción (los instaladores no pasan `-tags adelpos_production` y
+  `standalone/bootstrap.go` escribe `development`), qué pasa con una instalación de desarrollo y lo que no cambia.
+- **`ROTAR_LLAVES.md` y `DESBLOQUEO_SOPORTE.md`**: ya existían completos; agregué los enlaces y, en el desbloqueo, L1-D53
+  y L1-D58.
+- **`CLAUDE.md`**: la línea de «Última revisión» (0.15.0, esquema 28, la `0028`, Android 0.4.0, la Mac «Sin activar con
+  datos» hasta activarla con la Perpetua 3/3/3); §3 (la licencia y la composición del backend); §4 (paquetes, `cmd`,
+  `config/licencias`, `contracts/licencias`, `tools/soporte-desbloqueo`, la `0028` y `docs/licencias`); §6 (pruebas de
+  la licencia, `ISO_LICENSE_SIM`, 16 paquetes); §7 (secretos y llaves); §11–12 («Licencia en la interfaz» y «Reglas
+  permanentes desde la etapa L1»); §13–14 (filas de la A3, que faltaba, y de la L1); §15 (las decisiones L1-D1 a
+  L1-D59); §16, §17 (producción), §18, §19 («Etapa L1 sin verificar») y §20 (la siguiente migración es la `0029`). Los
+  locks (§3) y los puertos (§6) ya estaban al día desde las fases D y E.
+- **`docs/API_V1.md`**: comprobado contra `openapi.json` con un guion: las 42 operaciones están en la tabla con su
+  método y ruta, y los 5 códigos de licencia del contrato están documentados. Agregué los campos que faltaban de
+  `LicenseStatus` (`server_id`, `effective_now`, `can_manage`, `identity_regeneration_available` y los de `license`),
+  `LicenseSummary` (`license_type`…) y `LicenseClock`. `TestContractV1` (en `apicontract`, aprobado) recorre todas.
+- **`docs/VERIFICATION_STAGEL1.md`** (nuevo), con la forma de la A3: entorno aislado, Fase 0, resultados por fase, las
+  tres revisiones, las Fases G y G2, lo no verificado, la regresión final, «Android» («la completa el coordinador»), los
+  entregables y la instalación real con los pasos del propietario (Perpetua 3/3/3, L1-D59).
+- `android/CLAUDE.md` y `docs/ANDROID_INSTALAR.md` ya tenían lo de la L1 (Fase F, «Activa la computadora principal antes
+  de emparejar» y la sección 11): no los toqué.
+
+### 3. El `.pkg` 0.15.0
+
+- Construido con `./scripts/dev.sh build-macos-pkg` sobre una copia exacta de `16090b8` (1 978 archivos), con
+  `CARGO_NET_OFFLINE=true`, `GOFLAGS=-mod=readonly` y `GOPROXY=off`, en 123 s. **No se instaló.**
+- **`AD-EL POS_0.15.0.pkg`: 23 850 140 bytes, SHA-256 `fe60d29211fcef9f727d9e8d2bcbb45e6aa62747aa65ef3b58a92048a6369443`.**
+- Comprobaciones (`$SP/l1/hs-scripts/pkg-revisar.sh`, registro `$SP/l1/hs/pkg/revision.log`): los tres paquetes 0.15.0,
+  «Servidor del restaurante» marcada, `arm64`; la aplicación 0.15.0; el servidor de dentro `0.15.0`, `"schema_version":
+28` y la `0028_licencias.sql`; `codesign --verify --deep --strict`: «valid on disk», «satisfies its Designated
+  Requirement», `adhoc`; **confía en `test`** (`go version -m` sin `-tags`; lleva `adelpos-test-202611-1` con la pública
+  de §1.2, el `kid` de soporte de desarrollo y la dirección de pruebas); **no lleva** `kid` ni semillas de
+  `vectors.json`, `vectors.json`, `.lic`, `.licreq`, `.pem`, `.key`, `PRIVATE KEY`, `license-test` ni
+  `soporte-desbloqueo`; scripts idénticos a los de la copia.
+- Copiado a `desktop/src-tauri/target/release/bundle/macos-pkg/` del repositorio, junto a los de 0.10.0 a 0.14.0 (los
+  cinco con el mismo SHA-256 que antes), y a `$SP/AD-EL POS_0.15.0.pkg`.
+
+### Hallazgos y correcciones
+
+- **De la regresión**: ninguno. Todo aprobó a la primera.
+- **De los documentos** (corregidos):
+  - `API_CONTRACTS.md` decía 403 para `LICENSE_IDENTITY_LOCAL_ONLY` (corregido con L1-D56).
+  - `CLAUDE.md` §16 y §17 decían que aquí solo existía el límite `internal/licensing` y que producción estaba bloqueada
+    solo por `CheckStartup`; §13–14 no tenía la fila de la A3; §20 decía que la siguiente migración era la `0028`.
+- **Sin cambiar (tocan `backend/` y obligarían a repetir la regresión completa; los decide el coordinador)**:
+  - el comentario de la sección «Fase D» de `backend/migrations/0028_licencias.sql` (líneas 74-77) todavía dice que el
+    comandero cuenta «mientras … la terminal tenga alguna sesión vigente», que L1-D36 cambió (cuenta por actividad). Es
+    solo un comentario; cambiarlo cambia el archivo de la migración antes de instalarla;
+  - el comentario de `serverConfig` en `backend/internal/standalone/bootstrap.go:44` («hasta la etapa 10 no hay
+    licencias…») ya no es cierto. Queda anotado en `PASO_A_PRODUCCION.md`.
+
+### Decisiones propuestas
+
+1. **L1-D58 también en Tolerancia.** Con la licencia en Tolerancia, `license_ok` es verdadero y la pantalla sigue
+   diciendo «Tu licencia está bien…» (§6.2 de la especificación); debajo, en letra menor, agrego la aclaración. Por qué:
+   L1-D58 nombra Tolerancia y Vencida, y la §6.2 pide la frase «Tu licencia está bien» en Tolerancia; así se cumplen las
+   dos. En Revocada y Sin activar queda «es otro problema».
+2. **«Con los pasos de arriba»** en el texto de Vencida: después de un salto al futuro, corregir el reloj no basta (la
+   hora confiable solo baja con la §6.3 o la §6.4), así que la frase remite a los pasos de la pantalla.
+
+### Lo no verificado
+
+- La variante de Tolerancia de L1-D58 solo con Vitest (Playwright cubre Vencida).
+- El desbloqueo de soporte aceptado en la interfaz, `browser-tests.py` tal cual (`.local`), Docker real del lector
+  (apagado), Windows, la aplicación real de Tauri y dispositivos físicos: como en las fases.
+- Android: lo hace el otro agente.
+- La instalación del `.pkg`, la activación con la Perpetua y las pruebas 7, 8 y 10 de la guía: del propietario.
+
+### Encendido
+
+Nada: Go temporales (HS, HSC, el simulador y el sin activar) apagados, sin bases `adel_pos_test_hs*` en 55499, puertos
+8217, 8219, 8229, 8491, 8501 y 1441 libres, candado `candado-cmd` liberado. El árbol `$SP/wt/l1-h` está limpio. El
+clúster 55499 es compartido y sigue encendido.
+
+### Decisiones del coordinador sobre la Fase H (servidor y escritorio)
+
+Fusionada en `02f4642`.
+
+- **L1-D60 · Se aceptan las dos decisiones propuestas del agente sobre el texto de L1-D58.**
+  - En Tolerancia, la aclaración va como nota debajo de «Tu licencia está bien…»: así se cumplen a la vez L1-D58 y la
+    §6.2.
+  - En Vencida dice «con los pasos de arriba», porque después de un salto al futuro no basta corregir el reloj.
+- **L1-D61 · El comentario de la `0028` se corrigió antes de instalarla** (`842e088`). Decía que el comandero cuenta con
+  una sesión vigente; desde L1-D36 cuenta por actividad.
+  - Las migraciones llevan su SHA-256 en `schema_migrations`: después de instalar la `0028`, ya no se podría cambiar.
+  - Se repitieron `go-unit` y la integración de `database` y de `cmd/ad-el-pos-server`. Aprobaron.
+  - Se rehízo el `.pkg` 0.15.0 sobre `842e088`, con las mismas comprobaciones: 23 850 119 bytes, SHA-256
+    `2ef89832bb703f5bc69ccf01b621c5b28eed4f6b1537b171e2fd01ea3f6b669b`. Lleva la `0028` con el comentario nuevo.
+  - Reemplazó al primero (`fe60d292…9443`) en el repositorio y en `$SP`. Los de 0.10.0 a 0.14.0 siguen intactos.
+- **El comentario de `standalone/bootstrap.go:44`** («hasta la etapa 10 no hay licencias») se queda para después: un
+  comentario de Go se puede corregir en cualquier versión, y ya está anotado en `PASO_A_PRODUCCION.md`.
