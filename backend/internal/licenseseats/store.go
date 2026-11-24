@@ -230,7 +230,9 @@ func (manager *Manager) OpenShift(ctx context.Context, tx pgx.Tx, deviceID strin
 //
 // La actividad queda en now, también si estaba en el futuro (hallazgo R2-2, L1-D43): la tableta que capturó con el reloj
 // adelantado y sigue trabajando con la hora corregida renueva con la hora de ahora, y su cupo vence 15 minutos reales
-// después de su última previa, no cuando el reloj real alcance la fecha del salto. Solo con la hora confiable: en «Hora
+// después de su última previa, no cuando el reloj real alcance la fecha del salto. Sin greatest no retrocede por una
+// carrera: la fila solo la renueva su propia terminal, cuyas peticiones van en fila (la de app.devices), y cada una lee
+// su hora después de la anterior; los demás solo la bajan a su «ahora» o la borran. Solo con la hora confiable: en «Hora
 // del equipo incorrecta» (las previas pasan la puerta porque no registran nada con fecha) la hora de ahora puede ser la
 // equivocada, así que la actividad nunca retrocede (greatest), como antes.
 func (manager *Manager) Renew(ctx context.Context, tx pgx.Tx, deviceID string) error {
