@@ -69,12 +69,19 @@ export async function expectHome(page: Page) {
 }
 
 // Captura en la carpeta de la prueba y, si se indica, también en ADEL_SHOTS_DIR (las de la etapa:
-// $SP/shots-l1/escritorio).
-export async function shot(page: Page, testInfo: TestInfo, name: string) {
+// $SP/shots-l1/escritorio). Con un diálogo abierto, solo la ventana (`fullPage: false`): su fondo oscurecido es fijo.
+export async function shot(
+  page: Page,
+  testInfo: TestInfo,
+  name: string,
+  options: { fullPage?: boolean } = {},
+) {
   // Desde arriba: con la página desplazada, la captura de página completa dibuja la barra fija a media imagen.
   await page.evaluate(() => window.scrollTo(0, 0));
+  // Los avisos entran con una animación corta.
+  await page.waitForTimeout(400);
   const path = testInfo.outputPath(`${name}.png`);
-  await page.screenshot({ path, fullPage: true });
+  await page.screenshot({ path, fullPage: options.fullPage ?? true });
   const directory = process.env.ADEL_SHOTS_DIR;
   if (directory) {
     mkdirSync(directory, { recursive: true });
@@ -209,4 +216,17 @@ export async function captureTakeaway(page: Page, item: { category: string; prod
 // licencia y de la hora, que pueden decir lo mismo.
 export function operationMessage(page: Page, text: string | RegExp): Locator {
   return page.locator('.notice, [data-sonner-toaster]').filter({ hasText: text }).first();
+}
+
+// Cierra los avisos de la pila (los de error no se van solos), del de enfrente hacia atrás, para que una captura
+// posterior no muestre el aviso de un paso anterior.
+export async function dismissNotices(page: Page) {
+  const toasts = page.locator('[data-sonner-toast]');
+  for (let attempt = 0; attempt < 10 && (await toasts.count()) > 0; attempt += 1) {
+    const front = page.locator('[data-sonner-toast][data-front="true"]');
+    const target = (await front.count()) > 0 ? front.first() : toasts.first();
+    await target.getByRole('button', { name: 'Cerrar aviso' }).click({ force: true });
+    await page.waitForTimeout(500);
+  }
+  await expect(toasts).toHaveCount(0, { timeout: 10000 });
 }

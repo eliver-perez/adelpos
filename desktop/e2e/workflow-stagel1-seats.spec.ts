@@ -105,7 +105,7 @@ test('cupos: sin cupo de comandero y de pantalla de cocina, «Liberar cupo» en 
     await expect(dialog).toContainText(
       'Se cierra la sesión de quien esté usando esta terminal y su cupo de comandero queda libre para otra terminal.',
     );
-    await shot(page, testInfo, 'cupos-liberar-confirmacion');
+    await shot(page, testInfo, 'cupos-liberar-confirmacion', { fullPage: false });
     await dialog.getByRole('button', { name: 'Liberar cupo', exact: true }).click();
     await expect(notice(page, `Cupo de ${tabletName} liberado.`)).toBeVisible();
     await expect(release).toHaveCount(0, { timeout: 15000 });

@@ -7,7 +7,7 @@ import {
   simulatedLicenseServer,
   unlicensedServer,
 } from './native-driver';
-import { call, lightTheme, openLicense, shot } from './license-flow';
+import { call, dismissNotices, lightTheme, openLicense, shot } from './license-flow';
 import { notice } from './notices';
 import { topBar } from './navigation';
 
@@ -206,7 +206,7 @@ test.describe.serial('activación (Go temporal sin activar)', () => {
     await release.click();
     let dialog = page.getByRole('alertdialog', { name: 'Liberar esta licencia' });
     await expect(dialog).toContainText('queda libre para activarla en otra computadora');
-    await shot(page, testInfo, 'licencia-liberar-confirmacion');
+    await shot(page, testInfo, 'licencia-liberar-confirmacion', { fullPage: false });
     await dialog.getByRole('button', { name: 'Conservar la licencia', exact: true }).click();
     await expect(details).toContainText('Vigente');
     await release.click();
@@ -228,7 +228,9 @@ test.describe.serial('activación (Go temporal sin activar)', () => {
     ).toBeVisible({ timeout: 60000 });
     await expect(page.getByRole('region', { name: 'Transferir la licencia' })).toHaveCount(0);
 
-    // Activa en otra computadora con la transferencia disponible: el botón aparece y pide confirmación.
+    // Activa en otra computadora con la transferencia disponible: el botón aparece y pide confirmación. (Sin el aviso de
+    // error anterior, que no se va solo, en la captura.)
+    await dismissNotices(page);
     await activation.getByLabel('Código de la licencia').fill('ACT-2222-2222-2222');
     await activation.getByRole('button', { name: 'Activar', exact: true }).click();
     const offer = page.getByRole('region', { name: 'Transferir la licencia' });
