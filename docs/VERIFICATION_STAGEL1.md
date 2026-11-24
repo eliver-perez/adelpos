@@ -18,7 +18,10 @@ esquema 27, Android 0.3.0, con la A3 fusionada). La especificación está en `e2
 - **Correcciones de la revisión R2**: fusión en `f7fcbff`; avance en `cdc2ce2`.
 - **Fase G2** (el plan nuevo de la Perpetua, sin commits de código): avance en `49e84aa`.
 - **Fase H**, parte del servidor, el escritorio y los documentos (rama `etapa-l1-h`): `9384e63` (L1-D56), `623d089`
-  (L1-D58) y los documentos (`129ab49`, `0ffa6b8`, `8493414`, `16090b8` y este documento).
+  (L1-D58), los documentos (`129ab49`, `0ffa6b8`, `8493414`, `16090b8` y este documento) y el comentario de la `0028`
+  (`842e088`); fusión en `02f4642`, el `.pkg` rehecho en `ff71144` y avance en `23538ba`.
+- **Fase H**, parte de Android (rama `etapa-l1-ha`): `5968922` (la prueba `LicenseOnGoTest` en el teléfono); fusión en
+  `06f2b19`.
 
 **Servidor 0.15.0.** API v1, migración `0028_licencias.sql` (esquema **28**). Es una sola para toda la etapa, con tres
 secciones:
@@ -87,7 +90,8 @@ El de la A3 ([VERIFICATION_STAGEA3.md](VERIFICATION_STAGEA3.md), «Entorno aisla
 - **Playwright** con `ISO_LICENSE_SIM=1`: el arnés arranca el servidor de licencias simulado en loopback y un Go sin
   activar; `native-driver.ts` activa cada base nueva con una licencia de prueba (L1-D51).
 - Los emuladores, **sin ventana y de solo lectura**, siempre con `ANDROID_SERIAL` y con tope de tiempo en cada `adb`.
-  Durante las fases, `Pixel_Tablet` (Android 17) y `ADEL_A1_Tablet_API26` (Android 8.0).
+  Durante las fases, `Pixel_Tablet` (Android 17) y `ADEL_A1_Tablet_API26` (Android 8.0); en la regresión final,
+  también el teléfono `Pixel_8` (Android 17). `ADEL_A1_Phone_API33`, del propietario, no se tocó.
 
 Ninguna prueba corrió en un teléfono o una tableta reales, ni en la wifi de un restaurante. Vitest y Playwright
 sustituyen el puente nativo del escritorio por la simulación de `e2e/native-driver.ts`, como en las etapas anteriores.
@@ -201,8 +205,11 @@ identidad, y los códigos leídos dentro de un script sin mostrarlos. Detalle en
   de concurrencia.
 - **Limitaciones aceptadas**: un escritorio 0.14.0 conectado a un servidor 0.15.0 entra a Preparación sin ocupar cupo de
   cocina (L1-D28); las sesiones emitidas durante un salto del reloj conservan su vencimiento largo (L1-D50).
-- **Android**: lo de la regresión final lo completa el coordinador (abajo). En las fases quedó `takeaway t6` en Android 8
-  como el pendiente conocido A3-D32 (L1-D48).
+- **Android**: `takeaway t6` en Android 8, el pendiente conocido A3-D32 (L1-D48), que volvió a fallar en la regresión
+  final sin ningún rechazo de licencia, cupo u hora; `--suite all` de un tirón en Android 8 (la instalación por Gradle
+  se colgó, A3-D33, y se completó por partes); `ADEL_A1_Phone_API33`, del propietario; la suite `connection`; los
+  avisos de la licencia en tema oscuro; y la actualización de la 0.3.0 a la 0.4.0 en Android 17 (se hizo en Android
+  8). Detalle en «Regresión final › Android».
 
 ## Regresión final
 
@@ -267,14 +274,201 @@ repositorio lo nombra.
 
 ### Android
 
-**La completa el coordinador.**
+> **Estado: completa, con el pendiente conocido `takeaway t6` en Android 8 (A3-D32, L1-D48)** (24/11/2026).
+>
+> - **JVM, Robolectric, Lint y formato**: 62 XML, 413 pruebas, 0 fallas; Lint sin errores ni avisos.
+> - **Instrumentadas en los tres emuladores**: 168 pruebas cada uno, 0 fallas.
+> - **`--suite all`**: 84/84 en `Pixel_Tablet` y en `Pixel_8`; 83/84 en `ADEL_A1_Tablet_API26`, por partes.
+> - **Hallazgo H1, en la prueba**: `license l1`, `l2` y `l5` fallaban en el teléfono. Se corrigió en `59689224` y la
+>   suite `license` dio 8/8 en `Pixel_8`.
+> - **Falla que se repitió**: `takeaway t6` en Android 8, igual que en la A3 y la Fase F, sin ningún rechazo de
+>   licencia ni de hora.
+> - **Problemas del entorno**:
+>   - el primer intento de las instrumentadas en `Pixel_Tablet` chocó con «System UI isn't responding»;
+>   - en Android 8, la instalación por Gradle se colgó al empezar `waiter` (A3-D33).
+> - **El APK 0.4.0** está firmado con la llave de desarrollo y se instala encima de la 0.3.0 sin desemparejar.
+> - **Ninguna prueba llamó a un servidor de licencias**: los 34 Go temporales arrancaron con
+>   `license_server_disabled` (`remote_not_allowed`).
+
+**Qué se probó.**
+
+- **La cabeza `cdc2ce2`** (`etapa-l1` con todas las fases unidas), en el árbol `$SP/wt/l1-ha`, rama `etapa-l1-ha`:
+  JVM, instrumentadas de `Pixel_Tablet` y `Pixel_8` y `--suite all` en los dos.
+- **`59689224`**, la cabeza final: el resto, que es la suite `license` repetida en `Pixel_8`, todo lo de
+  `ADEL_A1_Tablet_API26` y el APK.
+  - Agrega a `cdc2ce2` solo la corrección de `LicenseOnGoTest.kt` (hallazgo H1). La aplicación es la misma.
+- **Qué cambió desde la Fase F**: `git diff --name-only 9c1070f 59689224` no toca nada de `android/` fuera de esa
+  corrección, ni `scripts/android-e2e.sh`. Sí cambió el servidor (la revisión R2 de la hora, la Fase G y sus
+  correcciones), así que los Go temporales son los de la cabeza (0.15.0, `test_mode: true`).
+
+**Entorno.**
+
+- **Go temporales**: `ISO_TAG=HA` (8221/8495), uno **nuevo para cada parte** (`ADELPOS_E2E_NEW_SERVER`, que detiene el
+  anterior y levanta otro en las mismas direcciones).
+  - Cada uno confía en las llaves de `vectors.json` y lee su reloj de un archivo propio.
+  - `ensure_test_license` les importa la licencia de prueba sin internet.
+  - Se guardaron los 34 registros de Go, y el registro completo (`logcat -b all`) de cada corrida, en `$SP/lh/e2e/`.
+- **Emuladores**: sin ventana y de solo lectura, con `ANDROID_SERIAL` y tope de tiempo en `adb`.
+  - Uno a la vez durante las pruebas; nunca más de dos encendidos.
+  - **`ADEL_A1_Phone_API33` (5554, del propietario) no se tocó.**
+  - Ninguna lista mostró un servidor real.
+- **Cuándo**: 24/11/2026, de 09:41 a 12:06. Otro agente corría a la vez la regresión del servidor y del escritorio, y el
+  coordinador, las pruebas de Go: al principio la carga de la Mac llegó a 120 y después bajó a entre 3 y 20.
+
+| Qué (en la Mac, una vez)                                                                                     | Resultado                                                                                                                                                                                                                                                            | Tiempo |
+| ------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| `ktfmtCheck :core:domain:test --rerun testDebugUnitTest --rerun lintDebug` (`--no-build-cache`, árbol nuevo) | **413 pruebas, 0 fallas, 0 omitidas (62 XML)**: `core:domain` 189 (26 XML), `core:data` 191 (28), `core:ui` 15 (5), `feature:access` 7, `feature:takeaway` 5 y `feature:waiter` 6. Lint en los 7 módulos: 0 errores, 0 avisos (3 sugerencias). `ktfmtCheck` aprobado | 101 s  |
+| Después de la corrección `59689224`: `ktfmtCheck`, `format` y `fmt-check`                                    | Aprobados. Los 56 archivos protegidos (`docs/etapas`, `docs/licencias`, `contracts`) son idénticos, uno por uno, a los de la cabeza                                                                                                                                  | —      |
+
+Por emulador, siempre con un Go nuevo para cada parte:
+
+- antes de las instrumentadas se desinstalaron la aplicación, sus pruebas y las de la 0.1.0 (`pm list packages`: 0);
+- en las instrumentadas se contaron los XML por módulo;
+- en `--suite all`, el guion desinstala y reinstala en cada parte.
+
+| Prueba                                                | `Pixel_Tablet` (Android 17, 5580)                                                              | `Pixel_8` (Android 17, 5582)                                       | `ADEL_A1_Tablet_API26` (Android 8.0, 5586)                                                                                                   |
+| ----------------------------------------------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Instrumentadas (XML): `app` / `core:data` / `core:ui` | **168, 0 fallas**: 134 / 20 / 14; 82 corridas, 86 omitidas (358 s, segundo intento: ver abajo) | **168, 0 fallas**: 134 / 20 / 14; 82 corridas, 86 omitidas (263 s) | **168, 0 fallas**: 134 / 20 / 14; 80 corridas, 88 omitidas (191 s; Gradle instaló sin colgarse)                                              |
+| access (1–5 y 6–7) / catalog                          | 7/7, 3/3                                                                                       | 7/7, 3/3                                                           | 7/7, 3/3 (dentro de `--suite all`)                                                                                                           |
+| waiter / field                                        | 19/19, 13/13                                                                                   | 19/19, 13/13                                                       | 19/19, 13/13 (por partes)                                                                                                                    |
+| takeaway / precheck                                   | 9/9, 7/7                                                                                       | 9/9, 7/7                                                           | **8/9** (`t6`; repetida: 8/9, `t6` otra vez), 7/7                                                                                            |
+| alerts / adjustments                                  | 11/11, 7/7                                                                                     | 11/11, 7/7                                                         | 11/11, 7/7                                                                                                                                   |
+| license (`l1`–`l8`)                                   | 8/8                                                                                            | **5/8** (`l1`, `l2` y `l5`: hallazgo H1); con `59689224`, **8/8**  | 8/8 (con `59689224`)                                                                                                                         |
+| Total                                                 | **`--suite all` 84/84** (1 839 s)                                                              | **84/84**: `--suite all` 81/84 (1 851 s) y `license` repetida 8/8  | **83/84**: `--suite all` hasta que la instalación de `waiter` se colgó (683 s); el resto por partes con `adb install -r -t` y `--no-install` |
+
+**Las líneas «se repite» (A3-D26)**: ninguna, en la salida y en el registro de cada paso de todas las corridas.
+
+**Ningún servidor de licencias.** Los 34 Go temporales (los 33 de las suites y el de la prueba de actualización)
+dicen, al arrancar:
+
+- `license_server_disabled` con `remote_not_allowed`;
+- `license_test_trust_enabled` y `license_test_clock_enabled`.
+
+Sus registros no nombran `sicrat` ni `licensing.` ni ningún pedido a un servidor remoto. Las 50 licencias se
+importaron sin internet (`license_offline_request_created` → `license_imported`): una para cada Go y las cuatro más
+de cada suite `license` (0 comanderos, con cupos, en tolerancia y vencida).
+
+**Hallazgo H1 · `LicenseOnGoTest` en el teléfono (de la prueba; corregido en `59689224`).**
+
+- **Lo que pasaba**: en `Pixel_8`, `license l1`, `l2` y `l5` fallaban en `waitForTables()` justo después de «Enviar a
+  cocina» (`LicenseOnGoTest.kt:164`, `:187` y `:272`).
+- **Por qué**: en el teléfono, la aplicación vuelve al panel de la mesa (un solo panel, `account-pane`), y ahí el
+  pedido ya decía «Requiere tu revisión» y «1 pedido por enviar». La prueba solo aceptaba la lista de Mesas. La
+  Fase F la había corrido solo en tabletas, donde la lista siempre está a la vista. `WaiterModeOnGoTest` ya aceptaba
+  las dos cosas.
+- **La corrección**: `waitForTables()` acepta la lista o el panel de la mesa, como `WaiterModeOnGoTest`, e imprime el
+  árbol de la pantalla si no llega. **No cambió la aplicación.**
+- **Comprobado**: `license` 8/8 en `Pixel_8` (140 s, Go nuevo) y en `ADEL_A1_Tablet_API26` (121 s).
+- `l3`, `l4`, `l6`, `l7` y `l8` ya habían aprobado en el teléfono en la primera corrida.
+
+**Instrumentadas en `Pixel_Tablet`: el primer intento (problema del entorno).**
+
+- **Lo que pasó**: se encendieron `Pixel_Tablet` y `Pixel_8` juntos, con la carga de la Mac entre 45 y 120. Fallaron 2
+  de 168 pruebas, las dos con `RootViewWithoutFocusException` (`has-window-focus=false`):
+  - `AccessScreensTest.buscarElServidorYElCodigoEnGrande`, en `closeSoftKeyboard`;
+  - `AppNavigationTest.mesasYParaLlevarEnLaNavegacionPrincipal`, en `pressBack`.
+- **La causa**: en la pantalla estaba el diálogo «System UI isn't responding» (`mCurrentFocus=Application Not
+Responding: com.android.systemui`, con captura). Es el caso de «Ojo (emulador cargado)» de `android/CLAUDE.md`.
+- **Lo que se hizo**: apagar los dos y repetir con `Pixel_Tablet` recién encendido y solo: 168, 0 fallas.
+- Los resultados del primer intento se guardaron aparte.
+
+**Android 8: cómo se completó `all` (A3-D33).**
+
+- **`--suite all`** con la instalación por Gradle: aprobaron `access` (1–5 y 6–7) y `catalog`. Al empezar `waiter`,
+  `:app:installDebug` se colgó: `ShellCommandUnresponsiveException` de `ddmlib`, «Unable to install», 9 min 32 s, y el
+  guion se detuvo sin correr pasos.
+- **El resto, por partes**: cada parte con su Go nuevo. Antes de cada una, `adb install -r -t` de la aplicación y de
+  sus pruebas (2 s, «Success»), lo mismo que hace `install_app` del guion: desinstala la aplicación, sus pruebas y las
+  de la 0.1.0. La suite corrió con `--no-install`. Los tiempos fueron:
+  - `waiter` 167 s, `field` 266 s, `takeaway` 139 s, `precheck` 80 s;
+  - `alerts` 612 s, `adjustments` 127 s y `license` 121 s.
+- **Las instrumentadas**, en cambio, sí se instalaron por Gradle en este emulador.
+- **No se cambió el guion**: es la orden aparte `$SP/lh/parts.sh`.
+
+**`takeaway t6` en Android 8: el pendiente conocido A3-D32 (L1-D48).** `t6_nombreYTelefonoDespuesEnLinea` falló dos
+veces (`5586-takeaway-1` y `-2`), en el mismo lugar que en la A3 y en la Fase F:
+
+- **Dónde**: `TakeawayOnGoTest.kt:306`, `waitForText("Luisa Martínez")`, a los 40 s.
+- **Lo que sí se cumple**: la condición anterior. El nombre llegó a Go, sin teléfono, y la cola de ediciones quedó
+  vacía.
+- **Sin rechazos de licencia, cupo u hora**: 0 líneas `LICENSE_`/`SYSTEM_CLOCK` en el logcat del paso y en el registro
+  de su Go (solo el arranque y la activación de prueba). No lo causa la L1.
+- **En los otros dos emuladores** aprobó.
+
+**Rendimiento** (`field f2`, registro `AdelOnGo`):
+
+| Medida                                                 | `ADEL_A1_Tablet_API26` | `Pixel_Tablet` | `Pixel_8` |
+| ------------------------------------------------------ | ---------------------- | -------------- | --------- |
+| Arranque en frío (proceso → lista de meseros)          | 1 494 ms               | 2 696 ms       | 2 969 ms  |
+| PIN (con conexión) → Mesas con la primera mesa         | 741 ms                 | 1 023 ms       | 938 ms    |
+| PIN → la mesa 40 a la vista                            | 1 272 ms               | 1 795 ms       | 1 555 ms  |
+| «Nueva cuenta» → catálogo de ~300 productos a la vista | 266 ms                 | 408 ms         | 383 ms    |
+| «Enviar a cocina» → «Recibido por el restaurante»      | 323 ms                 | 330 ms         | 312 ms    |
+| Memoria (total de `dumpsys meminfo`)                   | ≈ 93 MiB               | ≈ 147 MiB      | ≈ 141 MiB |
+
+Son parecidos a los de la A3 (1 410/797/1 312/266/324 ms y ≈ 91 MiB en Android 8).
+
+**Capturas del teléfono (nuevas; la Fase F solo corrió en tabletas).**
+
+- **Dónde están**: las 12 de la suite `license` en `Pixel_8` (`5582-license-2`) se copiaron a
+  `$SP/shots-l1/android/pixel-8/`.
+- **Lo que se revisó**:
+  - **El aviso de tolerancia en una pantalla angosta**: en la barra solo se ve el ícono, porque el teléfono tiene menos
+    de 600 dp (L1-D47). Al tocarlo se abre «La licencia venció · …Quedan 3 días para renovarla…» (`l7-*`). Lo que la
+    Fase F dejó sin ver queda visto.
+  - **El aviso fijo de la hora** en Mesas y en la captura, con las dos fechas de Go (`l5-*`).
+  - **La captura sin cupo**: «La licencia no incluye comanderos (0 de 0)…» (`l1-captura-*`).
+  - **La revisión con «Enviar de nuevo»** (`l1-revision-*`) y Pendientes con dos pedidos en revisión (`l3-*`).
+- **Resultado**: ningún texto provisional, código ni `message` del servidor a la vista.
+- **Observaciones, sin cambio**:
+  - En Pendientes del teléfono, la insignia de la barra se corta («2 pedidos por en…»). Con un pedido («1 pedido por
+    enviar») se ve completa. La insignia cuenta también los pedidos en revisión, como ya se aceptó en la Fase F.
+  - En la captura de `l7` del teléfono, Mesas muestra «Leyendo las mesas…» encima de la lista ya dibujada: la
+    lectura en curso al entrar.
+
+**La actualización de la 0.3.0 a la 0.4.0 (APK de entrega).** Se hizo en `ADEL_A1_Tablet_API26`, con la aplicación
+normal fuera de la instrumentación.
+
+- **Sin la red real**: la Wi-Fi del emulador estaba apagada (`adb root`, `svc wifi disable`) y el emulador solo tenía
+  la red móvil, que llega a 10.0.2.2. La búsqueda dijo «No se encontró ninguna computadora principal en la red».
+- **Con un Go temporal nuevo** (HA), configurado por la API de la principal, con la licencia de prueba y una mesera
+  («Rosa H», PIN, en un rol con `waiter_devices.use`).
+
+1. **La 0.3.0**: se instaló `AD-EL-POS-Android-0.3.0.apk`, del repositorio (SHA-256 `87477497…ac4d`, misma
+   firma `fb6a4bac…7c86`). Se emparejó escribiendo la dirección `10.0.2.2:8495`. La tableta mostró el código de 6
+   dígitos de «Restaurante de prueba A1», y la principal lo aprobó por su API. Después, «Selecciona tu usuario» con
+   Rosa y, con su PIN, Mesas. En Go, el dispositivo es `4dc6e004…`, «Tableta 1», con `app_version` 0.3.0.
+2. **La 0.4.0, encima**: `adb install -r` del APK nuevo («Success»). `dumpsys package`: `versionName` 0.4.0,
+   `versionCode` 4, la misma `firstInstallTime` y una `lastUpdateTime` nueva.
+3. **Al abrirla**: «Selecciona tu usuario» con Rosa y «En línea». **No pidió emparejar.** Rosa entró con su PIN a
+   Mesas. En Go es el mismo dispositivo (`4dc6e004…`), sin retirar y con `last_seen_at` nuevo.
+4. **Al terminar**: se volvió a encender la Wi-Fi, se desinstaló la aplicación y se apagaron el Go y el emulador.
+
+- **Observación**: Go sigue mostrando `app_version` «0.3.0» para ese dispositivo.
+  - Por qué: Go la guarda solo al emparejar (`backend/internal/administration/pairing.go:547`).
+  - Es así desde antes de la L1. Terminales enseñará la versión con que se emparejó, no la instalada.
+  - El único uso en el código (`kitchen/preparation.go:186`, ≥ 0.2.0) no cambia.
+- Las capturas están en `$SP/lh/upgrade/`.
+
+**No verificado en esta parte:**
+
+- `takeaway t6` en Android 8 (A3-D32, L1-D48).
+- `--suite all` de un tirón en Android 8: la instalación por Gradle se colgó en `waiter` y se completó por partes.
+- La corrección H1 no se repitió en `Pixel_Tablet`: allí `license` ya aprobaba con la prueba anterior, y la nueva
+  aprobó en la otra tableta (Android 8) y en el teléfono.
+- `ADEL_A1_Phone_API33` (Android 13): es el emulador del propietario y el encargo lo excluye.
+- La suite `connection` (la hora sin uso, fuera de `all`).
+- Los avisos de la licencia en tema oscuro: `field f10` hace las capturas oscuras de las pantallas principales, no las
+  de `license`.
+- Un dispositivo físico.
+- La actualización de la 0.3.0 a la 0.4.0 en Android 17: se hizo solo en Android 8.
 
 ## Entregables
 
-| Archivo                                                                  | Bytes      | SHA-256                                                            | Qué es                                                                                                                                                                     |
-| ------------------------------------------------------------------------ | ---------- | ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `desktop/src-tauri/target/release/bundle/macos-pkg/AD-EL POS_0.15.0.pkg` | 23 850 119 | `2ef89832bb703f5bc69ccf01b621c5b28eed4f6b1537b171e2fd01ea3f6b669b` | Aplicación y servidor 0.15.0 (esquema 28), **versión de desarrollo** (confía en el entorno `test`), compilado sobre una copia exacta de `842e088`; firma ad hoc verificada |
-| El APK 0.4.0                                                             | —          | —                                                                  | **Lo completa el coordinador**, con la sección «Android»                                                                                                                   |
+| Archivo                                                                  | Bytes      | SHA-256                                                            | Qué es                                                                                                                                                                                                       |
+| ------------------------------------------------------------------------ | ---------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `desktop/src-tauri/target/release/bundle/macos-pkg/AD-EL POS_0.15.0.pkg` | 23 850 119 | `2ef89832bb703f5bc69ccf01b621c5b28eed4f6b1537b171e2fd01ea3f6b669b` | Aplicación y servidor 0.15.0 (esquema 28), **versión de desarrollo** (confía en el entorno `test`), compilado sobre una copia exacta de `842e088`; firma ad hoc verificada                                   |
+| `android/app/build/outputs/apk/release/AD-EL-POS-Android-0.4.0.apk`      | 2 674 175  | `9ed2733f61f55faf88621a08d6c0b942c1a63c3c5eaba85c0c1f74cda0f29146` | `com.adelpos.meseros` 0.4.0 (`versionCode` 4, `minSdk` 26), firmado con la llave de desarrollo (esquema v2, `fb6a4bac…7c86`, la misma de la 0.2.0 y la 0.3.0), compilado sobre una copia exacta de `5968922` |
 
 **El `.pkg` 0.15.0** se construyó con `./scripts/dev.sh build-macos-pkg` en una copia exacta de `842e088` (`git archive`,
 1 979 archivos, con `CARGO_NET_OFFLINE=true`, `GOFLAGS=-mod=readonly` y `GOPROXY=off`), en 122 s, sin instalar nada (ni
@@ -306,6 +500,18 @@ se reemplazó por este. Comprobaciones:
   en `$SP/AD-EL POS_0.15.0.pkg`.
 
 Instalarlo es la parada del propietario.
+
+**El APK 0.4.0** se compiló con `:app:assembleRelease` (`--no-build-cache`, 72 s) sobre una copia exacta de `5968922`
+(`git archive`, 1 976 archivos, los mismos que `git ls-files`), nunca con `gradle clean` en el repositorio. De `cdc2ce2`
+a `5968922` solo cambió una prueba instrumentada, que no entra en el APK. Comprobaciones:
+
+- **`apksigner verify`**: esquema v2, un firmante, «CN=AD-EL POS desarrollo - APK de prueba, O=AD-EL POS», SHA-256
+  `fb6a4bac93052ca9051342ea122ed90469340a3685de14243bdab288d71c7c86`.
+- **La versión**: `com.adelpos.meseros` 0.4.0, `versionCode` 4, `minSdk` 26, `targetSdk` 36 y `compileSdk` 37.
+- **La actualización**: instalado encima de la 0.3.0 en Android 8, sigue emparejado (sección «Android»).
+- **Los anteriores no cambiaron** (SHA-256 antes y después): la 0.3.0 (2 672 443 bytes, `87477497…ac4d`), la 0.2.0
+  (2 589 899 bytes, `38d687ce…b824`) y el `app-release.apk` del 18/11.
+- **Copia**: también en `$SP/AD-EL-POS-Android-0.4.0.apk`.
 
 ## Instalación real
 

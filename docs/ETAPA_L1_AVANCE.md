@@ -4702,3 +4702,107 @@ Fusionada en `02f4642`.
   - Reemplazó al primero (`fe60d292…9443`) en el repositorio y en `$SP`. Los de 0.10.0 a 0.14.0 siguen intactos.
 - **El comentario de `standalone/bootstrap.go:44`** («hasta la etapa 10 no hay licencias») se queda para después: un
   comentario de Go se puede corregir en cualquier versión, y ya está anotado en `PASO_A_PRODUCCION.md`.
+
+## Fase H · Android: regresión completa y APK 0.4.0 (ISO_TAG=HA)
+
+- **Dónde**: árbol `$SP/wt/l1-ha`, rama `etapa-l1-ha`, desde `cdc2ce2` (`etapa-l1` con todas las fases unidas).
+- **Go temporal**: `ISO_TAG=HA` (8221/8495), uno nuevo por parte.
+- **Emuladores**: `Pixel_Tablet` (5580), `Pixel_8` (5582) y `ADEL_A1_Tablet_API26` (5586), uno a la vez.
+  - `ADEL_A1_Phone_API33` (5554) no se tocó.
+- **Guiones**: en `$SP/lh/`. La sección para la verificación está en `$SP/l1/verif-android.md`.
+- **No se cambió nada de `backend/`.**
+
+### Commit
+
+- `59689224` · etapa L1 fase H: en LicenseOnGoTest, Mesas es la lista o, en el teléfono, el panel de la mesa al que
+  vuelve «Enviar a cocina» (l1, l2 y l5 en Pixel_8). Solo cambia
+  `android/app/src/androidTest/kotlin/com/adelpos/meseros/LicenseOnGoTest.kt` (`waitForTables`).
+
+### Pruebas (lo que realmente se ejecutó)
+
+| Prueba                                                                                     | Dónde                     | Resultado                                                                                                                                 |
+| ------------------------------------------------------------------------------------------ | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `ktfmtCheck`, `:core:domain:test`, `testDebugUnitTest`, `lintDebug` (`--rerun`, sin caché) | Mac, `cdc2ce2`            | **62 XML, 413 pruebas, 0 fallas**; Lint de 7 módulos: 0 errores, 0 avisos (3 sugerencias)                                                 |
+| `ktfmtCheck`, `format` y `fmt-check` tras la corrección                                    | Mac, `59689224`           | Aprobados; los 56 archivos protegidos, idénticos a la cabeza                                                                              |
+| Instrumentadas                                                                             | `Pixel_Tablet`, `cdc2ce2` | Primer intento: 2 fallas por el diálogo «System UI isn't responding» (entorno). Repetidas con el emulador solo: **168, 0 fallas** (3 XML) |
+| Instrumentadas                                                                             | `Pixel_8`, `cdc2ce2`      | **168, 0 fallas** (3 XML: 134 / 20 / 14)                                                                                                  |
+| Instrumentadas                                                                             | API 26, `59689224`        | **168, 0 fallas** (80 corridas, 88 omitidas)                                                                                              |
+| `--suite all`                                                                              | `Pixel_Tablet`, `cdc2ce2` | **84/84** (1 839 s)                                                                                                                       |
+| `--suite all`                                                                              | `Pixel_8`, `cdc2ce2`      | 81/84: `license l1`, `l2` y `l5` (hallazgo H1). `license` con `59689224`: **8/8**                                                         |
+| `all` y después por partes (`adb install -r -t`, `--no-install`)                           | API 26, `59689224`        | **83/84**: Gradle se colgó al instalar `waiter` (A3-D33); `takeaway t6` falló dos veces, igual que A3-D32/L1-D48                          |
+| APK 0.4.0 encima de la 0.3.0 (los dos de entrega)                                          | API 26, Go temporal       | Sigue emparejado: «Selecciona tu usuario» sin pedir emparejar, y la mesera entra con su PIN                                               |
+
+- **Ningún servidor de licencias**: los 34 Go temporales arrancaron con `license_server_disabled` (`remote_not_allowed`).
+  - Sus registros no nombran `sicrat` ni hacen llamadas remotas.
+  - Las licencias se importaron sin internet, firmadas con las llaves de `vectors.json`.
+- **Ninguna línea «se repite»** (A3-D26).
+
+### Hallazgos
+
+- **H1 (de la prueba, corregido)**:
+  - **Qué fallaba**: `LicenseOnGoTest.waitForTables()` solo aceptaba la lista de Mesas.
+  - **Por qué**: en el teléfono, «Enviar a cocina» vuelve al panel de la mesa. La Fase F la corrió solo en tabletas.
+  - **La corrección**: acepta las dos cosas, como `WaiterModeOnGoTest`. La aplicación no cambió.
+- **`takeaway t6` en Android 8**: el mismo pendiente A3-D32 (L1-D48).
+  - Falla en `TakeawayOnGoTest.kt:306` aunque el nombre ya llegó a Go.
+  - No hubo ningún rechazo de licencia, cupo ni hora.
+- **Entorno**: el diálogo de System UI con la Mac cargada (`android/CLAUDE.md`) y la instalación por Gradle en Android
+  8 (A3-D33).
+- **Observaciones, sin cambio**:
+  - **`app_version` en Go**: Go guarda la versión solo al emparejar (`administration/pairing.go:547`). Después de
+    actualizar a la 0.4.0, la tableta sigue registrada como «0.3.0». Es así desde antes de la L1; su único uso
+    (`kitchen/preparation.go:186`, ≥ 0.2.0) no cambia.
+  - En Pendientes del teléfono, la insignia «2 pedidos por en…» se corta.
+  - En la captura `l7` del teléfono se ve «Leyendo las mesas…» encima de la lista.
+- **Visto por primera vez en un teléfono**: el aviso de tolerancia solo con el ícono (menos de 600 dp) y su texto
+  completo al tocarlo. Las capturas están en `$SP/shots-l1/android/pixel-8/`.
+
+### APK 0.4.0
+
+- **El archivo**: `android/app/build/outputs/apk/release/AD-EL-POS-Android-0.4.0.apk`, también en
+  `$SP/AD-EL-POS-Android-0.4.0.apk`.
+  - 2 674 175 bytes, SHA-256 `9ed2733f61f55faf88621a08d6c0b942c1a63c3c5eaba85c0c1f74cda0f29146`.
+- **La firma**: esquema v2, un firmante, «CN=AD-EL POS desarrollo - APK de prueba, O=AD-EL POS», con SHA-256
+  `fb6a4bac93052ca9051342ea122ed90469340a3685de14243bdab288d71c7c86`.
+- **La versión**: `com.adelpos.meseros` 0.4.0, `versionCode` 4, `minSdk` 26, `targetSdk` 36.
+- **Cómo se hizo**: con `git archive 59689224` (1 976 archivos), sin `gradle clean` en el repositorio.
+- **Los anteriores**: la 0.2.0 y la 0.3.0 no cambiaron (SHA-256 comprobado antes y después).
+
+### No verificado
+
+- `takeaway t6` en Android 8.
+- `all` de un tirón en Android 8.
+- La corrección H1 en `Pixel_Tablet`: aprobó en el teléfono y en la tableta con Android 8.
+- `ADEL_A1_Phone_API33`, por ser del propietario.
+- La suite `connection`.
+- Los avisos de la licencia en tema oscuro.
+- Un dispositivo físico.
+- La actualización de la 0.3.0 a la 0.4.0 en Android 17: se hizo solo en Android 8.
+
+### Para el coordinador
+
+- **Unir `59689224`** (solo una prueba instrumentada).
+- **Decidir si la observación de `app_version` vale una nota en la guía** («Terminales muestra la versión con que se
+  emparejó»), o se deja como está.
+- **Pegar `$SP/l1/verif-android.md`** en la sección «Android» de `docs/VERIFICATION_STAGEL1.md`. Incluye la fila del APK
+  para «Entregables».
+
+### Decisiones del coordinador sobre la Fase H (Android)
+
+Fusionada en `06f2b19`.
+
+- **L1-D62 · Se acepta la corrección H1 de `LicenseOnGoTest`** (`5968922`). En el teléfono, «Enviar a cocina» vuelve
+  al panel de la mesa, como ya aceptaba `WaiterModeOnGoTest`; la prueba esperaba solo la lista. No cambia la
+  aplicación ni el APK. Que no se repitiera en `Pixel_Tablet` no preocupa: allí la lista siempre está a la vista, y
+  la prueba nueva acepta lo mismo que la anterior y además el panel.
+- **L1-D63 · `takeaway t6` en Android 8 sigue como el pendiente conocido** (A3-D32, L1-D48). Falló igual que en la
+  A3 y la Fase F, en el mismo lugar, con el nombre ya en Go y sin ningún rechazo de licencia, cupo u hora. No lo causa
+  la L1 y no detiene la etapa.
+- **L1-D64 · `app_version` en Go se queda como está en la L1.** Go la guarda solo al emparejar
+  (`administration/pairing.go:547`), así que Sistema › Terminales muestra la versión con que se emparejó cada
+  teléfono o tableta, no la instalada. Es así desde antes de la L1 y su único uso (`kitchen/preparation.go:186`) no
+  cambia. Cambiarlo ahora obligaría a repetir la regresión. Queda propuesto para una etapa siguiente: actualizarla al
+  iniciar sesión o en cada consulta del dispositivo. Mientras, se dice en la entrega al propietario.
+- **Las dos observaciones del teléfono** (la insignia «2 pedidos por en…» cortada en Pendientes y «Leyendo las
+  mesas…» encima de la lista en `l7`) son de presentación, sin efecto en los datos: se anotan para una etapa
+  siguiente.
