@@ -3690,3 +3690,244 @@ difieren los archivos de Android de la Fase F. Por eso no se repitieron las suit
     cerrar la sesión o con «Liberar cupo» en Terminales.
 
   Va como propuesta para la V1.1.
+
+---
+
+## Fase E · Escritorio de la licencia
+
+Hicieron la fase dos agentes del escritorio, en `$SP/wt/l1-e`, rama `etapa-l1-e`, con `ISO_TAG=LE` (Playwright en
+`ISO_GO_PORT=8207` e `ISO_PREVIEW_PORT=1437`, el simulador de licencias en 8487 y el Go sin activar en 8211). El primero
+hizo el puente, las pantallas, `native-driver.ts` y la especificación de la activación, y se detuvo por el límite de uso
+el 23/11; el segundo confirmó ese trabajo, escribió las demás especificaciones, igualó `scripts/browser-tests.py` con el
+arnés aislado y corrió las pruebas.
+
+Todo lo nuevo se esconde con la capacidad `license-v1`: contra un servidor 0.14.0 el escritorio se ve como antes
+(Configuración sin «Licencia», Terminales con el resumen de sesiones por tipo, Preparación sin avisar a Go).
+
+### Commits
+
+- `502aadc6` puente nativo de la licencia (rutas `license/*`, `kitchen/display-mode` y `seat/release` en la lista cerrada
+  de `api.rs`; `license_files.rs` guarda la solicitud `.licreq` e importa el `.lic` y la respuesta de soporte con los
+  diálogos nativos)
+- `b9cf948c` escritorio de la licencia (activación, Configuración › Licencia, avisos, pantalla de la fecha y hora con
+  el desbloqueo de soporte, cupos en Terminales y Preparación) con los textos por código en `services/license.ts`
+- `7208e3ee` Merge branch 'etapa-l1' into etapa-l1-e (la Fase C)
+- `91b72832` botón «Licencia» en Configuración general y «Comprobar la hora con internet» con el tiempo de espera del
+  servidor de licencias en `api.rs`
+- `df4f4505` `native-driver.ts` activa el Go temporal con una licencia de prueba de `license-test` y simula los diálogos
+  de la licencia; especificación de la activación y resumen de cupos en 9G y 9H
+- `9e242bba` especificaciones de los avisos, del bloqueo por la fecha y hora y de los cupos
+- `74dab2aa` capturas desde arriba de la página y sin el aviso anterior en la del bloqueo con la licencia vencida
+- `c047cd5f` `browser-tests.py` arranca el servidor de licencias simulado, la confianza de prueba y el reloj simulado de
+  cada Go temporal y un Go sin activar, como el arnés aislado
+- `08e67257` las capturas de la etapa sin avisos de error de un paso anterior y las de un diálogo solo con la ventana
+
+### Qué se hizo
+
+**El puente de Rust** (`desktop/src-tauri/src/api.rs`, `license_files.rs`, `main.rs`):
+
+- en la lista cerrada de `api.rs`: `license_status`, `license_activate`, `license_transfer`, `license_refresh`,
+  `license_deactivate`, `license_identity_regenerate`, `license_time_check`, `license_support_request`,
+  `license_support_unlock`, `kitchen_display_mode` y `devices_seat_release` (con el identificador validado). La prueba
+  `license_and_seat_routes_are_closed` comprueba las rutas y que la solicitud sin internet y la importación **no** están
+  en la lista: solo las envía Rust;
+- las operaciones que hablan con el servidor de licencias (activar, transferir, buscar actualización, liberar y
+  «Comprobar la hora con internet») esperan hasta 80 s (`LICENSE_TIMEOUT_SECONDS`; Go les da 75 s);
+- `license_files.rs`, como `legacy_migration.rs`: `license_save_request` pide a Go la solicitud
+  (`POST license/offline-request`) y la guarda con el diálogo nativo con un nombre limpio; `license_import_file` y
+  `license_import_unlock_file` abren el diálogo, leen el archivo (`.lic` hasta 64 KiB, `.desbloqueo` hasta 16 KiB, UTF-8
+  y no vacío) y lo envían a Go. React nunca recibe una ruta ni el contenido.
+
+**Las pantallas** (`desktop/src/pages/license/`):
+
+- `ActivationStartPage.tsx` y `ActivationPanel.tsx`: el primer arranque «Sin activar» o «Sin activar con datos», con
+  el código validado al escribirlo (L1-D4: se ordena solo en grupos de 3, 4, 4 y 4 y dice cuántos caracteres faltan o
+  qué símbolo no se usa), «Activar sin internet» (guardar la solicitud e importar el `.lic`) y la instalación copiada
+  con la identidad nueva (L1-D11), solo en la computadora principal, con su explicación y confirmación. «Continuar sin
+  activar» entra al sistema con el aviso fijo;
+- `LicensePage.tsx` (Configuración › Licencia, desde el botón «Licencia» de Configuración general): estado, plan,
+  cliente, vencimiento o «Perpetua», días de tolerancia, cupos en uso / límite, y el entorno «Servidor de licencias de
+  pruebas» solo cuando Go dice `environment: test`. Con «Administrar la licencia»: «Buscar actualización», «Transferir a
+  esta computadora» (solo con `ACTIVATION_LIMIT` y `transfer_available: true`, con confirmación; con `TRANSFER_LIMIT`,
+  «Comunícate con soporte»), «Liberar esta licencia» (confirmación en rojo), «Solicitud sin internet» (activación,
+  renovación y liberación) e «Importar archivo de licencia». Ver el estado no pide permiso;
+- `LicenseNotices.tsx`: los avisos en todas las pantallas (en la captura, en un renglón). Fijos: la hora, sin activar,
+  vencida y revocada (según su motivo). Diarios, con «Entendido»: la tolerancia para todos y los 7 días antes del
+  vencimiento para quien administra la licencia; para los demás, un indicador discreto;
+- `ClockBlockPage.tsx`: «Sistema detenido por la fecha y hora de la computadora» con sus cinco partes (§6.2): las dos
+  fechas que da Go, por qué se detiene, qué sí se puede hacer (con «Ir a Reportes» e «Ir a Respaldos»), cómo resolverlo
+  (Mac, Windows, «Comprobar la hora con internet» y el desbloqueo de soporte con su código, la respuesta pegada o
+  importada) y «Tu licencia está bien…» solo con la licencia vigente o en tolerancia; si no, el problema de licencia
+  aparte. En la computadora principal se abre sola una vez por bloqueo; las terminales ven el aviso fijo y, al
+  registrar, «No se puede registrar: la computadora principal tiene la fecha y hora incorrectas. Avisa al encargado.».
+
+**Cupos** (§5): Terminales muestra el resumen «Cupos de la licencia» en lugar del de sesiones por tipo, la columna «Cupo»
+y «Liberar cupo» de comandero o de cocina (con confirmación; cierra la sesión de esa terminal). Preparación
+(`PreparationSeat.tsx`) avisa a Go al entrar y al salir (`kitchen/display-mode`, en orden) y, sin cupo, dice cuál falta
+y sus cifras con «Volver a intentar».
+
+**Textos**: todos salen de `services/license.ts` a partir del código de error y sus `details` (`licenseErrorText`),
+nunca del `message` del servidor de licencias. `api.ts` (`rejectionOf`) los usa para cualquier rechazo y, con
+`SYSTEM_CLOCK_INVALID` o un rechazo por el estado de la licencia, pide a la sesión que vuelva a leer el estado (igual
+que el evento `license.changed`).
+
+**Pruebas de interfaz**:
+
+- `desktop/e2e/native-driver.ts`: **el único lugar donde las pruebas activan el Go temporal.** Al configurar una base
+  nueva, entra como el administrador del asistente e importa una licencia perpetua con 20 cupos de cada tipo, firmada
+  por `license-test issue` con las llaves de `vectors.json` para la carpeta `identity` de ese Go. Así las
+  especificaciones anteriores siguen pasando. Simula `license_save_request`, `license_import_file` y
+  `license_import_unlock_file` con las mismas comprobaciones que Rust, y expone `driver.license` (firmar, instalar,
+  escribir un archivo y las colas de los diálogos), el reloj simulado y los controles del simulador;
+- `desktop/e2e/license-flow.ts`: ayudas de la etapa (otras terminales por la API o con su página, cupos, captura,
+  capturas en `ADEL_SHOTS_DIR` y `restoreTestLicense`, que deja la licencia de las demás especificaciones en el
+  `finally`);
+- cuatro especificaciones `workflow-stagel1-*.spec.ts` (abajo, en la tabla);
+- `workflow-stage9g-terminals` y `workflow-stage9h-adjustments`: el resumen ahora es «Cupos de la licencia».
+
+**Arneses**:
+
+- `$SP/iso.sh browser` con `ISO_LICENSE_SIM=1` compila `license-test`, arranca el simulador antes del Go, le pasa la
+  confianza de prueba, su certificado y un reloj simulado, y con `ISO_UNLICENSED_PORT` arranca un segundo Go sin
+  activar. Sin esas variables hace lo mismo que antes;
+- `scripts/browser-tests.py` (`dev.sh test-browser`) hace lo mismo: compila `license-test` en una carpeta temporal (nunca
+  en `bin/`), arranca el simulador en **8189** antes de los servidores, y los tres servidores (8183, 8185 y el nuevo sin
+  activar en **8187**) apuntan al simulador, confían en `vectors.json` y tienen su propio reloj simulado. Pasa a
+  Playwright `ADEL_BROWSER_LICENSE_TOOL`, `_LICENSE_SERVER_URL`, `_LICENSE_CA`, `_CLOCK_FILE` y
+  `_UNLICENSED_SERVER_URL`/`_PROVISIONING`, y al terminar borra todo. `dev.sh` no menciona `license-test`, como exige
+  `TestTestToolsNeverShip`.
+
+### Decisiones propuestas
+
+1. **Las pruebas activan el Go temporal en un solo lugar.** `installDriver` importa, al configurar cada base nueva, una
+   licencia perpetua con 20 cupos de cada tipo, firmada por `license-test issue` para la identidad de ese Go. Por qué:
+   desde la Fase C, un Go sin licencia rechaza la administración y la captura (L1-D35), y las 45 especificaciones
+   anteriores no deben saber de licencias. Con 20 cupos, ninguna se queda sin cupo. Las de la etapa cambian la licencia
+   desde otra terminal de administración y, en su `finally`, dejan esa misma licencia (`restoreTestLicense`) y el reloj
+   en la hora real.
+2. **Un tercer Go temporal, sin activar, solo para la activación** (`ADEL_BROWSER_UNLICENSED_SERVER_URL`; 8187 en
+   `browser-tests.py`, `ISO_UNLICENSED_PORT` en el arnés). Por qué: el compartido ya está activado cuando llega esa
+   especificación. Sin la variable, sus pruebas se omiten, como las de instalación limpia de la 9H.
+3. **`license-test` se compila en una carpeta temporal y nunca en `bin/`**, y `dev.sh` no lo menciona. Por qué: así no
+   queda junto al servidor que empaquetan los instaladores y `TestTestToolsNeverShip` sigue igual.
+4. **La prueba de «Comprobar la hora con internet» activa en línea con el simulador** (un código `PRP` inventado,
+   distinto en cada corrida, con la hora del simulador 5 horas atrás). Por qué: con una activación, Go pide la hora con
+   la consulta (`refresh`) de esa activación; con un `.lic` firmado por `license-test`, el simulador no conoce la
+   activación y responde `INVALID_PROOF` (en el escritorio, «El servidor de licencias rechazó la operación…»). La hora
+   atrasada del simulador deja la licencia emitida antes de la hora del paso 5, por el piso firmado de la §6.3.
+5. **El desbloqueo de soporte aceptado no se prueba en Playwright.** Necesita la llave privada de soporte, que nunca está
+   en las pruebas (§0 «Secretos»). La interfaz se prueba con el código de solicitud, una respuesta pegada que no vale
+   y un archivo equivocado; la aceptación la cubren las pruebas de Go de la Fase C.
+6. **La pantalla de la fecha y hora se abre sola una vez por bloqueo** en la computadora principal (no en «Solo
+   servidor» ni en las terminales). Desde ahí se puede ir a Reportes o Respaldos, y el aviso fijo «Ver cómo resolverlo»
+   regresa a ella. Las terminales solo ven el aviso fijo y el mensaje al registrar.
+7. **Los avisos diarios** (tolerancia y 7 días antes) se muestran al entrar hasta que el usuario toca «Entendido» y no
+   vuelven ese día, por usuario y en esa computadora (`localStorage`; si no está disponible, el aviso vuelve a
+   aparecer). El de 7 días es para quien tiene «Administrar la licencia»; los demás ven un indicador discreto.
+8. **«Licencia» se abre desde Configuración general** (botón junto a «Ver estado del sistema») y su ruta de navegación
+   es Administración › Sistema › Configuración › Licencia. No se agregó un mosaico nuevo en Sistema.
+
+### Pruebas
+
+Todas con el arnés aislado (`ISO_TAG=LE`, clúster 55499), salvo donde se dice. Playwright con
+`ISO_GO_PORT=8207 ISO_PREVIEW_PORT=1437 ISO_LICENSE_SIM=1 ISO_LICENSE_PORT=8487 ISO_UNLICENSED_PORT=8211`. Registros en
+`$SP/le/`.
+
+| Prueba                                                                                                                                                     | Resultado                                                                                                                                                                                           |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `vitest` (con `tsc`), sobre `7208e3ee` + lo que quedaba sin confirmar (`vitest2.log`)                                                                      | 105 archivos, **999 pruebas aprobadas**. Las de la fase: `stageL1License.test.tsx` (21) y `license.test.ts` (15)                                                                                    |
+| `cargo test` (`cargo2.log`)                                                                                                                                | **115 aprobadas**, 3 ignoradas (las de siempre). Incluye `license_and_seat_routes_are_closed` (con `license_time_check`) y las 6 de `license_files.rs`                                              |
+| `build`                                                                                                                                                    | Lo hace la vista previa de Playwright (`npm run build`) en cada corrida: sin errores                                                                                                                |
+| `tsc --noEmit` después de cada cambio de `e2e/`                                                                                                            | Sin errores                                                                                                                                                                                         |
+| `format`, `fmt-check` y `sync-check`                                                                                                                       | Aprobados (última vez sobre `08e67257`). `md5` de `contracts/`, `docs/etapas/` y `docs/licencias/` igual antes y después (`md5-before2.txt`, `md5-after.txt`)                                       |
+| `workflow-stagel1-*` solas, Chromium (`pw-l1-chromium-4.log`)                                                                                              | **5/5**                                                                                                                                                                                             |
+| `workflow-stagel1-*` solas, WebKit (`pw-l1-webkit-1.log`)                                                                                                  | **5/5**                                                                                                                                                                                             |
+| `workflow-stagel1-*` con las capturas finales, sobre `08e67257` (`pw-l1-chromium-final3.log`, `pw-l1-webkit-final3.log`)                                   | **5/5** en Chromium y **5/5** en WebKit                                                                                                                                                             |
+| **Suite completa en Chromium**, sobre `c047cd5f` (`pw-full-chromium-1.log`, 21 min)                                                                        | **46 aprobadas, 4 omitidas, 0 fallas.** Las omitidas son las de instalación limpia de la 9H: el arnés aislado no arranca el Go limpio (pasan abajo, con `browser-tests.py`)                         |
+| Relacionadas en WebKit: `9f-kitchen-stations`, `9g-terminals`, `9h-adjustments`, `9h-migration`, `a2-terminals` y `stagel1-*` (`pw-rel-webkit-1.log`)      | **15 aprobadas, 4 omitidas** (las mismas de instalación limpia)                                                                                                                                     |
+| Relacionadas en Chromium                                                                                                                                   | Dentro de la suite completa: todas aprobadas                                                                                                                                                        |
+| `scripts/browser-tests.py`, copia aislada en `$SP/le/bt-root` (ver «No verificado»), filtro `workflow-stagel1 workflow-stage9h-migration` (`bt-run-2.log`) | Chromium **12/12** y WebKit **12/12**, con las 4 de **instalación limpia** (el segundo Go, activado por `native-driver.ts`). Al terminar no quedaron bases, carpetas temporales ni puertos abiertos |
+
+**Lo que cubre cada especificación nueva:**
+
+| Especificación                                            | Cubre                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `workflow-stagel1-activation` (2 pruebas, Go sin activar) | Primer arranque: formato al escribir, código inexistente, «Activar sin internet» (la solicitud lleva el código y la firma de la instalación), un archivo que no es `.lic`, uno de otra computadora y el bueno. Configuración › Licencia: estado, plan, cliente, tipo, entorno y cupos sin identificadores a la vista; revocada (aviso fijo por motivo); activar en línea; «Buscar actualización»; «Liberar esta licencia» con su confirmación (cancelar y confirmar); `ACN` → «Comunícate con soporte»; `ACT` → «Transferir a esta computadora» con confirmación; solicitud de renovación |
+| `workflow-stagel1-notices`                                | 7 días antes: aviso diario para el administrador, «Entendido» y no vuelve al entrar otra vez ese día; indicador discreto para un mesero sin el permiso. Tolerancia: aviso diario para los dos, cada uno lo cierra por su lado, con los días que quedan. Vencida: aviso fijo sin «Entendido», con lo que sí y lo que no                                                                                                                                                                                                                                                                    |
+| `workflow-stagel1-clock`                                  | Reloj 3 h atrás: la pantalla se abre sola con sus cinco partes y las fechas de Go; «Comprobar la hora con internet» sin coincidir; desbloqueo de soporte (código de 24 caracteres, respuesta pegada inválida, archivo `.txt` y `.desbloqueo` dañado); Reportes con el aviso fijo y «Ver cómo resolverlo»; otra terminal con el aviso fijo y el mensaje al capturar; corregir el reloj lo quita solo en las dos; «Comprobar la hora con internet» coincidiendo lo quita; con la licencia vencida, los dos problemas por separado                                                           |
+| `workflow-stagel1-seats`                                  | La tableta ocupa el último cupo de comandero y la barra ve «No hay cupo de comandero libre (n de n en uso)…»; Terminales con «Cupos de la licencia», la columna «Cupo» y «Liberar cupo» con confirmación (cierra la sesión de la tableta); después la barra captura. Preparación sin cupo de cocina con sus cifras, «Liberar cupo» de cocina, «Volver a intentar» abre el tablero y salir de Preparación libera el cupo en Go                                                                                                                                                             |
+
+**Capturas** (tema claro, en `$SP/shots-l1/escritorio/`, 21 por navegador, prefijo `chromium-` o `webkit-`): activación
+(primer arranque, código válido, sin internet), Configuración › Licencia (configuración, revocada, liberar, transferir,
+administrar), avisos (vencimiento, indicador, tolerancia, vencida), hora (pantalla, desbloqueo de soporte, terminal,
+desbloqueada, hora y licencia) y cupos (comandero, cocina, Terminales y la confirmación). Las revisé: ningún texto
+provisional ni identificador interno. Lo único con aspecto de código son el código de solicitud de soporte (es para
+dictarlo) y los códigos inventados del simulador escritos en el campo (`ZZZ-…`, `ACT-…`).
+
+### No verificado y pendiente
+
+- **`scripts/browser-tests.py` no se corrió tal cual**: usa `.local/server.json` y el clúster 55432, que esta etapa no
+  toca. Se probó una copia en `$SP/le/bt-root` que solo cambia las cuatro constantes de puertos (a 8207, 8477, 8211 y
+  8487), con un `database.py` falso sobre el clúster aislado 55499, un `dev.sh` falso que solo compila el servidor y un
+  `npm` falso que agrega el filtro `workflow-stagel1 workflow-stage9h-migration`. Pasó en los dos navegadores (tabla de pruebas) y
+  dejó todo limpio (bases, carpetas temporales y puertos). La corrida completa con `dev.sh test-browser` queda para la
+  Fase H o el propietario.
+- **`scripts/windows/dev.mjs` no se cambió** (Windows no se puede probar aquí). Sin `ADEL_TEST_LICENSE_TRUST`, sus Go
+  temporales no aceptan la licencia de prueba y `installDriver` falla en todas las especificaciones. Propuesta: pasar
+  `ADEL_TEST_LICENSE_TRUST=<ROOT>/contracts/licencias/v1/fixtures/vectors.json` a los servidores de `startBrowserServer`
+  (sin mencionar `license-test`, que `TestTestToolsNeverShip` prohíbe en ese archivo; `native-driver.ts` compila la orden
+  por su cuenta). Sin el simulador ni el Go sin activar, la activación y el bloqueo por la hora se omiten; los avisos y
+  los cupos sí corren. **Lo decide el coordinador.**
+- **El arnés aislado sin `ISO_LICENSE_SIM=1`** arranca el Go como antes, sin la confianza de prueba: sobre `etapa-l1`,
+  cualquier corrida de Playwright (la regresión de la Fase H, por ejemplo) necesita `ISO_LICENSE_SIM=1` (o
+  `ISO_LICENSE_TRUST`).
+- **Sin Playwright** (los cubren `vitest` y Go): el desbloqueo de soporte aceptado (decisión 5), la instalación copiada
+  con la identidad nueva (no se puede provocar sin alterar la carpeta `identity` del Go temporal) y el mensaje sin cupo
+  de caja al abrir turno (solo el texto, en `license.test.ts`).
+- **CLAUDE.md** no se tocó: los puertos nuevos de `browser-tests.py` (8187 y 8189) y el tercer Go van en §6 al unir la
+  fase.
+- **Observación para Go (no se cambió)**: con una activación vigente, «Comprobar la hora con internet» pide la hora con
+  la consulta de esa activación (`ServerTime` en `licensing/client.go`). Si el servidor de licencias rechaza la consulta
+  (por ejemplo, una activación que no conoce), la comprobación falla aunque el desafío (`challenge`), que no depende de
+  la activación, daría la hora. Podría usarse el desafío como respaldo ante un rechazo
+  que no sea de transporte. Lo decide el coordinador; el escritorio ya muestra el texto del código.
+- **Para la unión**: la fase no cambia nada de `backend/`. La rama trae `etapa-l1` hasta la Fase C (`7208e3ee`); no
+  tiene `c0217c0d` (avance de la Fase G, solo documentación), que no choca con nada de aquí.
+- **La suite completa de Chromium** corrió sobre `c047cd5f`; el último commit (`08e67257`) solo cambia cómo se toman
+  las capturas en tres especificaciones de la etapa, que volvieron a pasar en los dos navegadores.
+
+### Decisiones del coordinador sobre la Fase E
+
+Fusionada en `20d2725`, sin conflictos. La rama no tocaba `backend/` ni ningún archivo de las Fases D y F.
+
+**Comprobación del árbol unido.** El árbol con D, E y F unidas (`20d2725`, en `$SP/wt/l1-m`, `ISO_LICENSE_SIM=1`)
+corrió:
+
+- las cinco especificaciones de la etapa;
+- `workflow-stagea2-terminals`, `workflow-stage9f-kitchen-stations`, `workflow-stage9g-terminals` y
+  `workflow-stage9h-adjustments`.
+
+Resultado: **12/12 en Chromium y 12/12 en WebKit**, con los cupos por actividad de la Fase D.
+
+- **L1-D51 · Se aceptan las ocho decisiones propuestas del agente.**
+  - Un solo lugar activa el Go temporal: una perpetua de prueba con 20 cupos de cada tipo.
+  - Un tercer Go sin activar, solo para la activación.
+  - `license-test` nunca se compila en `bin/`.
+  - La comprobación de la hora activa en línea con el simulador.
+  - El desbloqueo de soporte aceptado se prueba solo en Go.
+  - La pantalla de la hora se abre sola una vez por bloqueo.
+  - Los avisos diarios se cierran con «Entendido».
+  - «Licencia» se abre desde Configuración general.
+- **L1-D52 · Windows: `scripts/windows/dev.mjs` pasa `ADEL_TEST_LICENSE_TRUST` a sus Go temporales** (`a5ef6e6`).
+  - Así `native-driver.ts` los puede activar con una licencia de prueba.
+  - No arranca el simulador ni el Go sin activar: ahí se omiten las especificaciones de la activación y de la hora.
+  - No se probó en Windows. Sí pasó `TestTestToolsNeverShip`.
+  - `CLAUDE.md` §6 anota los puertos 8187 y 8189.
+- **L1-D53 · «Comprobar la hora con internet» no usa el desafío como respaldo.**
+  - Con una activación vigente, la hora sale de la consulta de esa activación, como ya se hace.
+  - Si el servidor de licencias la rechaza, la persona ve el texto de su código y puede usar el desbloqueo de soporte
+    (§6.4).
+  - Tomar la hora de otra respuesta cambiaría el diseño de seguridad de la §6.3 al final de la etapa. Va como
+    propuesta para la V1.1.
+- **Para la Fase H**: toda corrida de Playwright sobre `etapa-l1` con el arnés aislado lleva `ISO_LICENSE_SIM=1` e
+  `ISO_UNLICENSED_PORT`; sin ellos, el Go temporal no se activa.
