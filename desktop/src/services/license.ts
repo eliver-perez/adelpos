@@ -644,6 +644,23 @@ export const clockWhyText =
 export const clockLicenseOkText =
   'Tu licencia está bien. Este bloqueo es solo por la fecha y hora.';
 
+// Etapa L1, Fase H (L1-D58): Go calcula el estado de la licencia con la hora confiable (§5.6 del contrato:
+// ahora_efectivo = máximo(reloj local, última hora confiable)). Si la fecha de la computadora saltó al futuro, esa hora
+// confiable subió con ella y una suscripción puede verse en Tolerancia o Vencida solo por eso: al resolver la hora (con
+// los pasos de la pantalla), Go vuelve a calcular el estado. Revocada y Sin activar no dependen de la fecha.
+export function clockLicenseDependsOnDate(state: LicenseState) {
+  return state === 'grace' || state === 'expired';
+}
+
+export const clockLicenseGraceText =
+  'La licencia aparece en tolerancia. Si la computadora tuvo la fecha adelantada, corregir la fecha y hora también puede quitar ese aviso.';
+
+export const clockLicenseMayClearText =
+  'Puede ser por la misma fecha equivocada: si la computadora tuvo la fecha adelantada, corregir la fecha y hora con los pasos de arriba también puede resolver el aviso de la licencia.';
+
+export const clockLicenseSeparateText =
+  'Es otro problema, aparte de la fecha y hora: corregir el reloj no lo resuelve.';
+
 // supportCodeGroups separa el código de solicitud en sus grupos para dictarlo por teléfono.
 export function supportCodeGroups(code: string) {
   return code.split('-').filter((group) => group !== '');

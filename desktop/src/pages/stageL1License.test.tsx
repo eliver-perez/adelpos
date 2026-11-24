@@ -430,9 +430,45 @@ describe('Sistema detenido por la fecha y hora de la computadora (§6.2)', () =>
       clock: { ...blockedSummary.clock, license_state: 'expired', license_ok: false },
     });
     expect(screen.queryByRole('note')).toBeNull();
-    expect(textOf(screen.getByRole('group', { name: /Además, la licencia: Vencida/ }))).toContain(
-      'corregir el reloj no lo resuelve',
+    // Vencida puede venir del mismo salto de la fecha (L1-D58): corregir la hora puede resolver los dos.
+    const expired = textOf(screen.getByRole('group', { name: /Además, la licencia: Vencida/ }));
+    expect(expired).toContain(
+      'Puede ser por la misma fecha equivocada: si la computadora tuvo la fecha adelantada, corregir la fecha y hora con los pasos de arriba también puede resolver el aviso de la licencia.',
     );
+    expect(expired).not.toContain('corregir el reloj no lo resuelve');
+  });
+
+  it('revocada no depende de la fecha: corregir el reloj no la resuelve (L1-D58)', () => {
+    renderClock({
+      ...blockedSummary,
+      state: 'revoked',
+      revocation_reason: 'revoked',
+      clock: { ...blockedSummary.clock, license_state: 'revoked', license_ok: false },
+    });
+    const revoked = textOf(screen.getByRole('group', { name: /Además, la licencia: Revocada/ }));
+    expect(revoked).toContain(
+      'Es otro problema, aparte de la fecha y hora: corregir el reloj no lo resuelve.',
+    );
+    expect(revoked).not.toContain('misma fecha equivocada');
+  });
+
+  it('en tolerancia, la licencia está bien y corregir la fecha puede quitar su aviso (L1-D58)', () => {
+    renderClock({
+      ...blockedSummary,
+      state: 'grace',
+      clock: { ...blockedSummary.clock, license_state: 'grace', license_ok: true },
+    });
+    const note = textOf(screen.getByRole('note'));
+    expect(note).toContain('Tu licencia está bien. Este bloqueo es solo por la fecha y hora.');
+    expect(note).toContain(
+      'La licencia aparece en tolerancia. Si la computadora tuvo la fecha adelantada, corregir la fecha y hora también puede quitar ese aviso.',
+    );
+    expect(screen.queryByRole('group', { name: /Además, la licencia/ })).toBeNull();
+  });
+
+  it('vigente: solo «Tu licencia está bien…», sin la aclaración de la fecha', () => {
+    renderClock(blockedSummary);
+    expect(textOf(screen.getByRole('note'))).not.toContain('tolerancia');
   });
 
   it('«Comprobar la hora con internet» muestra la hora de internet si no coincide', async () => {

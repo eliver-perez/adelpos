@@ -424,8 +424,10 @@ func (service *Service) licenseImport(ctx context.Context, tx pgx.Tx, request Re
 // y pasa el gestor a ella conservando la última hora confiable (L1-D25). Ningún dato del restaurante cambia. La
 // escucha de red sigue con el certificado anterior hasta reiniciar el servidor (restart_required).
 func (service *Service) regenerateIdentity(ctx context.Context, tx pgx.Tx, request Request, principal Principal) (any, error) {
+	// Etapa L1, fase H (L1-D56, como R2-6 en license_clock.go): desde otra terminal no es un problema de permisos, así
+	// que es un 409; un 403 dentro de runProtected quedaría en la auditoría como un acceso denegado.
 	if !request.Local {
-		return nil, &Fault{Status: 403, Code: "LICENSE_IDENTITY_LOCAL_ONLY", Message: "La identidad nueva solo se crea en la computadora principal."}
+		return nil, &Fault{Status: 409, Code: "LICENSE_IDENTITY_LOCAL_ONLY", Message: "La identidad nueva solo se crea en la computadora principal."}
 	}
 	var input struct {
 		Confirmed bool `json:"confirmed"`

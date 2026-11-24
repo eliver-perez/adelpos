@@ -324,7 +324,16 @@ func TestLicenseRoutes(t *testing.T) {
 
 	// La identidad nueva: solo en una instalación copiada y solo por la escucha local.
 	env.call(admin, "POST", "license/identity/regenerate", map[string]any{"confirmed": true}, 409, "IDENTITY_REGENERATION_NOT_NEEDED")
-	env.check(env.send(admin, "POST", "license/identity/regenerate", map[string]any{"confirmed": true}, true), "POST", "license/identity/regenerate", 403, "LICENSE_IDENTITY_LOCAL_ONLY")
+	// Desde la red es un 409 que dice dónde se hace, no un problema de permisos: no queda como acceso denegado en la
+	// auditoría (L1-D56, como R2-6).
+	deniedBefore := env.scalar("SELECT count(*)::int FROM app.audit_events WHERE action='access.denied'")
+	fromNetwork := env.check(env.send(admin, "POST", "license/identity/regenerate", map[string]any{"confirmed": true}, true), "POST", "license/identity/regenerate", 409, "LICENSE_IDENTITY_LOCAL_ONLY")
+	if message, _ := fromNetwork["message"].(string); !strings.Contains(message, "computadora principal") {
+		t.Fatalf("la identidad nueva desde la red dice dónde se hace: %v", fromNetwork)
+	}
+	if denied := env.scalar("SELECT count(*)::int FROM app.audit_events WHERE action='access.denied'"); denied != deniedBefore {
+		t.Fatalf("la identidad nueva desde la red quedó como acceso denegado: %d antes, %d después", deniedBefore, denied)
+	}
 	testRegenerateCopiedIdentity(t, env, admin)
 }
 

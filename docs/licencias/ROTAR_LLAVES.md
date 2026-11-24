@@ -57,5 +57,7 @@ una llave privada se compromete, el propietario decide qué hacer. Es una propue
 - El mismo procedimiento, con `config/licencias/llaves-production.json` y la compilación con `-tags adelpos_production`.
 - El archivo de producción nunca lleva llaves `test` ni las de los archivos de prueba.
 - Una versión de producción nunca apunta al servidor de licencias de pruebas.
-- Lo demás que falta para producción (su servidor de licencias, su dirección y la llave de soporte) va en
-  `docs/licencias/PASO_A_PRODUCCION.md` (Fase H).
+- Lo demás que falta para producción (su servidor de licencias, su dirección, la llave de soporte y la compilación) va
+  en [PASO_A_PRODUCCION.md](PASO_A_PRODUCCION.md).
+
+Cómo está hecha la integración, con el lugar de cada llave: [INTEGRACION.md](INTEGRACION.md).

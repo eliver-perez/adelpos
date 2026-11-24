@@ -49,7 +49,8 @@ import { openSection, topBar } from './navigation';
 // 5. Corregir el reloj quita el bloqueo solo, en las dos terminales. Con el reloj otra vez atrás y la misma hora en
 //    internet (el reloj ya es correcto: la última actividad estaba en el futuro), «Comprobar la hora con internet» lo
 //    quita.
-// 6. Con la licencia vencida a la vez: los dos problemas por separado, sin «Tu licencia está bien…».
+// 6. Con la licencia vencida a la vez: los dos problemas por separado, sin «Tu licencia está bien…», y la aclaración
+//    de que corregir la fecha y hora puede resolver también el de la licencia (L1-D58).
 
 const clockTerminalMessage =
   'No se puede registrar: la computadora principal tiene la fecha y hora incorrectas. Avisa al encargado.';
@@ -244,8 +245,10 @@ test('bloqueo por la fecha y hora: pantalla completa, comprobar con internet, de
     const licenseProblem = page.getByRole('group', { name: /Además, la licencia/ });
     await expect(licenseProblem).toContainText('Además, la licencia: Vencida', { timeout: 15000 });
     await expect(licenseProblem).toContainText('La licencia del sistema venció.');
+    // Vencida puede venir de la misma fecha equivocada (L1-D58): la pantalla dice que corregir la hora puede
+    // resolver también el aviso de la licencia.
     await expect(licenseProblem).toContainText(
-      'Es otro problema, aparte de la fecha y hora: corregir el reloj no lo resuelve.',
+      'Puede ser por la misma fecha equivocada: si la computadora tuvo la fecha adelantada, corregir la fecha y hora con los pasos de arriba también puede resolver el aviso de la licencia.',
     );
     await expect(licenseOk).toHaveCount(0);
     await expect(page.getByRole('alert', { name: 'Aviso de la licencia' })).toContainText(

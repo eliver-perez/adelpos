@@ -73,8 +73,9 @@ SELECT id, 'license.manage' FROM app.roles WHERE code = 'administrator';
 --        cierre: al cerrarlo, también desde otra computadora, se liberan todas las terminales que lo usaban.
 --      · order_taker (cupo order_takers, L1-D2 y L1-D13): la terminal que captura sin turno activo en su caja. Cuenta
 --        mientras su última actividad de captura (last_activity_at, con la hora de Go, L1-D16) tenga menos de 15
---        minutos y la terminal tenga alguna sesión vigente. Varios meseros con su PIN en la misma tableta son una sola
---        fila.
+--        minutos, tenga o no una sesión vigente (revisión R3, L1-D36); la fila se borra al cerrarse la última sesión de
+--        esa terminal. Una actividad con fecha futura se baja a la hora de Go con la hora confiable (L1-D43, L1-D49).
+--        Varios meseros con su PIN en la misma tableta son una sola fila.
 --      · kitchen_display (cupo kitchen_displays, L1-D7): la terminal en Preparación. La fila apunta a la sesión que
 --        entró (session_id) y cuenta mientras esa sesión siga vigente.
 --    Las llaves foráneas borran la fila con la terminal, el turno o la sesión (nunca se borran en la operación, pero
