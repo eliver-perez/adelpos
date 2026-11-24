@@ -3047,7 +3047,7 @@ $G/levantar.sh down <carpeta>          # apaga y borra la base; la identidad se 
 - **L1-D40 · El defecto G-1 del servidor de licencias**: un `request_id` reutilizado con otro desafío responde
   `INVALID_PROOF` en vez de `REQUEST_CONFLICT` (§8.7). No afecta a AD-EL POS, que reintenta siempre con el mismo cuerpo.
   Va como defecto del servidor o propuesta para la V1.1, y lo decide el propietario.
-- **L1-D41 · La Perpetua es del plan básico (1 / 0 / 0).** Si el propietario activa con ella la Mac real (§10 de la
+- **L1-D41 · La Perpetua es del plan básico (1 / 0 / 0).** _(Desde el 24/11/2026 es del plan elemental: ver L1-D59.)_ Si el propietario activa con ella la Mac real (§10 de la
   especificación), la Mac funciona como caja, pero las tabletas Android no capturan y Preparación no se abre. Va en la
   entrega final.
 
@@ -4387,3 +4387,139 @@ Las correcciones se fusionaron en `f7fcbff`. En `review_r2_seats_integration_tes
 - **L1-D58 · Un salto al futuro también puede cambiar el estado de la licencia.** Con el bloqueo por la hora y la
   licencia en Tolerancia o Vencida, la pantalla de la fecha y hora dice que corregir la hora puede resolver también el
   aviso de la licencia. Lo hace la Fase H.
+
+---
+
+## Fase G2 · El cambio de plan de la Perpetua (24/11/2026)
+
+El 24/11/2026 el propietario cambió en el panel la Perpetua del plan básico al **plan elemental**, con la Perpetua
+liberada (cierre `deactivated`, rev. 2, de la Fase G). Esta fase comprobó que AD-EL POS recibe los datos nuevos y los
+aplica.
+
+- **Instancia P2**, nueva y con identidad propia: `$SP/l1/fase-g2/P2`, `ISO_TAG=LG4`, puertos 8225 (local) y 8497
+  (red), `server_id` `2f2cacf1-…`. La levantó `$SP/l1/fase-g2/up-p2.sh`, que hace lo mismo que `up.sh` (en línea, con el
+  reloj simulado vacío `reloj-LG4`) pero con la instancia dentro de `fase-g2`.
+- **El binario** (0.15.0): `$SP/l1/fase-g2/bin/ad-el-pos-server`, compilado con `go build ./cmd/ad-el-pos-server` de una
+  copia `git archive` de `etapa-l1` en `cdc2ce2` (`$SP/l1/fase-g2/src`), con `GOFLAGS=-mod=readonly`, `GOPROXY=off` y el
+  `GOMODCACHE` del arnés.
+- **Los ayudantes** son copias de `g.py`, `cupos.py`, `scan.py` y `auditoria.py` de la Fase G, en `$SP/l1/fase-g2/`, para
+  que sus resultados queden ahí (`resultados.jsonl`, `resultados-cupos.jsonl` y `resultados-raw.jsonl`). `raw` se usó
+  desde `$SP/l1/fase-g/raw/`. Los `.lic` están en `$SP/l1/fase-g2/lic/`.
+- **Las llamadas a `licensing.sicrat.com`**, solo con la Perpetua: `activate`, `refresh` y `deactivate` desde P2, y una
+  `raw consult` al final. Cada una con su desafío. El código se usó una sola vez, en `activate`.
+- **Nunca se tocó** la instalación real, la hora de la Mac, la Mensual, la Prueba, las instancias conservadas de
+  `~/.adel-pos-dev/instancias-l1/` ni los árboles `$SP/wt/*`. Ningún commit; `git status` del repositorio, limpio.
+
+### Antes y después
+
+| Dato                        | Fase G (P, 23/11)                     | Fase G2 (P2, 24/11)                           |
+| --------------------------- | ------------------------------------- | --------------------------------------------- |
+| Tipo                        | `perpetual`, `billing_period: null`   | `perpetual`, `billing_period: null`           |
+| Plan                        | Plan básico (`basico`)                | **Plan elemental (`elemental`)**              |
+| Cajas                       | 1                                     | **3**                                         |
+| Comanderos                  | 0                                     | **3**                                         |
+| Pantallas de cocina (KDS)   | 0                                     | **3**                                         |
+| Revisión                    | 1 (activa) y 2 (cierre `deactivated`) | **3** (activa) y **4** (cierre `deactivated`) |
+| `custom`                    | `false`                               | `false`                                       |
+| `updates_until`             | 23/05/2027 21:28:31Z                  | 23/05/2027 21:28:31Z (**no cambió**)          |
+| `expires_at` y `grace_days` | `null` y 0                            | `null` y 0                                    |
+| `period_starts_at`          | 23/11/2026 21:28:31Z                  | 23/11/2026 21:28:31Z (no cambió)              |
+| `features`, `kid`, entorno  | `{}`, `adelpos-test-202611-1`, `test` | `{}`, `adelpos-test-202611-1`, `test`         |
+
+- Es la misma licencia (`license_id` `66de35bd-…`), con una activación nueva (`220e83b6-…`).
+- **Cumple el contrato**:
+  - §11.3, «Perpetua que sube»: el cambio aplica de inmediato y `updates_until` no cambia;
+  - §5.2: el periodo no vuelve a empezar, porque no es la primera activación.
+- El cambio en el panel no firmó una revisión propia mientras estaba liberada: la siguiente revisión, la 3, ya trae el
+  plan nuevo.
+
+### AD-EL POS aplica los datos nuevos
+
+**Lo que ve el escritorio:**
+
+- `license/status`: «Vigente» (`active`), perpetua, Plan elemental, `limits` 3/3/3, rev. 3 y `custom: false`. La
+  pantalla Licencia saca de aquí el plan y los cupos.
+- `devices/sessions-summary`: `seats` con `limit` 3 en los tres cupos y `limited: true`. La pantalla Licencia saca de
+  aquí los que están en uso.
+- `auth/me` y `restaurant/state`: `license` con `state: active`, `perpetual: true`, `expires_at: null` y su `clock` sin
+  bloqueo. No traen el plan ni los cupos, porque ese resumen no los lleva: no es un defecto.
+
+**Los cupos reales** (`cupos.py`, por la API v1, con terminales de escritorio enroladas y el usuario administrador):
+
+| Cupo                    | Hasta el límite                            | El siguiente                                                  |
+| ----------------------- | ------------------------------------------ | ------------------------------------------------------------- |
+| Comanderos (3)          | **3 terminales capturan sin turno**        | La 4.ª: 409 `LICENSE_SEAT_UNAVAILABLE`, `order_takers` 3 de 3 |
+| Pantallas de cocina (3) | 3 entran a Preparación (y salen)           | La 4.ª: 409, `kitchen_displays` 3 de 3                        |
+| Cajas (3)               | 3 abren turno, cada una con su caja física | El 4.º turno: 409, `cash_registers` 3 de 3                    |
+
+- La caja 1, con su turno, captura (200).
+- Otra terminal de la caja física 1: 409 `cash_registers` 3 de 3 (L1-D3).
+- `sessions-summary` siguió los cupos en cada paso: 3/3 comanderos, 3/3 cocina y después 3/3 cajas.
+- **Capturar como comandero ya funciona**. Con el plan básico la primera terminal recibía 409 `order_takers` 0 de 0.
+- Los mensajes salen de AD-EL POS, en español; por ejemplo, «No hay cupo de comandero libre (3 de 3 en uso). Pide que se
+  cierre la sesión de otra terminal.».
+- **Resultado: aprobado.** 0 fallas.
+
+**«Buscar actualización»** (`license/refresh`, una vez): 200, la **misma rev. 3**, sin cambios. `vigente.lic` quedó
+idéntico byte por byte (el mismo SHA-256).
+
+### El estado final: liberada y sin transferencias
+
+- **`deactivate`**: 200, rev. **4**, `revoked` / `deactivated`: «Revocada» con motivo `deactivated`. Es el cierre
+  instalado en `identity/licencia/vigente.lic`, con la fila de `app.license_revisions` en la rev. 4.
+- **`raw consult`** de la activación `220e83b6-…`, directo al servidor y sin instalar la respuesta: 200, la **misma
+  rev. 4**, `revoked` / `deactivated`. El servidor no firmó otra.
+- **Ninguna activación vigente**:
+  - activar desde P2 funcionó a la primera, sin `ACTIVATION_LIMIT`, así que no había otra;
+  - la de P2 quedó cerrada.
+- **Ninguna transferencia pendiente**: la Perpetua nunca se transfirió, ni en la Fase G ni aquí.
+- **La Perpetua queda libre** para activarse en la Mac real (Fase H), ya con el plan elemental.
+- **P2 está apagada.**
+  - Su base `adel_pos_test_lg4_6fb05bfe26` se borró.
+  - Su `identity/` queda en `$SP/l1/fase-g2/P2` y no se conservó en `~/.adel-pos-dev/`.
+  - El reloj `reloj-LG4` siguió vacío.
+- La consulta en segundo plano no llegó a correr: P2 estuvo encendida unos 2 minutos.
+
+### Las búsquedas de códigos
+
+- **`scan.py`**: revisó 2006 archivos y ninguno contiene un código. Revisó `$SP/l1/fase-g2/` completo (la copia `src/`, `P2/` con su
+  `server.log`, la identidad y la configuración, los `.lic` y los resultados), `doc-G2.md` y `estado-G2.md`.
+- **`auditoria.py`** de la base de P2, antes de borrarla: ningún evento de `app.audit_events` contiene un código.
+  - Los eventos: `license.activated` (rev. 3), `license.state_changed`, `license.refreshed` (rev. 3),
+    `license.deactivated` (rev. 4) y `license.state_changed`.
+- **`server.log`**: solo `license_accepted` y `license_server_ok`, con la acción, el estado y la revisión.
+
+### Lo no verificado
+
+- **La prueba 7 de la guía**, «Buscar actualización» con un cambio de plan **mientras la licencia está activa**: no se
+  puede probar así, porque la Perpetua estaba liberada cuando el propietario la cambió. Aquí el plan nuevo llegó con
+  una activación nueva, no con una revisión mayor de una activación vigente.
+- **Cómo puede hacerla el propietario**, con la instancia `en-linea` conservada y la Prueba (pasos 1 y 2 de las pruebas
+  7 y 8 de la «Lista para el propietario» de la Fase G):
+  1. `levantar.sh up $H/en-linea 8211 8481 --en-linea`, después `g.py … setup` y `g.py … activate prueba`. Se espera
+     la Prueba «Vigente», con el Plan elemental 3/3/3 y una revisión mayor que 6. Con
+     `--bin $SP/l1/fase-g2/bin/ad-el-pos-server` usa el binario de `cdc2ce2` en vez del de `f32d740`.
+  2. `g.py … status` y anotar la revisión.
+  3. En el panel, cambiar el plan de la Prueba, por ejemplo a premium. En una prueba es libre y no cambia las fechas
+     (§11.3).
+  4. Sin reiniciar nada, `g.py … refresh`. Se espera 200, una **revisión mayor**, Plan premium 5/10/5 y las mismas
+     fechas.
+  5. `cupos.py $H/en-linea`: 5 cajas, 10 comanderos y 5 pantallas de cocina, y el siguiente de cada uno con 409.
+  6. Después, la prueba 8 (revocar) o liberar con `g.py … deactivate`, y apagar.
+  - Si no se pulsa «Buscar actualización», la consulta en segundo plano también debería traer la revisión nueva por
+    su cuenta.
+- **Con la Perpetua en la Mac real**, un cambio a un plan mayor también llegaría así, pero en una perpetua cobra la
+  diferencia (§11.3). Lo decide el propietario.
+- **Lo del panel**: que P2 (`2f2cacf1-…`) aparezca como liberada en «Computadoras y transferencias» de la Perpetua.
+- **Android y el escritorio**: no se usaron. Los cupos se probaron por la API, con terminales de escritorio.
+
+### Decisión del coordinador sobre la Fase G2
+
+- **L1-D59 · La Perpetua ahora es del plan elemental (3 / 3 / 3). Reemplaza la segunda parte de L1-D41.**
+  - El propietario la cambió en el panel el 24/11/2026.
+  - AD-EL POS 0.15.0 la recibe al activarla y aplica sus cupos.
+  - Cuando el propietario active la Mac real con ella (§10 de la especificación), la Mac funciona como caja. Además, hasta
+    3 tabletas capturan como comanderos y Preparación se abre en hasta 3 pantallas.
+- **La prueba 7 de la guía sigue en la lista del propietario**: «Buscar actualización» con un cambio de plan mientras la
+  licencia está activa. Los pasos, con la instancia `en-linea` conservada y la Prueba, están arriba, en «Lo no
+  verificado».
