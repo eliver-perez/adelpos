@@ -23,19 +23,55 @@ type DatabaseProbe interface {
 	// HasOperations indica si la base tiene operaciones: distingue «Sin activar» de «Sin activar con datos».
 	HasOperations(ctx context.Context) (bool, error)
 	// LatestActivity es la hora de la última actividad registrada (max de audit_events.occurred_at), con
-	// falso si no hay ninguna. Solo inicia la última hora confiable cuando todavía no existe.
+	// falso si no hay ninguna. Solo inicia la última hora confiable cuando falta alguna de sus dos copias (L1-D15 y
+	// revisión R2, hallazgo R2-3).
 	LatestActivity(ctx context.Context) (time.Time, bool, error)
 	// AcceptedRevisions es la segunda copia del historial de revisiones aceptadas, en la base (revisión R1, hallazgo
 	// R1-3): por license_id, la revisión más alta y su sha256.
 	AcceptedRevisions(ctx context.Context) (map[string]AcceptedRevision, error)
 	// RecordAcceptedRevision sube esa copia para una licencia aceptada (nunca la baja).
 	RecordAcceptedRevision(ctx context.Context, licenseID string, revision int64, sha256 string) error
+	// TrustedTimeCopy es la segunda copia de la última hora confiable, en la base (revisión R2, hallazgo R2-3), con falso
+	// si todavía no hay ninguna.
+	TrustedTimeCopy(ctx context.Context) (TrustedCopy, bool, error)
+	// RaiseTrustedTimeCopy sube esa copia (nunca la baja).
+	RaiseTrustedTimeCopy(ctx context.Context, value TrustedCopy) error
+	// ReplaceTrustedTimeCopy la reemplaza, también hacia atrás. Solo la usan la §6.3 y la §6.4 (ReplaceTrustedTime y
+	// AcceptSupportUnlock).
+	ReplaceTrustedTimeCopy(ctx context.Context, value TrustedCopy) error
 }
 
 // AcceptedRevision es la revisión más alta aceptada de una licencia en la copia de la base.
 type AcceptedRevision struct {
 	Revision int64
 	SHA256   string
+}
+
+// TrustedCopy es la copia de la base de la última hora confiable con su fuente (un TimeSource o un ReplaceReason).
+type TrustedCopy struct {
+	Time   time.Time
+	Source string
+}
+
+// knownTrustedSources son las fuentes que acepta la copia de la base (su restricción en la 0028).
+var knownTrustedSources = map[string]bool{
+	string(TimeFromServer): true, string(TimeFromLicense): true, string(TimeFromClock): true,
+	string(TimeFromOperation): true, string(TimeFromAudit): true,
+	string(ReplaceByInternetCheck): true, string(ReplaceBySupportUnlock): true,
+}
+
+// copySource es la fuente que se guarda en la copia de la base. Una fuente desconocida en estado.json (editada a mano
+// o de otra versión) se guarda como reloj local, para que la copia se pueda seguir subiendo.
+func copySource(source string) string {
+	if knownTrustedSources[source] {
+		return source
+	}
+	return string(TimeFromClock)
+}
+
+// databaseInstant es una hora como la guarda PostgreSQL (al microsegundo): así se compara con la copia de la base.
+func databaseInstant(instant time.Time) time.Time {
+	return instant.UTC().Truncate(time.Microsecond)
 }
 
 // databaseTimeout limita cada consulta del gestor a la base.
@@ -64,8 +100,8 @@ type Options struct {
 	MachineID func() (string, error)
 	// MachineRetryDelay es la espera entre los tres intentos de lectura de la huella. Sin valor, 200 ms.
 	MachineRetryDelay time.Duration
-	// Database es la consulta de la base. Sin valor, la base se considera sin operaciones y la última hora
-	// confiable no se inicia con la auditoría.
+	// Database es la consulta de la base. Sin valor, la base se considera sin operaciones, la última hora
+	// confiable no se inicia con la auditoría y no tiene segunda copia en la base.
 	Database DatabaseProbe
 	// Logger recibe los avisos técnicos. Nunca recibe una licencia completa ni una llave.
 	Logger *slog.Logger
@@ -108,7 +144,12 @@ type Manager struct {
 	machineID func() (string, error)
 	logger    *slog.Logger
 
-	mutex sync.Mutex
+	// timeMutex ordena las lecturas y escrituras de la copia de la base de la última hora confiable (revisión R2, hallazgos
+	// R2-3 y R2-4): una subida o una lectura que empezó antes de una baja (§6.3 o §6.4) nunca llega después de ella. Se
+	// toma siempre antes que mutex. La subida de cada minuto escribe en la base sin mutex, para que Status nunca espere a
+	// la base.
+	timeMutex sync.Mutex
+	mutex     sync.Mutex
 	// state es lo guardado en estado.json, más la última hora confiable todavía sin guardar (dirty).
 	state storedState
 	dirty bool
@@ -121,6 +162,12 @@ type Manager struct {
 	// databaseRevisions es la copia del historial de revisiones de la base (R1-3); databaseLoaded, que se leyó.
 	databaseRevisions map[string]acceptedRecord
 	databaseLoaded    bool
+	// databaseTime es lo que tiene la copia de la base de la última hora confiable según lo último que se leyó o se
+	// escribió (nil: ninguna), al microsegundo (R2-3). databaseTimeLoaded indica que la base ya respondió: se leyó su copia
+	// y, si hacía falta, la última actividad de la auditoría. Mientras no, la semilla está pendiente y el trabajador la
+	// reintenta cada minuto (R2-4).
+	databaseTime       *time.Time
+	databaseTimeLoaded bool
 	// license es la licencia vigente ya verificada (nil si no hay ninguna).
 	license *License
 	// machine es la huella actual del equipo (vacía si no se pudo leer).
@@ -168,6 +215,8 @@ func NewManager(options Options) *Manager {
 // aunque devuelva un error (por ejemplo, sin poder escribir la carpeta): el error es para la bitácora, y el
 // estado queda en memoria.
 func (manager *Manager) Load(ctx context.Context) error {
+	manager.timeMutex.Lock()
+	defer manager.timeMutex.Unlock()
 	manager.mutex.Lock()
 	defer manager.mutex.Unlock()
 	var problems []error
@@ -213,7 +262,7 @@ func (manager *Manager) Load(ctx context.Context) error {
 	if err := manager.loadDatabaseRevisions(ctx); err != nil {
 		problems = append(problems, err)
 	}
-	if manager.seedTrustedTime(ctx) {
+	if manager.loadDatabaseTimeLocked(ctx) {
 		changed = true
 	}
 	if manager.loadLicense(recoverFromFile) {
@@ -225,6 +274,10 @@ func (manager *Manager) Load(ctx context.Context) error {
 		if err := manager.persist(); err != nil {
 			problems = append(problems, err)
 		}
+	}
+	// La copia de la base queda al día con lo que se cargó (R2-3). Al arrancar no hay nadie más esperando el mutex.
+	if target, needed := manager.trustedCopyTargetLocked(); needed {
+		manager.raiseTrustedCopyLocked(ctx, target)
 	}
 	status := manager.statusLocked()
 	manager.logger.Info("license_loaded",
@@ -290,21 +343,189 @@ func (manager *Manager) recordInstallation() bool {
 	return false
 }
 
-// seedTrustedTime inicia la última hora confiable con la última actividad de la base, solo si todavía no
-// existe (L1-D15, Duda 16): si se leyera siempre, la corrección de la §6.3 no podría bajarla.
-func (manager *Manager) seedTrustedTime(ctx context.Context) bool {
-	if manager.state.TrustedTime != nil || manager.options.Database == nil {
+// --- La última hora confiable en la base (revisión R2, hallazgos R2-3 y R2-4) -------------------------------------
+//
+// La última hora confiable vive en estado.json (L1-D9) y tiene una segunda copia en app.license_trusted_time (0028,
+// sección «Fase A (revisión R1)»). La que vale es el **máximo** de las dos: editar estado.json no la baja, porque manda
+// la de la base, y restaurar un respaldo viejo de la base tampoco, porque manda la de identity/. Solo la §6.3 y la §6.4
+// bajan las dos (replaceTrustedTimeLocked).
+//
+//   - Al arrancar (Load) se lee la copia de la base y se sube la de estado.json hasta ella.
+//   - La última actividad de la auditoría (max(audit_events.occurred_at)) sigue siendo la semilla de L1-D15: se usa solo
+//     si falta alguna de las dos copias (la primera vez que arranca la 0.15.0, un estado.json dañado o una base de
+//     antes de la 0028). Con las dos copias no se vuelve a leer: si no, la corrección de la §6.3 no podría bajarla.
+//   - Si la base no responde al arrancar, la lectura queda pendiente y el trabajador la reintenta cada minuto antes de
+//     observar el reloj (R2-4). Mientras tanto, el reloj local y las operaciones no se vuelven la primera hora
+//     confiable (ObserveTime): la actividad ya registrada podría estar por delante.
+//   - Cada minuto (Flush), y al apagar, la copia de la base se sube hasta la de estado.json.
+
+// databaseTimeReading es lo que se leyó de la base para la última hora confiable.
+type databaseTimeReading struct {
+	copy        TrustedCopy
+	copyFound   bool
+	latest      time.Time
+	latestFound bool
+}
+
+// readDatabaseTime lee la copia de la base y, si falta alguna de las dos copias, la última actividad de la auditoría.
+// No toca el gestor: Load la llama con el mutex tomado y el trabajador sin él.
+func (manager *Manager) readDatabaseTime(ctx context.Context, stateMissing bool) (databaseTimeReading, error) {
+	queryCtx, cancel := context.WithTimeout(ctx, databaseTimeout)
+	defer cancel()
+	var reading databaseTimeReading
+	copied, found, err := manager.options.Database.TrustedTimeCopy(queryCtx)
+	if err != nil {
+		return reading, err
+	}
+	reading.copy, reading.copyFound = copied, found
+	if found && !stateMissing {
+		return reading, nil
+	}
+	latest, present, err := manager.options.Database.LatestActivity(queryCtx)
+	if err != nil {
+		return reading, err
+	}
+	reading.latest, reading.latestFound = latest, present
+	return reading, nil
+}
+
+// applyDatabaseTimeLocked sube la última hora confiable con lo leído de la base (con el mutex tomado). Devuelve si
+// cambió.
+func (manager *Manager) applyDatabaseTimeLocked(reading databaseTimeReading) bool {
+	changed := false
+	if reading.copyFound {
+		known := databaseInstant(reading.copy.Time)
+		manager.databaseTime = &known
+		if manager.state.raiseTrustedTime(reading.copy.Time, copySource(reading.copy.Source)) {
+			changed = true
+		}
+	}
+	if reading.latestFound && manager.state.raiseTrustedTime(reading.latest, string(TimeFromAudit)) {
+		changed = true
+	}
+	manager.databaseTimeLoaded = true
+	return changed
+}
+
+// loadDatabaseTimeLocked es la lectura de Load. Si la base no responde, queda pendiente (R2-4): no es un error del
+// arranque, solo queda en la bitácora.
+func (manager *Manager) loadDatabaseTimeLocked(ctx context.Context) bool {
+	if !manager.databaseTimePendingLocked() {
 		return false
 	}
-	latest, found, err := manager.options.Database.LatestActivity(ctx)
+	reading, err := manager.readDatabaseTime(ctx, manager.state.TrustedTime == nil)
 	if err != nil {
 		manager.logger.Warn("license_activity_unavailable", "reason", err.Error())
 		return false
 	}
-	if !found {
+	return manager.applyDatabaseTimeLocked(reading)
+}
+
+// databaseTimePendingLocked indica que hay base y todavía no respondió a la lectura de la última hora confiable.
+func (manager *Manager) databaseTimePendingLocked() bool {
+	return manager.options.Database != nil && !manager.databaseTimeLoaded
+}
+
+// retryDatabaseTime reintenta la lectura pendiente (R2-4). La consulta corre sin el mutex; timeMutex impide que una baja
+// de la §6.3 o la §6.4 quede en medio y se pierda al subir con lo leído antes.
+func (manager *Manager) retryDatabaseTime(ctx context.Context) {
+	manager.timeMutex.Lock()
+	defer manager.timeMutex.Unlock()
+	manager.mutex.Lock()
+	pending := manager.databaseTimePendingLocked()
+	stateMissing := manager.state.TrustedTime == nil
+	manager.mutex.Unlock()
+	if !pending {
+		return
+	}
+	reading, err := manager.readDatabaseTime(ctx, stateMissing)
+	if err != nil {
+		manager.logger.Warn("license_activity_unavailable", "reason", err.Error())
+		return
+	}
+	manager.mutex.Lock()
+	defer manager.mutex.Unlock()
+	if manager.applyDatabaseTimeLocked(reading) {
+		manager.dirty = true
+	}
+	manager.logger.Info("license_trusted_time_seeded")
+}
+
+// trustedCopyTargetLocked es lo que falta subir en la copia de la base: la última hora confiable, si va por delante de
+// lo que tiene la base. Sin base, o sin haberla podido leer, nada (con el mutex tomado).
+func (manager *Manager) trustedCopyTargetLocked() (TrustedCopy, bool) {
+	if manager.options.Database == nil || !manager.databaseTimeLoaded || manager.state.TrustedTime == nil {
+		return TrustedCopy{}, false
+	}
+	target := databaseInstant(*manager.state.TrustedTime)
+	if manager.databaseTime != nil && !target.After(*manager.databaseTime) {
+		return TrustedCopy{}, false
+	}
+	return TrustedCopy{Time: target, Source: copySource(manager.state.TrustedSource)}, true
+}
+
+// saveTrustedCopy sube la copia de la base. Un fallo solo queda en la bitácora: Flush lo reintenta cada minuto. No toma
+// ningún mutex.
+func (manager *Manager) saveTrustedCopy(ctx context.Context, target TrustedCopy) bool {
+	writeCtx, cancel := context.WithTimeout(ctx, databaseTimeout)
+	defer cancel()
+	if err := manager.options.Database.RaiseTrustedTimeCopy(writeCtx, target); err != nil {
+		manager.logger.Warn("license_trusted_copy_not_saved", "reason", err.Error())
 		return false
 	}
-	return manager.state.raiseTrustedTime(latest, string(TimeFromAudit))
+	return true
+}
+
+// noteTrustedCopyLocked anota lo que ya tiene la copia de la base después de subirla.
+func (manager *Manager) noteTrustedCopyLocked(saved time.Time) {
+	if manager.databaseTime == nil || saved.After(*manager.databaseTime) {
+		known := saved
+		manager.databaseTime = &known
+	}
+}
+
+// raiseTrustedCopyLocked sube la copia de la base con el mutex tomado (Load y la vuelta atrás de una baja que no se
+// guardó).
+func (manager *Manager) raiseTrustedCopyLocked(ctx context.Context, target TrustedCopy) {
+	if manager.saveTrustedCopy(ctx, target) {
+		manager.noteTrustedCopyLocked(target.Time)
+	}
+}
+
+// replaceTrustedTimeLocked guarda next, un estado con la última hora confiable reemplazada (también hacia atrás), en
+// las dos copias: primero la de la base y después estado.json. Si falla la de la base, no cambia nada. Si falla
+// estado.json después, la base ya bajó, pero vale el máximo de las dos, así que tampoco cambió nada: la copia de la
+// base se vuelve a subir en el momento o, si no se puede, en el siguiente minuto (Flush). Se llama con timeMutex y
+// mutex tomados; solo la usan la §6.3 y la §6.4.
+func (manager *Manager) replaceTrustedTimeLocked(next storedState) error {
+	replaced := *next.TrustedTime
+	if manager.options.Database != nil {
+		writeCtx, cancel := context.WithTimeout(context.Background(), databaseTimeout)
+		err := manager.options.Database.ReplaceTrustedTimeCopy(writeCtx, TrustedCopy{Time: replaced, Source: next.TrustedSource})
+		cancel()
+		if err != nil {
+			manager.logger.Error("license_trusted_copy_not_saved", "reason", err.Error())
+			return ErrStateNotSaved
+		}
+		known := databaseInstant(replaced)
+		manager.databaseTime = &known
+	}
+	if manager.stateLoaded {
+		if err := manager.store.write(next, manager.now()); err != nil {
+			manager.logger.Error("license_state_not_saved", "reason", err.Error())
+			if target, needed := manager.trustedCopyTargetLocked(); needed {
+				manager.raiseTrustedCopyLocked(context.Background(), target)
+			}
+			return ErrStateNotSaved
+		}
+	}
+	manager.state = next
+	manager.dirty = false
+	// La corrección fija la hora en las dos copias: una semilla pendiente (R2-4) ya no hace falta.
+	if manager.options.Database != nil {
+		manager.databaseTimeLoaded = true
+	}
+	return nil
 }
 
 // loadLicense vuelve a verificar la licencia guardada con la §10 completa (L1-D20). Prueba primero la de
@@ -573,6 +794,13 @@ func (manager *Manager) TrustedTime() time.Time {
 func (manager *Manager) ObserveTime(instant time.Time, source TimeSource) {
 	manager.mutex.Lock()
 	defer manager.mutex.Unlock()
+	// Revisión R2, hallazgo R2-4: mientras la base no haya respondido, el reloj local y las operaciones (que llevan la hora
+	// del reloj local) no se vuelven la primera hora confiable. La actividad ya registrada podría estar por delante, y las
+	// operaciones que se acepten mientras tanto quedan en la auditoría, que es la semilla.
+	localSource := source == TimeFromClock || source == TimeFromOperation
+	if localSource && manager.state.TrustedTime == nil && manager.databaseTimePendingLocked() {
+		return
+	}
 	if !manager.state.raiseTrustedTime(instant, string(source)) {
 		return
 	}
@@ -582,9 +810,10 @@ func (manager *Manager) ObserveTime(instant time.Time, source TimeSource) {
 	}
 }
 
-// ReplaceTrustedTime reemplaza la última hora confiable, también hacia atrás, y la guarda de inmediato.
-// Devuelve el valor anterior para la auditoría. Solo la usan la §6.3 (ReplaceByInternetCheck) y la §6.4
-// (ReplaceBySupportUnlock); es lo único que la baja. Si no se puede guardar, no cambia nada.
+// ReplaceTrustedTime reemplaza la última hora confiable, también hacia atrás, y la guarda de inmediato en las dos
+// copias, la de la base y estado.json (revisión R2, hallazgo R2-3). Devuelve el valor anterior para la auditoría. Solo
+// la usan la §6.3 (ReplaceByInternetCheck) y la §6.4 (ReplaceBySupportUnlock); es lo único que la baja. Si no se puede
+// guardar, no cambia nada (ErrStateNotSaved). La ruta audita la baja antes de llamarla (R2-1).
 func (manager *Manager) ReplaceTrustedTime(instant time.Time, reason ReplaceReason) (time.Time, error) {
 	if reason != ReplaceByInternetCheck && reason != ReplaceBySupportUnlock {
 		return time.Time{}, errors.New("motivo desconocido para reemplazar la última hora confiable")
@@ -592,6 +821,8 @@ func (manager *Manager) ReplaceTrustedTime(instant time.Time, reason ReplaceReas
 	if instant.IsZero() {
 		return time.Time{}, errors.New("la nueva hora confiable no es válida")
 	}
+	manager.timeMutex.Lock()
+	defer manager.timeMutex.Unlock()
 	manager.mutex.Lock()
 	defer manager.mutex.Unlock()
 	previous := time.Time{}
@@ -607,14 +838,9 @@ func (manager *Manager) ReplaceTrustedTime(instant time.Time, reason ReplaceReas
 	replaced := instant.UTC()
 	next.TrustedTime = &replaced
 	next.TrustedSource = string(reason)
-	if manager.stateLoaded {
-		if err := manager.store.write(next, manager.now()); err != nil {
-			manager.logger.Error("license_state_not_saved", "reason", err.Error())
-			return previous, ErrStateNotSaved
-		}
+	if err := manager.replaceTrustedTimeLocked(next); err != nil {
+		return previous, err
 	}
-	manager.state = next
-	manager.dirty = false
 	manager.logger.Info("license_trusted_time_replaced", "reason", string(reason), "previous", previous, "replaced", replaced)
 	return previous, nil
 }
@@ -708,14 +934,24 @@ func (manager *Manager) LocalClock() time.Time {
 	return manager.now()
 }
 
-// Flush guarda la última hora confiable que quedó en memoria.
+// Flush guarda la última hora confiable que quedó en memoria, en estado.json y en la copia de la base (R2-3). La base
+// se escribe sin el mutex: Status no la espera.
 func (manager *Manager) Flush() error {
+	manager.timeMutex.Lock()
+	defer manager.timeMutex.Unlock()
 	manager.mutex.Lock()
-	defer manager.mutex.Unlock()
-	if !manager.dirty {
-		return nil
+	var err error
+	if manager.dirty {
+		err = manager.persist()
 	}
-	return manager.persist()
+	target, needed := manager.trustedCopyTargetLocked()
+	manager.mutex.Unlock()
+	if needed && manager.saveTrustedCopy(context.Background(), target) {
+		manager.mutex.Lock()
+		manager.noteTrustedCopyLocked(target.Time)
+		manager.mutex.Unlock()
+	}
+	return err
 }
 
 // Run es el trabajador del gestor mientras el servidor funciona: cada minuto toma la hora local como hora
@@ -738,6 +974,9 @@ func (manager *Manager) Run(ctx context.Context) {
 // tick es un paso de Run (las pruebas lo llaman directamente). La consulta de la base corre sin el mutex,
 // para que Status (que usa cada operación protegida) nunca espere a la base.
 func (manager *Manager) tick(ctx context.Context) {
+	// Revisión R2, hallazgo R2-4: si la base no respondió al arrancar, primero se reintenta su lectura (la copia de la hora
+	// y la semilla de la auditoría); el reloj se observa después.
+	manager.retryDatabaseTime(ctx)
 	manager.ObserveTime(manager.now(), TimeFromClock)
 	manager.mutex.Lock()
 	needsCheck := !manager.hasOperations && manager.options.Database != nil

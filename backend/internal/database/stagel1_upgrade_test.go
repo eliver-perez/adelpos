@@ -19,7 +19,8 @@ import (
 )
 
 // Etapa L1: actualización desde el esquema 27 con roles, usuarios, terminales, sesiones y turnos de caja abiertos, en
-// arqueo y cerrados. La sección «Fase A (revisión R1)» de la 0028 crea app.license_revisions vacía; la «Fase B», el
+// arqueo y cerrados. La sección «Fase A (revisión R1)» de la 0028 crea app.license_revisions y app.license_trusted_time
+// vacías (revisiones R1 y R2); la «Fase B», el
 // permiso license.manage concedido solo al rol administrator; la «Fase D» crea app.license_seats con sus restricciones
 // e índices y ocupa el cupo de caja de la terminal que abrió cada turno activo (L1-D3), y ninguno más. Ninguna otra
 // fila de ninguna tabla existente cambia. Deja la base vacía.
@@ -80,7 +81,45 @@ func TestStageL1Upgrade(t *testing.T) {
 	}
 	checkStageL1Seats(ctx, t, pool)
 	checkStageL1LicenseRevisions(ctx, t, pool)
+	checkStageL1TrustedTime(ctx, t, pool)
 	checkStageL1Permission(ctx, t, pool)
+}
+
+// checkStageL1TrustedTime: la segunda copia de la última hora confiable (revisión R2, hallazgo R2-3) nace vacía y tiene a
+// lo más una fila, con la hora y una fuente conocida. Las escrituras del servidor (internal/licensing) la suben y solo la
+// §6.3 y la §6.4 la bajan.
+func checkStageL1TrustedTime(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	var rows int
+	if err := pool.QueryRow(ctx, "SELECT count(*)::int FROM app.license_trusted_time").Scan(&rows); err != nil || rows != 0 {
+		t.Fatalf("license_trusted_time nace vacía: %d %v", rows, err)
+	}
+	valid := "INSERT INTO app.license_trusted_time(trusted_time,source) VALUES ('2026-11-24T12:00:00Z','local_clock')"
+	if _, err := pool.Exec(ctx, valid); err != nil {
+		t.Fatal(err)
+	}
+	invalid := map[string]string{
+		"segunda fila":      "INSERT INTO app.license_trusted_time(trusted_time,source) VALUES ('2026-11-24T12:00:00Z','audit')",
+		"otro id":           "INSERT INTO app.license_trusted_time(id,trusted_time,source) VALUES (2,'2026-11-24T12:00:00Z','audit')",
+		"fuente que no es":  "UPDATE app.license_trusted_time SET source='a_mano'",
+		"sin hora":          "UPDATE app.license_trusted_time SET trusted_time=NULL",
+		"sin fuente":        "UPDATE app.license_trusted_time SET source=NULL",
+		"id distinto de 1":  "UPDATE app.license_trusted_time SET id=3",
+		"fuente sin nombre": "UPDATE app.license_trusted_time SET source=''",
+	}
+	for name, statement := range invalid {
+		if _, err := pool.Exec(ctx, statement); err == nil {
+			t.Fatalf("license_trusted_time acepta %s", name)
+		}
+	}
+	for _, source := range []string{"server_time", "issued_at", "local_clock", "operation", "audit", "internet_check", "support_unlock"} {
+		if _, err := pool.Exec(ctx, "UPDATE app.license_trusted_time SET source=$1", source); err != nil {
+			t.Fatalf("license_trusted_time no acepta la fuente %s: %v", source, err)
+		}
+	}
+	if _, err := pool.Exec(ctx, "DELETE FROM app.license_trusted_time"); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // checkStageL1LicenseRevisions: la segunda copia del historial de revisiones (revisión R1, hallazgo R1-3) nace vacía,

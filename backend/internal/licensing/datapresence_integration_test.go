@@ -196,3 +196,73 @@ func TestDatabaseRevisionCopyNeverGoesBack(t *testing.T) {
 		t.Fatal("un sha256 inválido se rechaza")
 	}
 }
+
+// Revisión R2 (R2-3): la copia de la última hora confiable en la base sube y nunca baja con RaiseTrustedTimeCopy; solo
+// ReplaceTrustedTimeCopy (§6.3 y §6.4) la baja. Un gestor que arranca con estado.json editado hacia atrás toma el máximo
+// de las dos copias.
+func TestDatabaseTrustedTimeCopy(t *testing.T) {
+	pool := testDatabase(t)
+	ctx := context.Background()
+	probe := PoolProbe{Pool: pool}
+	if _, found, err := probe.TrustedTimeCopy(ctx); err != nil || found {
+		t.Fatalf("una base nueva no tiene copia: %v %v", found, err)
+	}
+	later := time.Date(2026, 11, 25, 12, 0, 0, 123456789, time.UTC)
+	earlier := time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
+	if err := probe.RaiseTrustedTimeCopy(ctx, TrustedCopy{Time: later, Source: string(TimeFromOperation)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := probe.RaiseTrustedTimeCopy(ctx, TrustedCopy{Time: earlier, Source: string(TimeFromClock)}); err != nil {
+		t.Fatal(err)
+	}
+	copied, found, err := probe.TrustedTimeCopy(ctx)
+	if err != nil || !found || !copied.Time.Equal(databaseInstant(later)) || copied.Source != string(TimeFromOperation) {
+		t.Fatalf("subir con una hora anterior no la baja: %+v %v %v", copied, found, err)
+	}
+	if err := probe.ReplaceTrustedTimeCopy(ctx, TrustedCopy{Time: earlier, Source: string(ReplaceByInternetCheck)}); err != nil {
+		t.Fatal(err)
+	}
+	if copied, _, _ = probe.TrustedTimeCopy(ctx); !copied.Time.Equal(earlier) || copied.Source != string(ReplaceByInternetCheck) {
+		t.Fatalf("la §6.3 la baja: %+v", copied)
+	}
+	if err := probe.RaiseTrustedTimeCopy(ctx, TrustedCopy{Time: later, Source: "a_mano"}); err == nil {
+		t.Fatal("una fuente desconocida la rechaza la base")
+	}
+	var rows int
+	if err := pool.QueryRow(ctx, "SELECT count(*)::int FROM app.license_trusted_time").Scan(&rows); err != nil || rows != 1 {
+		t.Fatalf("una sola fila: %d %v", rows, err)
+	}
+
+	// Con el gestor: la copia de la base se llena al arrancar y sube cada minuto; editar estado.json hacia atrás no
+	// baja la hora confiable al reiniciar.
+	if _, err := pool.Exec(ctx, "DELETE FROM app.license_trusted_time"); err != nil {
+		t.Fatal(err)
+	}
+	h := newHarness(t)
+	h.database = nil
+	start := func() *Manager {
+		installation := h.fixtures.installations["installation-fixture-a"]
+		manager := NewManager(Options{
+			Directory: h.directory, Installation: &installation, Trust: h.fixtures.testTrust(), Now: h.clock.now,
+			MachineID: func() (string, error) { return h.machine, nil }, Database: probe,
+		})
+		if err := manager.Load(ctx); err != nil {
+			t.Fatal(err)
+		}
+		return manager
+	}
+	manager := start()
+	h.clock.set("2026-11-25T12:00:00Z")
+	manager.tick(ctx)
+	if copied, _, _ = probe.TrustedTimeCopy(ctx); !copied.Time.Equal(h.clock.now()) || copied.Source != string(TimeFromClock) {
+		t.Fatalf("cada minuto la copia sube con el reloj: %+v", copied)
+	}
+	h.clock.set("2026-11-21T12:00:00Z")
+	state := h.readState()
+	state.TrustedTime = &earlier
+	h.writeState(state)
+	if restarted := start(); !restarted.TrustedTime().Equal(time.Date(2026, 11, 25, 12, 0, 0, 0, time.UTC)) ||
+		!restarted.Clock().Blocked {
+		t.Fatalf("editar estado.json no baja la hora confiable: %s", restarted.TrustedTime())
+	}
+}

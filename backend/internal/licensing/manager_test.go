@@ -48,7 +48,8 @@ func (clock *testClock) set(instant string) {
 	clock.current = parsed
 }
 
-// fakeDatabase simula la consulta de la base, con la copia del historial de revisiones (R1-3).
+// fakeDatabase simula la consulta de la base, con la copia del historial de revisiones (R1-3) y la de la última hora
+// confiable (R2-3). failure hace fallar las lecturas; copyFail, solo las escrituras de la copia de la hora.
 type fakeDatabase struct {
 	mutex          sync.Mutex
 	operations     bool
@@ -58,6 +59,64 @@ type fakeDatabase struct {
 	failure        error
 	revisions      map[string]AcceptedRevision
 	revisionFail   error
+	trusted        *TrustedCopy
+	copyFail       error
+	copyWrites     int
+}
+
+func (database *fakeDatabase) TrustedTimeCopy(context.Context) (TrustedCopy, bool, error) {
+	database.mutex.Lock()
+	defer database.mutex.Unlock()
+	if database.failure != nil {
+		return TrustedCopy{}, false, database.failure
+	}
+	if database.trusted == nil {
+		return TrustedCopy{}, false, nil
+	}
+	return *database.trusted, true, nil
+}
+
+func (database *fakeDatabase) RaiseTrustedTimeCopy(_ context.Context, value TrustedCopy) error {
+	database.mutex.Lock()
+	defer database.mutex.Unlock()
+	if database.copyFail != nil {
+		return database.copyFail
+	}
+	database.copyWrites++
+	if database.trusted == nil || value.Time.After(database.trusted.Time) {
+		copied := value
+		database.trusted = &copied
+	}
+	return nil
+}
+
+func (database *fakeDatabase) ReplaceTrustedTimeCopy(_ context.Context, value TrustedCopy) error {
+	database.mutex.Lock()
+	defer database.mutex.Unlock()
+	if database.copyFail != nil {
+		return database.copyFail
+	}
+	database.copyWrites++
+	copied := value
+	database.trusted = &copied
+	return nil
+}
+
+// trustedCopy es la copia de la hora que tiene la base simulada (cero si no hay).
+func (database *fakeDatabase) trustedCopy() time.Time {
+	database.mutex.Lock()
+	defer database.mutex.Unlock()
+	if database.trusted == nil {
+		return time.Time{}
+	}
+	return database.trusted.Time
+}
+
+// setTrustedCopy cambia la copia de la base a mano (una edición o un respaldo restaurado).
+func (database *fakeDatabase) setTrustedCopy(instant time.Time) {
+	database.mutex.Lock()
+	defer database.mutex.Unlock()
+	database.trusted = &TrustedCopy{Time: instant, Source: string(TimeFromClock)}
 }
 
 func (database *fakeDatabase) AcceptedRevisions(context.Context) (map[string]AcceptedRevision, error) {

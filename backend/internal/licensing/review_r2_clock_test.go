@@ -108,22 +108,35 @@ func TestReviewR2DefectCopiedFolderAcceptsTheSameSupportResponse(t *testing.T) {
 	}
 }
 
-// Límite conocido (§12 del contrato), comprobado: el piso de la §6.3 es el issued_at de la licencia vigente, y no hace
-// falta un servidor falso para llegar a él. estado.json no está firmado y es de la cuenta que corre el servicio (en macOS,
-// la del usuario que instaló, sin sudo): basta editar last_trusted_time y reiniciar. Al cargar, la licencia vuelve a subir
-// la hora a su issued_at, que es el piso. Con una perpetua emitida hace meses, el piso es de hace meses.
-func TestReviewR2LimitEditingTheStateLowersTrustedTimeToTheLicenseIssuedAt(t *testing.T) {
+// Límite conocido (§12 del contrato), comprobado por la revisión R2 (hallazgo R2-3) y ajustado con su corrección: el
+// piso de la §6.3 es el issued_at de la licencia vigente, y no hace falta un servidor falso para llegar a él.
+// estado.json no está firmado y es de la cuenta que corre el servicio (en macOS, la del usuario que instaló, sin sudo).
+// Desde la corrección, la última hora confiable tiene una segunda copia en la base y vale el máximo de las dos: editar
+// solo estado.json ya no la baja. Quien además puede escribir en la base (la cuenta de PostgreSQL) sí la baja al
+// editar las dos copias y reiniciar: al cargar, la licencia vuelve a subir la hora a su issued_at, que es el piso. Con
+// una perpetua emitida hace meses, el piso es de hace meses.
+func TestReviewR2LimitEditingBothCopiesLowersTrustedTimeToTheLicenseIssuedAt(t *testing.T) {
 	h, _ := blockedHarness(t)
 	issued := time.Date(2026, 11, 16, 6, 30, 0, 0, time.UTC)
+	future := time.Date(2026, 11, 25, 12, 0, 0, 0, time.UTC)
 	// El reloj se atrasa cuatro días más (el sistema sigue bloqueado) y se edita estado.json a mano.
 	h.clock.set("2026-11-17T12:00:00Z")
 	state := h.readState()
 	edited := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
 	state.TrustedTime = &edited
 	h.writeState(state)
+	if restarted := h.start(); !restarted.TrustedTime().Equal(future) || !restarted.Clock().Blocked {
+		t.Fatalf("R2-3: editar solo estado.json no baja la hora confiable: %s, bloqueado %v",
+			restarted.TrustedTime().Format(time.RFC3339), restarted.Clock().Blocked)
+	}
+	// Las dos copias editadas: la hora queda en el issued_at de la licencia.
+	state = h.readState()
+	state.TrustedTime = &edited
+	h.writeState(state)
+	h.database.setTrustedCopy(edited)
 	restarted := h.start()
 	if !restarted.TrustedTime().Equal(issued) || restarted.Clock().Blocked {
-		t.Fatalf("la hora confiable editada queda en el issued_at de la licencia: %s, bloqueado %v",
+		t.Fatalf("con las dos copias editadas, la hora confiable queda en el issued_at de la licencia: %s, bloqueado %v",
 			restarted.TrustedTime().Format(time.RFC3339), restarted.Clock().Blocked)
 	}
 	// Más abajo del piso (issued_at − 10 min) sí se bloquea.
