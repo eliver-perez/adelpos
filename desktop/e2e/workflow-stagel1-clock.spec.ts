@@ -226,6 +226,9 @@ test('bloqueo por la fecha y hora: pantalla completa, comprobar con internet, de
 
     // 6. También vencida: los dos problemas por separado. (El reloj, 6 horas atrás: la última actividad quedó 3 horas
     // atrás en el paso 5.)
+    await expect(
+      notice(page, 'La hora coincide con la de internet: el sistema se desbloqueó.'),
+    ).toHaveCount(0, { timeout: 15000 });
     await page.getByRole('button', { name: 'Volver al inicio', exact: true }).click();
     await expect(topBar(page)).toBeVisible();
     setServerClockOffset('-6h');

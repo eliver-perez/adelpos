@@ -71,6 +71,8 @@ export async function expectHome(page: Page) {
 // Captura en la carpeta de la prueba y, si se indica, también en ADEL_SHOTS_DIR (las de la etapa:
 // $SP/shots-l1/escritorio).
 export async function shot(page: Page, testInfo: TestInfo, name: string) {
+  // Desde arriba: con la página desplazada, la captura de página completa dibuja la barra fija a media imagen.
+  await page.evaluate(() => window.scrollTo(0, 0));
   const path = testInfo.outputPath(`${name}.png`);
   await page.screenshot({ path, fullPage: true });
   const directory = process.env.ADEL_SHOTS_DIR;
