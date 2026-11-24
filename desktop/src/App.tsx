@@ -654,6 +654,7 @@ function ApplicationContent({
             can={can}
             onSaved={session.refresh}
             onOpenStatus={() => requestScreen('status')}
+            onOpenLicense={() => requestScreen('license')}
           />
         );
       case 'status':

@@ -23,8 +23,8 @@ const REPORT_TIMEOUT_SECONDS: u64 = 45;
 // Tiempo de respuesta de «Quitar datos de prueba» (etapa 9F): Go crea antes un respaldo completo de la
 // base y responde en hasta 120 s.
 const MAINTENANCE_TIMEOUT_SECONDS: u64 = 130;
-// Etapa L1 (Fase E): activar, transferir, buscar actualización y liberar la licencia hablan con el servidor de
-// licencias con sus reintentos; Go les da hasta 75 s.
+// Etapa L1 (Fase E): activar, transferir, buscar actualización, liberar la licencia y comprobar la hora hablan con el
+// servidor de licencias con sus reintentos; Go les da hasta 75 s.
 const LICENSE_TIMEOUT_SECONDS: u64 = 80;
 
 pub(crate) fn resource_id(id: Option<&str>) -> Result<&str, String> {
@@ -986,11 +986,16 @@ pub async fn api_request(
     })
 }
 
-// license_online dice si la operación de la licencia espera al servidor de licencias (Etapa L1, Fase E).
+// license_online dice si la operación de la licencia espera al servidor de licencias (Etapa L1, Fase E): activar,
+// transferir, buscar actualización, liberar y «Comprobar la hora con internet».
 pub(crate) fn license_online(operation: &str) -> bool {
     matches!(
         operation,
-        "license_activate" | "license_transfer" | "license_refresh" | "license_deactivate"
+        "license_activate"
+            | "license_transfer"
+            | "license_refresh"
+            | "license_deactivate"
+            | "license_time_check"
     )
 }
 
@@ -2692,6 +2697,7 @@ mod tests {
         // Solo las que hablan con el servidor de licencias esperan más que el resto.
         assert!(license_online("license_activate"));
         assert!(license_online("license_deactivate"));
+        assert!(license_online("license_time_check"));
         assert!(!license_online("license_status"));
         assert!(!license_online("license_support_unlock"));
         assert!(allowed_query_keys("license_status").is_empty());
