@@ -122,9 +122,25 @@ func (db *seatsDatabase) openSession(device string) string {
 	return session
 }
 
+// closeSessions cierra las sesiones vigentes de la terminal sin liberar nada más (como una revocación en la que la
+// operación no clasifica sus cupos).
 func (db *seatsDatabase) closeSessions(device string) {
 	db.t.Helper()
 	if _, err := db.pool.Exec(db.ctx, "UPDATE app.sessions SET revoked_at=now(),revoke_reason='logout' WHERE device_id=$1 AND revoked_at IS NULL", device); err != nil {
+		db.t.Fatal(err)
+	}
+}
+
+// logout cierra la sesión de la terminal y, en la misma transacción, libera su comandero si era la última
+// (administration.withSeats con SessionEnd).
+func (db *seatsDatabase) logout(manager *licenseseats.Manager, member terminal) {
+	db.t.Helper()
+	if err := db.within(func(tx pgx.Tx) error {
+		if _, err := tx.Exec(db.ctx, "UPDATE app.sessions SET revoked_at=now(),revoke_reason='logout' WHERE id=$1", member.session); err != nil {
+			return err
+		}
+		return manager.ReleaseClosedSessions(db.ctx, tx)
+	}); err != nil {
 		db.t.Fatal(err)
 	}
 }
@@ -262,7 +278,7 @@ func TestSeatAssignmentIsAtomic(t *testing.T) {
 				return db.terminal(fmt.Sprintf("Tableta %d %s", index, randomHex()[:6]), false)
 			},
 			clean: func(winner terminal) {
-				db.closeSessions(winner.device)
+				db.logout(manager, winner)
 			},
 		},
 		{
@@ -392,14 +408,6 @@ func TestSeatRules(t *testing.T) {
 			return manager.SetKitchenDisplay(db.ctx, tx, member.device, member.session, active)
 		})
 	}
-	sweep := func() {
-		t.Helper()
-		if err := db.within(func(tx pgx.Tx) error {
-			return manager.Sweep(db.ctx, tx)
-		}); err != nil {
-			t.Fatal(err)
-		}
-	}
 	first := db.terminal("Comandero uno", false)
 	second := db.terminal("Comandero dos", false)
 
@@ -434,31 +442,71 @@ func TestSeatRules(t *testing.T) {
 		unavailable(t, capture(first), licenseseats.OrderTakers, 1, 1)
 	})
 
-	t.Run("comandero: la terminal que se queda sin sesiones lo libera y no lo recupera al volver a entrar", func(t *testing.T) {
-		db.closeSessions(second.device)
-		if inUse := db.inUse(manager, licenseseats.OrderTakers); inUse != 0 {
-			t.Fatalf("comanderos en uso sin sesiones: %d", inUse)
+	t.Run("comandero: cerrar la última sesión de la terminal lo libera; con otra sesión vigente, no", func(t *testing.T) {
+		// La segunda tiene el cupo. Otra sesión del mismo dispositivo (otro mesero) sigue vigente: no se libera.
+		var other string
+		if err := db.pool.QueryRow(db.ctx, `INSERT INTO app.users(username,display_name,role_id)
+            SELECT 'cupos2','Cupos dos',role_id FROM app.users WHERE id=$1 RETURNING id::text`, db.user).Scan(&other); err != nil {
+			t.Fatal(err)
 		}
-		sweep()
+		if _, err := db.pool.Exec(db.ctx, `INSERT INTO app.sessions(user_id,device_id,token_hash,expires_at) VALUES ($1,$2,$3,$4)`,
+			other, second.device, randomHex(), time.Now().Add(12*time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+		db.logout(manager, second)
+		if inUse := db.inUse(manager, licenseseats.OrderTakers); inUse != 1 {
+			t.Fatalf("se liberó con otra sesión vigente en la terminal: %d", inUse)
+		}
+		// La última sesión se cierra: se libera aunque la captura tenga menos de 15 minutos.
+		if err := db.within(func(tx pgx.Tx) error {
+			if _, err := tx.Exec(db.ctx, "UPDATE app.sessions SET revoked_at=now(),revoke_reason='logout' WHERE device_id=$1 AND revoked_at IS NULL",
+				second.device); err != nil {
+				return err
+			}
+			return manager.ReleaseClosedSessions(db.ctx, tx)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if inUse := db.inUse(manager, licenseseats.OrderTakers); inUse != 0 {
+			t.Fatalf("comanderos en uso al cerrar la última sesión: %d", inUse)
+		}
+		// La sesión nueva en esa terminal no lo recupera sin capturar.
 		second.session = db.openSession(second.device)
 		if inUse := db.inUse(manager, licenseseats.OrderTakers); inUse != 0 {
 			t.Fatalf("la sesión nueva recuperó el cupo sin pedirlo: %d", inUse)
 		}
-		// Sin barrido, la primera asignación que lo ve libre lo borra: tampoco vuelve.
-		db.closeSessions(first.device)
-		first.session = db.openSession(first.device)
-		if err := capture(first); err != nil {
-			t.Fatal(err)
-		}
-		db.closeSessions(first.device)
+		// Cerrar sesiones de otra terminal en otra transacción no toca el cupo de esta.
 		if err := capture(second); err != nil {
 			t.Fatal(err)
 		}
+		db.logout(manager, first)
+		if inUse := db.inUse(manager, licenseseats.OrderTakers); inUse != 1 {
+			t.Fatalf("cerrar la sesión de otra terminal liberó este cupo: %d", inUse)
+		}
 		first.session = db.openSession(first.device)
-		if usage := db.inUse(manager, licenseseats.OrderTakers); usage != 1 {
-			t.Fatalf("comanderos en uso: %d", usage)
+		unavailable(t, capture(first), licenseseats.OrderTakers, 1, 1)
+	})
+
+	t.Run("comandero: la tableta sin sesión que entrega con la credencial ocupa el cupo por su actividad (R3-1)", func(t *testing.T) {
+		clock.Advance(16 * time.Minute)
+		tablet := db.terminal("Tableta sin sesión", false)
+		db.closeSessions(tablet.device)
+		if err := capture(tablet); err != nil {
+			t.Fatal(err)
+		}
+		if inUse := db.inUse(manager, licenseseats.OrderTakers); inUse != 1 {
+			t.Fatalf("la tableta sin sesión capturó y no ocupa el comandero: %d", inUse)
 		}
 		unavailable(t, capture(first), licenseseats.OrderTakers, 1, 1)
+		// Otra transacción que cierra sesiones de otra terminal no la libera: no le cerró ninguna sesión a ella.
+		db.logout(manager, second)
+		unavailable(t, capture(first), licenseseats.OrderTakers, 1, 1)
+		// A los 15 minutos de su última captura se libera.
+		clock.Advance(15 * time.Minute)
+		if err := capture(first); err != nil {
+			t.Fatal(err)
+		}
+		second.session = db.openSession(second.device)
 	})
 
 	t.Run("caja por terminal: abrir turno, capturar en la caja compartida y cerrar el turno", func(t *testing.T) {
@@ -545,6 +593,21 @@ func TestSeatRules(t *testing.T) {
 		if err := kitchen(screen, true); err != nil {
 			t.Fatal(err)
 		}
+		// R3-2: con el reloj de los cupos 13 horas adelante, la sesión vence con su propio reloj (el de la autenticación)
+		// y la pantalla sigue ocupando su cupo.
+		clock.Advance(13 * time.Hour)
+		if inUse := db.inUse(manager, licenseseats.KitchenDisplays); inUse != 1 {
+			t.Fatalf("pantallas de cocina en uso con el reloj de los cupos adelantado: %d", inUse)
+		}
+		unavailable(t, kitchen(other, true), licenseseats.KitchenDisplays, 1, 1)
+		// Una sesión que ya se cerró no entra a Preparación: su cupo no contaría (R3-1).
+		db.closeSessions(screen.device)
+		if err := kitchen(screen, true); !errors.Is(err, licenseseats.ErrSessionClosed) {
+			t.Fatalf("Preparación con una sesión cerrada: %v", err)
+		}
+		if err := kitchen(other, true); err != nil {
+			t.Fatal(err)
+		}
 	})
 
 	t.Run("licencia nueva con menos cupos: nadie se interrumpe y no se ocupan nuevos", func(t *testing.T) {
@@ -564,10 +627,10 @@ func TestSeatRules(t *testing.T) {
 			}
 		}
 		unavailable(t, capture(late), licenseseats.OrderTakers, 3, 1)
-		db.closeSessions(holders[0].device)
-		db.closeSessions(holders[1].device)
+		db.logout(manager, holders[0])
+		db.logout(manager, holders[1])
 		unavailable(t, capture(late), licenseseats.OrderTakers, 1, 1)
-		db.closeSessions(holders[2].device)
+		db.logout(manager, holders[2])
 		if err := capture(late); err != nil {
 			t.Fatal(err)
 		}

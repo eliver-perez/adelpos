@@ -498,6 +498,11 @@ func authenticateSession(ctx context.Context, tx pgx.Tx, request Request) (Princ
 		if err := audit(ctx, tx, principal, "session.expired", "session", &principal.SessionID, nil, nil, true); err != nil {
 			return principal, err
 		}
+		// Etapa L1 (revisión R3, R3-1): si era la última sesión vigente de la terminal, su comandero se libera ahora, con el
+		// mismo reloj con que se comprobó el vencimiento.
+		if err := licenseseats.ReleaseClosedSessions(ctx, tx, time.Now()); err != nil {
+			return principal, err
+		}
 		return principal, &Fault{Status: 401, Code: "SESSION_EXPIRED", Message: "Tu sesión expiró. Inicia sesión nuevamente.", Commit: true}
 	}
 	principal.Permissions, err = effectivePermissions(ctx, tx, principal.UserID, principal.Support)

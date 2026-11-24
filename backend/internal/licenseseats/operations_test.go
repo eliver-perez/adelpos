@@ -4,6 +4,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 const someID = "0f7a2b1c-1d2e-4f30-8a40-5b6c7d8e9f00"
@@ -37,6 +38,15 @@ func TestForOperation(t *testing.T) {
 		{"POST", "auth/password", SessionEnd},
 		{"POST", "sessions/" + someID + "/revoke", SessionEnd},
 		{"POST", "devices/" + someID + "/revoke", SessionEnd},
+		{"PUT", "auth/pin", SessionEnd},
+		{"PATCH", "users/" + someID, SessionEnd},
+		{"PUT", "users/" + someID + "/pin", SessionEnd},
+		{"POST", "users/" + someID + "/pin/remove", SessionEnd},
+		{"POST", "license/identity/regenerate", SessionEnd},
+		{"POST", "users/" + someID + "/pin/unlock", None},
+		{"POST", "users", None},
+		{"GET", "users/" + someID, None},
+		{"GET", "auth/pin", None},
 		// Lo que nunca pide cupo.
 		{"GET", "restaurant/accounts", None},
 		{"GET", "restaurant/accounts/" + someID, None},
@@ -140,9 +150,16 @@ func TestManagerDefaults(t *testing.T) {
 	if limits, valid := withdrawn.Limits(); valid || limits != (Limits{}) {
 		t.Fatalf("sin licencia válida: %+v %v", limits, valid)
 	}
-	now, cutoff := manager.Window()
-	if now.Sub(cutoff) != OrderTakerIdle || OrderTakerIdle.Minutes() != 15 {
+	now, cutoff, sessionNow := manager.times()
+	if now.Sub(cutoff) != OrderTakerIdle || OrderTakerIdle.Minutes() != 15 || sessionNow.Before(now) {
 		t.Fatalf("plazo del comandero: %v", now.Sub(cutoff))
+	}
+	// El reloj de las sesiones no es el de los cupos (R3-2): con el de los cupos adelantado, las sesiones siguen con el
+	// suyo.
+	ahead := NewManager(Options{Now: func() time.Time { return time.Now().Add(13 * time.Hour) }})
+	cutoff, sessionNow = ahead.Window()
+	if cutoff.Sub(sessionNow) < 12*time.Hour || time.Since(sessionNow) > time.Minute {
+		t.Fatalf("relojes de los cupos y de las sesiones: %v %v", cutoff, sessionNow)
 	}
 	if LockKey != 7820148311 {
 		t.Fatalf("lock de los cupos: %d", LockKey)
