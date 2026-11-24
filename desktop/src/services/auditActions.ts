@@ -19,6 +19,15 @@ export const auditActionLabels: Record<string, string> = {
   'maintenance.test_data_removed': 'Datos de prueba quitados',
   // Etapa 9G (fase A): reinicio del servicio del servidor desde Mantenimiento.
   'maintenance.service_restarted': 'Servidor reiniciado',
+  // Etapa L1 (Fase C): la protección de la hora del equipo y el estado de la licencia.
+  'license.clock_blocked': 'Sistema detenido por la fecha y hora de la computadora',
+  'license.clock_unblocked': 'Fecha y hora de la computadora corregidas',
+  'license.clock_internet_check': 'Hora comprobada con internet',
+  'license.clock_corrected': 'Última actividad corregida con la hora de internet',
+  'license.support_requested': 'Código de desbloqueo de soporte pedido',
+  'license.support_unlocked': 'Desbloqueo de soporte aplicado',
+  'license.support_unlock_rejected': 'Desbloqueo de soporte rechazado',
+  'license.state_changed': 'Estado de la licencia cambiado',
   // Etapa 9G (fase B): emparejamiento y administración de terminales.
   'device.pairing_requested': 'Terminal nueva pidió su código',
   'device.pairing_approved': 'Terminal aprobada',

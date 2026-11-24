@@ -219,24 +219,10 @@ func newApplication(pool *pgxpool.Pool, configFile string, backups maintenance.B
 		Queues: kitchen.HostQueueInspector{},
 		// Vista previa del logotipo en el diseñador de documentos (etapa 9B).
 		Rasters: identity.NewRasters(pool),
-		// Cupos de la licencia (etapa L1, Fase D; internal/licenseseats). Los límites llegan por la interfaz
-		// licenseseats.LimitsSource y la hora por Options.Now. En esta fase todavía no hay gestor de licencias: sin
+		// Cupos de la licencia (etapa L1, Fase D; internal/licenseseats). Aquí todavía no hay gestor de licencias: sin
 		// fuente no hay licencia válida y ninguna operación que pide cupo procede (falla cerrada; nunca un «sin
-		// límite» que pudiera llegar a un instalador). La Fase C lo conecta al fusionar con la Fase A, en cuanto el
-		// gestor de licencias (licensing.Manager) esté cargado y antes de atender peticiones:
-		//
-		//	application.Seats = licenseseats.NewManager(licenseseats.Options{
-		//		Limits: licenseseats.LimitsFunc(func() (licenseseats.Limits, bool) {
-		//			status := manager.Status()
-		//			valid := status.State != licensing.StateNotActivated && status.State != licensing.StateNotActivatedWithData
-		//			return licenseseats.Limits{CashRegisters: status.Limits.CashRegisters,
-		//				OrderTakers: status.Limits.OrderTakers, KitchenDisplays: status.Limits.KitchenDisplays}, valid
-		//		}),
-		//		Now: manager.LocalClock,
-		//	})
-		//
-		// Con una licencia vencida o revocada los cupos siguen siendo los de esa licencia (la puerta de la Fase C decide
-		// qué se permite en cada estado).
+		// límite» que pudiera llegar a un instalador). serveHTTP lo reemplaza por el de los límites reales de la
+		// licencia (administration.LicenseSeats, Fase C) en cuanto carga el gestor, antes de atender peticiones.
 		Seats: licenseseats.NewManager(licenseseats.Options{Limits: nil}),
 	}
 	// Respaldos programados y «Respaldar ahora» (etapa 9G, fase F): el mismo respaldo de la instalación (pg_dump con
@@ -278,14 +264,17 @@ func serveHTTP(ctx context.Context, logger *slog.Logger, cfg config.Config, pool
 	if identityErr != nil {
 		licenseIdentity = nil
 	}
-	application.License = loadLicense(ctx, logger, licenseOptions{
+	// Etapa L1, fase C: con los cupos de la licencia (useLicense, license.go).
+	useLicense(application, loadLicense(ctx, logger, licenseOptions{
 		identityDir: network.IdentityDir,
 		identity:    licenseIdentity,
 		database:    licensing.PoolProbe{Pool: pool},
 		testMode:    testMode,
-	})
+	}))
 	// Etapa L1, fase B: el cliente del servidor de licencias (rutas license/* y consulta en segundo plano).
 	application.LicenseServer = newLicenseClient(logger, application.License, cfg.LicenseServerURL, testMode)
+	// Etapa L1, fase C: «Comprobar la hora con internet» (§6.3) con la hora de ese mismo cliente.
+	application.LicenseServerClock = administration.LicenseClientClock(application.LicenseServer)
 	if err := config.CheckNetworkAddress(network.Address, cfg.ListenAddress); err != nil {
 		return err
 	}
@@ -409,6 +398,13 @@ func serveHTTP(ctx context.Context, logger *slog.Logger, cfg config.Config, pool
 		defer close(licenseRefreshDone)
 		application.LicenseServer.RunBackground(workerContext, licensing.DefaultSchedule())
 	}()
+	// Etapa L1, fase C: el vigilante de la licencia y de la hora (administration/license_monitor.go) revisa al arrancar
+	// y cada 15 s, audita cada bloqueo y desbloqueo por la hora del equipo y avisa a las terminales con license.changed.
+	licenseMonitorDone := make(chan struct{})
+	go func() {
+		defer close(licenseMonitorDone)
+		application.RunLicenseMonitor(workerContext)
+	}()
 	defer func() {
 		stopWorker()
 		<-workerDone
@@ -420,6 +416,7 @@ func serveHTTP(ctx context.Context, logger *slog.Logger, cfg config.Config, pool
 		<-legacyDone
 		<-licenseDone
 		<-licenseRefreshDone
+		<-licenseMonitorDone
 	}()
 	stopped := make(chan error, 2)
 	go func() {

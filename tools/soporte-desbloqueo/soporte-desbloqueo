@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Envoltura de la orden backend/cmd/soporte-desbloqueo: el desbloqueo de soporte sin internet de la etapa L1 (§6.4).
+# Uso y procedimiento: tools/soporte-desbloqueo/README.md y docs/licencias/DESBLOQUEO_SOPORTE.md.
+#
+# Usa el Go del proyecto (.tools/go) con las cachés del proyecto (scripts/env.sh). La llave privada de soporte nunca sale
+# de su carpeta (por omisión ~/.adel-pos-dev/soporte) ni se muestra.
+set -euo pipefail
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+export PROJECT_ROOT
+source "$PROJECT_ROOT/scripts/env.sh"
+exec go run -C "$PROJECT_ROOT/backend" ./cmd/soporte-desbloqueo "$@"

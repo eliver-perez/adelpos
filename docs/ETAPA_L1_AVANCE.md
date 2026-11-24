@@ -2198,3 +2198,351 @@ commit `df8f1e3` nombra estas decisiones como L1-D27 a L1-D29, la numeración de
     nuevas.
   - El arnés pasa las ayudas de prueba de la licencia a `server-up`: lo hace el coordinador.
   - La conexión de los cupos con la licencia la hace la Fase C.
+
+---
+
+## Fase C · Estados en el backend y protección de la hora
+
+Hizo la fase el agente de la puerta y la hora, en `$SP/wt/l1-c`, rama `etapa-l1-c`, desde `etapa-l1` (`406e730`, con la
+Fase A fusionada), con `ISO_TAG=LC`. A mitad de la fase se trajo `etapa-l1` con la Fase D fusionada (`f4b42a3` y
+`dcb6cd3`): fusión `ed71382`, con un solo conflicto (los campos de `Service` en `service.go`), resuelto conservando los
+dos lados.
+
+- Sin Go temporal ni emuladores. Ninguna llamada a `licensing.sicrat.com`. No se leyeron los códigos de licencia de
+  prueba. La hora de la Mac no se tocó: todo con el reloj simulado (`licensingtest.Clock`).
+- **La Fase C no guarda nada en la base**: no hay sección «Fase C» en la `0028`. El evento `license.changed` usa el
+  ámbito `configuration`, que ya existe (ver Decisión propuesta 9).
+- La llave de soporte de desarrollo se generó con la herramienta en `~/.adel-pos-dev/soporte/` (carpeta 0700, llave
+  0600). La privada nunca se mostró; la salida solo tiene el `kid`, la pública y la ruta.
+
+### Qué se hizo
+
+**La tabla de la §6** (`backend/internal/licensing/operations.go`): la única clasificación por `(método, ruta)`.
+
+- Cada operación tiene su fila (`RowCapture` F1, `RowCaptured` F2, `RowOpenShift` F3, `RowCloseShift` F4,
+  `RowKitchen` F5, `RowRecords` F6, `RowAdministration` F7, `RowLicense` F8, y las que la tabla no lista:
+  `RowAlways` y `RowStartup`, L1-D6), si registra algo con fecha (`Dated`, L1-D14) y si está en la tabla (`Known`).
+- `Row.Decide(state)` es la celda de la tabla: `Allow`, `Deny` o `AllowWithPendingAccounts` (abrir turno en Vencida o
+  Revocada, L1-D6). Las celdas «—» de Sin activar son «No», salvo reportes, historial y respaldos.
+- **Una escritura que no está en la tabla** toma `RowUnknownWrite`: solo Vigente y Tolerancia, y con fecha (Decisión
+  propuesta 3).
+- **El cupo no se clasifica aquí**: `administration.ClassifyGateOperation` (`license_gate.go:58`) junta la fila con
+  `licenseseats.ForOperation(método, ruta)` de la Fase D, sin repetirla.
+
+**La puerta** (`backend/internal/administration/license_gate.go:102`), llamada desde `Service.dispatch` en dos puntos:
+
+- antes de las rutas públicas (asistente, alta local y emparejamiento; `service.go:330`);
+- y, para todo lo demás, en cuanto se autentica la terminal (`service.go:371`), antes de la entrada con contraseña o PIN,
+  la credencial de envío, el agente de impresión, los avisos de platillos listos y toda operación con sesión.
+- **Orden**: primero la hora (una operación con fecha y el reloj bloqueado → `SYSTEM_CLOCK_INVALID`), después el estado
+  de la licencia (`LICENSE_NOT_ACTIVATED`, `LICENSE_EXPIRED` o `LICENSE_REVOKED`). El cupo lo aplica después
+  `withSeats` (Fase D), con 7820148311 como último lock (L1-D27): la puerta no duplica nada de los cupos.
+- **Abrir turno en Vencida o Revocada**: solo con al menos una cuenta `open` con unidades activas (una lectura sin
+  locks consultivos), y con cupo de caja (lo aplica la Fase D con los cupos de esa licencia).
+- **Las reglas firmes** salen de la tabla: la puerta solo rechaza antes de escribir, cobrar lo abierto (F2) se permite
+  en Vencida y Revocada, y reportes, historial y respaldos (F6) siempre, también con la hora incorrecta.
+- **Cada operación con fecha aceptada** alimenta la última hora confiable (`ObserveTime(…, TimeFromOperation)`,
+  L1-D15).
+- **Sin identidad**, el emparejamiento sigue respondiendo `503 PAIRING_UNAVAILABLE` (la causa real) y no el «Sin activar»
+  que también resulta de no tener identidad.
+
+**Los cinco códigos de L1-D17** (todos 409, con `message` en español sencillo para los clientes anteriores):
+
+| Código                     | Lo produce | `details`                                                                                                                                  |
+| -------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `LICENSE_NOT_ACTIVATED`    | La puerta  | `operation`, `state` (`not_activated` o `not_activated_with_data`), `copied` y `machine_unverified`                                        |
+| `LICENSE_EXPIRED`          | La puerta  | `operation`, `expires_at` y `grace_ended_at`; al abrir turno, `pending_accounts`                                                           |
+| `LICENSE_REVOKED`          | La puerta  | `operation` y `reason`; al abrir turno, `pending_accounts`                                                                                 |
+| `LICENSE_SEAT_UNAVAILABLE` | Fase D     | `seat`, `in_use` y `limit`                                                                                                                 |
+| `SYSTEM_CLOCK_INVALID`     | La puerta  | `blocked`, `local_time`, `last_activity_time`, `margin_minutes`, `timezone`, los dos textos de la pantalla, `license_state` y `license_ok` |
+
+- Los textos son las dos fechas completas en la zona del restaurante: «lunes 23 nov 2026, 10:15»
+  (`licensing.ScreenTime`). `license_ok` (Vigente o Tolerancia) decide la aclaración «Tu licencia está bien…».
+- El mensaje de `SYSTEM_CLOCK_INVALID` es el de la §6.2 para las terminales: «No se puede registrar: la computadora
+  principal tiene la fecha y hora incorrectas. Avisa al encargado.».
+- El `LICENSE_NOT_ACTIVATED` sin `details` de los cupos queda como respaldo: la puerta responde antes (L1-D27).
+
+**La protección de la hora** (`backend/internal/licensing/clock.go`):
+
+- `ClockMargin` = 10 min; `CheckClock(local, última)` bloquea con `local < última − 10 min`; `Manager.Clock()` lee las dos
+  con el reloj del gestor. Se quita solo al corregir el reloj: no se guarda nada.
+- **Se revisa** en cada operación protegida (la puerta), al arrancar y cada 15 s (el vigilante).
+- **El vigilante** (`administration/license_monitor.go`, arrancado en `serveHTTP`, `main.go:395`): audita cada bloqueo
+  y desbloqueo con las dos fechas (`license.clock_blocked` y `license.clock_unblocked`), cada cambio de estado
+  (`license.state_changed`) y publica `license.changed`. Escribe en su propia transacción corta, nunca dentro de la de
+  una petición (así la puerta no toma una segunda conexión). La puerta lo despierta al ver un bloqueo.
+
+**§6.3, `POST license/time-check`** (`administration/license_clock.go:98`), según L1-D5:
+
+- la hora del servidor de licencias llega por la interfaz `LicenseServerClock` (`ServerTime(ctx) (time.Time, error)`),
+  que implementa el cliente de la Fase B; sin ella, `503 LICENSE_SERVER_UNAVAILABLE`;
+- **si coincide** (±10 min) y la última hora confiable estaba en el futuro, se reemplaza por el `server_time`
+  (`ReplaceTrustedTime(…, ReplaceByInternetCheck)`) y se audita `license.clock_corrected` con los dos valores y la
+  **lista de las operaciones con fecha futura** (cuentas, pedidos, cobros, turnos y movimientos de inventario, con
+  hasta 20 identificadores de cada tipo), que no se modifican;
+- **si no coincide**: `409 LICENSE_TIME_MISMATCH` con `server_time` y su texto, y se audita el intento.
+
+**§6.4, desbloqueo de soporte** (`backend/internal/licensing/unlock.go`, L1-D19):
+
+- **código de solicitud** de 24 caracteres en base32 de Crockford (versión, etiqueta de 40 bits del `server_id`, número
+  de un solo uso, última hora confiable en minutos y 12 bits de verificación). Se lee con minúsculas, espacios, O = 0 e
+  I/L = 1;
+- **la solicitud pendiente** va en `identity/licencia/estado.json` (campo `support_unlock` de `storedState`, en
+  `store.go`), con los últimos 16 números usados. Una solicitud vigente se vuelve a entregar; `renew` crea otra;
+- **la respuesta** es un JWS con `typ` `adelpos-unlock+jws`. Se acepta una sola vez, solo en esa instalación y dentro de
+  las 24 h medidas con el reloj local (también se rechaza si el reloj se corrigió más de 10 min hacia atrás desde la
+  solicitud). Reemplazar la hora y marcar el número como usado van en **una sola escritura**;
+- **rutas**: `POST license/support-request` y `POST license/support-unlock` (`{response, source: text|file}`;
+  `400 SUPPORT_UNLOCK_INVALID` con `reason`: `used`, `other_installation`, `expired`, `altered` o `not_requested`).
+  Cada solicitud, desbloqueo e intento rechazado se audita;
+- **las tres rutas de la hora** solo por la escucha local (`403 LICENSE_LOCAL_ONLY`), con cualquier sesión y sin permiso
+  especial (Decisión propuesta 5);
+- **herramienta**: `backend/cmd/soporte-desbloqueo` (`generar-llave` y `responder`) y su envoltura
+  `tools/soporte-desbloqueo/soporte-desbloqueo` con `README.md`. Comparte el formato con el servidor y comprueba que su
+  respuesta verifica con la pública compilada antes de entregarla;
+- **llaves**: la privada de desarrollo en `~/.adel-pos-dev/soporte/soporte-development.key`; la pública en
+  `config/licencias/soporte-development.pub.json` (`kid` `adelpos-soporte-development-20261123`), sincronizada por
+  `scripts/sync-metadata.mjs` (que ahora copia también `soporte-<entorno>.pub.json`) y embebida por
+  `support_development.go`. `support_production.go` embebe `soporte-production.pub.json`, que no existe: **la
+  compilación de producción tampoco compila sin ella** (`TestProductionBuildFailsWithoutProductionKeys` lo comprueba
+  ahora con las dos llaves).
+
+**El estado para las terminales**:
+
+- `license` (`LicenseSummary`) en `auth/me` y `restaurant/state` (`routes.go:42` y `:71`): estado, entorno, `copied`,
+  motivo de revocación, tipo, vencimiento, días de tolerancia, `days_until_expiry`, `grace_days_remaining` y `clock`
+  (`LicenseClock`, con las dos fechas);
+- `license.changed` en el canal de eventos (`events.AppendLicenseChanged`), que **reciben todas las personas** que leen
+  el canal, sin importar permisos ni estación (`events/store.go:104`).
+- **Documentado** en `openapi.json` (esquemas `LicenseSummary`, `LicenseClock`, `LicenseRejection` y
+  `SystemClockInvalid`; `license` en `Identity` y `RecoveryState`; los 409 de las operaciones de captura de la Fase D
+  con los dos rechazos nuevos; las descripciones de `Error` y `EventBatch`) y en `docs/API_V1.md` (sección «Licencia:
+  estado, hora del equipo y rechazos» y tres renglones en los códigos de error).
+
+**Las conexiones**:
+
+- **Los cupos con los límites reales**: `administration.LicenseSeats(manager)` (`license_gate.go:76`) da los cupos de
+  `Status().Limits` solo con `HasLicense()` y el reloj `LocalClock()`. `serveHTTP` lo conecta con `useLicense`
+  (`cmd/ad-el-pos-server/license.go`, `main.go:268`), en `serve` y en el host de macOS y de Windows, antes de atender
+  peticiones. **Desde ahí `etapa-l1` ya no rechaza toda captura** (L1-D28).
+- **El gestor con la última operación registrada**: la puerta llama a `ObserveTime(TimeFromOperation)` en cada operación
+  con fecha aceptada (L1-D15).
+- **Pendiente de conectar**: `Service.LicenseServerClock` con el cliente de la Fase B (ver «Para el coordinador»).
+
+**Otros**:
+
+- `backend/internal/licensing/licensingtest`: gestores de prueba con licencias firmadas con las llaves de `vectors.json`
+  para una instalación de esos archivos, reloj simulado y llave de soporte de prueba. Solo lo importan pruebas.
+- `desktop/src/services/auditActions.ts`: los nombres del Registro de movimientos de las acciones nuevas, y también el de
+  `license.seat_released` de la Fase D, que faltaba (lo exige `auditActions.test.ts`).
+- `docs/licencias/DESBLOQUEO_SOPORTE.md`, con la **propuesta para la V1.1** de pasar el desbloqueo al panel del
+  servidor de licencias.
+
+### Decisiones propuestas
+
+El coordinador aceptó las siete del informe como **L1-D35** (unión con la Fase B).
+
+1. **Sin gestor de licencias (`Service.License` nil) la puerta no aplica nada.** Solo las pruebas que no tratan de la
+   licencia construyen así el servicio (16 lugares); `serveHTTP` lo crea siempre antes de atender peticiones. Por qué:
+   hacerla fallar cerrada obligaba a cambiar las mismas líneas de esas pruebas que cambió la Fase D. Los cupos sí fallan
+   cerrados sin fuente (Fase D). Si el revisor prefiere fallar cerrada también aquí, es un cambio pequeño en
+   `licenseGate` y en las pruebas.
+2. **La hora va antes que el estado de la licencia.** Con los dos problemas, la respuesta es `SYSTEM_CLOCK_INVALID` y
+   `details.license_state` permite a la pantalla mostrar los dos por separado (§6.2, punto 5).
+3. **«La clase más restrictiva» para una escritura desconocida es «solo Vigente y Tolerancia, con fecha»** (como F1),
+   no F7 como decía entre paréntesis 0.5.7: F1 es más restrictiva que F7 (F7 se permite en Vencida y Revocada). La
+   prueba de completitud impide que una ruta conocida caiga ahí.
+4. **El asistente (`setup`) y el alta local (`devices/enroll`) no se bloquean por la hora.** Son el arranque (L1-D6), no
+   registran operaciones del negocio, y sin el alta la computadora principal no podría ni iniciar sesión para ver la
+   pantalla de la hora. Los clasifico `RowStartup` sin fecha.
+5. **Las tres rutas de la hora** (`time-check`, `support-request`, `support-unlock`): solo por la escucha local y con
+   cualquier sesión, sin `license.manage`. La pantalla está en la computadora principal y quien esté en la caja debe
+   poder resolverlo; la seguridad del desbloqueo está en la firma y la comprobación con internet solo baja la hora si el
+   servidor de licencias coincide con el reloj.
+6. **`support-request` entrega la solicitud pendiente** mientras siga vigente (`reused: true`) y solo crea otra con
+   `renew`: así refrescar la pantalla no invalida un código que el propietario está procesando.
+7. **Las 24 h del desbloqueo también vencen si el reloj retrocede** más de 10 min desde la solicitud (la lectura de
+   L1-D19: «si el reloj se corrige en medio, se pide una solicitud nueva»).
+8. **El contenido de la respuesta de soporte** (`schema_version` 1.0, `product_id`, `environment` = entorno de
+   compilación, `installation_tag`, `request_nonce`, `request_code`, `new_trusted_time`, `issued_at`) se lee estricto:
+   un campo desconocido es «alterada». Mide unos 600 caracteres, no 470.
+9. **`license.changed` se guarda en el ámbito `configuration`**, que ya existe, y `events.Read` lo entrega a todos por
+   su tipo. Por qué: un ámbito nuevo («license») exigía cambiar la restricción de `realtime_events` en la `0028`, y el
+   plan de la Fase C es no guardar nada en la base. Los clientes anteriores lo ignoran (Android) o solo vuelven a leer
+   (escritorio).
+10. **El vigilante revisa cada 15 s** (no cada minuto): el aviso de las terminales aparece y se quita pronto. Solo
+    escribe cuando algo cambia.
+11. **`POST license/time-check` hace la consulta al servidor de licencias fuera de la transacción** (desde la unión
+    con la Fase B, como sus operaciones en línea): la ruta autoriza y `completeDeferred` consulta y audita aparte.
+12. **Los mensajes de los tres rechazos de la licencia** dicen qué sigue disponible: «Se puede seguir cobrando lo
+    abierto, hacer cortes y consultar reportes. Avisa al encargado.», con la causa según el estado y el motivo de
+    revocación.
+13. **Piso firmado para la §6.3**: el `server_time` no va firmado (solo lo protege el TLS), así que una hora del
+    servidor anterior a la emisión (`issued_at`, firmada) de la licencia vigente no se usa para bajar la hora confiable:
+    `502 LICENSE_RESPONSE_INVALID`. No cambia nada en el uso normal: el servidor de licencias emitió esa licencia con su
+    propia hora.
+14. **Códigos nuevos fuera de la tabla de 0.6.2**: `LICENSE_LOCAL_ONLY` (403), `LICENSE_STATE_NOT_SAVED` (503, no se
+    pudo guardar en `identity/licencia`) y `SUPPORT_UNLOCK_UNAVAILABLE` (503, la versión no tiene llave de soporte).
+
+### Para el coordinador (lo que falta conectar o decidir)
+
+Lo que quedaba pendiente con la Fase B (el adaptador de la §6.3, el aviso desde `license/*`, `license.seat_released`)
+y la duda de `GET kitchen/board` se resolvieron en la «Unión con la Fase B» (abajo). Sigue en pie:
+
+- **Pruebas de interfaz y Android sobre `etapa-l1`**: con la puerta, un Go temporal sin licencia queda «Sin activar» y
+  rechaza la captura, la administración y emparejar. Las suites de Playwright y Android de las fases E, F y H necesitan
+  una licencia firmada con las llaves de `vectors.json` para la identidad del Go temporal (`ADEL_TEST_LICENSE_TRUST`, o
+  la orden `license-test` de la Fase B).
+- **Sin activar no se administra** (tabla de la §6): en una instalación nueva hay que activar antes de crear usuarios,
+  catálogo o configuración. Es lo que dice el contrato; la Fase E debe llevar al usuario a la activación primero.
+
+### Unión con la Fase B
+
+Se trajo `etapa-l1` (`a8dd193`: la Fase B con las correcciones de R1) con la fusión `097df8cb`.
+
+- **Conflictos, conservando los dos lados**:
+  - `main.go`: el cliente de la Fase B y sus trabajos en segundo plano junto a `useLicense` y el vigilante;
+  - `docs/API_V1.md`: la sección «Licencia del servidor principal» (B) y después «Licencia: estado, hora del equipo y
+    rechazos» (C);
+  - `openapi.json`: se tomó el de la Fase B y se volvieron a aplicar, sobre él, los esquemas y descripciones de la C
+    (`LicenseSummary`, `LicenseClock`, `LicenseRejection`, `SystemClockInvalid`, `license` en `Identity` y
+    `RecoveryState`, y los 409 de las operaciones de captura).
+- **Sin conflicto de texto**: `routes.go` (el bloque de la C va antes de `licenseRoutes` de la B), `service.go` y
+  `auditActions.ts` (`license.seat_released` queda una sola vez, la de la B).
+- **Ajustes al código de la B** (R1-1 y R1-2):
+  - el desbloqueo de soporte escribe `estado.json` con `ensureStateLocked`, como toda escritura después de R1-1;
+  - `licensingtest` firma el registro de la huella (`identity/license-machine.json`, R1-2) y entrega la llave de la
+    instalación, que firma las pruebas de posesión.
+
+**El adaptador de la §6.3** (`administration.LicenseClientClock`, `license_clock.go`):
+
+- toma `licensing.Client.ServerTime` de la B (refresh con activación; sin ella, el desafío, L1-D5), devuelve su `.Time` y
+  traduce sus errores con `licenseFault` (los códigos de la B: `LICENSE_SERVER_UNAVAILABLE`, `LICENSE_SERVER_ERROR`…);
+- se conecta en `serveHTTP` (`main.go`), justo después del cliente.
+- **La comprobación ya no corre dentro de la transacción**: la ruta solo autoriza y `completeDeferred` hace la consulta
+  después de confirmarla, como las operaciones en línea de la B. La auditoría va en una transacción corta aparte. El plazo
+  es el de las rutas `license/*` (75 s), con 60 s para la consulta y sus reintentos.
+
+**El aviso desde las rutas `license/*`** (`notifyLicense`, que llama a `CheckLicense` fuera de la transacción):
+
+- después de activar, transferir, buscar actualización y liberar (`completeLicenseOperation`, ya fuera de la transacción);
+- después de importar un `.lic` y de crear la identidad nueva: esas rutas devuelven `licenseNotice` y
+  `completeDeferred` avisa después de confirmar, sin tomar una segunda conexión con la transacción abierta;
+- después de «Comprobar la hora con internet».
+- Solo publica si algo cambió (una consulta sin cambios no avisa).
+
+**`GET kitchen/board` pasa a F6** (lectura), como decidió el coordinador: lo lee la vista de una cuenta y entrar en modo
+Cocina ya lo controla `kitchen/display-mode` (F5, con cupo). La prueba de completitud lo comprueba.
+
+**Una prueba de la B que cambió**: `TestLicenseRoutes` daba de alta a la cajera sin activar. Con la puerta, la
+administración no se permite en «Sin activar» (tabla de la §6): ese bloque se movió a después de activar, sin cambiar lo
+que comprueba.
+
+**Pruebas nuevas de la unión**: `TestStageL1LicenseNoticesAndTimeCheckWithLicenseServer` (administration) contra el
+servidor simulado de la B (`licensetest`, TLS en loopback):
+
+- `license.changed` después de activar, de una consulta con renovación (una sin cambios no avisa), de liberar, de importar
+  y de transferir;
+- la §6.3 con el cliente real: coincide (con su `refresh`; la hora confiable baja, el bloqueo se quita, se audita y se
+  avisa), un error del servidor de licencias (`502 LICENSE_SERVER_ERROR` de la B) y no coincide (servidor 3 h adelante:
+  `409 LICENSE_TIME_MISMATCH` con su hora).
+
+**Pruebas de la unión** (sobre la cabeza `e7ad4adb`, realmente ejecutadas):
+
+| Prueba                                                                                                                                                        | Resultado                                                                                                                                                                                                   |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ISO_TAG=LC iso.sh … go-unit`                                                                                                                                 | **Aprobado**                                                                                                                                                                                                |
+| `go-int ./internal/licensing ./internal/database ./internal/apicontract ./internal/administration ./internal/operations`                                      | **Estado 0** en los cinco (9 s, 16 s, 57 s, 293 s y 531 s)                                                                                                                                                  |
+| `go-int ./cmd/ad-el-pos-server`, con el candado (script de bash con `trap` que siempre lo libera)                                                             | **Estado 0** (83 s); candado liberado                                                                                                                                                                       |
+| `TestStageL1LicenseNoticesAndTimeCheckWithLicenseServer`, `TestLicenseRoutes` (B, con el bloque de la cajera movido) y `TestStageL1LicenseGateWithoutSession` | Aprobadas (también por separado con `-v`)                                                                                                                                                                   |
+| `vitest src/services/auditActions.test.ts`                                                                                                                    | Aprobada con las acciones de la Fase C; antes de unir la Fase B fallaba solo por `license.seat_released` de la Fase D (sin nombre en `etapa-l1`). Después de la unión, aprobada (ver «Unión con la Fase B») |
+| `format`, `fmt-check` y `sync-check`                                                                                                                          | Aprobados; MD5 de `docs/etapas/`, el contrato, la guía y `contracts/` iguales                                                                                                                               |
+| Go temporal                                                                                                                                                   | No se usó; `run-LC` no existe                                                                                                                                                                               |
+
+### Archivos
+
+- `backend/internal/licensing/`: `operations.go`, `clock.go`, `unlock.go`, `support_trust.go`,
+  `support_development.go`, `support_production.go`, `soporte-development.pub.json` (copia), `store.go` (el campo
+  `Support`), `licensingtest/licensingtest.go`; pruebas `operations_test.go`, `clock_test.go`, `unlock_test.go` y
+  `production_build_test.go`.
+- `backend/internal/administration/`: `license_gate.go`, `license_clock.go`, `license_monitor.go`; en `service.go` los
+  campos de la Fase C y las dos llamadas de `dispatch`; en `routes.go` `auth/me`, `restaurant/state` y las tres rutas;
+  pruebas `license_gate_test.go` (completitud y cupos) y `license_gate_acceptance_test.go`.
+- `backend/internal/events/store.go`: `license.changed`.
+- `backend/internal/operations/stagel1_license_gate_test.go`: la tabla estado por estado.
+- `backend/internal/apicontract/`: `openapi.json` y `contract_license_integration_test.go`.
+- `backend/cmd/ad-el-pos-server/`: `main.go` (vigilante y `useLicense`), `license.go` (`useLicense`) y `license_test.go`.
+- `backend/cmd/soporte-desbloqueo/main.go` y `main_test.go`; `tools/soporte-desbloqueo/` (envoltura y `README.md`).
+- `config/licencias/soporte-development.pub.json` y `scripts/sync-metadata.mjs`.
+- `docs/API_V1.md`, `docs/licencias/DESBLOQUEO_SOPORTE.md` y `desktop/src/services/auditActions.ts`.
+
+### Pruebas (realmente ejecutadas)
+
+| Prueba                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Resultado                                                                                                                                                                                                                                                |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TestOperationTableOfTheContract` (`licensing`): las 11 filas × 6 estados de la tabla de la §6                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | Aprobada                                                                                                                                                                                                                                                 |
+| `TestClassifyOperation` y `TestUnknownOperationsTakeTheMostRestrictiveClass` (75 operaciones representativas; escrituras desconocidas)                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Aprobadas                                                                                                                                                                                                                                                |
+| `TestCheckClockMargin`, `TestManagerClockBlocksAndUnblocks`, `TestScreenTime`, `TestServerTimeMatches` (límite exacto de 10 min, atrasar el reloj nunca baja la hora confiable, textos «lunes 23 nov 2026, 10:15»)                                                                                                                                                                                                                                                                                                                                                                                              | Aprobadas                                                                                                                                                                                                                                                |
+| `TestSupportCodeRoundTrip` (dictado con minúsculas, O, I y L; de 744 variantes con un carácter cambiado se aceptan como mucho 2), `TestSupportUnlock` (válido, repetido también tras reiniciar, de otra instalación, vencido a las 24 h y con el reloj hacia atrás, alterado de tres formas, sin solicitud), `TestSupportRequestIsPersisted`, `TestCompiledSupportTrust`                                                                                                                                                                                                                                        | Aprobadas                                                                                                                                                                                                                                                |
+| `TestProductionBuildFailsWithoutProductionKeys`: sin llaves no compila; con solo `llaves-production.json` tampoco (falta `soporte-production.pub.json`); con las dos simuladas, compila                                                                                                                                                                                                                                                                                                                                                                                                                         | Aprobada                                                                                                                                                                                                                                                 |
+| `cmd/soporte-desbloqueo`: `TestGenerateKey` (0700/0600, nunca reemplaza, la salida no muestra la privada), `TestRespond` (la respuesta verifica, `--salida`, código mal dictado y llave que no es la de la versión), `TestUsageErrors`                                                                                                                                                                                                                                                                                                                                                                          | Aprobadas                                                                                                                                                                                                                                                |
+| `responder` con la llave real de desarrollo y un código sintético: firma y verifica con la pública compilada; la salida no tiene «PRIVATE»                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | Correcto (a mano)                                                                                                                                                                                                                                        |
+| `TestEveryOperationHasItsLicenseClass` (`administration`): **405 operaciones** (362 del puente `api.rs`, 41 de `openapi.json`, 29 locales) en la tabla, coherentes con `licenseseats.ForOperation`                                                                                                                                                                                                                                                                                                                                                                                                              | Aprobada                                                                                                                                                                                                                                                 |
+| `TestLicenseSeatsUseTheLicense` y `TestStartupConnectsSeatsToTheLicense` (`cmd`): los cupos salen del gestor real en cada estado y con su reloj                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | Aprobadas                                                                                                                                                                                                                                                |
+| `TestStageL1LicenseGate` (`operations`, API v1 y `Execute`): Sin activar, Vigente, Tolerancia, Vencida (cobrar lo abierto, cerrar y abrir turno con cuentas pendientes, sin ellas 409), Revocada (motivo `transferred`), carpeta copiada y respaldo restaurado («Sin activar con datos»), hora incorrecta (también cobrar; las dos fechas; auditoría y `license.changed`; desbloqueo al corregir), §6.3 (sin cliente 503; no coincide 409; hora anterior a la licencia 502; coincide: baja, auditada con las operaciones futuras, que no cambian), §6.4 por la API y cupos del plan básico con la licencia real | Aprobada (10 subpruebas)                                                                                                                                                                                                                                 |
+| `TestStageL1LicenseGateWithoutSession` (`administration`): asistente y entrada sin activar; emparejar 503 sin identidad y 409 con ella; PIN, avisos, `auth/me` y `restaurant/state` con la hora incorrecta; `license.changed` para el mesero; `LICENSE_LOCAL_ONLY` desde la red                                                                                                                                                                                                                                                                                                                                 | Aprobada                                                                                                                                                                                                                                                 |
+| `TestContractV1License` (`apicontract`): `license` en `getIdentity` y `getRecoveryState` en cada estado y con la hora incorrecta, `LicenseRejection` y `SystemClockInvalid` validados contra su esquema exacto                                                                                                                                                                                                                                                                                                                                                                                                  | Aprobada                                                                                                                                                                                                                                                 |
+| `ISO_TAG=LC iso.sh … go-int ./internal/licensing ./internal/apicontract ./internal/payments ./internal/administration ./internal/operations`                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | **Estado 0** en los cinco (7 s, 51 s, 3 s, 274 s y 556 s)                                                                                                                                                                                                |
+| `go-int ./cmd/ad-el-pos-server`, con el candado                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | **Estado 0** (67 s); candado liberado                                                                                                                                                                                                                    |
+| `ISO_TAG=LC iso.sh … go-unit`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | **Aprobado**, dos veces (la última, sobre la cabeza final)                                                                                                                                                                                               |
+| `format`, `fmt-check` y `sync-check`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | Aprobados; MD5 de `docs/etapas/`, el contrato, la guía y `contracts/` iguales antes y después                                                                                                                                                            |
+| `vitest src/services/auditActions.test.ts`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | Aprobada con las acciones de la Fase C. **Falla en la cabeza final solo por `license.seat_released` de la Fase D**, que ya estaba sin nombre en `etapa-l1`: lo agrega la Fase B (`7c9ccc85`); no lo dupliqué para que la unión no deje la clave repetida |
+
+### Lo no verificado
+
+- **La §6.3 contra `licensing.sicrat.com`**: solo con el cliente real contra el servidor simulado de la Fase B (y con un
+  `server_time` inyectado); la prueba contra el servidor real es de la Fase G.
+- **La pantalla de la hora, los avisos y Android**: son de las fases E y F. Aquí solo el backend y el contrato.
+- **El host de Windows**: comparte `serveHTTP`; no se ejecutó.
+- **Un respaldo restaurado con `pg_restore`**: «Sin activar con datos» se probó con la misma base y una identidad sin
+  licencia, que es lo que ve una computadora nueva.
+- **La revisión independiente R2** de la protección de la hora: pendiente, según el plan.
+- **Un límite conocido** (contrato §12): quien administra la Mac puede atrasar el reloj y, con un servidor falso con un
+  certificado en el que confíe el sistema, bajar la hora confiable con la §6.3 hasta la emisión de la licencia vigente
+  (el piso de la Decisión propuesta 13). Va para la revisión R2.
+
+### Commits (rama `etapa-l1-c`)
+
+- `63e24665` etapa L1 fase C: tabla de operaciones de la §6 (fila, fecha y lo desconocido) y regla de la hora con su margen de 10 minutos
+- `ce7a5cad` etapa L1 fase C: desbloqueo de soporte (código de solicitud, respuesta firmada, solicitud pendiente en estado.json y llave pública de desarrollo embebida)
+- `ecc09a68` etapa L1 fase C: orden soporte-desbloqueo (generar-llave y responder) para el propietario
+- `e33335a9` etapa L1 fase C: licensingtest, gestores de licencia de prueba con las llaves de vectors.json y reloj simulado
+- `fe5fbcef` etapa L1 fase C: puerta de la licencia y de la hora en dispatch, rutas license/time-check y support-*, vigilante con license.changed y estado de la licencia en auth/me y restaurant/state
+- `ed713823` Merge branch 'etapa-l1' into etapa-l1-c (la Fase D; conflicto en los campos de `Service`, se conservaron los dos lados)
+- `b377a4d2` etapa L1 fase C: cupos con los límites reales de la licencia y el reloj del gestor (LimitsSource), clasificación de los cupos en la puerta y prueba de completitud
+- `9ba687b2` etapa L1 fase C: prueba de la puerta sin sesión (asistente, emparejamiento, PIN, avisos y license.changed para todos)
+- `59513af8` etapa L1 fase C: contrato v1 con el estado de la licencia (LicenseSummary y LicenseClock), LicenseRejection, SystemClockInvalid y license.changed, con su prueba de contrato
+- `f0da7d0f` etapa L1 fase C: envoltura tools/soporte-desbloqueo y docs/licencias/DESBLOQUEO_SOPORTE.md con la propuesta para la V1.1
+- `1c4badac` etapa L1 fase C: nombres del Registro de movimientos para la hora del equipo, el desbloqueo de soporte y los cupos
+- `8ec938df` etapa L1 fase C: la comprobación con internet no usa una hora del servidor anterior a la emisión de la licencia vigente
+- `1b2670e2` etapa L1 fase C: el nombre de license.seat_released queda en la Fase B, que también lo agrega
+- `097df8cb` Merge branch 'etapa-l1' into etapa-l1-c (la Fase B con R1; conflictos en `main.go`, `openapi.json` y `docs/API_V1.md`, conservando los dos lados)
+- `3201783a` etapa L1 fase C: unión con la Fase B: el desbloqueo de soporte escribe con la regla de R1-1 y licensingtest firma el registro de la huella
+- `8cfb6b7b` etapa L1 fase C: «Comprobar la hora con internet» fuera de la transacción con el cliente de la Fase B (LicenseClientClock en serveHTTP) y license.changed después de activar, transferir, consultar, liberar, importar y la identidad nueva
+- `e7ad4adb` etapa L1 fase C: GET kitchen/board es una lectura (F6); entrar en modo Cocina sigue en F5 con cupo
+
+### Decisiones del coordinador sobre la Fase C
+
+Fusionada en `91f17ba`, con la Fase B ya unida en su rama. `go-unit` pasó sobre el árbol fusionado.
+
+- **L1-D35 · Se aceptan las siete decisiones propuestas del agente.**
+  - Sin `Service.License`, la puerta no aplica nada. Solo pasa en pruebas: `serveHTTP` siempre pone el gestor.
+  - La hora se revisa antes que el estado.
+  - Una escritura desconocida toma la fila F1.
+  - `setup` y `devices/enroll` no se bloquean por la hora.
+  - Las rutas de la hora solo van por la escucha local.
+  - La §6.3 tiene un piso firmado.
+  - `license.changed` usa el ámbito `configuration`.
+- **`GET kitchen/board` es una lectura (F6).** Entrar en modo Cocina lo controla `kitchen/display-mode` (F5, con cupo).
+- **Desde esta fusión, `etapa-l1` ya no rechaza toda captura.** Los cupos toman los límites de la licencia real. El Go
+  temporal de las pruebas de interfaz y de Android necesita una licencia de prueba (`license-test issue`).
