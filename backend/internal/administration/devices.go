@@ -39,8 +39,8 @@ const onlineWindow = "2 minutes"
 // usuario que tiene la sesión activa en ella (nunca la identidad reservada de soporte). Es por terminal:
 // desde la etapa 9H el mismo usuario puede ser el usuario actual de varias terminales a la vez. Desde la etapa L1
 // (Fase D), seats son los cupos de la licencia que ocupa (cash_registers, order_takers, kitchen_displays), calculados
-// con la hora de Go: $1 es el corte de inactividad del comandero y $2 la hora de las sesiones
-// (licenseseats.Manager.Window).
+// con la hora de Go: $1 es el corte de inactividad del comandero (licenseseats.Manager.Window) y $2 la hora de las
+// sesiones (Manager.SessionNow).
 var deviceListQuery = `SELECT d.id,d.name,d.register_id,r.name AS register_name,d.keyboard_mode,d.home_screen,d.created_at,d.last_seen_at,d.revoked_at,
     d.kind,d.os,d.app_version,d.paired_at,d.idle_lock_seconds,` + waiterDeviceColumns + `,
     (d.revoked_at IS NULL AND d.last_seen_at > now() - interval '` + onlineWindow + `') AS online,
@@ -94,8 +94,8 @@ func devices(ctx context.Context, tx pgx.Tx, request Request, principal Principa
 		if err := principal.require("devices.read"); err != nil {
 			return nil, err
 		}
-		cutoff, sessionNow := seats.Window()
-		return list(ctx, tx, deviceListQuery+" ORDER BY d.created_at", cutoff, sessionNow)
+		_, cutoff := seats.Window()
+		return list(ctx, tx, deviceListQuery+" ORDER BY d.created_at", cutoff, seats.SessionNow())
 	}
 	// Etapa 9G (§3.3): configuración de una terminal (pantalla de inicio, caja, estaciones; las impresoras
 	// de la terminal llegan con la fase E).
@@ -255,8 +255,8 @@ func devices(ctx context.Context, tx pgx.Tx, request Request, principal Principa
 // 9G también sus impresoras: las de AD-EL POS conectadas a ella (printers) y las que informó su computadora para
 // su agente de impresión, con si sirven para tickets (local_printers).
 func deviceConfiguration(ctx context.Context, tx pgx.Tx, deviceID string, seats *licenseseats.Manager) (any, error) {
-	cutoff, sessionNow := seats.Window()
-	device, err := object(ctx, tx, deviceListQuery+" WHERE d.id=$3", cutoff, sessionNow, deviceID)
+	_, cutoff := seats.Window()
+	device, err := object(ctx, tx, deviceListQuery+" WHERE d.id=$3", cutoff, seats.SessionNow(), deviceID)
 	if err != nil {
 		return nil, err
 	}

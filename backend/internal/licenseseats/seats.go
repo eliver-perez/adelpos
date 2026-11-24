@@ -168,12 +168,17 @@ func (manager *Manager) Limits() (Limits, bool) {
 	return limits, true
 }
 
-// Window son las dos horas con que se evalúa qué cupos siguen en uso: el corte de inactividad del comandero (la hora de
-// Go menos OrderTakerIdle; una fila con actividad en ese instante o antes ya no cuenta) y la hora de las sesiones (una
-// pantalla de cocina cuenta mientras su sesión venza después).
-func (manager *Manager) Window() (cutoff, sessionNow time.Time) {
-	_, cutoff, sessionNow = manager.times()
-	return cutoff, sessionNow
+// Window es la hora de Go de los cupos y el corte de inactividad del comandero: una fila de comandero con actividad en
+// ese instante o antes ya no cuenta.
+func (manager *Manager) Window() (now, cutoff time.Time) {
+	now, cutoff, _ = manager.times()
+	return now, cutoff
+}
+
+// SessionNow es la hora de las sesiones (Options.SessionNow): una pantalla de cocina cuenta mientras su sesión venza
+// después (revisión R3, R3-2).
+func (manager *Manager) SessionNow() time.Time {
+	return manager.sessionNow()
 }
 
 // times es la hora de Go, el corte del comandero y la hora de las sesiones.

@@ -157,7 +157,8 @@ func TestManagerDefaults(t *testing.T) {
 	// El reloj de las sesiones no es el de los cupos (R3-2): con el de los cupos adelantado, las sesiones siguen con el
 	// suyo.
 	ahead := NewManager(Options{Now: func() time.Time { return time.Now().Add(13 * time.Hour) }})
-	cutoff, sessionNow = ahead.Window()
+	_, cutoff = ahead.Window()
+	sessionNow = ahead.SessionNow()
 	if cutoff.Sub(sessionNow) < 12*time.Hour || time.Since(sessionNow) > time.Minute {
 		t.Fatalf("relojes de los cupos y de las sesiones: %v %v", cutoff, sessionNow)
 	}

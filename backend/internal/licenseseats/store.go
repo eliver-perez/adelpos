@@ -32,7 +32,8 @@ func inUseCondition(alias, cutoff, sessionNow string) string {
 
 // DeviceSeatsColumn es una expresión SQL con los cupos que ocupa la terminal deviceAlias.id, como arreglo JSON de
 // nombres (cash_registers, order_takers, kitchen_displays; vacío si no ocupa ninguno). cutoff y sessionNow son los
-// marcadores de Manager.Window, en ese orden. La usa la lista de Terminales (GET devices).
+// marcadores del corte de Manager.Window y de Manager.SessionNow, en ese orden. La usa la lista de Terminales (GET
+// devices).
 func DeviceSeatsColumn(deviceAlias, cutoff, sessionNow string) string {
 	return `(SELECT coalesce(jsonb_agg(CASE seat.kind WHEN 'cash_register' THEN 'cash_registers'
             WHEN 'order_taker' THEN 'order_takers' ELSE 'kitchen_displays' END
@@ -241,7 +242,7 @@ func (manager *Manager) ReleaseDevice(ctx context.Context, tx pgx.Tx, deviceID s
 
 // DeviceSeats son los cupos que ocupa la terminal en este instante, en el orden de Seats.
 func (manager *Manager) DeviceSeats(ctx context.Context, tx pgx.Tx, deviceID string) ([]Seat, error) {
-	cutoff, sessionNow := manager.Window()
+	_, cutoff, sessionNow := manager.times()
 	rows, err := tx.Query(ctx, `SELECT seat.kind FROM app.license_seats seat
         WHERE seat.device_id = $3 AND `+inUseCondition("seat", "$1", "$2"), cutoff, sessionNow, deviceID)
 	if err != nil {
@@ -265,7 +266,7 @@ func (manager *Manager) DeviceSeats(ctx context.Context, tx pgx.Tx, deviceID str
 // Usage es cuántos cupos de cada tipo están en uso y el límite de la licencia (0 sin licencia válida), para
 // sessions-summary y Configuración › Licencia.
 func (manager *Manager) Usage(ctx context.Context, tx pgx.Tx) (map[Seat]Usage, error) {
-	cutoff, sessionNow := manager.Window()
+	_, cutoff, sessionNow := manager.times()
 	limits, _ := manager.Limits()
 	usage := map[Seat]Usage{}
 	for _, seat := range Seats {
