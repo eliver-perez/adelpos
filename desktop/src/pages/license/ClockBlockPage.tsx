@@ -2,7 +2,11 @@ import { useEffect, useId, useState } from 'react';
 import { IconLabel } from '../../components/Icon';
 import { APIError } from '../../services/api';
 import {
+  clockLicenseDependsOnDate,
+  clockLicenseGraceText,
+  clockLicenseMayClearText,
   clockLicenseOkText,
+  clockLicenseSeparateText,
   clockScreenTitle,
   clockWhyText,
   licenseStateExplanation,
@@ -29,7 +33,9 @@ import { errorMessage, notifyError, notifySuccess } from '../../services/notify'
 //  4. cómo resolverlo: corregir el reloj (Mac y Windows), «Comprobar la hora con internet» (§6.3) y el desbloqueo de
 //     soporte (§6.4) con su código de solicitud, pegando la respuesta o importándola como archivo;
 //  5. «Tu licencia está bien…», solo si la licencia está vigente o en tolerancia. Si también hay un problema de
-//     licencia, los dos se muestran por separado.
+//     licencia, los dos se muestran por separado. En Tolerancia o Vencida se aclara que corregir la fecha y hora puede
+//     resolver también el aviso de la licencia (L1-D58: un salto al futuro sube la hora con la que Go calcula el
+//     estado); en Revocada o Sin activar, que es otro problema.
 //
 // El bloqueo se quita solo en cuanto el reloj se corrige: la sesión vuelve a leer el estado cada pocos segundos.
 
@@ -103,9 +109,12 @@ export function ClockBlockPage({
         </div>
         <ClockSolutions onChanged={onChanged} />
         {clock.license_ok ? (
-          <p className="clock-license-ok" role="note">
-            {clockLicenseOkText}
-          </p>
+          <div className="clock-license-ok" role="note">
+            <p>{clockLicenseOkText}</p>
+            {clockLicenseDependsOnDate(license.state) && (
+              <p className="muted text-sm">{clockLicenseGraceText}</p>
+            )}
+          </div>
         ) : (
           <div className="clock-license-problem" role="group" aria-labelledby="clock-license-title">
             <h2 id="clock-license-title">
@@ -113,7 +122,9 @@ export function ClockBlockPage({
             </h2>
             <p>{licenseStateExplanation(license)}</p>
             <p className="muted text-sm">
-              Es otro problema, aparte de la fecha y hora: corregir el reloj no lo resuelve.
+              {clockLicenseDependsOnDate(license.state)
+                ? clockLicenseMayClearText
+                : clockLicenseSeparateText}
             </p>
             <div className="button-row">
               <button type="button" className="secondary-button" onClick={onOpenLicense}>
