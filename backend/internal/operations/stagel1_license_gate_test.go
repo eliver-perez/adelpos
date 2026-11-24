@@ -201,6 +201,15 @@ func (fixture *licenseGateFixture) alwaysAvailable(t *testing.T, accountID strin
 	fixture.passesGate(t, "POST", "maintenance/backups/run", map[string]any{})
 	fixture.allowed(t, "GET", "auth/me", nil, 200)
 	fixture.allowed(t, "PUT", "preferences", map[string]any{"theme": "light", "home_screen": "status"}, 200)
+	// La puerta deja pasar siempre las rutas de la hora. El desbloqueo de soporte es «solo en esa instalación»: en una
+	// carpeta copiada lo rechaza la ruta, no la puerta, con LICENSE_INSTALLATION_COPIED (revisión R2, hallazgo R2-5).
+	if fixture.service.License.Status().Copied {
+		reply := fixture.send("POST", "license/support-request", map[string]any{})
+		if reply.status != 409 || reply.code != "LICENSE_INSTALLATION_COPIED" {
+			t.Fatalf("código de desbloqueo en una carpeta copiada: %d %s", reply.status, reply.body)
+		}
+		return
+	}
 	fixture.allowed(t, "POST", "license/support-request", map[string]any{}, 200)
 }
 

@@ -398,8 +398,7 @@ func supportWindowOpen(created, now time.Time) bool {
 func (manager *Manager) SupportRequest(renew bool) (SupportRequestInfo, error) {
 	manager.mutex.Lock()
 	defer manager.mutex.Unlock()
-	// Como toda escritura del estado: sin identidad no hay solicitud, y sin el estado del disco no se escribe (R1-1).
-	if err := manager.ensureStateLocked(); err != nil {
+	if err := manager.supportInstallationProblemLocked(); err != nil {
 		return SupportRequestInfo{}, err
 	}
 	installation := manager.options.Installation
@@ -440,6 +439,22 @@ func (manager *Manager) SupportRequest(renew bool) (SupportRequestInfo, error) {
 	return pending.info(false), nil
 }
 
+// supportInstallationProblemLocked dice por qué esta instalación no puede pedir ni aceptar un desbloqueo de soporte, o
+// nil. La §6.4 es «solo en esa instalación»: como Accept, se niega sin identidad, en una carpeta de datos copiada de
+// otra computadora (que tendría la misma identidad y la misma solicitud pendiente) y sin la huella del equipo comprobada
+// (revisión R2, hallazgo R2-5). Como toda escritura del estado, sin el estado del disco tampoco (R1-1).
+func (manager *Manager) supportInstallationProblemLocked() error {
+	switch {
+	case manager.options.Installation == nil:
+		return ErrIdentityUnavailable
+	case manager.copied:
+		return ErrCopiedInstallation
+	case manager.machineUnverified:
+		return ErrMachineUnverified
+	}
+	return manager.ensureStateLocked()
+}
+
 func (support *supportState) pending() *pendingSupportRequest {
 	if support == nil {
 		return nil
@@ -468,38 +483,68 @@ type SupportUnlockResult struct {
 	NewTrustedTime      time.Time
 }
 
-// AcceptSupportUnlock comprueba una respuesta de soporte contra la solicitud pendiente y, si vale, reemplaza la última
-// hora confiable (también hacia atrás) y marca el número como usado, en una sola escritura. Un rechazo es un
-// *SupportUnlockError con su motivo y no cambia nada; si no se puede guardar, ErrStateNotSaved, tampoco cambia nada.
-func (manager *Manager) AcceptSupportUnlock(response string, trust SupportTrust) (SupportUnlockResult, error) {
+// CheckSupportUnlock comprueba una respuesta de soporte igual que AcceptSupportUnlock, sin cambiar nada: la ruta la
+// audita antes de aplicarla, para que el desbloqueo y su auditoría pasen juntos (revisión R2, hallazgo R2-1).
+func (manager *Manager) CheckSupportUnlock(response string, trust SupportTrust) (SupportUnlockResult, error) {
 	verified, err := trust.verify(response)
 	if err != nil {
 		return SupportUnlockResult{}, err
 	}
 	manager.mutex.Lock()
 	defer manager.mutex.Unlock()
-	if err := manager.ensureStateLocked(); err != nil {
+	result, _, err := manager.prepareSupportUnlockLocked(verified)
+	return result, err
+}
+
+// AcceptSupportUnlock comprueba una respuesta de soporte contra la solicitud pendiente y, si vale, reemplaza la última
+// hora confiable (también hacia atrás) en sus dos copias y marca el número como usado en la misma escritura de
+// estado.json (R2-3). Un rechazo es un *SupportUnlockError con su motivo y no cambia nada; si no se puede guardar,
+// ErrStateNotSaved, tampoco cambia nada y el número sigue sin usar.
+func (manager *Manager) AcceptSupportUnlock(response string, trust SupportTrust) (SupportUnlockResult, error) {
+	verified, err := trust.verify(response)
+	if err != nil {
 		return SupportUnlockResult{}, err
+	}
+	manager.timeMutex.Lock()
+	defer manager.timeMutex.Unlock()
+	manager.mutex.Lock()
+	defer manager.mutex.Unlock()
+	result, next, err := manager.prepareSupportUnlockLocked(verified)
+	if err != nil {
+		return SupportUnlockResult{}, err
+	}
+	if err := manager.replaceTrustedTimeLocked(next); err != nil {
+		return SupportUnlockResult{}, err
+	}
+	manager.logger.Info("license_trusted_time_replaced", "reason", string(ReplaceBySupportUnlock),
+		"previous", result.PreviousTrustedTime, "replaced", result.NewTrustedTime)
+	return result, nil
+}
+
+// prepareSupportUnlockLocked comprueba una respuesta ya verificada contra esta instalación y su solicitud pendiente, y
+// prepara el estado que la aplica (sin guardarlo).
+func (manager *Manager) prepareSupportUnlockLocked(verified verifiedSupportResponse) (SupportUnlockResult, storedState, error) {
+	if err := manager.supportInstallationProblemLocked(); err != nil {
+		return SupportUnlockResult{}, storedState{}, err
 	}
 	installation := manager.options.Installation
 	content := verified.content
 	if content.InstallationTag != SupportInstallationTag(installation.ServerID) {
-		return SupportUnlockResult{}, supportRejected(SupportReasonOtherInstallation)
+		return SupportUnlockResult{}, storedState{}, supportRejected(SupportReasonOtherInstallation)
 	}
 	support := manager.state.Support
 	if support.used(content.RequestNonce) {
-		return SupportUnlockResult{}, supportRejected(SupportReasonUsed)
+		return SupportUnlockResult{}, storedState{}, supportRejected(SupportReasonUsed)
 	}
 	pending := support.pending()
 	if pending == nil || pending.Nonce != content.RequestNonce {
-		return SupportUnlockResult{}, supportRejected(SupportReasonNotRequested)
+		return SupportUnlockResult{}, storedState{}, supportRejected(SupportReasonNotRequested)
 	}
 	if pending.Code != content.RequestCode {
-		return SupportUnlockResult{}, supportRejected(SupportReasonAltered)
+		return SupportUnlockResult{}, storedState{}, supportRejected(SupportReasonAltered)
 	}
-	now := manager.now()
-	if !supportWindowOpen(pending.CreatedAt, now) {
-		return SupportUnlockResult{}, supportRejected(SupportReasonExpired)
+	if !supportWindowOpen(pending.CreatedAt, manager.now()) {
+		return SupportUnlockResult{}, storedState{}, supportRejected(SupportReasonExpired)
 	}
 
 	result := SupportUnlockResult{RequestCode: pending.Code, NewTrustedTime: verified.newTrustedTime}
@@ -515,13 +560,5 @@ func (manager *Manager) AcceptSupportUnlock(response string, trust SupportTrust)
 	if len(next.Support.Used) > supportUsedMemory {
 		next.Support.Used = next.Support.Used[len(next.Support.Used)-supportUsedMemory:]
 	}
-	if err := manager.store.write(next, now); err != nil {
-		manager.logger.Error("license_state_not_saved", "reason", err.Error())
-		return SupportUnlockResult{}, ErrStateNotSaved
-	}
-	manager.state = next
-	manager.dirty = false
-	manager.logger.Info("license_trusted_time_replaced", "reason", string(ReplaceBySupportUnlock),
-		"previous", result.PreviousTrustedTime, "replaced", replaced)
-	return result, nil
+	return result, next, nil
 }

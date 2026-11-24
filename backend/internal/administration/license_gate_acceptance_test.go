@@ -130,12 +130,27 @@ func TestStageL1LicenseGateWithoutSession(t *testing.T) {
 		t.Fatalf("el mesero no recibió license.changed: %v", snapshot)
 	}
 
-	// Las rutas de la hora solo en la computadora principal (escucha local).
-	_, err = service.Execute(ctx, administration.Request{Method: "POST", Path: "/api/v1/license/support-request", Body: []byte(`{}`),
-		DeviceID: admin.device, DeviceToken: admin.secret, SessionToken: admin.session, Local: false})
-	var fault *administration.Fault
-	if !errors.As(err, &fault) || fault.Status != 403 || fault.Code != "LICENSE_LOCAL_ONLY" {
-		t.Fatalf("desde la red: %v", err)
+	// Las rutas de la hora solo en la computadora principal (escucha local). Desde la red es un 409 que dice dónde se hace,
+	// no un problema de permisos: no queda como acceso denegado en la auditoría (revisión R2, hallazgo R2-6).
+	countDenied := func() int {
+		var denied int
+		if err := pool.QueryRow(ctx, "SELECT count(*)::int FROM app.audit_events WHERE action='access.denied'").Scan(&denied); err != nil {
+			t.Fatal(err)
+		}
+		return denied
+	}
+	deniedBefore := countDenied()
+	for _, route := range []string{"license/time-check", "license/support-request", "license/support-unlock"} {
+		_, err = service.Execute(ctx, administration.Request{Method: "POST", Path: "/api/v1/" + route, Body: []byte(`{}`),
+			DeviceID: admin.device, DeviceToken: admin.secret, SessionToken: admin.session, Local: false})
+		var fault *administration.Fault
+		if !errors.As(err, &fault) || fault.Status != 409 || fault.Code != "LICENSE_LOCAL_ONLY" ||
+			!strings.Contains(fault.Message, "computadora principal") {
+			t.Fatalf("%s desde la red: %v", route, err)
+		}
+	}
+	if denied := countDenied(); denied != deniedBefore {
+		t.Fatalf("las rutas de la hora desde la red quedaron como acceso denegado: %d antes, %d después", deniedBefore, denied)
 	}
 	reply := env.call(admin, "POST", "license/support-request", map[string]any{}, 200)
 	if code := fmt.Sprint(reply["request_code"]); len(code) != 29 || reply["expires_at_text"] == "" {

@@ -75,6 +75,11 @@ func (service *Service) completeDeferred(ctx context.Context, result any) (any, 
 	if check, ok := result.(*timeCheck); ok {
 		return service.completeTimeCheck(ctx, check)
 	}
+	// Revisión R2 (hallazgo R2-1): el desbloqueo de soporte, también fuera de la transacción, con su auditoría confirmada
+	// antes de bajar la hora.
+	if attempt, ok := result.(*supportUnlockAttempt); ok {
+		return service.completeSupportUnlock(ctx, attempt)
+	}
 	if notice, ok := result.(*licenseNotice); ok {
 		service.notifyLicense(ctx)
 		return notice.result, nil

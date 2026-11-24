@@ -97,14 +97,15 @@ var stage9HLegacyTables = []string{"legacy_import_batches", "legacy_id_map", "le
 // cambiar ninguna. La prueba migra hasta la última, así que excluye lo que agrega la 0025 (etapa A1: sus tablas
 // pin_attempts y offline_order_credentials, el permiso waiter_devices.use y sus concesiones), que se comprueba en
 // stagea1_upgrade_test.go, la tabla ready_notices de la 0026 (etapa A2, parte D), que se comprueba en
-// stagea2_upgrade_test.go, y lo de la 0028 (etapa L1: la tabla license_revisions de la sección «Fase A (revisión R1)»,
-// el permiso license.manage de la «Fase B» y la tabla license_seats de la «Fase D»), que se comprueba en
-// stagel1_upgrade_test.go.
+// stagea2_upgrade_test.go, y lo de la 0028 (etapa L1: las tablas license_revisions y license_trusted_time de la sección
+// «Fase A (revisión R1)», el permiso license.manage de la «Fase B» y la tabla license_seats de la «Fase D»), que se
+// comprueba en stagel1_upgrade_test.go.
 func stage9HRowCounts(ctx context.Context, t *testing.T, pool *pgxpool.Pool) string {
 	t.Helper()
 	rows, err := pool.Query(ctx, `SELECT table_name FROM information_schema.tables WHERE table_schema = 'app'
         AND table_type = 'BASE TABLE' AND table_name NOT LIKE 'legacy\_%'
-        AND table_name NOT IN ('pin_attempts', 'offline_order_credentials', 'ready_notices', 'license_seats', 'license_revisions')
+        AND table_name NOT IN ('pin_attempts', 'offline_order_credentials', 'ready_notices', 'license_seats', 'license_revisions',
+            'license_trusted_time')
         ORDER BY table_name`)
 	if err != nil {
 		t.Fatal(err)

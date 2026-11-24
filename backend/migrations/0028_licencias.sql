@@ -3,10 +3,11 @@
 -- «Fase B» y «Fase D». Es transaccional (el migrador aplica todas las pendientes en una sola transacción). No toca
 -- ventas, pagos, cortes, cuentas, pedidos, sesiones, usuarios, roles ni terminales: solo agrega lo que dice cada
 -- sección. La licencia, su llave y la última hora confiable no van en la base sino en identity/ (decisión L1-D9): la
--- base solo guarda una segunda copia de las revisiones aceptadas (revisión R1), el permiso y los cupos.
+-- base solo guarda una segunda copia de las revisiones aceptadas (revisión R1) y de la última hora confiable (revisión
+-- R2), el permiso y los cupos.
 
 -- =====================================================================================================================
--- Fase A (revisión R1) · Segunda copia del historial de revisiones aceptadas (hallazgo R1-3 de la revisión R1)
+-- Fase A (revisión R1) · Segundas copias del historial de revisiones (R1-3) y de la última hora confiable (R2-3)
 -- =====================================================================================================================
 
 -- 1. La revisión más alta aceptada de cada licencia (contrato §10.4) vive en identity/licencia/estado.json (L1-D9).
@@ -25,6 +26,26 @@ CREATE TABLE app.license_revisions (
 );
 COMMENT ON TABLE app.license_revisions IS
     'Segunda copia de la revisión más alta aceptada de cada licencia (etapa L1, revisión R1; la primera está en identity/licencia)';
+
+-- 2. La última hora confiable (§5.6 del contrato y §6 de la especificación) vive en identity/licencia/estado.json
+--    (L1-D9). Esta tabla es su segunda copia (hallazgo R2-3 de la revisión R2), con una sola fila: la que vale es el
+--    máximo de las dos. Si se edita o se borra estado.json, manda la de la base; si se restaura un respaldo viejo de la
+--    base, manda la de identity/. El servidor la sube cada minuto junto con estado.json y nunca la baja
+--    (internal/licensing, RaiseTrustedTimeCopy), salvo «Comprobar la hora con internet» (§6.3) y el desbloqueo de
+--    soporte (§6.4), que bajan las dos copias (ReplaceTrustedTimeCopy). Nace vacía: el primer arranque de la 0.15.0 la
+--    llena con la mayor entre estado.json y la última actividad de la auditoría (L1-D15). source es la fuente de esa
+--    hora, con los nombres de internal/licensing.
+CREATE TABLE app.license_trusted_time (
+    id smallint NOT NULL DEFAULT 1 CONSTRAINT license_trusted_time_pkey PRIMARY KEY
+        CONSTRAINT license_trusted_time_single_row_check CHECK (id = 1),
+    trusted_time timestamptz NOT NULL,
+    source text NOT NULL
+        CONSTRAINT license_trusted_time_source_check CHECK (source IN ('server_time', 'issued_at', 'local_clock',
+            'operation', 'audit', 'internet_check', 'support_unlock')),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+COMMENT ON TABLE app.license_trusted_time IS
+    'Segunda copia de la última hora confiable (etapa L1, revisión R2; la primera está en identity/licencia)';
 
 -- =====================================================================================================================
 -- Fase B · Cliente del servidor de licencias (§3 y §4 de la especificación; decisiones L1-D21 y L1-D23)

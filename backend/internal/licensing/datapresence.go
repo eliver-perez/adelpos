@@ -2,6 +2,7 @@ package licensing
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -151,4 +152,74 @@ func (probe PoolProbe) RecordAcceptedRevision(ctx context.Context, licenseID str
             SET license_revision = EXCLUDED.license_revision, sha256 = EXCLUDED.sha256, updated_at = now()
             WHERE app.license_revisions.license_revision < EXCLUDED.license_revision`, licenseID, revision, sha256)
 	return err
+}
+
+// --- Copia de la última hora confiable (revisión R2, hallazgo R2-3) --------------------------------------------
+//
+// app.license_trusted_time (0028, sección «Fase A (revisión R1)») tiene a lo más una fila: la segunda copia de la
+// última hora confiable de estado.json, con su fuente. La que vale es el máximo de las dos (manager.go). Viaja en los
+// respaldos, pero restaurar uno viejo solo baja esta copia, nunca la de identity/; y editar o borrar estado.json no toca
+// esta. Solo la §6.3 y la §6.4 la bajan (ReplaceTrustedTimeCopy).
+
+// trustedTimeRaiseStatement sube la copia; nunca la baja.
+const trustedTimeRaiseStatement = `INSERT INTO app.license_trusted_time(id, trusted_time, source) VALUES (1, $1, $2)
+    ON CONFLICT (id) DO UPDATE SET trusted_time = EXCLUDED.trusted_time, source = EXCLUDED.source, updated_at = now()
+        WHERE app.license_trusted_time.trusted_time < EXCLUDED.trusted_time`
+
+// trustedTimeReplaceStatement la reemplaza, también hacia atrás.
+const trustedTimeReplaceStatement = `INSERT INTO app.license_trusted_time(id, trusted_time, source) VALUES (1, $1, $2)
+    ON CONFLICT (id) DO UPDATE SET trusted_time = EXCLUDED.trusted_time, source = EXCLUDED.source, updated_at = now()`
+
+// TrustedTimeCopy lee la copia de la base, con falso si todavía no hay ninguna.
+func (probe PoolProbe) TrustedTimeCopy(ctx context.Context) (TrustedCopy, bool, error) {
+	var value TrustedCopy
+	var found bool
+	err := probe.readOnly(ctx, func(ctx context.Context, querier rowQuerier) error {
+		err := querier.QueryRow(ctx, `SELECT trusted_time, source FROM app.license_trusted_time WHERE id = 1`).
+			Scan(&value.Time, &value.Source)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		value.Time = value.Time.UTC()
+		found = true
+		return nil
+	})
+	return value, found, err
+}
+
+// RaiseTrustedTimeCopy sube la copia de la base.
+func (probe PoolProbe) RaiseTrustedTimeCopy(ctx context.Context, value TrustedCopy) error {
+	return probe.writeTrustedTime(ctx, trustedTimeRaiseStatement, value)
+}
+
+// ReplaceTrustedTimeCopy reemplaza la copia de la base, también hacia atrás (§6.3 y §6.4).
+func (probe PoolProbe) ReplaceTrustedTimeCopy(ctx context.Context, value TrustedCopy) error {
+	return probe.writeTrustedTime(ctx, trustedTimeReplaceStatement, value)
+}
+
+// writeTrustedTime escribe la fila en una transacción corta propia, con plazo y lock_timeout: la escritura de cada
+// minuto nunca espera a un cambio de estructura.
+func (probe PoolProbe) writeTrustedTime(ctx context.Context, statement string, value TrustedCopy) error {
+	if value.Time.IsZero() {
+		return errors.New("la última hora confiable no es válida")
+	}
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
+	transaction, err := probe.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = transaction.Rollback(context.Background())
+	}()
+	if _, err := transaction.Exec(ctx, "SET LOCAL lock_timeout = '2s'"); err != nil {
+		return err
+	}
+	if _, err := transaction.Exec(ctx, statement, value.Time.UTC(), value.Source); err != nil {
+		return err
+	}
+	return transaction.Commit(ctx)
 }
