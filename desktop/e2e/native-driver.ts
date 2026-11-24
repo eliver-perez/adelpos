@@ -1,8 +1,9 @@
 import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { request as httpsRequest } from 'node:https';
 import { tmpdir } from 'node:os';
-import { basename, isAbsolute, join } from 'node:path';
+import { basename, dirname, extname, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Page } from '@playwright/test';
 import {
@@ -118,6 +119,8 @@ export interface DriverOptions {
   // (`catalog: false`), la base queda como la deja el asistente inicial.
   server?: { url: string; provisioning: string };
   catalog?: boolean;
+  // Etapa L1 (Fase E): con `license: false` la base nueva queda sin activar (la especificación de la activación).
+  license?: boolean;
 }
 
 // Servidor temporal con una base limpia (etapa 9H, fase D): solo lo usa workflow-stage9h-migration.spec.ts para el
@@ -126,6 +129,156 @@ export function cleanServer(): { url: string; provisioning: string } | null {
   const url = process.env.ADEL_BROWSER_CLEAN_SERVER_URL;
   const provisioning = process.env.ADEL_BROWSER_CLEAN_PROVISIONING;
   return url && provisioning ? { url, provisioning } : null;
+}
+
+// --- Etapa L1 (Fase E): la licencia del Go temporal ---------------------------------------------------------------
+//
+// Con la puerta de la licencia (Fase C), un Go temporal sin licencia queda «Sin activar»: rechaza la captura, la
+// administración y emparejar. Este es **el único lugar** donde las pruebas lo activan: al configurar una base nueva,
+// installDriver entra como el administrador del asistente e importa una licencia de prueba (POST license/import), antes
+// de preparar el catálogo. La licencia la firma `license-test issue` (Fase B) con las llaves de prueba de vectors.json
+// para la identidad de ese Go temporal; nunca se llama a un servidor de licencias real. El Go temporal debe confiar en
+// esas llaves (ADEL_TEST_LICENSE_TRUST, que ponen scripts/browser-tests.py y el arnés aislado); si no, la importación
+// falla y la prueba lo dice.
+//
+// La licencia de las especificaciones es perpetua y con cupos holgados (20 de cada uno): las que no tratan de la
+// licencia nunca se quedan sin cupo. Las de la etapa L1 importan otras y al terminar dejan una así.
+
+const repositoryRoot = fileURLToPath(new URL('../../', import.meta.url));
+export const licenseVectors = join(repositoryRoot, 'contracts/licencias/v1/fixtures/vectors.json');
+export const defaultTestLicense = [
+  '--type',
+  'perpetual',
+  '--plan',
+  'premium',
+  '--cash-registers',
+  '20',
+  '--order-takers',
+  '20',
+  '--kitchen-displays',
+  '20',
+  '--licensee',
+  'Restaurante de aceptación',
+];
+const licenseCapability = 'license-v1';
+let builtLicenseTool = '';
+
+// licenseTool es la orden license-test: la que indica ADEL_BROWSER_LICENSE_TOOL o, si no, una compilada una sola vez por
+// proceso en una carpeta temporal (solo de pruebas: nunca llega a un instalador).
+function licenseTool() {
+  const configured = process.env.ADEL_BROWSER_LICENSE_TOOL;
+  if (configured) return configured;
+  if (builtLicenseTool === '') {
+    const folder = mkdtempSync(join(tmpdir(), 'adel-license-tool-'));
+    const output = join(folder, process.platform === 'win32' ? 'license-test.exe' : 'license-test');
+    execFileSync('go', ['build', '-o', output, './cmd/license-test'], {
+      cwd: join(repositoryRoot, 'backend'),
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    builtLicenseTool = output;
+  }
+  return builtLicenseTool;
+}
+
+// issueTestLicense firma un .lic de prueba para la instalación de esa carpeta identity y devuelve su texto (JWS).
+export function issueTestLicense(identityDirectory: string, args: string[] = defaultTestLicense) {
+  const output = execFileSync(
+    licenseTool(),
+    ['issue', '--identity', identityDirectory, '--fixtures', licenseVectors, ...args],
+    { env: { ...process.env, ADEL_TEST_MODE: '1' }, stdio: ['ignore', 'pipe', 'pipe'] },
+  ).toString();
+  const line = output.trim().split('\n').pop() ?? '';
+  const event = JSON.parse(line) as { event?: string; output?: string; message?: string };
+  if (event.event !== 'issued' || !event.output) {
+    throw new Error(`license-test issue no emitió la licencia: ${event.message ?? line}`);
+  }
+  return event.output;
+}
+
+// Reloj simulado del Go temporal (ADEL_TEST_CLOCK_FILE, Fase A): un desfase con formato de duración de Go («-2h»). Nunca
+// se cambia la hora de la Mac. Vacío: sin desfase.
+export function setServerClockOffset(offset: string) {
+  const filename = process.env.ADEL_BROWSER_CLOCK_FILE;
+  if (!filename) {
+    throw new Error('El Go temporal no tiene reloj simulado (ADEL_BROWSER_CLOCK_FILE).');
+  }
+  writeFileSync(filename, offset);
+}
+
+export function serverClockAvailable() {
+  return !!process.env.ADEL_BROWSER_CLOCK_FILE;
+}
+
+// Servidor de licencias simulado (license-test server, en loopback y con TLS): sus controles de prueba (§ «Fase B» del
+// avance), por ejemplo `/_prueba/hora` o `/_prueba/siguiente-error`.
+export function simulatedLicenseServer() {
+  const url = process.env.ADEL_BROWSER_LICENSE_SERVER_URL;
+  const ca = process.env.ADEL_BROWSER_LICENSE_CA;
+  return url && ca ? { url, ca } : null;
+}
+
+export function licenseServerControl(path: string, body?: unknown) {
+  const server = simulatedLicenseServer();
+  if (!server) {
+    throw new Error('No hay servidor de licencias simulado (ADEL_BROWSER_LICENSE_SERVER_URL).');
+  }
+  const target = new URL(path, server.url);
+  if (target.hostname !== '127.0.0.1' && target.hostname !== '::1' && target.hostname !== '[::1]') {
+    throw new Error('El servidor de licencias simulado solo escucha en loopback.');
+  }
+  const payload = body === undefined ? undefined : JSON.stringify(body);
+  return new Promise<{ status: number; body: unknown }>((resolve, reject) => {
+    const outgoing = httpsRequest(
+      target,
+      {
+        method: payload === undefined ? 'GET' : 'POST',
+        ca: readFileSync(server.ca),
+        headers: payload === undefined ? {} : { 'Content-Type': 'application/json' },
+      },
+      (response) => {
+        const chunks: Buffer[] = [];
+        response.on('data', (chunk: Buffer) => chunks.push(chunk));
+        response.on('end', () => {
+          const text = Buffer.concat(chunks).toString('utf8');
+          let parsed: unknown = text;
+          try {
+            parsed = text === '' ? null : JSON.parse(text);
+          } catch {
+            parsed = text;
+          }
+          resolve({ status: response.statusCode ?? 0, body: parsed });
+        });
+      },
+    );
+    outgoing.on('error', reject);
+    if (payload !== undefined) outgoing.write(payload);
+    outgoing.end();
+  });
+}
+
+// Tercer Go temporal, con una base limpia y **sin activar** (etapa L1): solo lo usa la especificación de la activación
+// (installDriver con `license: false`). Lo arrancan scripts/browser-tests.py y el arnés aislado; sin él, esas pruebas se
+// omiten.
+export function unlicensedServer(): { url: string; provisioning: string } | null {
+  const url = process.env.ADEL_BROWSER_UNLICENSED_SERVER_URL;
+  const provisioning = process.env.ADEL_BROWSER_UNLICENSED_PROVISIONING;
+  return url && provisioning ? { url, provisioning } : null;
+}
+
+// Port de suggested_request_name de license_files.rs.
+function suggestedRequestName(filename: string) {
+  const base = filename.split(/[/\\]/).pop() ?? '';
+  const cleaned = base.replace(/[^A-Za-z0-9._-]/g, '_');
+  let stem = cleaned.endsWith('.licreq') ? cleaned.slice(0, -'.licreq'.length) : cleaned;
+  stem = stem.replace(/^[._]+|[._]+$/g, '');
+  if (stem === '') stem = 'solicitud-licencia';
+  return `${stem.slice(0, 100 - '.licreq'.length)}.licreq`;
+}
+
+export interface SavedLicenseRequest {
+  action: string;
+  fileName: string;
+  content: string;
 }
 
 export async function installDriver(page: Page, options: DriverOptions = {}) {
@@ -284,10 +437,10 @@ export async function installDriver(page: Page, options: DriverOptions = {}) {
   let deviceID = '';
   let deviceToken = '';
   let sessionToken = '';
-  const provisioning = readFileSync(
-    options.server?.provisioning ?? process.env.ADEL_BROWSER_PROVISIONING!,
-    'utf8',
-  ).trim();
+  const provisioningFile = options.server?.provisioning ?? process.env.ADEL_BROWSER_PROVISIONING!;
+  const provisioning = readFileSync(provisioningFile, 'utf8').trim();
+  // Etapa L1: la carpeta identity del Go temporal (junto a su token, como en e2e/pairing.ts), para firmarle licencias.
+  const identityDirectory = join(dirname(provisioningFile), 'identity');
   const rust = readFileSync(new URL('../src-tauri/src/api.rs', import.meta.url), 'utf8');
   const routes = new Map<string, { method: string; path: string }>();
   for (const match of rust.matchAll(
@@ -451,6 +604,24 @@ export async function installDriver(page: Page, options: DriverOptions = {}) {
     delete result.session_token;
     return { status: response.status, body: result };
   }
+  // Etapa L1: el servidor aplica la licencia (capacidad license-v1).
+  async function serverLicensed() {
+    const version = await request('GET', 'version');
+    const capabilities = (version.body as { capabilities?: unknown }).capabilities;
+    return Array.isArray(capabilities) && capabilities.includes(licenseCapability);
+  }
+  async function activateTestLicense() {
+    await request('POST', 'auth/login', { username: 'admin', password: 'admin' });
+    const imported = await request('POST', 'license/import', {
+      license: issueTestLicense(identityDirectory),
+    });
+    await request('POST', 'auth/logout');
+    if (imported.status !== 200) {
+      throw new Error(
+        `No se pudo activar el Go temporal con la licencia de prueba (¿arrancó con ADEL_TEST_LICENSE_TRUST?): ${JSON.stringify(imported.body?.error ?? imported.body)}`,
+      );
+    }
+  }
   const setup = await request('GET', 'setup/status');
   const prepared = setup.body.configured
     ? (options.terminal ?? preparedTerminals.get(provisioning))
@@ -467,6 +638,10 @@ export async function installDriver(page: Page, options: DriverOptions = {}) {
       terminal_name: 'WebView temporal',
     });
     preparedTerminals.set(provisioning, { deviceID, deviceToken });
+    // Etapa L1: activar va antes de administrar (tabla de la §6 del contrato de licencias).
+    if (options.license !== false && (await serverLicensed())) {
+      await activateTestLicense();
+    }
   } else if (prepared) {
     deviceID = prepared.deviceID;
     deviceToken = prepared.deviceToken;
@@ -1005,6 +1180,90 @@ export async function installDriver(page: Page, options: DriverOptions = {}) {
     }
     throw new Error('Comando de prueba no autorizado');
   }
+  // Etapa L1 (Fase E): archivos de la licencia. Simula las operaciones cerradas de src-tauri/src/license_files.rs:
+  // license_save_request pide a Go la solicitud .licreq (POST license/offline-request, fuera de la lista cerrada de
+  // api.rs) y la «guarda» según la cola nextLicenseSave ('save' | 'cancel'; sin respuesta, guarda); license_import_file
+  // y license_import_unlock_file «eligen» el archivo de la cola nextLicenseFile / nextUnlockFile (una ruta o 'cancel'; sin
+  // respuesta, se cancela), lo leen con las mismas comprobaciones que Rust y lo envían a Go. El navegador nunca recibe una
+  // ruta ni el contenido, como con Rust.
+  const licenseFolder = mkdtempSync(join(tmpdir(), 'adel-license-e2e-'));
+  page.on('close', () => {
+    rmSync(licenseFolder, { recursive: true, force: true });
+  });
+  const licenseChoices = { save: [] as string[], license: [] as string[], unlock: [] as string[] };
+  const savedLicenseRequests: SavedLicenseRequest[] = [];
+  function readChosenFile(path: string, extension: string, limit: number, wrongFile: string) {
+    if (!isAbsolute(path) || extname(path).toLowerCase() !== extension || !existsSync(path)) {
+      return { problem: wrongFile };
+    }
+    const size = statSync(path).size;
+    if (size === 0 || size > limit) return { problem: wrongFile };
+    const bytes = readFileSync(path);
+    const text = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+    if (text.includes('\uFFFD') || text.trim() === '') return { problem: wrongFile };
+    return { text };
+  }
+  async function simulateLicenseFiles(command: string, args: Record<string, unknown>) {
+    const reject = (message: string) => ({ __bridgeRejection: message });
+    if (command === 'license_save_request') {
+      const action = String(args.action ?? '');
+      if (!['activate', 'renew', 'deactivate'].includes(action))
+        return reject('Elige activar, renovar o liberar.');
+      const key = typeof args.licenseKey === 'string' ? args.licenseKey.trim() : '';
+      const body: Record<string, string> = { action };
+      if (key !== '') {
+        if (action !== 'activate')
+          return reject('El código de la licencia solo va en la solicitud de activación.');
+        if ([...key].length > 64)
+          return reject('El código de la licencia no tiene el formato correcto.');
+        body.license_key = key;
+      }
+      const response = await request('POST', 'license/offline-request', body);
+      if (response.status !== 200) return response;
+      if ((licenseChoices.save.shift() ?? 'save') === 'cancel') {
+        return { status: 200, body: { result: 'cancelled' } };
+      }
+      const fileName = suggestedRequestName(String(response.body.filename ?? ''));
+      savedLicenseRequests.push({ action, fileName, content: String(response.body.content) });
+      return { status: 200, body: { result: 'saved', file_name: fileName } };
+    }
+    if (command === 'license_import_file' || command === 'license_import_unlock_file') {
+      const unlock = command === 'license_import_unlock_file';
+      const path = (unlock ? licenseChoices.unlock : licenseChoices.license).shift() ?? 'cancel';
+      if (path === 'cancel') return { status: 200, body: { result: 'cancelled' } };
+      const chosen = unlock
+        ? readChosenFile(
+            path,
+            '.desbloqueo',
+            16 * 1024,
+            'Elige la respuesta de soporte (un archivo terminado en .desbloqueo).',
+          )
+        : readChosenFile(
+            path,
+            '.lic',
+            64 * 1024,
+            'Elige el archivo de licencia (un archivo terminado en .lic) que te enviaron.',
+          );
+      if ('problem' in chosen) return reject(chosen.problem!);
+      const response = unlock
+        ? await request('POST', 'license/support-unlock', { response: chosen.text, source: 'file' })
+        : await request('POST', 'license/import', { license: chosen.text });
+      if (response.status !== 200) return response;
+      return {
+        status: 200,
+        body: unlock
+          ? { result: 'unlocked', unlock: response.body }
+          : { result: 'imported', license: response.body },
+      };
+    }
+    throw new Error('Comando de prueba no autorizado');
+  }
+  // Escribe un archivo en la carpeta temporal de la prueba (por ejemplo, un .lic de license-test) y devuelve su ruta.
+  function writeLicenseFile(name: string, content: string) {
+    const path = join(licenseFolder, name);
+    writeFileSync(path, content);
+    return path;
+  }
   await page.exposeFunction(
     '__nativeTestBridge',
     async (command: string, args: Record<string, unknown> = {}) => {
@@ -1124,6 +1383,7 @@ export async function installDriver(page: Page, options: DriverOptions = {}) {
         }
       }
       if (command.startsWith('legacy_')) return simulateLegacy(command, args);
+      if (command.startsWith('license_')) return simulateLicenseFiles(command, args);
       if (command !== 'api_request') throw new Error('Comando de prueba no autorizado');
       const operation = String(args.operation);
       const entry = routes.get(operation);
@@ -1301,6 +1561,19 @@ export async function installDriver(page: Page, options: DriverOptions = {}) {
     setInstallation,
     setDiscovery,
     printAgent: { report: reportLocalPrinters, run: runPrintAgent, calls: printAgentCalls },
+    // Etapa L1 (Fase E): la licencia del Go temporal (firmar e importar con la sesión de la página) y los diálogos de
+    // license_files.rs.
+    license: {
+      identity: identityDirectory,
+      issue: (args: string[] = defaultTestLicense) => issueTestLicense(identityDirectory, args),
+      install: async (args: string[] = defaultTestLicense) =>
+        request('POST', 'license/import', { license: issueTestLicense(identityDirectory, args) }),
+      writeFile: writeLicenseFile,
+      nextSave: (choice: 'save' | 'cancel') => licenseChoices.save.push(choice),
+      nextLicenseFile: (path: string) => licenseChoices.license.push(path),
+      nextUnlockFile: (path: string) => licenseChoices.unlock.push(path),
+      requests: savedLicenseRequests,
+    },
     // Etapa 9H (fase D): diálogos, preparación simulada, paquetes sintéticos y lo anotado en Go.
     legacy: {
       nextBackup: (name: string) => legacyChoices.backup.push(name),
