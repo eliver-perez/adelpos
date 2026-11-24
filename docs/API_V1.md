@@ -861,6 +861,10 @@ decide; el cliente solo muestra el mensaje o arma el suyo con `details`.
   recibe su resultado guardado aunque el cupo de esa terminal haya vencido mientras tanto.
 - **Licencia nueva con menos cupos**: nadie se interrumpe (quien tiene su cupo lo conserva y sigue capturando); no se
   ocupan cupos nuevos hasta quedar dentro del límite.
+- **Reloj que saltó al futuro y se corrigió** (L1-D43): la actividad de un comandero registrada con la fecha adelantada
+  cuenta como de ahora y vence **15 minutos reales** después del primer intento de captura o previa con la hora
+  corregida (también si ese intento recibe `LICENSE_SEAT_UNAVAILABLE`); nunca espera a que el reloj real alcance la
+  fecha del salto. Con «Hora del equipo incorrecta» no se cambia.
 - **Sin licencia válida**: 409 `LICENSE_NOT_ACTIVATED` (la puerta de la licencia rechaza antes esas operaciones).
 - **`setKitchenDisplayMode`** (`POST /kitchen/display-mode`, `{active: boolean}` → `{active}`): lo llama la terminal al
   entrar a Preparación y al salir. Requiere `kitchen.states.read`; repetirlo no ocupa otro cupo; salir nunca falla por
