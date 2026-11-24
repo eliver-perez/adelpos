@@ -70,7 +70,9 @@ type storedState struct {
 	// TrustedTime es la última hora confiable (§5.6) y TrustedSource su fuente.
 	TrustedTime   *time.Time `json:"last_trusted_time,omitempty"`
 	TrustedSource string     `json:"last_trusted_source,omitempty"`
-	UpdatedAt     time.Time  `json:"updated_at"`
+	// Support es la solicitud de desbloqueo de soporte pendiente y los números ya usados (Fase C, unlock.go).
+	Support   *supportState `json:"support_unlock,omitempty"`
+	UpdatedAt time.Time     `json:"updated_at"`
 }
 
 func newStoredState() storedState {
@@ -88,6 +90,7 @@ func (state storedState) clone() storedState {
 		instant := *state.TrustedTime
 		copied.TrustedTime = &instant
 	}
+	copied.Support = state.Support.clone()
 	return copied
 }
 

@@ -76,6 +76,15 @@ type Service struct {
 	// sin fuente de límites, no hay licencia válida y ninguna operación que pide cupo procede (falla cerrada): main.go
 	// lo crea siempre y las pruebas inyectan uno con los cupos y el reloj que necesitan (licenseseats/seatstest).
 	Seats *licenseseats.Manager
+	// Etapa L1, Fase C (license_gate.go, license_clock.go y license_monitor.go): la puerta de la licencia y la
+	// protección de la hora. LicenseServerClock da la hora del servidor de licencias para «Comprobar la hora con
+	// internet» (§6.3; lo implementa el cliente de la Fase B; sin valor, esa ruta responde 503). SupportTrust son las
+	// llaves públicas de soporte del desbloqueo sin internet (§6.4); sin valor, las compiladas (solo las pruebas lo
+	// cambian). licenseMonitorState es el vigilante que audita los bloqueos y publica license.changed.
+	LicenseServerClock  LicenseServerClock
+	SupportTrust        *licensing.SupportTrust
+	licenseMonitorOnce  sync.Once
+	licenseMonitorState *licenseMonitor
 	// Logger recibe el detalle técnico de los fallos que la interfaz explica sin términos técnicos.
 	Logger      *slog.Logger
 	reportsOnce sync.Once
@@ -317,6 +326,14 @@ func (service *Service) dispatch(ctx context.Context, tx pgx.Tx, request Request
 		return nil, unauthorized("OFFLINE_CREDENTIAL_NOT_ALLOWED",
 			"La autorización de envío solo sirve para entregar pedidos capturados sin conexión.")
 	}
+	// Etapa L1, Fase C (license_gate.go): la puerta de la licencia y de la hora. Las rutas públicas (asistente, alta de la
+	// propia computadora y emparejamiento) pasan aquí, antes de atenderlas; todas las demás, en cuanto se autentica la
+	// terminal (abajo).
+	if publicLicenseRoute(route) {
+		if err := service.licenseGate(ctx, tx, request, route); err != nil {
+			return nil, err
+		}
+	}
 	if route == "setup/status" && request.Method == "GET" {
 		var configured bool
 		err := tx.QueryRow(ctx, "SELECT EXISTS(SELECT FROM app.establishment)").Scan(&configured)
@@ -350,6 +367,11 @@ func (service *Service) dispatch(ctx context.Context, tx pgx.Tx, request Request
 		return nil, err
 	}
 	if err := matchClientKind(ctx, tx, request); err != nil {
+		return nil, err
+	}
+	// Etapa L1, Fase C (license_gate.go): la puerta, para todo lo que sigue (entrada con contraseña o PIN, credencial de
+	// envío, agente de impresión, avisos de platillos listos y toda operación con sesión).
+	if err := service.licenseGate(ctx, tx, request, route); err != nil {
 		return nil, err
 	}
 	if route == "auth/login" && request.Method == "POST" {

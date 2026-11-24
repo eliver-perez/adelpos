@@ -198,24 +198,6 @@ func TestLicenseRoutes(t *testing.T) {
 		t.Fatalf("resumen sin sesión: %v", summary)
 	}
 
-	// Sin license.manage: ver el estado sí, administrar no.
-	var cashierRole string
-	if err := pool.QueryRow(ctx, "SELECT id FROM app.roles WHERE code='cashier'").Scan(&cashierRole); err != nil {
-		t.Fatal(err)
-	}
-	env.call(admin, "POST", "users", map[string]any{"username": "cajera", "display_name": "Cajera", "role_id": cashierRole,
-		"active": true, "password": "clave-cajera"}, 200, "")
-	cashier := login("cajera", "clave-cajera")
-	if view := env.call(cashier, "GET", "license/status", nil, 200, ""); view["can_manage"] != false {
-		t.Fatalf("sin permiso no administra: %v", view)
-	}
-	for _, route := range []string{"license/activate", "license/refresh", "license/deactivate", "license/offline-request", "license/import", "license/identity/regenerate"} {
-		env.call(cashier, "POST", route, map[string]any{}, 403, "PERMISSION_DENIED")
-	}
-	if env.scalar("SELECT count(*)::int FROM app.role_permissions rp JOIN app.roles r ON r.id=rp.role_id WHERE rp.permission_key='license.manage' AND r.code<>'administrator'") != 0 {
-		t.Fatal("license.manage solo es del administrador")
-	}
-
 	// Cada código de error, con su texto propio.
 	env.call(admin, "POST", "license/activate", map[string]string{"license_key": "no-es-un-codigo"}, 400, "LICENSE_KEY_INVALID_FORMAT")
 	env.call(admin, "POST", "license/activate", map[string]string{"license_key": "ZZZ-2222-2222-2222"}, 404, "LICENSE_KEY_NOT_FOUND")
@@ -247,6 +229,25 @@ func TestLicenseRoutes(t *testing.T) {
 	moved := env.call(admin, "POST", "license/transfer", map[string]any{"license_key": "ACT-2222-2222-2222", "confirmed": true}, 200, "")
 	if moved["state"] != "active" || moved["license"] == nil {
 		t.Fatalf("transferida: %v", moved)
+	}
+
+	// Sin license.manage: ver el estado sí, administrar no. Etapa L1, fase C: dar de alta a la cajera es administración,
+	// que la puerta de la licencia no permite sin activar (tabla de la §6): va después de activar.
+	var cashierRole string
+	if err := pool.QueryRow(ctx, "SELECT id FROM app.roles WHERE code='cashier'").Scan(&cashierRole); err != nil {
+		t.Fatal(err)
+	}
+	env.call(admin, "POST", "users", map[string]any{"username": "cajera", "display_name": "Cajera", "role_id": cashierRole,
+		"active": true, "password": "clave-cajera"}, 200, "")
+	cashier := login("cajera", "clave-cajera")
+	if view := env.call(cashier, "GET", "license/status", nil, 200, ""); view["can_manage"] != false {
+		t.Fatalf("sin permiso no administra: %v", view)
+	}
+	for _, route := range []string{"license/activate", "license/refresh", "license/deactivate", "license/offline-request", "license/import", "license/identity/regenerate"} {
+		env.call(cashier, "POST", route, map[string]any{}, 403, "PERMISSION_DENIED")
+	}
+	if env.scalar("SELECT count(*)::int FROM app.role_permissions rp JOIN app.roles r ON r.id=rp.role_id WHERE rp.permission_key='license.manage' AND r.code<>'administrator'") != 0 {
+		t.Fatal("license.manage solo es del administrador")
 	}
 
 	// Activar otra licencia, buscar actualización con una revisión alterada (se ignora) y sin cambios.
