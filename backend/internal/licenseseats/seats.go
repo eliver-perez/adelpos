@@ -8,12 +8,14 @@
 //     su caja (aunque lo abriera otra) ocupa el suyo en su primera captura. Se liberan todos al cerrar el turno, también
 //     desde otra computadora. Cobrar y las operaciones de efectivo nunca piden cupo.
 //   - Comandero, por terminal (L1-D2): varios meseros con su PIN en una tableta ocupan un cupo. Se ocupa al primer
-//     intento de crear o modificar un pedido sin turno activo en su caja; las previas solo renuevan la actividad. Se
-//     libera a los 15 minutos sin actividad de captura (OrderTakerIdle), cuando la terminal se queda sin sesiones
-//     vigentes (al cerrar sesión el último usuario) o al abrir turno en su caja. Volver a «Selecciona tu usuario» no
-//     cierra ninguna sesión, así que no lo libera.
+//     intento de crear o modificar un pedido sin turno activo en su caja, también con la credencial de envío de una
+//     tableta sin sesión; las previas solo renuevan la actividad. Cuenta por actividad: mientras su última captura
+//     tenga menos de 15 minutos (OrderTakerIdle). Se borra al cerrarse la última sesión de esa terminal (cerrar sesión,
+//     revocar, vencer, «Liberar cupo») y al abrir turno en su caja (revisión R3, R3-1). Volver a «Selecciona tu
+//     usuario» no cierra ninguna sesión, así que no lo libera.
 //   - Cocina (L1-D7): la terminal en Preparación (POST kitchen/display-mode), hasta que sale o se cierra la sesión que
-//     entró.
+//     entró. La vigencia de esa sesión se compara con el reloj de las sesiones (Options.SessionNow), el mismo con que
+//     se escribe y se valida, no con el reloj de los cupos (R3-2).
 //   - Asignación atómica: contar y ocupar en la misma transacción, con el lock consultivo 7820148311 (LockKey). La hora
 //     es la de Go (Options.Now), nunca now() de PostgreSQL, y se lee ya con el lock tomado.
 //   - Licencia nueva con menos cupos: quien ya tiene su cupo lo conserva; no se ocupan cupos nuevos hasta quedar dentro
@@ -106,8 +108,9 @@ func (function LimitsFunc) SeatLimits() (Limits, bool) {
 }
 
 // LockKey es el lock consultivo de los cupos: de transacción y exclusivo. Es el último que toma una operación: después
-// de 7820148305 y de cualquier otro lock consultivo que haya tomado su manejador (7820148304 o 7820148308). Las rutas que
-// solo tocan cupos (modo Cocina y liberar desde Terminales) lo toman solo. Ver CLAUDE.md §3.
+// de 7820148305 y de cualquier otro lock consultivo que haya tomado su manejador (7820148304, 7820148308 y 7820148306, el
+// de los eventos). Con él tomado nunca se publica un evento ni se pide otro lock (revisión R3, R3-3). Las rutas que solo
+// tocan cupos (modo Cocina y liberar desde Terminales) lo toman solo. Ver CLAUDE.md §3.
 const LockKey = 7820148311
 
 // OrderTakerIdle es cuánto dura el cupo de comandero sin actividad de captura (§5 de la especificación: 15 minutos). Es
@@ -119,8 +122,17 @@ type Options struct {
 	// Limits son los cupos de la licencia. Sin valor, no hay licencia válida y no se ocupa ningún cupo (falla cerrada).
 	Limits LimitsSource
 	// Now es el reloj de Go (L1-D16). Sin valor, time.Now. La Fase C le pasa el reloj local del gestor de licencias
-	// (licensing.Manager.LocalClock) y las pruebas uno simulado.
+	// (licensing.Manager.LocalClock) y las pruebas uno simulado. Con él se escribe y se compara la actividad.
 	Now func() time.Time
+	// SessionNow es el reloj de las sesiones: el mismo con que administration escribe y valida su vencimiento
+	// (issueSession y authenticateSession; hoy time.Now). Sin valor, time.Now. Con él se decide si sigue vigente la sesión
+	// de una pantalla de cocina, para que un desfase del reloj de los cupos no la dé por vencida (revisión R3, R3-2).
+	SessionNow func() time.Time
+	// ClockTrusted dice si la hora de Go (Now) es confiable en este momento: la protección de la hora de la Fase C no
+	// está en «Hora del equipo incorrecta». Sin valor, siempre lo es. Solo con la hora confiable se baja a «ahora» una
+	// actividad de comandero registrada en el futuro (hallazgo R2-2, L1-D43): con el reloj atrasado, «ahora» es la hora
+	// equivocada y bajarla liberaría antes de tiempo el cupo de una terminal que sí está capturando.
+	ClockTrusted func() bool
 	// OrderTakerIdle sustituye los 15 minutos del comandero (solo las pruebas). Sin valor, OrderTakerIdle.
 	OrderTakerIdle time.Duration
 }
@@ -128,16 +140,25 @@ type Options struct {
 // Manager aplica los cupos dentro de la transacción de cada petición (store.go). Es seguro para uso concurrente: no
 // guarda estado propio, todo está en app.license_seats.
 type Manager struct {
-	limits LimitsSource
-	now    func() time.Time
-	idle   time.Duration
+	limits       LimitsSource
+	now          func() time.Time
+	sessionNow   func() time.Time
+	clockTrusted func() bool
+	idle         time.Duration
 }
 
 // NewManager prepara el gestor de cupos.
 func NewManager(options Options) *Manager {
-	manager := &Manager{limits: options.Limits, now: options.Now, idle: options.OrderTakerIdle}
+	manager := &Manager{limits: options.Limits, now: options.Now, sessionNow: options.SessionNow,
+		clockTrusted: options.ClockTrusted, idle: options.OrderTakerIdle}
 	if manager.now == nil {
 		manager.now = time.Now
+	}
+	if manager.sessionNow == nil {
+		manager.sessionNow = time.Now
+	}
+	if manager.clockTrusted == nil {
+		manager.clockTrusted = func() bool { return true }
 	}
 	if manager.idle <= 0 {
 		manager.idle = OrderTakerIdle
@@ -157,16 +178,38 @@ func (manager *Manager) Limits() (Limits, bool) {
 	return limits, true
 }
 
-// Window es la hora de Go con que se evalúa qué cupos siguen en uso y el corte de inactividad del comandero: una fila
-// de comandero con actividad en ese instante o antes ya no cuenta.
+// Window es la hora de Go de los cupos y el corte de inactividad del comandero: una fila de comandero con actividad en
+// ese instante o antes ya no cuenta.
 func (manager *Manager) Window() (now, cutoff time.Time) {
+	now, cutoff, _ = manager.times()
+	return now, cutoff
+}
+
+// SessionNow es la hora de las sesiones (Options.SessionNow): una pantalla de cocina cuenta mientras su sesión venza
+// después (revisión R3, R3-2).
+func (manager *Manager) SessionNow() time.Time {
+	return manager.sessionNow()
+}
+
+// ClockTrusted dice si la hora de Go es confiable en este momento (Options.ClockTrusted): solo entonces se baja a
+// «ahora» una actividad de comandero registrada en el futuro (hallazgo R2-2, L1-D43).
+func (manager *Manager) ClockTrusted() bool {
+	return manager.clockTrusted()
+}
+
+// times es la hora de Go, el corte del comandero y la hora de las sesiones.
+func (manager *Manager) times() (now, cutoff, sessionNow time.Time) {
 	now = manager.now()
-	return now, now.Add(-manager.idle)
+	return now, now.Add(-manager.idle), manager.sessionNow()
 }
 
 // ErrNoValidLicense: no hay ninguna licencia válida, así que no se ocupa ningún cupo. La puerta de la Fase C rechaza
 // antes esas operaciones con su propio código (LICENSE_NOT_ACTIVATED); esto es la protección de respaldo.
 var ErrNoValidLicense = errors.New("no hay una licencia válida")
+
+// ErrSessionClosed: la sesión que pide entrar a Preparación ya no está vigente (se cerró mientras llegaba la petición).
+// Su cupo de cocina no contaría, así que no se ocupa.
+var ErrSessionClosed = errors.New("la sesión ya no está vigente")
 
 // UnavailableError es el rechazo por falta de cupo: el cupo, cuántos están en uso (sin contar a quien pide) y el límite
 // de la licencia. La API lo publica como 409 LICENSE_SEAT_UNAVAILABLE con details {seat, in_use, limit}.

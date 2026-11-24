@@ -29,17 +29,18 @@ func (service *Service) seats() *licenseseats.Manager {
 // withSeats ejecuta la operación (run, que la autoriza y la aplica en su savepoint) y aplica su efecto en los cupos, en
 // la misma transacción:
 //
-//   - Capture y OpenShift: después de que el manejador hizo su trabajo (con 7820148305 tomado), se cuenta y se ocupa el
-//     cupo con 7820148311, el último lock de la operación. Sin cupo, la respuesta es 409 LICENSE_SEAT_UNAVAILABLE y
+//   - Capture y OpenShift: después de que el manejador hizo su trabajo (con 7820148305 tomado y sus eventos ya
+//     publicados con 7820148306), se cuenta y se ocupa el cupo con 7820148311, el último lock de la operación: con él
+//     tomado no se publica nada ni se pide otro lock (R3-3). Sin cupo, la respuesta es 409 LICENSE_SEAT_UNAVAILABLE y
 //     toda la transacción se revierte: no se guarda el pedido, ni la clave de operación, ni el turno. Así los
 //     errores propios de la operación (datos inválidos, mesa ocupada, turno ya abierto…) se informan primero y un
 //     rechazo de la operación nunca ocupa un cupo.
 //   - Una operación cuya clave (operation_id) ya está registrada no vuelve a pedir cupo: el manejador responde con su
 //     resultado guardado o con su conflicto y nunca registra nada nuevo. Así un reintento de algo que ya entró (por
 //     ejemplo, la cola de Android después de una respuesta perdida) no se rechaza por un cupo que ya venció.
-//   - Preview: renueva la actividad del comandero si la terminal lo tiene.
-//   - SessionEnd: después de cerrar la sesión se borran las filas que ya no cuentan (Sweep): el comandero de la terminal
-//     que se quedó sin sesiones se libera en ese momento y no vuelve con la siguiente sesión que se abra en ella.
+//   - Preview: renueva la actividad sin el lock de los cupos (Renew, R3-4).
+//   - SessionEnd: después de cerrar sesiones, el comandero de cada terminal que se quedó sin ninguna vigente se borra en
+//     ese momento (ReleaseClosedSessions, revisión R3, R3-1): cuenta por actividad, así que no basta con el conteo.
 //   - Los demás efectos no piden nada aquí: cerrar el turno libera sin escribir (el conteo es derivado) y el modo Cocina
 //     y «Liberar cupo» lo hacen en su propia ruta.
 func (service *Service) withSeats(ctx context.Context, tx pgx.Tx, request Request, principal Principal, route string,
@@ -78,7 +79,7 @@ func (service *Service) withSeats(ctx context.Context, tx pgx.Tx, request Reques
 		if err != nil {
 			return result, err
 		}
-		if err := service.seats().Sweep(ctx, tx); err != nil {
+		if err := service.seats().ReleaseClosedSessions(ctx, tx); err != nil {
 			return nil, err
 		}
 		return result, nil
@@ -101,6 +102,28 @@ func operationRecorded(ctx context.Context, tx pgx.Tx, body json.RawMessage) (bo
 	return recorded, err
 }
 
+// seatUnavailable dice si la operación se rechazó por falta de cupo (409 LICENSE_SEAT_UNAVAILABLE de seatFault).
+func seatUnavailable(err error) bool {
+	var fault *Fault
+	return errors.As(err, &fault) && fault.Code == "LICENSE_SEAT_UNAVAILABLE"
+}
+
+// settleFutureSeatActivity guarda, después de un rechazo por falta de cupo, la actividad de comandero con fecha futura
+// bajada a «ahora» (hallazgo R2-2, L1-D43; licenseseats.SettleFutureActivity), en una transacción corta propia que solo
+// toma 7820148311. Sin esto, el rechazo revierte lo que bajó claim, cada intento vuelve a encontrar esa actividad en el
+// futuro y el cupo sigue «en uso» hasta que el reloj real alcance la fecha del salto: la otra tableta nunca entra.
+//
+// Así el cupo vence 15 minutos reales después del primer intento con la hora corregida. Si falla, el rechazo se responde
+// igual (el siguiente intento lo vuelve a hacer) y el detalle va al registro.
+func (service *Service) settleFutureSeatActivity(ctx context.Context) {
+	err := pgx.BeginFunc(ctx, service.Pool, func(tx pgx.Tx) error {
+		return service.seats().SettleFutureActivity(ctx, tx)
+	})
+	if err != nil && service.Logger != nil {
+		service.Logger.Warn("license_seats_settle_failed", "reason", err.Error())
+	}
+}
+
 // seatFault traduce el rechazo de los cupos a su error público (L1-D17, todos 409 para que no entren en la auditoría de
 // los 403). El mensaje va en español sencillo para los clientes anteriores a la etapa; los nuevos deciden por el código.
 func seatFault(err error) error {
@@ -111,6 +134,10 @@ func seatFault(err error) error {
 			"in_use": unavailable.InUse,
 			"limit":  unavailable.Limit,
 		}}
+	}
+	// La sesión que pedía entrar a Preparación se cerró mientras llegaba la petición (por ejemplo, «Liberar cupo»).
+	if errors.Is(err, licenseseats.ErrSessionClosed) {
+		return unauthorized("SESSION_REVOKED", "Tu sesión fue revocada. Inicia sesión nuevamente.")
 	}
 	// Protección de respaldo: la puerta de la Fase C rechaza antes estas operaciones sin licencia válida, con el mismo
 	// código y el estado de la licencia en details.

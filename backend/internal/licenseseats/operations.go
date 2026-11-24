@@ -28,11 +28,11 @@ const (
 	// KitchenDisplay: POST kitchen/display-mode {active}. Ocupa el cupo de cocina al entrar a Preparación y lo libera al
 	// salir. Lo hace la propia ruta (administration/license_seats.go).
 	KitchenDisplay Effect = "kitchen_display"
-	// SessionEnd: cerrar sesión o cerrar sesiones de otros (revocar una sesión o la terminal, cambiar la contraseña). Al
-	// quedarse la terminal sin sesiones vigentes se libera su comandero, y al cerrarse la sesión que entró a
-	// Preparación, su cupo de cocina: los dos cuentan solo con sesiones vigentes, y después de la operación se borran
-	// las filas que ya no cuentan (Manager.Sweep). Cualquier otro cierre de sesiones (desactivar al usuario, cambiar su
-	// PIN, una sesión vencida) libera igual en el conteo; la fila se borra en la siguiente asignación.
+	// SessionEnd: las operaciones que cierran sesiones (cerrar sesión, revocar una sesión o la terminal, cambiar la
+	// contraseña o el PIN, desactivar al usuario, crear una identidad nueva). Después de la operación se borra el
+	// comandero de cada terminal que se quedó sin ninguna sesión vigente (ReleaseClosedSessions, revisión R3, R3-1); al
+	// cerrarse la sesión que entró a Preparación, su cupo de cocina deja de contar. Una sesión vencida libera igual
+	// (authenticateSession, al encontrarla vencida).
 	SessionEnd Effect = "session_end"
 	// DeviceRelease: POST devices/{id}/seat/release. Libera el comandero y la cocina de esa terminal y cierra sus
 	// sesiones. Lo hace la propia ruta. Las cajas se liberan cerrando el turno.
@@ -94,14 +94,32 @@ func ForOperation(method, route string) Effect {
 		return CloseShift
 	case method == "POST" && route == "kitchen/display-mode":
 		return KitchenDisplay
-	case method == "POST" && (route == "auth/logout" || route == "auth/password"):
+	case method == "POST" && (route == "auth/logout" || route == "auth/password" || route == "license/identity/regenerate"):
+		return SessionEnd
+	case method == "PUT" && route == "auth/pin":
 		return SessionEnd
 	case method == "POST" && len(parts) == 3 && (parts[0] == "sessions" || parts[0] == "devices") && parts[2] == "revoke":
+		return SessionEnd
+	case parts[0] == "users" && len(parts) >= 2 && userSessionEnd(method, parts):
 		return SessionEnd
 	case method == "POST" && len(parts) == 4 && parts[0] == "devices" && parts[2] == "seat" && parts[3] == "release":
 		return DeviceRelease
 	}
 	return None
+}
+
+// userSessionEnd dice si la acción sobre un usuario puede cerrar sus sesiones: editarlo (al desactivarlo), cambiar su
+// PIN o quitárselo (cierra sus sesiones en los dispositivos de meseros).
+func userSessionEnd(method string, parts []string) bool {
+	switch {
+	case method == "PATCH" && len(parts) == 2:
+		return true
+	case method == "PUT" && len(parts) == 3 && parts[2] == "pin":
+		return true
+	case method == "POST" && len(parts) == 4 && parts[2] == "pin" && parts[3] == "remove":
+		return true
+	}
+	return false
 }
 
 // accountEffect clasifica las acciones sobre una cuenta (restaurant/accounts/{id}/<acción>).

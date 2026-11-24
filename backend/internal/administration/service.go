@@ -258,6 +258,13 @@ func (service *Service) Execute(ctx context.Context, request Request) (any, erro
 			return nil, err
 		}
 	}
+	// Etapa L1, Fase D (hallazgo R2-2, L1-D43; license_seats.go): el rechazo por falta de cupo revierte la transacción
+	// entera, también la actividad con fecha futura que los cupos bajaron a «ahora». Se baja otra vez en una transacción
+	// propia, ya revertida la de la petición (que tenía esas filas bloqueadas).
+	if seatUnavailable(operationError) {
+		_ = transaction.Rollback(ctx)
+		service.settleFutureSeatActivity(ctx)
+	}
 	return result, operationError
 }
 
@@ -518,6 +525,11 @@ func authenticateSession(ctx context.Context, tx pgx.Tx, request Request) (Princ
 			return principal, err
 		}
 		if err := audit(ctx, tx, principal, "session.expired", "session", &principal.SessionID, nil, nil, true); err != nil {
+			return principal, err
+		}
+		// Etapa L1 (revisión R3, R3-1): si era la última sesión vigente de la terminal, su comandero se libera ahora, con el
+		// mismo reloj con que se comprobó el vencimiento.
+		if err := licenseseats.ReleaseClosedSessions(ctx, tx, time.Now()); err != nil {
 			return principal, err
 		}
 		return principal, &Fault{Status: 401, Code: "SESSION_EXPIRED", Message: "Tu sesión expiró. Inicia sesión nuevamente.", Commit: true}
