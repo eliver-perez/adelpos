@@ -3050,3 +3050,208 @@ $G/levantar.sh down <carpeta>          # apaga y borra la base; la identidad se 
 - **L1-D41 · La Perpetua es del plan básico (1 / 0 / 0).** Si el propietario activa con ella la Mac real (§10 de la
   especificación), la Mac funciona como caja, pero las tabletas Android no capturan y Preparación no se abre. Va en la
   entrega final.
+
+---
+
+## Fase F · Android 0.4.0 (§8)
+
+Rama `etapa-l1-f` (árbol `$SP/wt/l1-f`), desde la cabeza de `etapa-l1` con la Fase C fusionada (`c55eef74`). La fase la
+empezó un agente que se detuvo el 23/11 por el límite de uso; otro agente la terminó el 24/11 (pruebas que faltaban,
+capturas de Android 8 y este documento). **No se cambió nada de `backend/`.**
+
+### Qué se hizo
+
+#### Versión
+
+- `android/gradle.properties`: **0.4.0**, `versionCode` **4** (`36b7fe33`).
+
+#### Los rechazos de la licencia, del cupo y de la hora, en un solo lugar (`8a4296ef`)
+
+- `core:domain/error/LicenseRefusal.kt`: los cinco códigos de L1-D17 (`LicenseRefusal.CODES`) y sus `details`:
+  `LicenseState` (estado y `details.operation`), `NoSeat` (`seat`, `in_use`, `limit`; el asiento se lee de
+  `details.seat`, nunca se supone) y `ClockInvalid` (los dos textos de la hora de Go).
+- `core:domain/error/AppError.kt:93`: `AppError.LicenseRefused`. Lo arma `ApiErrors.toAppError`
+  (`core:data/api/ApiProblem.kt`) con un 409 y uno de esos códigos. No pasa por `report` (no es un error de acceso).
+- `core:domain/error/LicenseMessages.kt:10`: **todos los textos**, nunca el `message` de la respuesta:
+  - licencia vencida, revocada o sin activar: «La licencia del sistema no permite capturar pedidos. Avisa al
+    encargado.» (en otra operación, «…no permite esta operación…»);
+  - sin cupo, el texto de §5 con los números de `details`: «No hay cupo de comandero libre (3 de 3 en uso). Pide que
+    se cierre la sesión de otra terminal.»; con límite 0, «La licencia no incluye comanderos (0 de 0): solo se
+    capturan pedidos en una terminal con el turno de caja abierto.» (L1-D27); también los de caja y cocina, por si Go
+    los dijera;
+  - hora: «No se puede registrar: la computadora principal tiene la fecha y hora incorrectas. Avisa al encargado.»,
+    más «La computadora principal tiene la hora … y la última actividad registrada fue el …» con los textos de Go;
+  - al emparejar con una principal sin activar (L1-D6): «La computadora principal no tiene la licencia activada. Pide
+    al encargado que la active y vuelve a intentarlo.».
+- Quien muestra un rechazo usa `ApiErrors.shownMessage(problem)` o `AppError.shownMessage()`: captura, modificar lo
+  enviado, precuenta, «Entregado», «Descartar cuenta vacía» y la entrada con PIN.
+
+#### La cola sin conexión (`442a7a9b`)
+
+- `core:domain/waiter/OrderSendRules.kt:60`: `SendOutcome.NotAllowed`. El pedido rechazado por la licencia, un cupo o
+  la hora queda en **«Requiere tu revisión»** con `ReviewReason.NOT_ALLOWED` (`OrderQueue.kt:168`) y el texto de su
+  código (`OrderSendRules.kt:121`). **Nunca vuelve solo a «Por enviar»**: el trabajador no lo reintenta.
+- `OrderReviewRules.kt:52` (`resend`) y `:126` (`offersResendAsIs`): la revisión muestra su introducción propia y
+  **«Enviar de nuevo»** (`TAG_REVIEW_RESEND`), con la **misma `operation_id`** y sin confirmación: Go no guardó nada
+  (ni la clave) y vuelve a revisarlo todo. «Corregir en la captura» y «Descartar el pedido» siguen como antes.
+- `CaptureRepository.kt:1077`: un `confirmDraft` rechazado así no sigue como pedido sin conexión (pasaría por la
+  misma puerta).
+- `TakeawayRepository.kt`: el nombre y teléfono de un pedido para llevar que la hora o la licencia no dejaron guardar
+  **se conserva** y sale en una vuelta siguiente de la cola (al volver la red o el mesero, al abrir la aplicación o
+  la de cada 15 minutos), sin reintentos seguidos.
+- **Sin cambio de esquema de Room**: `NOT_ALLOWED` se guarda por su nombre en el JSON de `pending_orders.review`.
+
+#### El estado de la licencia y los avisos (`eccb9150`)
+
+- `core:domain/license/LicenseSummary.kt`: el `license` del contrato (estado, días de tolerancia, `clock`).
+- `core:data/license/LicenseStatusRepository.kt:42` (`AppContainer.licenseStatus`, solo en memoria, borrado en
+  `deviceDataWipe`): lo último que traen `restaurant/state` (`RestaurantRepository`) y `auth/me`
+  (`PrecheckRepository`). El evento `license.changed` (`RealtimeKinds.LICENSE_CHANGED`) hace volver a leer
+  `restaurant/state`. Un servidor anterior que no manda `license`: sin avisos.
+- `core:ui/components/LicenseNotices.kt`:
+  - `LicenseClockBanner` (`:52`): con `clock.blocked`, el **aviso fijo** de §6.2 debajo de la barra en todas las
+    pantallas, con las dos fechas de Go;
+  - `LicenseGraceBadge` (`:102`): en Tolerancia, el **aviso discreto** en la barra, «Licencia: quedan 3 días» con
+    ≥ 600 dp de ancho o solo el ícono, 48 dp táctiles y el texto completo al tocarlo.
+  - Los pone `AdelPosNavigation` (`app/navigation/AdelPosApp.kt`).
+
+#### Documentos
+
+- `docs/ANDROID_INSTALAR.md` (`c04b09f8`): la 0.4.0, «Activa la computadora principal antes de emparejar» y la
+  sección 11, «La licencia de la computadora principal», con cada aviso y qué hacer.
+- `android/CLAUDE.md` (`9c1070f7`): regla 23 («La licencia la decide Go»), la sección «Licencia», el contrato de la
+  cola con `NOT_ALLOWED`, la versión 0.4.0 y la suite `license`.
+
+#### Pruebas nuevas y el guion de punta a punta (`97d1848c`)
+
+- JVM: `LicenseMessagesTest`, `LicenseQueueRulesTest` (dominio) y `LicenseErrorCodesTest` (las formas del contrato).
+- Robolectric: `LicenseQueueTest` (sin cupo, hora y licencia vencida en la cola: revisión, sin reintentos del
+  trabajador, «Enviar de nuevo» con la misma clave, el motivo al reabrir la base), `LicenseStatusTest` y
+  `TakeawayQueueTest` (la edición que la hora no permitió).
+- Instrumentada: `StageL1ScreensTest` (los dos avisos, la revisión y la barra).
+- `scripts/android-e2e.sh`:
+  - **Una licencia para el Go temporal de todas las suites, en un solo lugar**: `prepare_server` → `ensure_test_license`
+    (`scripts/android-e2e.sh:415`). Si el servidor temporal dice «Sin activar», le importa una perpetua premium (5
+    cajas, 10 comanderos, 5 pantallas de cocina) firmada por `backend/cmd/license-test` con las llaves de prueba de
+    `vectors.json`, para la identidad de ese servidor. Nunca habla con un servidor de licencias.
+  - **Suite `license`** (`LicenseOnGoTest`, pasos `l1`–`l8`): licencia de 0 comanderos y pedido en cola rechazado por
+    cupo (`l1`–`l3`), «Enviar de nuevo» con la misma clave al volver el cupo (`l4`), reloj del servidor 2 h atrás con
+    `ADELPOS_E2E_CLOCK_FILE` (`l5`) y corregido (`l6`), tolerancia (`l7`) y vencida (`l8`). Nunca la hora de la Mac
+    ni la del emulador.
+
+### Decisiones propuestas
+
+1. **Sin migración de Room.** El motivo nuevo de la revisión, `ReviewReason.NOT_ALLOWED`, se guarda por su nombre en
+   el JSON de `pending_orders.review`, como los motivos que ya existen. El estado de la licencia vive solo en memoria.
+   Por qué: el encargo pedía una migración solo «si hace falta»; aquí no cambia ninguna tabla ni columna, y la prueba
+   `LicenseQueueTest` comprueba que el motivo sigue ahí al reabrir la base.
+2. **«Enviar de nuevo» con la misma `operation_id`, sin pedir confirmación.** Por qué: Go no guarda nada de un envío
+   rechazado por licencia, cupo u hora (ni la clave, ver «Qué responde `restaurant/offline-orders` sin cupo» en el
+   avance) y vuelve a revisar todo. Si la respuesta de un envío aceptado se pierde, la misma clave evita el duplicado.
+   La suite `license` lo comprueba en `l4` y `l6` («entra una vez»).
+3. **Un pedido rechazado así nunca vuelve solo a «Por enviar».** Lo reenvía el mesero cuando el encargado resuelve
+   el problema. Por qué: §8 pide que no se reintente sin fin, y Android no puede saber cuándo vuelve el cupo o se
+   corrige la hora.
+4. **La edición del cliente de Para llevar (nombre y teléfono) que la hora o la licencia no dejaron guardar se
+   conserva y sale en una vuelta siguiente de la cola** (al volver la red o el mesero, al abrir la aplicación o cada
+   15 minutos). No pasa a «Requiere tu revisión». Por qué: no es un pedido ni ocupa cupo, y la cola de esas ediciones
+   no tiene pantalla de revisión. No hay reintentos seguidos: espera la siguiente vuelta.
+5. **Un `confirmDraft` en línea rechazado por la licencia no sigue como pedido sin conexión.** Por qué: pasaría por la
+   misma puerta de Go. El mesero ve el texto del código en la captura.
+6. **El aviso de tolerancia muestra el texto completo («Licencia: quedan 3 días») con 600 dp o más de ancho, y solo
+   el ícono en pantallas angostas.** Al tocarlo, abre el texto completo. Por qué: §8 pide un aviso discreto, y en un
+   teléfono vertical la barra ya lleva al mesero, la conexión y «por enviar».
+7. **El asiento del mensaje sin cupo sale de `details.seat`.** Los textos de caja y cocina están por si Go los
+   dijera, como pide el avance («la Fase F debe leer `details.seat` y no suponerlo»).
+
+### Pruebas (lo que realmente se ejecutó)
+
+Cabeza probada: `9c1070f7` (rama `etapa-l1-f`). Los APK que se instalaron son los de esa cabeza (`assembleDebug` al
+día, `versionName` 0.4.0, `versionCode` 4). Go temporal `ISO_TAG=LF` (8209/8479), nuevo en cada corrida, con la
+licencia de prueba de `ensure_test_license`. Registros en `$SP/lf/`.
+
+| Prueba                                                                                                  | Dónde                                      | Resultado                                                                                                                                                                                                   |
+| ------------------------------------------------------------------------------------------------------- | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ktfmtCheck`, `:core:domain:test`, `testDebugUnitTest` (JVM y Robolectric, con `--rerun`) y `lintDebug` | Mac                                        | **62 XML, 413 pruebas, 0 fallas, 0 omitidas**; Lint sin errores (`unit-full3.log`)                                                                                                                          |
+| Instrumentadas (`connectedDebugAndroidTest`, apps de prueba desinstaladas antes)                        | `Pixel_Tablet` (Android 17, 5580)          | **3 XML** (app, core/data, core/ui): **168 pruebas, 82 corridas, 86 omitidas, 0 fallas** (`connected-emulator-5580-xml.txt`). Se omiten las `*OnGoTest` (corren en las e2e) y `ServerApiOnDeviceTest`       |
+| Instrumentadas (igual)                                                                                  | `ADEL_A1_Tablet_API26` (Android 8.0, 5586) | **3 XML: 168 pruebas, 80 corridas, 88 omitidas, 0 fallas** (`connected-emulator-5586-xml.txt`, 23/11). Además de las de arriba, en Android 8 se omiten `ConnectionOnDeviceTest` y `WorkNetworkOnDeviceTest` |
+| e2e `license` (`l1`–`l8`)                                                                               | 5580                                       | **8/8 aprobadas** (`e2e/5580-license-1`, 23/11)                                                                                                                                                             |
+| e2e `license` (`l1`–`l8`)                                                                               | 5586                                       | **8/8 aprobadas** (`e2e/5586-license-1`)                                                                                                                                                                    |
+| e2e `waiter` (`w1`–`w13c`)                                                                              | 5580                                       | **19/19 aprobadas** (`e2e/5580-waiter-1`)                                                                                                                                                                   |
+| e2e `waiter`                                                                                            | 5586                                       | **19/19 aprobadas** (`e2e/5586-waiter-1`)                                                                                                                                                                   |
+| e2e `access` (pasos 1–5 y 7)                                                                            | 5580                                       | **6/6 aprobadas** (`e2e/5580-access-1`)                                                                                                                                                                     |
+| e2e `access` (pasos 1–5 y 7)                                                                            | 5586                                       | **6/6 aprobadas** (`e2e/5586-access-1`)                                                                                                                                                                     |
+| e2e `takeaway` (`t1`–`t9`)                                                                              | 5580                                       | **9/9 aprobadas** (`e2e/5580-takeaway-1`)                                                                                                                                                                   |
+| e2e `takeaway` (`t1`–`t9`)                                                                              | 5586                                       | **8/9**: `t6` FALLA, dos corridas (`e2e/5586-takeaway-1` y `-2`). Es el pendiente conocido **A3-D32** (ver abajo)                                                                                           |
+
+- En Android 8 se instaló con `adb install -r -t` (lo mismo que `install_app` del guion: antes desinstala la
+  aplicación, sus pruebas y las de la 0.1.0) y la suite corrió con `--no-install` (A3-D33). La instalación por Gradle
+  no se probó ahí.
+- **`takeaway t6` en Android 8** falla en `TakeawayOnGoTest.kt:306` (`waitForText("Luisa Martínez")`). La condición
+  anterior sí se cumple: el nombre llega a Go y la cola de ediciones queda vacía. Solo la lista de la tableta no
+  muestra el nombre nuevo en 40 s. Es el mismo síntoma de **A3-D32** (C1 de la A3, que el propietario dejó abierto el
+  20/11). En las dos corridas no hubo ningún rechazo de licencia, cupo u hora (cero líneas `LICENSE_`/`SYSTEM_CLOCK`
+  en el logcat del paso, y el Go temporal solo registra el arranque y la activación de prueba). En 5580 aprueba. **No
+  se tocó**: no lo causa la L1 y la decisión del propietario sigue en pie.
+- Ninguna e2e existente falló por un cambio de pantalla de esta fase; no hubo que corregir pruebas.
+- Ninguna prueba llamó a un servidor de licencias: el Go temporal arranca con `license_server_disabled`
+  (`remote_not_allowed`) y las licencias se importan sin internet, firmadas con las llaves de `vectors.json`.
+
+### Capturas (tema claro)
+
+- `$SP/shots-l1/android/pixel-tablet/`: 12 (Android 17, `5580-license-1`).
+- `$SP/shots-l1/android/tablet-api26/`: 12 (Android 8.0, `5586-license-1`), revisadas una por una:
+  - el **aviso fijo de la hora** en Mesas, en la captura y en la revisión (`l5-*`), con las dos fechas de Go;
+  - el **aviso de tolerancia** en la barra y su texto completo al tocarlo (`l7-*`);
+  - **«Requiere tu revisión» sin cupo** con «Enviar de nuevo» (`l1-revision-sin-cupo-con-enviar-de-nuevo.png`) y
+    Pendientes con dos pedidos en revisión (`l3-*`);
+  - la captura con la licencia vencida (`l8-*`) y sin cupo (`l1-captura-*`).
+- No hay textos provisionales, códigos ni `message` del servidor a la vista. Todo es español sencillo.
+- Observaciones (sin cambio, para que el coordinador decida si valen la pena):
+  - en la captura, la tarjeta del rechazo por la hora o por la licencia vencida ofrece «Reintentar», el botón que ya
+    tenían los demás rechazos del borrador; mientras el encargado no lo resuelva, reintentar dará el mismo mensaje;
+  - con el aviso fijo de la hora, la captura muestra el mismo texto dos veces: en el aviso y en la tarjeta del
+    rechazo;
+  - la insignia «N pedidos por enviar» de la barra cuenta también los pedidos en «Requiere tu revisión», como antes
+    de esta etapa.
+
+### No verificado
+
+- La instalación por Gradle en Android 8 (se usó `adb install`, A3-D33).
+- `access` paso 6 (certificado cambiado): necesita otro servidor temporal con otra identidad y no entra en la suite
+  por omisión. Esta fase no lo cambia.
+- Teléfonos: solo se corrió en las dos tabletas que asignó el encargo. El aviso de tolerancia con solo el ícono lo
+  cubre `StageL1ScreensTest` (el componente con `showText = false`, en las instrumentadas). La elección por ancho
+  (menos de 600 dp) en una pantalla angosta real no se vio.
+- Las suites `catalog`, `field`, `precheck`, `alerts`, `adjustments` y `connection` no se corrieron: el encargo pidió
+  `waiter`, `access`, `takeaway` y `license`. Todas pasan por el mismo `ensure_test_license`.
+
+### Para el coordinador
+
+- `takeaway t6` en Android 8 sigue como A3-D32: decidir si se mantiene como pendiente conocido en la L1.
+- Las decisiones propuestas 1–7, sobre todo la 1 (sin migración de Room) y la 4 (la edición del cliente no pasa a la
+  revisión).
+- No hubo commits nuevos al reanudar: la rama queda en `9c1070f7` y no trae `c0217c0d` (avance de la Fase G, solo
+  documentación), que está en `etapa-l1`.
+
+### Decisiones del coordinador sobre la Fase F
+
+Fusionada en `774c6f0`, sin conflictos y sin cambios en `backend/`. El árbol unido solo difiere de la cabeza probada
+(`9c1070f`) en este avance.
+
+- **L1-D47 · Se aceptan las siete decisiones propuestas del agente.**
+  - Sin migración de Room: `NOT_ALLOWED` se guarda por su nombre en el JSON de la revisión.
+  - «Enviar de nuevo» usa la misma `operation_id` y no pide confirmación.
+  - Un pedido rechazado por la licencia, un cupo o la hora nunca vuelve solo a «Por enviar».
+  - La edición del cliente de Para llevar que no se pudo guardar se conserva y sale en la siguiente vuelta de la cola:
+    no es un pedido, no ocupa cupo y no tiene pantalla de revisión.
+  - Un borrador en línea rechazado así no sigue como pedido sin conexión.
+  - El aviso de tolerancia muestra el texto desde 600 dp y solo el ícono en pantallas más angostas.
+  - El mensaje sin cupo toma el tipo de cupo de `details.seat`.
+- **L1-D48 · `takeaway t6` en Android 8 sigue como el pendiente conocido A3-D32.** Falla igual que en la A3, sin
+  ningún rechazo de licencia, cupo u hora; en la Pixel_Tablet aprueba. La regresión de la Fase H lo vuelve a correr.
+- **Las tres observaciones de las capturas se quedan como están**:
+  - «Reintentar» en la tarjeta del rechazo sirve en cuanto el encargado corrige la hora o la licencia;
+  - el texto de la hora aparece dos veces porque la §6.2 pide las dos cosas: el aviso fijo mientras dure y el mensaje
+    cuando Go rechaza;
+  - el contador «por enviar» cuenta igual que antes de la etapa.
