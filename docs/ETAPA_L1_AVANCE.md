@@ -3255,3 +3255,438 @@ Fusionada en `774c6f0`, sin conflictos y sin cambios en `backend/`. El árbol un
   - el texto de la hora aparece dos veces porque la §6.2 pide las dos cosas: el aviso fijo mientras dure y el mensaje
     cuando Go rechaza;
   - el contador «por enviar» cuenta igual que antes de la etapa.
+
+---
+
+## Revisión independiente R3 · Asignación atómica de cupos (Fase D)
+
+Árbol `$SP/wt/l1-r3`, rama `etapa-l1-r3`, desde `f4b42a3` (la Fase D fusionada sobre la A). `ISO_TAG=R3`, clúster
+temporal 55499, sin Go temporal ni emuladores. Se revisó `git diff 1ceee93 etapa-l1-d` (`f202543`, `20019dc`,
+`e816750` y `bc4db5b`), sobre todo `backend/internal/licenseseats/`, `withSeats` en `administration.Service.dispatch`,
+el modo Cocina, «Liberar cupo» y la sección «Fase D» de la `0028`. Las decisiones que mandan son L1-D2, L1-D3, L1-D7,
+L1-D13, L1-D27 y L1-D28. Usé `doc-D.md` solo como mapa y comprobé cada afirmación en el código.
+
+No se corrigió nada del código. El único commit agrega las pruebas que demuestran los hallazgos:
+
+- `c0810d7` etapa L1 revisión R3: pruebas de los cupos (R3-1 pedido sin conexión sin sesión, R3-2 reloj de los cupos
+  y vencimiento de sesiones; fallan) y la concurrencia por el último cupo (pasa). Archivo:
+  `backend/internal/operations/stagel1_r3_seats_test.go`.
+
+**Aviso para fusionar**: mientras no se corrijan R3-1 y R3-2, `go-int ./internal/operations` completo falla en
+`TestStageL1R3OfflineOrderWithoutSessionHoldsSeat` y `TestStageL1R3SeatClockAndSessionExpiry`. Esas pruebas fallan a
+propósito.
+
+### Hallazgos
+
+| #    | Gravedad                               | Dónde                                                                                                                                                                                                                                                     | Escenario (entrada → resultado incorrecto)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | Prueba (commit `c0810d7`)                                                                                                                                                                                                                                | Corrección propuesta                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ---- | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R3-1 | **Alta**                               | `licenseseats/store.go:26-28` (`inUseCondition`, comandero: exige una sesión vigente), `store.go:93-101` (`claim` inserta sin comprobar que la fila contará), `administration/service.go:368-373` (la credencial de envío entra a `withSeats` sin sesión) | Con 1 comandero: una tableta se queda sin sesión vigente en Go (el último mesero cerró sesión, «Liberar cupo» cerró sus sesiones o venció la sesión de 12 h) y entrega con la credencial de envío (A1-D1) un pedido de su cola. Entra (200), pero su fila `order_taker` no cuenta porque la terminal no tiene sesión. Resultado: `sessions-summary` dice 0 en uso, Terminales no muestra el cupo y otra terminal también captura (200). Cuatro tabletas así, a la vez, obtienen **las cuatro** el único comandero. Con 2 comanderos, después de «Liberar cupo», capturan tres terminales. La afirmación de `doc-D.md` (Decisión propuesta 9: «los pedidos de la cola de esa tableta piden cupo otra vez al llegar») solo es cierta cuando no hay cupo libre: si lo hay, el pedido entra sin ocuparlo. Otra forma de llegar al mismo caso (descrita, sin prueba): una captura que se autenticó justo antes de que «Liberar cupo» revocara la sesión (la lectura de `authenticateSession` no bloquea y su `UPDATE last_seen_at` continúa después de la revocación) ocupa una fila que ya no cuenta | `TestStageL1R3OfflineOrderWithoutSessionHoldsSeat`, con tres subpruebas: «después de cerrar sesión el último mesero», «después de «Liberar cupo», con la cola de la tableta» y «cuatro tabletas sin sesión a la vez por el último comandero». **Fallan** | Que el pedido entregado con la credencial ocupe el comandero los 15 minutos aunque la terminal no tenga sesión. Opciones: (a) que el comandero cuente solo por actividad (`last_activity_at > corte`) y que el cierre de la última sesión de **esa** terminal borre su fila de forma explícita (logout, revocar, cambiar la contraseña, revocar la terminal y «Liberar cupo», con 7820148311), en vez de exigir una sesión vigente en `inUseCondition`; (b) marcar en la fila que la captura llegó con credencial (por ejemplo `credential_id`) y contarla mientras esa credencial siga vigente y dentro del corte. En cualquier caso, `claim` no debe aceptar una captura si la fila que escribe no va a contar. **Toca L1-D27** («El comandero solo cuenta con una sesión vigente»): **decide el coordinador** |
+| R3-2 | Baja (solo con reloj de prueba)        | `store.go:26-30` compara `sessions.expires_at` con `Options.Now`; `administration/auth.go:139` escribe `expires_at = time.Now()+12h` y `service.go:486` lo comprueba con `time.Now()`                                                                     | Con el reloj del gestor de cupos adelantado más de 12 h (el desfase de prueba de L1-D16 que la Fase C conectará con `licensing.Manager.LocalClock`, por ejemplo para probar la tolerancia o el vencimiento), la sesión con que la terminal acaba de capturar sigue valiendo para Go, pero ya no cuenta para los cupos. Las filas de comandero y de cocina no cuentan y cualquier número de terminales captura con 1 comandero. Con un desfase menor, las sesiones «vencen» antes para los cupos. En producción `LocalClock` es `time.Now` y no pasa, pero las pruebas de interfaz y de Android con desfase darían resultados falsos                                                                                                                                                                                                                                                                                                                                                                                                                                                              | `TestStageL1R3SeatClockAndSessionExpiry` (reloj +13 h, dos escritorios capturan con 1 comandero). **Falla**                                                                                                                                              | Comparar el vencimiento de la sesión con el mismo reloj que lo escribió y lo valida (`time.Now`), o que `issueSession` y `authenticateSession` usen el reloj inyectado. Avisar a la Fase C                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| R3-3 | Baja (documentación y riesgo a futuro) | `CLAUDE.md:158` y `:160`; `events/store.go:44`; `operations/queries.go:89`; `payments/shifts.go:308`                                                                                                                                                      | La captura y la apertura de turno publican su evento (`events.Append` toma 7820148306) **antes** de que `withSeats` pida 7820148311. El orden real es 05 → 04 → 08 → 06 → 11, pero la tabla dice «7820148311 siempre al final (05 → 04 → 08 → 11)» y la fila de 06 dice que todos lo toman «al final de sus cambios». Hoy no hay interbloqueo, porque quien tiene 11 no publica eventos. Pero si una fase posterior publica un evento con 11 tomado (por ejemplo, un aviso de «cupos cambiaron» en el modo Cocina o en «Liberar cupo» para Terminales), una captura con 06 que espera 11 y esa ruta con 11 que espera 06 se interbloquean                                                                                                                                                                                                                                                                                                                                                                                                                                                        | Sin prueba (lectura del código)                                                                                                                                                                                                                          | Escribir en §3 que 7820148311 va después de 7820148306 y que con 11 tomado no se llama `events.Append`, o pedir el cupo antes de publicar el evento                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| R3-4 | Baja (carga)                           | `administration/license_seats.go:67-75`, `store.go:158-167` (`Renew`)                                                                                                                                                                                     | Cada previa (`draft-preview` y `edit-preview`, que el cliente llama mientras se captura) toma 7820148311 **exclusivo**, también en las cajas y en las terminales sin comandero, que no tienen nada que renovar. Antes, las previas solo tomaban 7820148305 compartido y corrían en paralelo; ahora se forman una detrás de otra. No es un error de cupos, pero agrega espera con varias terminales. No se midió                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | Sin prueba                                                                                                                                                                                                                                               | Antes del lock, si la terminal no tiene fila `order_taker`, no hacer nada. Las peticiones de una misma terminal ya van en fila por la fila de `app.devices` (`authenticateDevice`), así que ninguna otra puede crearle esa fila a la vez. El lock sigue siendo necesario cuando la fila existe (ver «Comprobado»)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+
+### Lo que comprobé y está bien
+
+- **Atomicidad**:
+  - `claim` toma `pg_advisory_xact_lock(7820148311)` y después lee la hora de Go y los límites.
+  - Contar y ocupar ocurren en la misma transacción. El conteo y el barrido van en una sola sentencia, con la foto
+    tomada después del lock (las transacciones son READ COMMITTED; solo los reportes usan REPEATABLE READ).
+  - Mi prueba `TestStageL1R3ConcurrentLastSeat` (**pasa**, 114 s) hace tres carreras por el último cupo:
+    - seis escritorios entran a Preparación a la vez, en 3 vueltas;
+    - cuatro terminales de cuatro cajas abren turno a la vez, en 2 vueltas;
+    - dos tabletas con sesión (cola con credencial) y dos escritorios capturan a la vez, en 3 vueltas.
+
+    En cada vuelta obtiene el cupo exactamente una y los rechazos traen `in_use` y `limit` exactos.
+
+  - **Mutación** (cambio temporal, revertido con `git checkout`): sin el `pg_advisory_xact_lock`, la carrera de la cocina
+    **falla** («6 de 2 en uso»). La de caja y la de comandero siguen pasando: esas operaciones ya van en fila por
+    7820148305 exclusivo. El lock 7820148311 solo protege de verdad el modo Cocina y el barrido frente a las
+    asignaciones, y ahí funciona.
+- **Orden de los locks e interbloqueos**:
+  - 7820148311 siempre se toma después de 7820148305 (y de 04, 08 y 06) y ninguna transacción que lo tiene espera otro
+    lock consultivo.
+  - «Liberar cupo» y la revocación de la terminal cierran las sesiones antes de pedirlo.
+  - Las llaves foráneas de `license_seats` toman `FOR KEY SHARE` en `devices`, `sessions` y `cash_shifts`. Eso no choca
+    con los `UPDATE` sin cambio de llave que hacen las demás rutas, y no hay `FOR UPDATE` ni `DELETE` sobre esas tablas.
+  - Un lock tomado dentro del savepoint (modo Cocina y «Liberar cupo») se suelta solo si el savepoint se revierte, y
+    entonces se revierte toda la transacción.
+  - No encontré ningún ciclo.
+- **Ningún camino escribe un cupo antes de validar**:
+  - `claim` comprueba la licencia con el lock tomado.
+  - El rechazo es un `Fault` 409 sin `Commit` fuera del savepoint, así que se revierte la transacción entera: cuenta,
+    clave, auditoría, eventos y cola de impresión.
+  - `completeDeferred` solo corre con éxito.
+  - Las únicas escrituras sin 7820148311 son los borrados en cascada y la subida de la `0028`. Solo quitan filas o corren
+    sin concurrencia.
+- **Clave de operación ya registrada (L1-D27)**:
+  - Las cinco capturas y la apertura de turno pasan por el `replay` de `app.restaurant_operations`, que responde lo
+    guardado o un conflicto sin escribir nada nuevo.
+  - La comprobación previa de `operationRecorded` podría parecer una carrera, pero no se puede explotar. Dos peticiones
+    de la misma terminal van en fila por la fila de `app.devices` (el `UPDATE` de `authenticateDevice`), y el `replay`
+    exige la misma terminal.
+- **Rutas que crean o modifican pedidos**:
+  - Todos los `INSERT` en `restaurant_accounts`, `orders`, `items`, `item_versions`, `item_units` y `draft_items` salen
+    de las cinco rutas `Capture`. Las cuentas nuevas de transferir y dividir son reorganización (L1-D6).
+  - `payments`, `kitchen` y `catalog` no crean pedidos. Cobrar y efectivo dan `None` (L1-D3).
+  - `ForOperation` coincide con el enrutador de `operations`, también con la diagonal final.
+  - `ServeMux` redirige las rutas con `//`, `.` o `..` antes de llegar al manejador.
+  - `offline-orders` con credencial solo se acepta en la ruta exacta.
+- **Las reglas**:
+  - **L1-D2**: una fila por terminal. Se comprobó la tableta con tres PIN.
+  - **L1-D3**: la caja compartida ocupa dos cupos y cerrar el turno desde otra computadora libera los dos. Cobrar no pide
+    cupo. Una terminal no puede cambiar de caja con el turno activo (`devices.go`, `SHIFT_OPEN`), así que no se pueden
+    abrir dos turnos con un solo cupo.
+  - **L1-D7 y L1-D28**: el modo Cocina funciona. La limitación de L1-D28 (el tablero no exige el cupo) queda aceptada por
+    el coordinador.
+  - **L1-D13**: 15 minutos exactos (`>` el corte), las previas renuevan, abrir turno libera los comanderos de esa caja y
+    cerrar sesión el último usuario barre su fila.
+  - La licencia nueva con menos cupos y el plan básico funcionan.
+- **«Liberar cupo»**:
+  - Pide `devices.manage`; las sesiones con PIN no lo tienen (403).
+  - Responde `409 LICENSE_SEAT_NOT_HELD` sin cupo o con solo la caja, y deja la auditoría `license.seat_released`.
+  - Por el código (sin prueba propia), un identificador inválido responde 400 y uno inexistente 404 (`publicFault`).
+- **Migración «Fase D»**: `opened_device_id` es `NOT NULL`, los `CHECK` de vínculo y tipo están bien y `DISTINCT ON`
+  deja una fila por terminal.
+- **Falla cerrada**: sin fuente de límites no hay licencia válida. `seatstest` solo lo importan las pruebas y no da
+  cupos fuera de ellas (`testing.Testing()`).
+- **Observación ya resuelta**: `f4b42a3` no pasaba `fmt-check` (el orden de los `import` de `administration/service.go`
+  quedó mal al fusionar). En `etapa-l1` ya está bien. Mi archivo pasa `gofmt`, y no confirmé el cambio de `format` en
+  `service.go` porque no es de esta revisión.
+
+### Pruebas ejecutadas (lo que de verdad corrió)
+
+| Prueba                                                                                  | Resultado                                                                                                                                                                                                   |
+| --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `go vet -tags=integration ./internal/operations`                                        | Limpio                                                                                                                                                                                                      |
+| `go-int ./internal/operations`, `ISO_RUN=TestStageL1R3`, sobre `c0810d7`                | `TestStageL1R3OfflineOrderWithoutSessionHoldsSeat` **falla** en sus 3 subpruebas (R3-1). `TestStageL1R3SeatClockAndSessionExpiry` **falla** (R3-2). `TestStageL1R3ConcurrentLastSeat` pasa (158 s en total) |
+| `TestStageL1R3ConcurrentLastSeat` sola                                                  | `ok` (114 s)                                                                                                                                                                                                |
+| La misma, **sin** `pg_advisory_xact_lock` en `store.go` (cambio temporal, revertido)    | Falla la cocina («6 de 2 en uso»); caja y comandero pasan (7820148305)                                                                                                                                      |
+| `go-int ./internal/licenseseats` (las del autor)                                        | `ok`                                                                                                                                                                                                        |
+| `go-int ./internal/operations`, `ISO_RUN=TestStageL1LicenseSeats$` (la del autor)       | `ok` (81 s)                                                                                                                                                                                                 |
+| `format` y `fmt-check`                                                                  | `fmt-check` solo marca `administration/service.go`, que ya venía mal de `f4b42a3` y está corregido en `etapa-l1`. Mi archivo pasa `gofmt -l`                                                                |
+| `md5` de `docs/etapas/*.md`, `docs/licencias/CONTRATO*` y `contracts/`, antes y después | Iguales                                                                                                                                                                                                     |
+
+### Lo que no pude verificar
+
+- **La conexión real con el gestor de licencias** (Fase C): `LimitsSource` con `Status()` y `LocalClock`, y la puerta
+  del estado y de la hora alrededor de `withSeats`. R3-2 se volverá real en las pruebas en cuanto se conecte el desfase
+  de L1-D16.
+- **El escritorio y Android**: no corrí emuladores, Vitest ni Playwright. No comprobé qué hace la cola de Android
+  0.3.0 después de «Liberar cupo», más allá de lo que dice el código (`OrderSender` usa la credencial cuando no tiene
+  sesión).
+- **La carga real** con varias terminales: solo la observación de R3-4.
+- **La variante concurrente de R3-1** («Liberar cupo» al mismo tiempo que una captura): la describí por el código, sin
+  prueba. La corrección de R3-1 la cubre.
+
+### Correcciones de la revisión R3
+
+Revisión independiente en `$SP/l1/doc-R3.md` y decisiones del coordinador L1-D36 a L1-D39. En la rama `etapa-l1-d`,
+sobre `etapa-l1` (`a8dd193`, con la Fase B):
+
+- `5b54a576`: el commit de pruebas del revisor (`c0810d7`), traído tal cual con `cherry-pick`. No se ajustó ninguna
+  prueba: las tres están bien planteadas.
+- `981be34a`: las correcciones.
+- `e3776dd1`: los documentos de la API.
+- `5358f25d`: trae `etapa-l1` con la Fase C (`91f17ba`, `f32d740`), sin conflictos. La puerta de la C y su
+  `LicenseSeats` quedan como estaban.
+
+**R3-1 (alta, L1-D36): el comandero cuenta por actividad.**
+
+- `inUseCondition` (`licenseseats/store.go:22`): la fila del comandero cuenta mientras `last_activity_at` sea posterior
+  al corte de 15 minutos. Ya no se pide una sesión vigente. El pedido que entrega la cola de una tableta sin sesión, con
+  la credencial de envío, ocupa su cupo como cualquier captura.
+- **Se borra al cerrarse la última sesión de esa terminal**: `licenseseats.ReleaseClosedSessions` (`store.go:210`).
+  - Borra el comandero de las terminales a las que **esta transacción** les cerró una sesión (`revoked_at = now()`, la
+    hora de inicio de la transacción, igual en todas sus sentencias) y que ya no tienen ninguna sesión vigente.
+  - Las demás terminales, también las tabletas sin sesión que capturan con la credencial, no se tocan.
+  - Primero comprueba sin el lock si hay algo que borrar; solo entonces toma 7820148311.
+  - Lo llaman:
+    - `withSeats` después de toda operación `session_end` (`administration/license_seats.go:82`);
+    - `authenticateSession` al encontrar una sesión vencida (`administration/service.go:525`, con `time.Now`, el mismo
+      reloj con que la comprueba).
+  - `ForOperation` agrega a `session_end` las otras rutas que cierran sesiones: `PUT auth/pin`, `PATCH users/{id}`
+    (desactivar), `PUT users/{id}/pin`, `POST users/{id}/pin/remove` y `POST license/identity/regenerate`.
+- **Revocar la terminal** (`POST devices/{id}/revoke`, `administration/devices.go:147`) libera además su comandero y
+  su cocina con `ReleaseDevice`, después de cerrar sus sesiones. Su caja sigue hasta cerrar el turno.
+- «Liberar cupo» y abrir turno ya borraban la fila. Un pedido de la cola que llega después de «Liberar cupo» pide cupo
+  otra vez: si lo hay, lo ocupa 15 minutos; si no, `LICENSE_SEAT_UNAVAILABLE`.
+- **`claim` nunca acepta una fila que no vaya a contar**:
+  - la del comandero cuenta por la actividad que escribe;
+  - la de la caja, por su turno activo (la operación tiene 7820148305);
+  - la de la cocina, por la sesión que entra, que ahora se comprueba vigente en la misma sentencia del conteo. Si se
+    cerró mientras llegaba la petición, es `ErrSessionClosed` y `POST kitchen/display-mode` responde `401
+SESSION_REVOKED`. Esto cubre la variante concurrente que describió el revisor.
+
+**R3-2 (L1-D37): el reloj de las sesiones.**
+
+- `Options.SessionNow` (`licenseseats/seats.go:130`, por omisión `time.Now`) es el reloj con que la autenticación
+  escribe y valida `expires_at`.
+- Con él se decide si sigue vigente la sesión de una pantalla de cocina, también en `claim`. El reloj inyectado de los
+  cupos (`Options.Now`, que la Fase C conecta a `LocalClock`) queda solo para la actividad y el corte.
+- `Window()` conserva su firma `(hora, corte)`, porque la usan las pruebas de la Fase C. La hora de las sesiones sale de `Manager.SessionNow()`, y `devices.go` pasa el corte y esa hora a `DeviceSeatsColumn`.
+- El comandero ya no depende de las sesiones (R3-1).
+- **Para la Fase C**: si alguna vez la autenticación usa un reloj inyectado, hay que pasarlo también en `SessionNow`.
+
+**R3-3 (L1-D38): el orden de los locks.**
+
+- `CLAUDE.md` §3, en la fila de 7820148306 y en la de 7820148311: 7820148306 (los eventos, `events.Append`) se toma
+  antes de 7820148311, y con 7820148311 tomado nunca se publica un evento ni se pide otro lock. El orden de adquisición
+  dice 05 → 04 → 08 → 06 → 11.
+- **Revisé los caminos**:
+  - la captura, la apertura de turno y las rutas de sesiones publican en su manejador, antes de `withSeats`;
+  - el modo Cocina, «Liberar cupo», revocar la terminal y la sesión vencida solo escriben la auditoría después del
+    lock;
+  - el `license.changed` de la Fase C se publica en su propia transacción, fuera de la de la petición (`notifyLicense`).
+  - No encontré ningún camino que publique o pida otro lock con 7820148311 tomado.
+
+**R3-4 (L1-D39): las previas, sin lock.**
+
+`Renew` (`store.go:176`) ya no toma 7820148311. Hace un `UPDATE` condicional de la propia fila:
+`last_activity_at > corte`, con `greatest` para que la hora nunca retroceda. Si la terminal no tiene comandero, no
+escribe nada.
+
+**Es seguro sin el lock porque nunca revive un cupo vencido:**
+
+- La previa tiene 7820148305 compartido (su manejador) y toda asignación de comandero lo tiene exclusivo (la captura y
+  el pedido sin conexión, `operations.Handle`), así que nunca se intercalan:
+  - si la asignación va primero, la previa lee su hora después y ve el cupo tan vencido como lo vio la asignación;
+  - si la previa va primero, la asignación ve la actividad renovada.
+- Los borrados (liberar, cerrar sesiones, abrir turno, el barrido de `claim`) chocan con la previa en la fila: el que
+  llega segundo espera. Si el borrado va primero, la previa no encuentra la fila; si va después, la borra.
+- La asignación de cocina, que no tiene 7820148305, solo cuenta filas de cocina.
+
+**Lo único que cambió en el comportamiento de antes**: una tableta cuya última sesión vence sin volver a usarse (el
+vencimiento se marca al usarla) o se cierra fuera de una petición clasificada (el restablecimiento de soporte por línea
+de órdenes, `reset-sa`) conserva su comandero hasta 15 minutos después de su última captura. Es el lado seguro: cuenta
+de más, nunca de menos.
+
+**Pruebas de las correcciones** (la tabla final, abajo):
+
+- `licenseseats/seats_integration_test.go`:
+  - cerrar la última sesión libera, y con otra sesión vigente en la terminal no;
+  - la tableta sin sesión ocupa el cupo por su actividad y no la libera el cierre de sesión de otra terminal;
+  - la pantalla de cocina con el reloj de los cupos 13 h adelante sigue contando;
+  - Preparación con una sesión cerrada responde `ErrSessionClosed`;
+  - las vueltas de la concurrencia liberan con `logout` (cierre y liberación en la misma transacción).
+- `operations_test.go`: las rutas nuevas de `session_end` y los dos relojes.
+- **Mutación otra vez**: sin `pg_advisory_xact_lock`, `TestSeatAssignmentIsAtomic` falla. Lo revertí.
+
+**Tabla de pruebas de las correcciones R3** (lo que realmente corrió, `ISO_TAG=LD`, clúster temporal 55499). Las
+corridas completas son del 24/11, sobre el estado final de la rama (`a9913cf1`, que incluye también la corrección de
+R2-2, abajo). Las del 23/11 las corrió el agente anterior antes del corte.
+
+| Prueba                                                                                                                                          | Resultado                                                                                                                     |
+| ----------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| 23/11, antes de traer la Fase C: `go-int ./internal/operations` con `ISO_RUN=TestStageL1` (las tres del revisor R3 y `TestStageL1LicenseSeats`) | `ok`                                                                                                                          |
+| 23/11: sin `pg_advisory_xact_lock` (cambio temporal, revertido)                                                                                 | `TestSeatAssignmentIsAtomic` **falla**                                                                                        |
+| 23/11, antes de `d9f5ca40`: `go-unit`, `go-int` de `licenseseats`, `database` y `apicontract`                                                   | `ok`. `administration` y `operations` quedaron a medias por el corte                                                          |
+| 24/11: `go-unit` (vet normal e integración, `test -race`, compilación y vet para Windows)                                                       | `ok` (30 s)                                                                                                                   |
+| 24/11: `go-int ./internal/licenseseats` completo                                                                                                | Falla **solo** `TestReviewR2DefectSeatActivityFromAClockJumpOutlivesTheCorrection` (la prueba de R2-2 del revisor, ver abajo) |
+| 24/11: `go-int ./internal/licenseseats` con todas las demás (`ISO_RUN`)                                                                         | `ok` (4 s)                                                                                                                    |
+| 24/11: `go-int ./internal/database`                                                                                                             | `ok` (17 s)                                                                                                                   |
+| 24/11: `go-int ./internal/apicontract`                                                                                                          | `ok` (53 s)                                                                                                                   |
+| 24/11: `go-int ./internal/administration` completo                                                                                              | `ok` (307 s)                                                                                                                  |
+| 24/11: `go-int ./internal/operations` completo (las tres del revisor R3, `TestStageL1LicenseSeats`, la puerta de la Fase C y la nueva de R2-2)  | `ok` (712 s)                                                                                                                  |
+| 24/11: `go-int ./cmd/ad-el-pos-server`, con `run-cmd.sh` y el candado `$SP/l1/candado-cmd`                                                      | `ok` (68 s); candado soltado                                                                                                  |
+| 24/11: `format`, `fmt-check` y `sync-check` (antes de los commits y otra vez al final)                                                          | Aprobados; el `format` final no cambió nada                                                                                   |
+| `md5` de `docs/etapas/*`, `docs/licencias/CONTRATO*` y `contracts/` (53 archivos), antes y después de formatear                                 | Iguales, las dos veces                                                                                                        |
+
+En una corrida anterior del agente anterior (`$SP/l1d-work/administration-run1.log`), `go-int ./internal/administration`
+falló una vez en `stage9g_sesiones_activas_por_tipo`, con `by_kind` de 20 escritorios. La prueba compara ese conteo con una consulta propia hecha en otra transacción, así que
+parece una carrera de la prueba con las sesiones de las demás subpruebas. En la corrida completa del 24/11 pasó. No lo
+investigué más.
+
+### Corrección del hallazgo R2-2 (L1-D43)
+
+Hallazgo R2-2 de la revisión R2 (`$SP/l1/doc-R2.md`, fila de R2-2) y decisión del coordinador L1-D43. En la rama
+`etapa-l1-d`, sobre `cc5c4c5f` (la prueba del revisor):
+
+- `3aea0abf`: la corrección y sus pruebas.
+- `82bd7303`: `docs/API_V1.md` y `CLAUDE.md` §3.
+- `a9913cf1`: un comentario de `Renew` (por qué sin `greatest` la actividad no retrocede por una carrera).
+
+**El problema.** La fecha salta al futuro y una tableta captura: su comandero guarda `last_activity_at` en el futuro
+(la hora de Go en ese momento). Se corrige el reloj. `inUseCondition` compara esa fecha con el corte de 15 minutos, así
+que la fila sigue «en uso» hasta que el reloj real alcance la fecha del salto. Otra tableta recibe
+`LICENSE_SEAT_UNAVAILABLE` por algo que causó la hora.
+
+**Lo que se hizo: la actividad futura se baja a «ahora» y se guarda.** Una actividad de comandero posterior a la hora
+de Go cuenta como actividad de ahora: se guarda `now` y vence 15 minutos reales después, como cualquier captura. Se
+hace en tres lugares, y en los tres solo con la hora confiable (abajo):
+
+1. **`claim`** (`licenseseats/store.go:119`, con `settleFutureActivity`, `store.go:65`): con 7820148311 ya tomado y la
+   hora leída con él, antes del barrido y del conteo, un `UPDATE` baja a `now` las filas de comandero posteriores a
+   `now`. Vale para toda asignación (captura, pedido sin conexión, abrir turno, modo Cocina). La terminal del salto que
+   vuelve a capturar renueva con la hora corregida, y el conteo la ve como de ahora.
+2. **`Renew`** (las previas, `store.go:238`): ya no usa `greatest`, que conservaba la fecha futura. Con la hora
+   confiable la actividad queda en `now`; si no, sigue `greatest` (nunca retrocede), como antes.
+3. **Después de un rechazo por falta de cupo** (`administration/service.go:264`, `Execute`; `license_seats.go:106` y
+   `:118`; `licenseseats.SettleFutureActivity`, `store.go:78`): el rechazo revierte **toda** la transacción de la
+   petición, también lo que `claim` bajó. Sin esto, cada intento de la otra tableta volvería a encontrar la fecha
+   futura y el cupo seguiría ocupado. Por eso `Execute`, después de revertir la transacción de la petición, abre una
+   corta aparte:
+   - primero comprueba sin el lock si hay alguna actividad de comandero en el futuro (lo normal es que no, y entonces
+     no hace nada más);
+   - si la hay, toma 7820148311 (el único lock de esa transacción), lee la hora y la baja a `now`;
+   - si falla, el rechazo se responde igual y el detalle va al registro (`license_seats_settle_failed`); el siguiente
+     intento lo vuelve a hacer.
+
+**Por qué es correcta.**
+
+- **Nunca deja un cupo ocupado más de 15 minutos reales** después del primer intento con la hora corregida (de esa
+  terminal o de cualquier otra), aunque el intento se rechace.
+- **Nunca libera un cupo antes de tiempo.** La fila bajada a `now` sigue en uso (`now` es posterior al corte), así que el
+  conteo no cambia en ese momento. No se sabe cuándo ocurrió de verdad esa actividad, porque el único reloj que había
+  era el adelantado. «Ahora» es lo más que pudo haber durado, y es el lado seguro: cuenta de más, nunca de menos.
+- **Por qué no basta la sugerencia del revisor** (`LEAST(last_activity_at, now)` en la consulta): para una fecha
+  futura, `LEAST` da `now`, que siempre es posterior al corte, así que nunca vence. Hay que guardar el valor.
+- **Por qué no basta hacerlo solo en `claim`** (la forma que sugirió el coordinador): en el caso del hallazgo (1 de 1),
+  el intento de la otra tableta **se rechaza** y su transacción se revierte entera. Lo que bajó `claim` se pierde y el
+  cupo queda ocupado igual que antes. Por eso existe la transacción aparte del punto 3. La mutación 1 (abajo) lo
+  demuestra.
+- **Locks** (CLAUDE.md §3):
+  - en `claim`, el `UPDATE` va con 7820148311 ya tomado, al final de la operación, sin publicar eventos ni pedir otro
+    lock;
+  - la transacción aparte de `Execute` empieza después de revertir la de la petición (que tenía esas filas bloqueadas:
+    si no, se esperaría a sí misma) y solo toma 7820148311;
+  - `Renew` sigue sin el lock: es un `UPDATE` de su propia fila y no se intercala con las asignaciones de comandero
+    (7820148305 compartido frente a exclusivo, R3-4). Un `UPDATE` de varias filas siempre va con 7820148311, así que dos
+    no se pueden interbloquear entre sí.
+  - Lo agregué en `CLAUDE.md` §3, en el párrafo del orden de adquisición. No cambié la fila de la tabla, para que el
+    formato no vuelva a alinear toda la tabla.
+
+**Decisión propuesta (R2-2): solo con la hora confiable (`Options.ClockTrusted`).**
+
+- `licenseseats/seats.go:131` y `:196`. `administration.LicenseSeats` la conecta con `!manager.Clock().Blocked`
+  (`license_gate.go:96`): la hora es confiable mientras la protección de la hora de la Fase C no esté en «Hora del equipo
+  incorrecta». Sin gestor de licencias (y en las pruebas sin valor), siempre es confiable.
+- **El porqué.** Localmente no se distingue un reloj que saltó al futuro y se corrigió (la equivocada es la actividad)
+  de un reloj que alguien atrasó (la equivocada es la hora de ahora). En el segundo caso, bajar la actividad liberaría
+  antes de tiempo el cupo de una tableta que sí está capturando. La Fase C ya resuelve eso:
+  - con el reloj atrasado más de 10 minutos respecto de la última hora confiable, bloquea todo lo que registra con
+    fecha;
+  - la última hora confiable solo baja con la comprobación con internet (§6.3) o con el desbloqueo de soporte (§6.4),
+    que es justo cuando se acepta que esa fecha estaba en el futuro.
+
+  Las capturas y abrir turno ya no pasan la puerta con la hora bloqueada, pero **las previas sí** (no registran nada con
+  fecha), y entrar en modo Cocina también. Sin esta condición, `Renew` bajaría la actividad con la hora atrasada.
+
+- **Cuando la hora es confiable**, una actividad futura dentro del margen (hasta 10 minutos, por los ajustes normales
+  del reloj) también se baja. Así el cupo vence a los 15 minutos reales y no a los 25.
+- Es la única parte de la Fase C que toqué: `LicenseSeats` es el punto de conexión de los cupos. No toqué
+  `internal/licensing/` ni `license_clock.go`.
+
+**La prueba del revisor (`cc5c4c5f`) sigue fallando y creo que está mal planteada respecto de L1-D43.** No la cambié.
+
+- Lo que hace: salta +48 h, la primera tableta captura, corrige el reloj a +1 min, avanza a +17 min **sin ninguna
+  operación en medio** y exige, en la primera observación, 0 en uso y que la segunda tableta entre.
+- **Ningún diseño que cumpla L1-D43 puede pasarla.**
+  - A +17 min el sistema ve por primera vez una actividad con fecha +48 h. Con L1-D43 cuenta como de ahora (+17 min) y
+    vence a los +32 min.
+  - Para responder 0 tendría que saber que el reloj se corrigió 16 minutos antes, y ningún reloj de la prueba lo dice:
+    el reloj simulado es el único que avanza, y saltó; ni la base ni `time.Now` se mueven.
+  - Las únicas formas de pasarla son dar por vencida una actividad futura en cuanto se ve (cuenta de menos, contra
+    L1-D43), o compararla con `now()` de PostgreSQL. Esto último va contra L1-D16, y además rompería
+    `TestStageL1R3SeatClockAndSessionExpiry` (reloj de los cupos 13 h adelante).
+- Hoy falla con «sigue en uso (1 de 1) y la otra tableta recibe: No hay cupo de comandero libre (1 de 1 en uso)».
+- **Propuesta para el coordinador**: que el revisor la ajuste a L1-D43. Una observación con la hora corregida (un
+  intento de la otra tableta a +1 min, rechazado, y después `SettleFutureActivity`, como hace `Execute`); a +15 min
+  todavía en uso; a +16 min, libre. Es lo que comprueba mi prueba `TestSeatActivityFromAClockJumpCountsAsNow`. Otra
+  opción es decidir que una actividad futura se dé por vencida en cuanto se ve, pero eso cambia L1-D43.
+- **Aviso para fusionar**: mientras no se ajuste, `go-int ./internal/licenseseats` completo falla en esa prueba.
+
+**No corregido (anotado, como pide el encargo).** Las sesiones que se emiten durante el salto también duran de más:
+`issueSession` escribe `expires_at` con `time.Now()` + 12 h, y con el reloj adelantado 48 h esa sesión vence 60 h
+después de la hora real. Al corregir el reloj sigue vigente hasta entonces, a menos que se cierre o se revoque. Ya no
+retiene el comandero (R3-1: el comandero cuenta por actividad), pero sí retiene el cupo de **cocina** de una pantalla
+que entró a Preparación durante el salto, porque ese cupo cuenta mientras su sesión esté vigente. Se libera al salir de
+Preparación, al cerrar la sesión o con «Liberar cupo».
+
+**Pruebas nuevas.**
+
+- `licenseseats/clock_jump_integration_test.go`, `TestSeatActivityFromAClockJumpCountsAsNow`, con el gestor
+  directamente:
+  - **el intento rechazado de otra tableta empieza los 15 minutos**: con la hora corregida cuenta 1 en uso. El rechazo
+    revierte lo que bajó `claim` (la fecha sigue a +48 h), y `SettleFutureActivity` la deja en ahora. A los 14 minutos
+    sigue rechazada; a los 15 se libera y la otra tableta entra;
+  - **la tableta del salto renueva con la hora corregida**: la previa deja la actividad en ahora y vence a los 15
+    minutos; su captura también;
+  - **con la hora bloqueada no se baja nada**: ni la previa, ni `SettleFutureActivity`, ni el rechazo. Una actividad
+    pasada sí se renueva hacia adelante. Con la hora confiable otra vez, la previa la baja.
+- `operations/stagel1_seats_clock_jump_test.go`, `TestStageL1SeatActivityFromAClockJump`, por la API real (dos
+  escritorios sin caja, 1 comandero):
+  - **el 409 de la otra terminal deja la actividad en ahora** (la transacción aparte de `Execute`). A los 14 minutos,
+    409 otra vez; a los 15, `sessions-summary` dice 0, Terminales ya no muestra el cupo y la otra terminal captura;
+  - **la terminal del salto que entra a la mesa** (`draft-preview`) renueva con la hora corregida y libera a los 15
+    minutos.
+- `administration/license_seats_clock_test.go`, `TestLicenseSeatsTrustTheClockOnlyWhenItIsNotBlocked` (unitaria): con
+  el reloj del gestor 3 h atrás de la última hora confiable, la hora de los cupos no es confiable; dentro del margen, sí;
+  sin gestor, sí.
+- **Mutaciones** (cambios temporales, revertidos copiando el archivo original):
+  1. sin la transacción aparte de `Execute`, `TestStageL1SeatActivityFromAClockJump` **falla**: la actividad sigue a +48
+     h después del 409;
+  2. con `Renew` como antes (`greatest` siempre), **fallan** las dos pruebas nuevas de integración (la previa conserva
+     la fecha del salto);
+  3. con `Renew` bajando la fecha también con la hora bloqueada, **falla** «con la hora bloqueada no se baja nada».
+- **Dónde corrieron**: las tres pruebas nuevas, solas (`ISO_RUN`) y dentro de las corridas completas de la tabla de
+  R3 (`licenseseats` sin la del revisor, `operations` y `go-unit`, que incluye la unitaria de `administration`). Todas
+  `ok`.
+
+**No verificado (R2-2).**
+
+- **El recorrido completo con la puerta real de la Fase C.** No probé por la API el caso entero con el gestor de
+  licencias y su reloj simulado: salto, captura, corrección, bloqueo, «Comprobar la hora con internet» y después los
+  cupos. Lo cubren por partes:
+  - la unitaria de `LicenseSeats`, que dice cuándo es confiable la hora;
+  - las pruebas de cupos, con la hora confiable y bloqueada simulada.
+- **Escritorio y Android**: no corrí Vitest, Playwright ni emuladores. El contrato de la API no cambió (mismo 409 y
+  mismos `details`).
+- **La carga**: el `UPDATE` extra en cada asignación casi nunca encuentra filas. La transacción aparte solo corre después
+  de un 409 por cupo, y sin actividad futura se queda en un `SELECT EXISTS`. No se midió.
+
+**Para el coordinador (R2-2).**
+
+1. Que el revisor ajuste o retire `TestReviewR2DefectSeatActivityFromAClockJumpOutlivesTheCorrection`: es incompatible
+   con L1-D43 (ver arriba). Mientras tanto, `go-int ./internal/licenseseats` completo falla en ella.
+2. Aceptar o rechazar la Decisión propuesta (R2-2) (`ClockTrusted`, conectado en `LicenseSeats` de `license_gate.go`, el
+   único cambio en un archivo de la Fase C). Al fusionar con el trabajo de `$SP/wt/l1-fr2`, revisar que
+   `manager.Clock()` siga existiendo con el mismo sentido.
+3. Las sesiones emitidas durante el salto (`expires_at` más largo) siguen sin corregir. Ya no retienen el comandero,
+   pero sí el cupo de cocina de una pantalla que entró a Preparación durante el salto.
+
+### Decisiones del coordinador sobre la revisión R3 y el hallazgo R2-2
+
+Fusionadas en `df63422`. El servidor del árbol unido es idéntico a la cabeza que probó el agente (`44c05d8`): solo
+difieren los archivos de Android de la Fase F. Por eso no se repitieron las suites de Go.
+
+- **L1-D36 · R3-1 (alta): el comandero cuenta por actividad.**
+  - Ocupa el cupo durante 15 minutos desde su última captura, tenga o no una sesión vigente.
+  - Su fila se borra cuando se cierra la última sesión de esa terminal.
+  - Revocar la terminal libera su comandero y su cocina.
+  - Cambia L1-D27 («el comandero solo cuenta con una sesión vigente»).
+- **L1-D37 · R3-2: el reloj de las sesiones (`SessionNow`) se separa del reloj de los cupos.** El vencimiento de una
+  sesión se compara con el mismo reloj que lo escribe y lo valida.
+- **L1-D38 · R3-3: el orden de los locks en `CLAUDE.md` §3.** 7820148306 va antes de 7820148311. Con 7820148311
+  tomado, nunca se publica un evento ni se pide otro lock.
+- **L1-D39 · R3-4: las previas renuevan sin lock**, con un `UPDATE` condicional de su propia fila.
+- **L1-D43 · R2-2: una actividad de comandero con fecha futura cuenta como de ahora.** Se baja a «ahora», se guarda y
+  vence 15 minutos reales después. Se hace en tres lugares:
+  - en `claim`;
+  - en `Renew`;
+  - después de un rechazo por falta de cupo, en una transacción corta aparte (`SettleFutureActivity`), porque el
+    rechazo revierte la petición entera.
+- **L1-D49 · La fecha futura se baja solo con la hora confiable (`Options.ClockTrusted`).** Con la hora en «Hora del
+  equipo incorrecta», el «ahora» de Go es el equivocado. Bajar la actividad entonces liberaría antes de tiempo el cupo
+  de una terminal que sí está capturando.
+- **La prueba del revisor de R2-2 (`cc5c4c5f`) se ajusta a L1-D43** (`44c05d8`).
+  - Pedía el cupo libre 16 minutos después de corregir el reloj, sin que Go viera nada en medio. Con L1-D43, Go no
+    puede saber cuándo se corrigió la hora.
+  - Ajustada: después de corregir el reloj, la otra tableta intenta capturar y se rechaza; 16 minutos después entra.
+    Pasa.
+- **L1-D50 · Las sesiones emitidas durante un salto del reloj conservan su vencimiento largo** (hasta 60 h con un
+  salto de 48 h). No se corrige en la L1:
+  - ya no retienen el comandero (L1-D36);
+  - el cupo de cocina de una pantalla que entró a Preparación durante el salto se libera al salir de Preparación, al
+    cerrar la sesión o con «Liberar cupo» en Terminales.
+
+  Va como propuesta para la V1.1.
