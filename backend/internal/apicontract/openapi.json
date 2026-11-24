@@ -1073,13 +1073,19 @@
             }
           },
           "409": {
-            "description": "Etapa L1 (Fase D): sin cupo de la licencia (LICENSE_SEAT_UNAVAILABLE con LicenseSeatUnavailable): la terminal no tiene turno de caja activo en su caja y no hay cupo de comandero, o su caja tiene turno activo y no hay cupo de caja para ella. No se guardó nada. Otros conflictos de la operación, con Error.",
+            "description": "Etapa L1 (Fase D): sin cupo de la licencia (LICENSE_SEAT_UNAVAILABLE con LicenseSeatUnavailable): la terminal no tiene turno de caja activo en su caja y no hay cupo de comandero, o su caja tiene turno activo y no hay cupo de caja para ella. No se guardó nada. Otros conflictos de la operación, con Error. Etapa L1 (Fase C): antes, la licencia o la hora (LicenseRejection o SystemClockInvalid).",
             "content": {
               "application/json": {
                 "schema": {
                   "anyOf": [
                     {
                       "$ref": "#/components/schemas/LicenseSeatUnavailable"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LicenseRejection"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SystemClockInvalid"
                     },
                     {
                       "$ref": "#/components/schemas/Error"
@@ -1211,13 +1217,19 @@
             }
           },
           "409": {
-            "description": "Etapa L1 (Fase D): sin cupo de la licencia (LICENSE_SEAT_UNAVAILABLE con LicenseSeatUnavailable): la terminal no tiene turno de caja activo en su caja y no hay cupo de comandero, o su caja tiene turno activo y no hay cupo de caja para ella. No se guardó nada. Otros conflictos de la operación, con Error.",
+            "description": "Etapa L1 (Fase D): sin cupo de la licencia (LICENSE_SEAT_UNAVAILABLE con LicenseSeatUnavailable): la terminal no tiene turno de caja activo en su caja y no hay cupo de comandero, o su caja tiene turno activo y no hay cupo de caja para ella. No se guardó nada. Otros conflictos de la operación, con Error. Etapa L1 (Fase C): antes, la licencia o la hora (LicenseRejection o SystemClockInvalid).",
             "content": {
               "application/json": {
                 "schema": {
                   "anyOf": [
                     {
                       "$ref": "#/components/schemas/LicenseSeatUnavailable"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LicenseRejection"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SystemClockInvalid"
                     },
                     {
                       "$ref": "#/components/schemas/Error"
@@ -1335,13 +1347,19 @@
             }
           },
           "409": {
-            "description": "Etapa L1 (Fase D): sin cupo de la licencia (LICENSE_SEAT_UNAVAILABLE con LicenseSeatUnavailable): la terminal no tiene turno de caja activo en su caja y no hay cupo de comandero, o su caja tiene turno activo y no hay cupo de caja para ella. No se guardó nada. Otros conflictos de la operación, con Error.",
+            "description": "Etapa L1 (Fase D): sin cupo de la licencia (LICENSE_SEAT_UNAVAILABLE con LicenseSeatUnavailable): la terminal no tiene turno de caja activo en su caja y no hay cupo de comandero, o su caja tiene turno activo y no hay cupo de caja para ella. No se guardó nada. Otros conflictos de la operación, con Error. Etapa L1 (Fase C): antes, la licencia o la hora (LicenseRejection o SystemClockInvalid).",
             "content": {
               "application/json": {
                 "schema": {
                   "anyOf": [
                     {
                       "$ref": "#/components/schemas/LicenseSeatUnavailable"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LicenseRejection"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SystemClockInvalid"
                     },
                     {
                       "$ref": "#/components/schemas/Error"
@@ -1593,13 +1611,19 @@
             }
           },
           "409": {
-            "description": "Etapa L1 (Fase D): sin cupo de la licencia (LICENSE_SEAT_UNAVAILABLE con LicenseSeatUnavailable): la terminal no tiene turno de caja activo en su caja y no hay cupo de comandero, o su caja tiene turno activo y no hay cupo de caja para ella. No se guardó nada. Otros conflictos de la operación, con Error.",
+            "description": "Etapa L1 (Fase D): sin cupo de la licencia (LICENSE_SEAT_UNAVAILABLE con LicenseSeatUnavailable): la terminal no tiene turno de caja activo en su caja y no hay cupo de comandero, o su caja tiene turno activo y no hay cupo de caja para ella. No se guardó nada. Otros conflictos de la operación, con Error. Etapa L1 (Fase C): antes, la licencia o la hora (LicenseRejection o SystemClockInvalid).",
             "content": {
               "application/json": {
                 "schema": {
                   "anyOf": [
                     {
                       "$ref": "#/components/schemas/LicenseSeatUnavailable"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LicenseRejection"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SystemClockInvalid"
                     },
                     {
                       "$ref": "#/components/schemas/Error"
@@ -1766,7 +1790,7 @@
             }
           },
           "409": {
-            "description": "Requiere confirmación (ORDER_REQUIRES_CONFIRMATION); la clave ya entró, del mismo usuario y terminal, como pedido sin conexión con otro contenido o como «Enviar a cocina» en la misma cuenta (OFFLINE_ORDER_ALREADY_ACCEPTED, con el resultado y su origin); o la clave es de otro usuario, otra terminal u otra operación (IDEMPOTENCY_CONFLICT). Etapa L1: sin cupo de comandero (LICENSE_SEAT_UNAVAILABLE, LicenseSeatUnavailable).",
+            "description": "Requiere confirmación (ORDER_REQUIRES_CONFIRMATION); la clave ya entró, del mismo usuario y terminal, como pedido sin conexión con otro contenido o como «Enviar a cocina» en la misma cuenta (OFFLINE_ORDER_ALREADY_ACCEPTED, con el resultado y su origin); o la clave es de otro usuario, otra terminal u otra operación (IDEMPOTENCY_CONFLICT). Etapa L1: sin cupo de comandero (LICENSE_SEAT_UNAVAILABLE, LicenseSeatUnavailable). Etapa L1 (Fase C): antes, la licencia o la hora (LicenseRejection o SystemClockInvalid).",
             "content": {
               "application/json": {
                 "schema": {
@@ -1779,6 +1803,12 @@
                     },
                     {
                       "$ref": "#/components/schemas/LicenseSeatUnavailable"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LicenseRejection"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SystemClockInvalid"
                     },
                     {
                       "$ref": "#/components/schemas/Error"
@@ -2618,13 +2648,19 @@
             }
           },
           "409": {
-            "description": "Sin cupo de pantalla de cocina (LICENSE_SEAT_UNAVAILABLE con LicenseSeatUnavailable).",
+            "description": "Sin cupo de pantalla de cocina (LICENSE_SEAT_UNAVAILABLE con LicenseSeatUnavailable). Etapa L1 (Fase C): antes, la licencia o la hora (LicenseRejection o SystemClockInvalid).",
             "content": {
               "application/json": {
                 "schema": {
                   "anyOf": [
                     {
                       "$ref": "#/components/schemas/LicenseSeatUnavailable"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LicenseRejection"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SystemClockInvalid"
                     },
                     {
                       "$ref": "#/components/schemas/Error"
@@ -2751,7 +2787,7 @@
     },
     "responses": {
       "Error": {
-        "description": "Error. 400 datos inválidos, 401 terminal o sesión (DEVICE_*, SESSION_*), 403 sin permiso, 404 no existe, 409 conflicto (ACCOUNT_CONFLICT, QUOTE_CHANGED, IDEMPOTENCY_CONFLICT, PRODUCT_SOLD_OUT…), 426 CLIENT_UPDATE_REQUIRED, 429 demasiados intentos (LOGIN_THROTTLED, PIN_LOCKED con details.locked_until y details.requires_unlock). Etapa A1: 400 CLIENT_KIND_MISMATCH; 401 PIN_INVALID, OFFLINE_CREDENTIAL_INVALID y OFFLINE_CREDENTIAL_NOT_ALLOWED; 403 PIN_DEVICE_NOT_ALLOWED; 503 PIN_LOGIN_BUSY. Desde la etapa A1, una cuenta que ya no está abierta responde 400 OPERATION_VALIDATION con details AccountNotOpenDetails (reason account_not_open). Etapa A2: 409 BALANCE_PENDING y ALREADY_DELIVERED en deliverTakeaway. Etapa A2 (parte C): 409 PRINTER_NOT_CONFIGURED y PRINTER_UNAVAILABLE (PrinterRejection, con details.scope «device» en un dispositivo android) y PRINT_NOT_FAILED en printPrecheck y retryDocument. Etapa A2 (parte D): 403 READY_ALERTS_DEVICE_NOT_ALLOWED en los avisos de platillos listos. Etapa L1 (Fase D): 409 LICENSE_SEAT_UNAVAILABLE (LicenseSeatUnavailable) sin cupo de la licencia en openAccount, saveDraft, confirmDraft, editUnits, submitOfflineOrder y setKitchenDisplayMode; 409 LICENSE_NOT_ACTIVATED sin licencia válida.",
+        "description": "Error. 400 datos inválidos, 401 terminal o sesión (DEVICE_*, SESSION_*), 403 sin permiso, 404 no existe, 409 conflicto (ACCOUNT_CONFLICT, QUOTE_CHANGED, IDEMPOTENCY_CONFLICT, PRODUCT_SOLD_OUT…), 426 CLIENT_UPDATE_REQUIRED, 429 demasiados intentos (LOGIN_THROTTLED, PIN_LOCKED con details.locked_until y details.requires_unlock). Etapa A1: 400 CLIENT_KIND_MISMATCH; 401 PIN_INVALID, OFFLINE_CREDENTIAL_INVALID y OFFLINE_CREDENTIAL_NOT_ALLOWED; 403 PIN_DEVICE_NOT_ALLOWED; 503 PIN_LOGIN_BUSY. Desde la etapa A1, una cuenta que ya no está abierta responde 400 OPERATION_VALIDATION con details AccountNotOpenDetails (reason account_not_open). Etapa A2: 409 BALANCE_PENDING y ALREADY_DELIVERED en deliverTakeaway. Etapa A2 (parte C): 409 PRINTER_NOT_CONFIGURED y PRINTER_UNAVAILABLE (PrinterRejection, con details.scope «device» en un dispositivo android) y PRINT_NOT_FAILED en printPrecheck y retryDocument. Etapa A2 (parte D): 403 READY_ALERTS_DEVICE_NOT_ALLOWED en los avisos de platillos listos. Etapa L1 (Fase D): 409 LICENSE_SEAT_UNAVAILABLE (LicenseSeatUnavailable) sin cupo de la licencia en openAccount, saveDraft, confirmDraft, editUnits, submitOfflineOrder y setKitchenDisplayMode; 409 LICENSE_NOT_ACTIVATED sin licencia válida. Etapa L1 (Fase C): en toda operación que registra algo, 409 LICENSE_NOT_ACTIVATED, LICENSE_EXPIRED o LICENSE_REVOKED (LicenseRejection) según la tabla de la §6 del contrato, y 409 SYSTEM_CLOCK_INVALID (SystemClockInvalid) con la hora del equipo incorrecta; la puerta responde antes que los cupos, así que el LICENSE_NOT_ACTIVATED sin details de los cupos queda solo como respaldo.",
         "content": {
           "application/json": {
             "schema": {
@@ -3053,6 +3089,10 @@
               }
             },
             "required": ["name", "timezone", "currency", "precheck_name"]
+          },
+          "license": {
+            "$ref": "#/components/schemas/LicenseSummary",
+            "description": "Etapa L1 (Fase C): el estado de la licencia y de la hora del equipo. Un servidor anterior no lo envía."
           }
         },
         "required": ["user", "preferences", "terminal", "establishment"]
@@ -5071,6 +5111,10 @@
             "type": "integer",
             "minimum": 0,
             "description": "Etapa A1: cursor del canal de eventos al leer este estado. Abrir streamEvents con ?after=event_cursor entrega todo lo ocurrido después, sin perder nada (a lo más, un evento de algo que ya se ve aquí)."
+          },
+          "license": {
+            "$ref": "#/components/schemas/LicenseSummary",
+            "description": "Etapa L1 (Fase C): el estado de la licencia y de la hora del equipo. Un servidor anterior no lo envía."
           }
         },
         "required": [
@@ -5452,7 +5496,7 @@
           }
         },
         "required": ["cursor", "reset", "events"],
-        "description": "Contenido (data) de cada mensaje «changes» del canal de eventos. kind es estable (restaurant.account.preparation_changed, restaurant.order.confirmed, catalog.changed…); un cliente ignora los tipos que no conoce."
+        "description": "Contenido (data) de cada mensaje «changes» del canal de eventos. kind es estable (restaurant.account.preparation_changed, restaurant.order.confirmed, catalog.changed…); un cliente ignora los tipos que no conoce. Etapa L1 (Fase C): license.changed (ámbito configuration, sin agregado) llega a todas las personas que leen el canal cuando cambia el estado de la licencia o el bloqueo por la hora; el cliente vuelve a leer getIdentity o getRecoveryState."
       },
       "OfflineOrderAlreadyAccepted": {
         "type": "object",
@@ -6234,6 +6278,211 @@
           "can_manage",
           "identity_regeneration_available"
         ]
+      },
+      "LicenseClock": {
+        "type": "object",
+        "properties": {
+          "blocked": {
+            "type": "boolean"
+          },
+          "local_time": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_activity_time": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "margin_minutes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "timezone": {
+            "type": "string"
+          },
+          "local_time_text": {
+            "type": "string"
+          },
+          "last_activity_time_text": {
+            "type": "string"
+          },
+          "license_state": {
+            "enum": [
+              "active",
+              "grace",
+              "expired",
+              "revoked",
+              "not_activated",
+              "not_activated_with_data"
+            ]
+          },
+          "license_ok": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "blocked",
+          "local_time",
+          "last_activity_time",
+          "margin_minutes",
+          "timezone",
+          "local_time_text",
+          "last_activity_time_text",
+          "license_state",
+          "license_ok"
+        ],
+        "description": "Etapa L1 (Fase C, §6.2): la hora de la computadora principal. blocked es «Hora del equipo incorrecta»: su reloj (local_time) está más de margin_minutes (10) antes de la última actividad registrada (last_activity_time, la última hora confiable; null si todavía no hay). Mientras dure, Go rechaza todo lo que registra con fecha (también cobrar) con 409 SYSTEM_CLOCK_INVALID; reportes, historial, respaldos, la licencia y la sesión siguen. Los textos son las dos fechas completas en la zona horaria del restaurante (timezone), listas para la pantalla, por ejemplo «lunes 23 nov 2026, 10:15». license_ok (Vigente o Tolerancia) decide si se muestra «Tu licencia está bien. Este bloqueo es solo por la fecha y hora.»; con otro estado se muestran los dos problemas por separado. El bloqueo se quita solo al corregir el reloj."
+      },
+      "LicenseSummary": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "enum": [
+              "active",
+              "grace",
+              "expired",
+              "revoked",
+              "not_activated",
+              "not_activated_with_data"
+            ]
+          },
+          "environment": {
+            "enum": ["test", "production"]
+          },
+          "copied": {
+            "type": "boolean"
+          },
+          "machine_unverified": {
+            "type": "boolean"
+          },
+          "revocation_reason": {
+            "enum": ["deactivated", "transferred", "revoked", null]
+          },
+          "license_type": {
+            "enum": ["perpetual", "subscription", "trial", null]
+          },
+          "perpetual": {
+            "type": "boolean"
+          },
+          "expires_at": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "grace_days": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "grace_ends_at": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "days_until_expiry": {
+            "type": ["integer", "null"],
+            "minimum": 0
+          },
+          "grace_days_remaining": {
+            "type": ["integer", "null"],
+            "minimum": 0
+          },
+          "clock": {
+            "$ref": "#/components/schemas/LicenseClock"
+          }
+        },
+        "required": [
+          "state",
+          "environment",
+          "copied",
+          "machine_unverified",
+          "revocation_reason",
+          "license_type",
+          "perpetual",
+          "expires_at",
+          "grace_days",
+          "grace_ends_at",
+          "days_until_expiry",
+          "grace_days_remaining",
+          "clock"
+        ],
+        "description": "Etapa L1 (Fase C): el estado de la licencia del servidor principal para el aviso fijo de cada terminal. Go es la única autoridad y Android no habla con el servidor de licencias. state: active (Vigente), grace (Tolerancia), expired (Vencida), revoked (Revocada, con revocation_reason), not_activated (Sin activar) o not_activated_with_data (Sin activar con datos). copied: la carpeta de datos se copió de otra computadora; machine_unverified: no se pudo comprobar esta computadora. days_until_expiry (solo en Vigente con vencimiento) y grace_days_remaining (solo en Tolerancia: los días que quedan antes de que se bloquee la captura) ya vienen redondeados hacia arriba. clock es la hora del equipo (LicenseClock). Cuando algo de esto cambia, el canal de eventos publica license.changed."
+      },
+      "LicenseRejection": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "enum": ["LICENSE_NOT_ACTIVATED", "LICENSE_EXPIRED", "LICENSE_REVOKED"]
+              },
+              "message": {
+                "type": "string"
+              },
+              "request_id": {
+                "type": "string"
+              },
+              "details": {
+                "type": "object",
+                "properties": {
+                  "operation": {
+                    "type": "string"
+                  },
+                  "state": {
+                    "enum": ["not_activated", "not_activated_with_data"]
+                  },
+                  "copied": {
+                    "type": "boolean"
+                  },
+                  "machine_unverified": {
+                    "type": "boolean"
+                  },
+                  "expires_at": {
+                    "type": ["string", "null"],
+                    "format": "date-time"
+                  },
+                  "grace_ended_at": {
+                    "type": ["string", "null"],
+                    "format": "date-time"
+                  },
+                  "reason": {
+                    "enum": ["deactivated", "transferred", "revoked", ""]
+                  },
+                  "pending_accounts": {
+                    "type": "boolean"
+                  }
+                },
+                "required": ["operation"]
+              }
+            },
+            "required": ["code", "message", "details"]
+          }
+        },
+        "required": ["error"],
+        "description": "Etapa L1 (Fase C, tabla de la §6 del contrato): la licencia no permite la operación. LICENSE_NOT_ACTIVATED (Sin activar o Sin activar con datos: details.state y details.copied), LICENSE_EXPIRED (Vencida: details.expires_at y details.grace_ended_at) o LICENSE_REVOKED (Revocada: details.reason). details.operation es la fila de la tabla (capture, open_shift, administration…); abrir turno con la licencia vencida o revocada solo procede con cuentas pendientes de cobro (details.pending_accounts false si no hay). Lo ya abierto se sigue cobrando y los reportes nunca se bloquean. Android muestra «La licencia del sistema no permite capturar pedidos. Avisa al encargado.»; message ya lo dice en español sencillo para los clientes anteriores. No se guardó nada: es definitivo para ese envío."
+      },
+      "SystemClockInvalid": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "const": "SYSTEM_CLOCK_INVALID"
+              },
+              "message": {
+                "type": "string"
+              },
+              "request_id": {
+                "type": "string"
+              },
+              "details": {
+                "$ref": "#/components/schemas/LicenseClock"
+              }
+            },
+            "required": ["code", "message", "details"]
+          }
+        },
+        "required": ["error"],
+        "description": "Etapa L1 (Fase C, §6.2): la computadora principal tiene la fecha y hora incorrectas (antes de la última actividad registrada, con 10 minutos de margen). No es un problema de licencia, de conexión ni de permisos: no empieza con LICENSE. Se rechaza todo lo que registra con fecha, también cobrar. details es LicenseClock con las dos fechas. message: «No se puede registrar: la computadora principal tiene la fecha y hora incorrectas. Avisa al encargado.». No se guardó nada; se puede reenviar cuando el reloj se corrija."
       }
     }
   }

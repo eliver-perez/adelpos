@@ -38,7 +38,12 @@ func (service *Service) protected(ctx context.Context, tx pgx.Tx, request Reques
 		return result, err
 	}
 	if request.Method == "GET" && route == "auth/me" {
-		return currentIdentity(ctx, tx, principal)
+		// Etapa L1, Fase C: con el estado de la licencia y de la hora (license_gate.go).
+		return service.attachLicense(ctx, tx)(currentIdentity(ctx, tx, principal))
+	}
+	// Etapa L1, Fase C (license_clock.go): «Comprobar la hora con internet» y el desbloqueo de soporte.
+	if licenseClockRoute(route) {
+		return service.licenseClockRoutes(ctx, tx, request, principal, route)
 	}
 	if request.Method == "POST" && route == "auth/logout" {
 		if _, err := tx.Exec(ctx, "UPDATE app.sessions SET revoked_at=now(),revoke_reason='logout' WHERE id=$1", principal.SessionID); err != nil {
@@ -62,7 +67,8 @@ func (service *Service) protected(ctx context.Context, tx pgx.Tx, request Reques
 	// Recuperación del estado al reconectar (etapa 9G, §5.6; recovery.go). Va antes del prefijo restaurant/ porque
 	// responde con la sesión aunque el usuario ya no pueda consultar cuentas.
 	if request.Method == "GET" && route == "restaurant/state" {
-		return recoveryState(ctx, tx, principal)
+		// Etapa L1, Fase C: con el estado de la licencia y de la hora (license_gate.go).
+		return service.attachLicense(ctx, tx)(recoveryState(ctx, tx, principal))
 	}
 	if strings.HasPrefix(route, "restaurant/") {
 		// Desde la etapa 9D la operación recibe el autorizador de supervisor, como los cobros, para

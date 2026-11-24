@@ -41,28 +41,44 @@ func TestProductionBuildFailsWithoutProductionKeys(t *testing.T) {
 	if err == nil {
 		t.Fatal("la compilación de producción compiló sin llaves de producción")
 	}
-	if !strings.Contains(output, "llaves-production.json") {
+	if !strings.Contains(output, "llaves-production.json") && !strings.Contains(output, "soporte-production.pub.json") {
 		t.Fatalf("la compilación de producción falló por otra causa:\n%s", output)
 	}
 
-	// Con llaves de producción (simuladas, fuera de la carpeta) compila: el único faltante son las llaves.
+	// Con llaves de producción (simuladas, fuera de la carpeta) compila: el único faltante son las llaves. Desde la
+	// Fase C también la pública de soporte (§6.4): sin ella tampoco compila.
 	directory := t.TempDir()
-	keys := filepath.Join(directory, "llaves-production.json")
 	public := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
-	body := `{"environment":"production","keys":[{"kid":"prueba-de-compilacion","environment":"production","public_key":"` + public + `"}]}`
-	if err := os.WriteFile(keys, []byte(body), 0600); err != nil {
-		t.Fatal(err)
+	simulated := map[string]string{
+		"llaves-production.json":      `{"environment":"production","keys":[{"kid":"prueba-de-compilacion","environment":"production","public_key":"` + public + `"}]}`,
+		"soporte-production.pub.json": `{"environment":"production","keys":[{"kid":"prueba-de-compilacion","public_key":"` + public + `"}]}`,
 	}
-	target, err := filepath.Abs("llaves-production.json")
-	if err != nil {
-		t.Fatal(err)
+	overlayWith := func(names ...string) string {
+		replace := map[string]string{}
+		for _, name := range names {
+			source := filepath.Join(directory, name)
+			if err := os.WriteFile(source, []byte(simulated[name]), 0600); err != nil {
+				t.Fatal(err)
+			}
+			target, err := filepath.Abs(name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			replace[target] = source
+		}
+		overlay, _ := json.Marshal(map[string]map[string]string{"Replace": replace})
+		overlayFile := filepath.Join(directory, strings.Join(names, "+")+".overlay.json")
+		if err := os.WriteFile(overlayFile, overlay, 0600); err != nil {
+			t.Fatal(err)
+		}
+		return overlayFile
 	}
-	overlay, _ := json.Marshal(map[string]map[string]string{"Replace": {target: keys}})
-	overlayFile := filepath.Join(directory, "overlay.json")
-	if err := os.WriteFile(overlayFile, overlay, 0600); err != nil {
-		t.Fatal(err)
+	output, err = build("-overlay", overlayWith("llaves-production.json"), "./internal/licensing", "./cmd/ad-el-pos-server")
+	if err == nil || !strings.Contains(output, "soporte-production.pub.json") {
+		t.Fatalf("sin la llave pública de soporte de producción no debe compilar:\n%s", output)
 	}
-	if output, err := build("-overlay", overlayFile, "./internal/licensing", "./cmd/ad-el-pos-server"); err != nil {
+	if output, err := build("-overlay", overlayWith("llaves-production.json", "soporte-production.pub.json"),
+		"./internal/licensing", "./cmd/ad-el-pos-server"); err != nil {
 		t.Fatalf("con llaves de producción, la compilación de producción debe compilar:\n%s", output)
 	}
 }

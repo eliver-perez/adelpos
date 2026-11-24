@@ -323,6 +323,8 @@ func (service *Service) completeLicenseOperation(ctx context.Context, operation 
 	if auditErr := service.auditLicense(ctx, operation.principal, success, failure, status, fault); auditErr != nil && service.Logger != nil {
 		service.Logger.Error("license_audit_failed", "reason", auditErr.Error())
 	}
+	// Etapa L1, fase C (license_clock.go): las terminales se enteran en el momento del cambio (license.changed).
+	service.notifyLicense(ctx)
 	if fault != nil {
 		return nil, fault
 	}
@@ -412,7 +414,8 @@ func (service *Service) licenseImport(ctx context.Context, tx pgx.Tx, request Re
 	if err := audit(ctx, tx, principal, "license.imported", "license", nil, nil, licenseAuditDetails(status, nil), true); err != nil {
 		return nil, err
 	}
-	return service.licenseStatusView(principal, request.Local), nil
+	// Etapa L1, fase C: después de confirmar, el aviso a las terminales (licenseNotice, license_clock.go).
+	return &licenseNotice{result: service.licenseStatusView(principal, request.Local)}, nil
 }
 
 // regenerateIdentity es «Crear una identidad nueva para esta computadora» (L1-D11): solo en una instalación copiada,
@@ -499,12 +502,13 @@ func (service *Service) regenerateIdentity(ctx context.Context, tx pgx.Tx, reque
 	if err := audit(ctx, tx, principal, "license.identity_regenerated", "license", nil, nil, details, true); err != nil {
 		return nil, err
 	}
-	return map[string]any{
+	// Etapa L1, fase C: después de confirmar, el aviso a las terminales (licenseNotice, license_clock.go).
+	return &licenseNotice{result: map[string]any{
 		"server_id":         identity.ServerID,
 		"revoked_terminals": len(revoked),
 		"restart_required":  true,
 		"status":            service.licenseStatusView(principal, request.Local),
-	}, nil
+	}}, nil
 }
 
 // --- Errores (L1-D17, avance §0.6.2) -------------------------------------------------------------------------------
