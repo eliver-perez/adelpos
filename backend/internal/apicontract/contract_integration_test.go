@@ -32,6 +32,8 @@ import (
 	"local/ad-el-pos/server/internal/apicontract"
 	"local/ad-el-pos/server/internal/database"
 	"local/ad-el-pos/server/internal/httpapi"
+	"local/ad-el-pos/server/internal/licenseseats"
+	"local/ad-el-pos/server/internal/licenseseats/seatstest"
 	"local/ad-el-pos/server/internal/localsetup"
 	"local/ad-el-pos/server/internal/product"
 )
@@ -62,6 +64,9 @@ type contractClient struct {
 	// pool prepara estados que la API no produce sola en el recorrido (etapa A2: un trabajo de impresión que falló,
 	// porque aquí no corre el trabajador de la cola).
 	pool *pgxpool.Pool
+	// seats son los cupos de la licencia del recorrido (etapa L1, Fase D): el máximo del contrato, salvo en el paso de
+	// los cupos, que los baja para recibir LICENSE_SEAT_UNAVAILABLE.
+	seats *seatstest.Source
 }
 
 func contractID() string {
@@ -196,7 +201,9 @@ func TestContractV1(t *testing.T) {
 	if err := os.WriteFile(filename, []byte(provisioning), 0600); err != nil {
 		t.Fatal(err)
 	}
-	service := &administration.Service{Pool: pool, ProvisioningFile: filename}
+	seats := seatstest.NewSource(seatstest.ContractMaximum, seatstest.ContractMaximum, seatstest.ContractMaximum)
+	service := &administration.Service{Pool: pool, ProvisioningFile: filename,
+		Seats: licenseseats.NewManager(licenseseats.Options{Limits: seats})}
 	// Identidad del servidor para el emparejamiento (etapa 9G, fase C: rutas pairing/* del contrato).
 	serverIdentity, err := localsetup.EnsureIdentity(filepath.Join(t.TempDir(), localsetup.IdentityFolder))
 	if err != nil {
@@ -211,7 +218,7 @@ func TestContractV1(t *testing.T) {
 		t.Fatal(err)
 	}
 	client := &contractClient{t: t, contract: contract, handler: handler, version: product.Read().Version, kind: "desktop", covered: map[string][]int{},
-		fingerprint: serverIdentity.Fingerprint, pool: pool}
+		fingerprint: serverIdentity.Fingerprint, pool: pool, seats: seats}
 	// Asistente inicial: la terminal principal y el administrador.
 	setup := httptest.NewRequest("POST", "/api/v1/setup", strings.NewReader(`{"name":"Contrato v1","timezone":"America/Monterrey",
         "currency":"MXN","theme":"light","terminal_name":"Terminal de contrato"}`))
@@ -249,6 +256,17 @@ func contractScenario(t *testing.T, client *contractClient) {
 	client.call("GET", "/auth/me", nil, nil, 200)
 	// Un cliente anterior a la versión mínima recibe «Actualiza esta terminal» con el error documentado.
 	client.call("GET", "/auth/me", nil, map[string]string{httpapi.ClientVersionHeader: "0.0.1"}, 426)
+	// Etapa L1 (fase B): el estado de la licencia, con sesión y con solo la credencial del dispositivo.
+	status := decodeContract[map[string]any](t, client.call("GET", "/license/status", nil, nil, 200).Body.Bytes())
+	if status["state"] != "not_activated" || status["license"] != nil {
+		t.Fatalf("una instalación sin licencia: %v", status)
+	}
+	withoutSession := *client
+	withoutSession.session = ""
+	summary := decodeContract[map[string]any](t, withoutSession.call("GET", "/license/status", nil, nil, 200).Body.Bytes())
+	if len(summary) != 3 || summary["state"] != "not_activated" {
+		t.Fatalf("el resumen sin sesión: %v", summary)
+	}
 
 	// Catálogo de prueba (preparación, fuera del contrato).
 	category := decodeContract[map[string]any](t, client.setup("POST", "/catalog/categories",
@@ -407,7 +425,60 @@ func contractScenario(t *testing.T, client *contractClient) {
 	contractPrecheck(t, client, phone, waiterData)
 	// Etapa A2 (parte D): los avisos de platillos listos del teléfono, con su lectura y su canal.
 	contractReadyAlerts(t, client, phone, waiterData)
+	// Etapa L1 (Fase D): el modo Cocina y el rechazo por cupo de la licencia.
+	contractSeats(t, client, phone, waiterData)
 	client.call("POST", "/auth/logout", nil, nil, 200)
+}
+
+// contractSeats recorre los cupos de la licencia (etapa L1, Fase D): Preparación ocupa y libera el cupo de cocina
+// (setKitchenDisplayMode) y, sin cupo, Preparación y el pedido de la cola del teléfono reciben 409
+// LICENSE_SEAT_UNAVAILABLE con LicenseSeatUnavailable, sin guardar nada. El rechazo de las demás capturas se recorre en
+// internal/operations (stagel1_seats_test.go).
+func contractSeats(t *testing.T, client *contractClient, phone *contractClient, data contractWaiterData) {
+	seatError := func(body []byte, seat string, limit float64) {
+		t.Helper()
+		if err := client.contract.ValidateJSON(map[string]any{"$ref": "#/components/schemas/LicenseSeatUnavailable"}, body); err != nil {
+			t.Fatalf("el rechazo por cupo no cumple LicenseSeatUnavailable: %v (%s)", err, body)
+		}
+		details := decodeContract[map[string]any](t, body)["error"].(map[string]any)["details"].(map[string]any)
+		if details["seat"] != seat || details["limit"] != limit {
+			t.Fatalf("rechazo por cupo: %s", body)
+		}
+	}
+	entered := decodeContract[map[string]any](t, client.call("POST", "/kitchen/display-mode", map[string]any{"active": true}, nil, 200).Body.Bytes())
+	if entered["active"] != true {
+		t.Fatalf("entrar a Preparación: %v", entered)
+	}
+	client.call("POST", "/kitchen/display-mode", map[string]any{"active": false}, nil, 200)
+	client.seats.Set(seatstest.ContractMaximum, 0, 0)
+	defer client.seats.Set(seatstest.ContractMaximum, seatstest.ContractMaximum, seatstest.ContractMaximum)
+	seatError(client.call("POST", "/kitchen/display-mode", map[string]any{"active": true}, nil, 409).Body.Bytes(), "kitchen_displays", 0)
+	// El teléfono ya ocupa su cupo de comandero (quien lo tiene lo conserva con una licencia nueva con menos cupos): se
+	// libera desde Terminales (administración, fuera del contrato) y el mesero vuelve a entrar con su PIN.
+	client.setup("POST", "/devices/"+phone.device+"/seat/release", map[string]any{}, 200)
+	// El pedido de la cola del teléfono, con la credencial de envío: rechazo definitivo y la clave sin registrar.
+	customization := data.customization
+	waiterID := ""
+	if err := client.pool.QueryRow(context.Background(), "SELECT id::text FROM app.users WHERE username='ana.contrato'").Scan(&waiterID); err != nil {
+		t.Fatal(err)
+	}
+	login := decodeContract[map[string]any](t, phone.call("POST", "/auth/pin-login",
+		map[string]string{"user_id": waiterID, "pin": "4829"}, nil, 200).Body.Bytes())
+	order := map[string]any{
+		"operation_id": contractID(), "catalog_version": data.version,
+		"captured_at": time.Now().Add(-time.Minute).UTC().Format(time.RFC3339Nano),
+		"destination": map[string]any{"account_id": data.accountID},
+		"items": []map[string]any{{"id": contractID(), "product_id": data.fries, "variant_id": nil, "quantity": 1,
+			"customization": customization, "seen_unit_price": "40.00"}},
+	}
+	queue := *phone
+	headers := map[string]string{"X-Offline-Credential": fmt.Sprint(login["offline_credential"])}
+	seatError(queue.call("POST", "/restaurant/offline-orders", order, headers, 409).Body.Bytes(), "order_takers", 0)
+	var recorded int
+	if err := client.pool.QueryRow(context.Background(), "SELECT count(*)::int FROM app.restaurant_operations WHERE id=$1",
+		order["operation_id"]).Scan(&recorded); err != nil || recorded != 0 {
+		t.Fatalf("el pedido rechazado por cupo registró su clave: %d %v", recorded, err)
+	}
 }
 
 // contractWaiterData es lo que el recorrido del modo Mesero toma del recorrido principal.

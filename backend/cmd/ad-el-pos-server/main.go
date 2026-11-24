@@ -29,6 +29,7 @@ import (
 	"local/ad-el-pos/server/internal/kitchen"
 	"local/ad-el-pos/server/internal/lanlistener"
 	"local/ad-el-pos/server/internal/legacyimport"
+	"local/ad-el-pos/server/internal/licenseseats"
 	"local/ad-el-pos/server/internal/licensing"
 	"local/ad-el-pos/server/internal/localsetup"
 	"local/ad-el-pos/server/internal/maintenance"
@@ -218,6 +219,11 @@ func newApplication(pool *pgxpool.Pool, configFile string, backups maintenance.B
 		Queues: kitchen.HostQueueInspector{},
 		// Vista previa del logotipo en el diseñador de documentos (etapa 9B).
 		Rasters: identity.NewRasters(pool),
+		// Cupos de la licencia (etapa L1, Fase D; internal/licenseseats). Aquí todavía no hay gestor de licencias: sin
+		// fuente no hay licencia válida y ninguna operación que pide cupo procede (falla cerrada; nunca un «sin
+		// límite» que pudiera llegar a un instalador). serveHTTP lo reemplaza por el de los límites reales de la
+		// licencia (administration.LicenseSeats, Fase C) en cuanto carga el gestor, antes de atender peticiones.
+		Seats: licenseseats.NewManager(licenseseats.Options{Limits: nil}),
 	}
 	// Respaldos programados y «Respaldar ahora» (etapa 9G, fase F): el mismo respaldo de la instalación (pg_dump con
 	// serve; el de internal/standalone en el host), con su trabajador diario en serveHTTP.
@@ -252,6 +258,23 @@ func serveHTTP(ctx context.Context, logger *slog.Logger, cfg config.Config, pool
 	if application.ScheduledBackups != nil && identityErr == nil {
 		application.ScheduledBackups.InstallationID = serverIdentity.ServerID
 	}
+	// Etapa L1, fase A: el gestor de la licencia, con la llave de licencias de la identidad (license.go). Se carga
+	// antes de atender peticiones y nunca impide arrancar.
+	licenseIdentity := &serverIdentity
+	if identityErr != nil {
+		licenseIdentity = nil
+	}
+	// Etapa L1, fase C: con los cupos de la licencia (useLicense, license.go).
+	useLicense(application, loadLicense(ctx, logger, licenseOptions{
+		identityDir: network.IdentityDir,
+		identity:    licenseIdentity,
+		database:    licensing.PoolProbe{Pool: pool},
+		testMode:    testMode,
+	}))
+	// Etapa L1, fase B: el cliente del servidor de licencias (rutas license/* y consulta en segundo plano).
+	application.LicenseServer = newLicenseClient(logger, application.License, cfg.LicenseServerURL, testMode)
+	// Etapa L1, fase C: «Comprobar la hora con internet» (§6.3) con la hora de ese mismo cliente.
+	application.LicenseServerClock = administration.LicenseClientClock(application.LicenseServer)
 	if err := config.CheckNetworkAddress(network.Address, cfg.ListenAddress); err != nil {
 		return err
 	}
@@ -361,6 +384,27 @@ func serveHTTP(ctx context.Context, logger *slog.Logger, cfg config.Config, pool
 		defer close(pairingCleanupDone)
 		(&administration.PairingCleaner{Pool: pool, Logger: logger}).Run(workerContext)
 	}()
+	// Etapa L1, fase A: el trabajador del gestor de la licencia toma la hora local cada minuto como hora confiable
+	// y la guarda; al apagarse la guarda por última vez.
+	licenseDone := make(chan struct{})
+	go func() {
+		defer close(licenseDone)
+		application.License.Run(workerContext)
+	}()
+	// Etapa L1, fase B: la consulta de la licencia en segundo plano (al arrancar, entre 1 y 5 minutos después, y una vez
+	// al día); nunca bloquea nada y no hace nada sin una activación instalada.
+	licenseRefreshDone := make(chan struct{})
+	go func() {
+		defer close(licenseRefreshDone)
+		application.LicenseServer.RunBackground(workerContext, licensing.DefaultSchedule())
+	}()
+	// Etapa L1, fase C: el vigilante de la licencia y de la hora (administration/license_monitor.go) revisa al arrancar
+	// y cada 15 s, audita cada bloqueo y desbloqueo por la hora del equipo y avisa a las terminales con license.changed.
+	licenseMonitorDone := make(chan struct{})
+	go func() {
+		defer close(licenseMonitorDone)
+		application.RunLicenseMonitor(workerContext)
+	}()
 	defer func() {
 		stopWorker()
 		<-workerDone
@@ -370,6 +414,9 @@ func serveHTTP(ctx context.Context, logger *slog.Logger, cfg config.Config, pool
 		<-discoveryDone
 		<-pairingCleanupDone
 		<-legacyDone
+		<-licenseDone
+		<-licenseRefreshDone
+		<-licenseMonitorDone
 	}()
 	stopped := make(chan error, 2)
 	go func() {

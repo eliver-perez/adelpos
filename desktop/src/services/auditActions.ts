@@ -19,6 +19,15 @@ export const auditActionLabels: Record<string, string> = {
   'maintenance.test_data_removed': 'Datos de prueba quitados',
   // Etapa 9G (fase A): reinicio del servicio del servidor desde Mantenimiento.
   'maintenance.service_restarted': 'Servidor reiniciado',
+  // Etapa L1 (Fase C): la protección de la hora del equipo y el estado de la licencia.
+  'license.clock_blocked': 'Sistema detenido por la fecha y hora de la computadora',
+  'license.clock_unblocked': 'Fecha y hora de la computadora corregidas',
+  'license.clock_internet_check': 'Hora comprobada con internet',
+  'license.clock_corrected': 'Última actividad corregida con la hora de internet',
+  'license.support_requested': 'Código de desbloqueo de soporte pedido',
+  'license.support_unlocked': 'Desbloqueo de soporte aplicado',
+  'license.support_unlock_rejected': 'Desbloqueo de soporte rechazado',
+  'license.state_changed': 'Estado de la licencia cambiado',
   // Etapa 9G (fase B): emparejamiento y administración de terminales.
   'device.pairing_requested': 'Terminal nueva pidió su código',
   'device.pairing_approved': 'Terminal aprobada',
@@ -281,6 +290,21 @@ export const auditActionLabels: Record<string, string> = {
   get 'kitchen.print.precheck_requested'() {
     return `${precheckName().label} ${precheckName().sent} a imprimir`;
   },
+  // Etapa L1 (fase B): la licencia del servidor principal (administration/license.go).
+  'license.activated': 'Licencia activada',
+  'license.activation_failed': 'No se pudo activar la licencia',
+  'license.transferred': 'Licencia transferida a esta computadora',
+  'license.transfer_failed': 'No se pudo transferir la licencia',
+  'license.refreshed': 'Licencia actualizada',
+  'license.refresh_failed': 'No se pudo buscar la actualización de la licencia',
+  'license.deactivated': 'Licencia liberada',
+  'license.deactivation_failed': 'No se pudo liberar la licencia',
+  'license.offline_request_created': 'Solicitud de licencia sin internet creada',
+  'license.imported': 'Archivo de licencia importado',
+  'license.import_rejected': 'Archivo de licencia rechazado',
+  'license.identity_regenerated': 'Identidad nueva de la computadora principal',
+  // Etapa L1 (fase D): «Liberar cupo» en Terminales (administration/license_seats.go).
+  'license.seat_released': 'Cupo de la licencia liberado',
 };
 
 // unknownAuditAction es lo que dice la columna «Operación» con una acción que esta versión no conoce

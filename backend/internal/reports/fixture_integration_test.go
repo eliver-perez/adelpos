@@ -20,6 +20,7 @@ import (
 	"local/ad-el-pos/server/internal/administration"
 	"local/ad-el-pos/server/internal/catalog"
 	"local/ad-el-pos/server/internal/database"
+	"local/ad-el-pos/server/internal/licenseseats/seatstest"
 	"local/ad-el-pos/server/internal/operations"
 	"local/ad-el-pos/server/internal/payments"
 )
@@ -106,7 +107,7 @@ func newReportsFixture(t *testing.T) *reportsFixture {
 		t.Fatal(err)
 	}
 	fixture := &reportsFixture{ctx: ctx, pool: pool, provisioning: token, methods: map[string]string{},
-		service: &administration.Service{Pool: pool, ProvisioningFile: filename}}
+		service: &administration.Service{Pool: pool, ProvisioningFile: filename, Seats: seatstest.Roomy()}}
 	setup := decode[map[string]any](t, fixture.call(t, terminal{}, "POST", "setup", map[string]string{
 		"name": "Restaurante de reportes", "timezone": "America/Monterrey", "currency": "MXN", "theme": "light",
 		"terminal_name": "Caja principal",

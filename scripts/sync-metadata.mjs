@@ -1,4 +1,4 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { readdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -25,6 +25,31 @@ async function output(name, value) {
 }
 for (const name of ['backend/internal/product/metadata.json', 'desktop/src/generated/product.json'])
   await output(name, json(product));
+// Etapa L1 (licencias): las llaves públicas de confianza de cada entorno (config/licencias/llaves-<entorno>.json)
+// se embeben en el servidor Go con go:embed, que no puede leer fuera de backend/. config/licencias/ es la
+// fuente; backend/internal/licensing/ guarda la copia. Procedimiento: docs/licencias/ROTAR_LLAVES.md.
+// Etapa L1 (Fase C): también la llave pública de soporte de cada entorno de compilación
+// (config/licencias/soporte-<entorno>.pub.json), para el desbloqueo sin internet (docs/licencias/DESBLOQUEO_SOPORTE.md).
+const keyFiles = (await readdir(path.join(root, 'config/licencias')))
+  .filter((name) => /^llaves-[a-z]+\.json$/.test(name) || /^soporte-[a-z]+\.pub\.json$/.test(name))
+  .sort();
+for (const name of keyFiles) {
+  const keys = JSON.parse(await read(`config/licencias/${name}`));
+  await output(`backend/internal/licensing/${name}`, json(keys));
+}
+// Revisión R1 (R1-4): una copia sin su fuente (por ejemplo, una llaves-production.json huérfana, que haría compilar
+// la versión de producción) hace fallar sync-check; sync la borra.
+const keyCopies = (await readdir(path.join(root, 'backend/internal/licensing'))).filter((name) =>
+  /^llaves-[a-z]+\.json$/.test(name),
+);
+for (const name of keyCopies) {
+  if (keyFiles.includes(name)) continue;
+  if (check)
+    throw new Error(
+      `Llaves sin fuente: backend/internal/licensing/${name} no está en config/licencias. Ejecuta ./scripts/dev.sh sync`,
+    );
+  await unlink(path.join(root, 'backend/internal/licensing', name));
+}
 await output(
   'desktop/src/generated/connection.json',
   json(JSON.parse(await read('config/terminal.development.json'))),

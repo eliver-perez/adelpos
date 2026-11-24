@@ -18,6 +18,9 @@
     <string name="panes_back">Volver a %1$s</string>
     <string name="top_bar_back">Volver</string>
     <string name="top_bar_logo">AD-EL POS</string>
+    <!-- Etapa L1: el aviso discreto de la licencia en tolerancia (el texto con los días sale de LicenseMessages). -->
+    <string name="license_grace_title">La licencia venció</string>
+    <string name="license_grace_ok">Entendido</string>
 
     <!-- Teclado del PIN (§3.2). -->
     <string name="pin_pad_delete">Borrar</string>

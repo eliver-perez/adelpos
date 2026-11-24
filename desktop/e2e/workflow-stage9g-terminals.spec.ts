@@ -118,9 +118,11 @@ test('Terminales: aprobación con código, renombrar, configuración, revocació
   await expect(row).toContainText('Windows');
   await expect(row).toContainText('Cajera de la barra', { timeout: 10000 });
   await expect(row).toContainText('En línea');
-  const summary = page.getByRole('region', { name: 'Sesiones activas por tipo de terminal' });
-  await expect(summary).toContainText('Escritorio');
-  await expect(summary).toContainText('Teléfono o tableta0');
+  // Etapa L1 (Fase E, §5): el resumen de los cupos de la licencia reemplaza al de sesiones por tipo de terminal.
+  const summary = page.getByRole('region', { name: 'Cupos de la licencia' });
+  await expect(summary).toContainText('Cajas');
+  await expect(summary).toContainText('Comanderos');
+  await expect(summary).toContainText('de 20');
   // Etapa A3 (§1): sin la frase provisional «Solo se cuentan; todavía no se limita ninguna.».
   await expect(summary).not.toContainText('Solo se cuentan');
 

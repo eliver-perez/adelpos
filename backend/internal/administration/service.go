@@ -18,6 +18,8 @@ import (
 	"local/ad-el-pos/server/internal/documents"
 	"local/ad-el-pos/server/internal/kitchen"
 	"local/ad-el-pos/server/internal/legacyimport"
+	"local/ad-el-pos/server/internal/licenseseats"
+	"local/ad-el-pos/server/internal/licensing"
 	"local/ad-el-pos/server/internal/maintenance"
 	"local/ad-el-pos/server/internal/reports"
 )
@@ -62,6 +64,27 @@ type Service struct {
 	// Legacy es la migración del sistema anterior (etapa 9H, fase C; legacy_migration.go): subidas, corridas y su
 	// trabajador, que arranca main.go. Sin valor, las rutas de la migración responden 503.
 	Legacy *legacyimport.Manager
+	// License es el gestor de la licencia del servidor principal (etapa L1, fase A; internal/licensing): estado,
+	// cupos de la licencia y última hora confiable. Lo carga main.go al arrancar, después de la identidad. Lo usan
+	// las rutas license/* (Fase B), la puerta de la §6 y la hora (Fase C) y los cupos (Fase D). Sin valor
+	// (pruebas que no lo necesitan) no hay licencia.
+	License *licensing.Manager
+	// LicenseServer es el cliente del servidor de licencias (etapa L1, fase B; license.go): activar, transferir,
+	// consultar y liberar. Sin valor, esas rutas responden 503 LICENSE_SERVER_UNAVAILABLE.
+	LicenseServer *licensing.Client
+	// Seats aplica los cupos de la licencia (etapa L1, Fase D; license_seats.go e internal/licenseseats). Sin valor, o
+	// sin fuente de límites, no hay licencia válida y ninguna operación que pide cupo procede (falla cerrada): main.go
+	// lo crea siempre y las pruebas inyectan uno con los cupos y el reloj que necesitan (licenseseats/seatstest).
+	Seats *licenseseats.Manager
+	// Etapa L1, Fase C (license_gate.go, license_clock.go y license_monitor.go): la puerta de la licencia y la
+	// protección de la hora. LicenseServerClock da la hora del servidor de licencias para «Comprobar la hora con
+	// internet» (§6.3; lo implementa el cliente de la Fase B; sin valor, esa ruta responde 503). SupportTrust son las
+	// llaves públicas de soporte del desbloqueo sin internet (§6.4); sin valor, las compiladas (solo las pruebas lo
+	// cambian). licenseMonitorState es el vigilante que audita los bloqueos y publica license.changed.
+	LicenseServerClock  LicenseServerClock
+	SupportTrust        *licensing.SupportTrust
+	licenseMonitorOnce  sync.Once
+	licenseMonitorState *licenseMonitor
 	// Logger recibe el detalle técnico de los fallos que la interfaz explica sin términos técnicos.
 	Logger      *slog.Logger
 	reportsOnce sync.Once
@@ -235,6 +258,13 @@ func (service *Service) Execute(ctx context.Context, request Request) (any, erro
 			return nil, err
 		}
 	}
+	// Etapa L1, Fase D (hallazgo R2-2, L1-D43; license_seats.go): el rechazo por falta de cupo revierte la transacción
+	// entera, también la actividad con fecha futura que los cupos bajaron a «ahora». Se baja otra vez en una transacción
+	// propia, ya revertida la de la petición (que tenía esas filas bloqueadas).
+	if seatUnavailable(operationError) {
+		_ = transaction.Rollback(ctx)
+		service.settleFutureSeatActivity(ctx)
+	}
 	return result, operationError
 }
 
@@ -303,6 +333,14 @@ func (service *Service) dispatch(ctx context.Context, tx pgx.Tx, request Request
 		return nil, unauthorized("OFFLINE_CREDENTIAL_NOT_ALLOWED",
 			"La autorización de envío solo sirve para entregar pedidos capturados sin conexión.")
 	}
+	// Etapa L1, Fase C (license_gate.go): la puerta de la licencia y de la hora. Las rutas públicas (asistente, alta de la
+	// propia computadora y emparejamiento) pasan aquí, antes de atenderlas; todas las demás, en cuanto se autentica la
+	// terminal (abajo).
+	if publicLicenseRoute(route) {
+		if err := service.licenseGate(ctx, tx, request, route); err != nil {
+			return nil, err
+		}
+	}
 	if route == "setup/status" && request.Method == "GET" {
 		var configured bool
 		err := tx.QueryRow(ctx, "SELECT EXISTS(SELECT FROM app.establishment)").Scan(&configured)
@@ -338,6 +376,11 @@ func (service *Service) dispatch(ctx context.Context, tx pgx.Tx, request Request
 	if err := matchClientKind(ctx, tx, request); err != nil {
 		return nil, err
 	}
+	// Etapa L1, Fase C (license_gate.go): la puerta, para todo lo que sigue (entrada con contraseña o PIN, credencial de
+	// envío, agente de impresión, avisos de platillos listos y toda operación con sesión).
+	if err := service.licenseGate(ctx, tx, request, route); err != nil {
+		return nil, err
+	}
 	if route == "auth/login" && request.Method == "POST" {
 		return login(ctx, tx, request)
 	}
@@ -358,8 +401,11 @@ func (service *Service) dispatch(ctx context.Context, tx pgx.Tx, request Request
 		if err != nil {
 			return nil, err
 		}
-		return runProtected(ctx, tx, principal, request, route, func(work pgx.Tx) (any, error) {
-			return service.protected(ctx, work, request, principal, route)
+		// Etapa L1 (Fase D): el pedido de la cola pide cupo como cualquier captura (license_seats.go).
+		return service.withSeats(ctx, tx, request, principal, route, func() (any, error) {
+			return runProtected(ctx, tx, principal, request, route, func(work pgx.Tx) (any, error) {
+				return service.protected(ctx, work, request, principal, route)
+			})
 		})
 	}
 	// Agente de impresión de la terminal (etapa 9G, fase E; print_agent.go): solo con la credencial de la terminal,
@@ -372,13 +418,22 @@ func (service *Service) dispatch(ctx context.Context, tx pgx.Tx, request Request
 	if readyRoute {
 		return readyAlerts(ctx, tx, request)
 	}
+	// Etapa L1, fase B (license.go): el resumen del estado de la licencia con solo la credencial del dispositivo, para
+	// el teléfono o la tableta en «¿Quién eres?». Con sesión, GET license/status responde el estado completo.
+	if route == "license/status" && request.Method == "GET" && request.SessionToken == "" {
+		return service.licenseDeviceSummary(), nil
+	}
 	principal, err := authenticateSession(ctx, tx, request)
 	if err != nil {
 		return nil, err
 	}
-	// Las denegaciones y acciones de soporte también forman parte del historial de seguridad.
-	result, err := runProtected(ctx, tx, principal, request, route, func(work pgx.Tx) (any, error) {
-		return service.protected(ctx, work, request, principal, route)
+	// Las denegaciones y acciones de soporte también forman parte del historial de seguridad. Etapa L1 (Fase D): los
+	// cupos de la licencia se aplican aquí, en un solo punto, después de autenticar y en la misma transacción
+	// (license_seats.go; la clasificación es licenseseats.ForOperation).
+	result, err := service.withSeats(ctx, tx, request, principal, route, func() (any, error) {
+		return runProtected(ctx, tx, principal, request, route, func(work pgx.Tx) (any, error) {
+			return service.protected(ctx, work, request, principal, route)
+		})
 	})
 	if err == nil && request.Method == "GET" && principal.Support {
 		err = audit(ctx, tx, principal, "support.read", strings.Split(route, "/")[0], nil, nil, nil, true)
@@ -470,6 +525,11 @@ func authenticateSession(ctx context.Context, tx pgx.Tx, request Request) (Princ
 			return principal, err
 		}
 		if err := audit(ctx, tx, principal, "session.expired", "session", &principal.SessionID, nil, nil, true); err != nil {
+			return principal, err
+		}
+		// Etapa L1 (revisión R3, R3-1): si era la última sesión vigente de la terminal, su comandero se libera ahora, con el
+		// mismo reloj con que se comprobó el vencimiento.
+		if err := licenseseats.ReleaseClosedSessions(ctx, tx, time.Now()); err != nil {
 			return principal, err
 		}
 		return principal, &Fault{Status: 401, Code: "SESSION_EXPIRED", Message: "Tu sesión expiró. Inicia sesión nuevamente.", Commit: true}

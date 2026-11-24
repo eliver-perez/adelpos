@@ -434,6 +434,27 @@ class TakeawayQueueTest {
         assertEquals(1, edits().size)
     }
 
+    /**
+     * Etapa L1: con la hora incorrecta (o la licencia) Go no guarda nada y no es definitivo: la
+     * edición se conserva para una vuelta siguiente, sin pedir reintentos seguidos.
+     */
+    @Test
+    fun unaEdicionQueLaHoraNoPermitioSeConservaSinReintentosSeguidos() = runBlocking {
+        server.sessions[ANA] = "sesion-de-ana"
+        takeaway.editCustomer(ANA, CustomerTarget.Account(TAKEAWAY), TakeawayCustomer("Juan", ""))
+        val path = "POST restaurant/accounts/$TAKEAWAY/customer"
+        respond(path, error(409, "SYSTEM_CLOCK_INVALID", """{"blocked":true}"""))
+        assertFalse("no pide reintentar enseguida", customers.sendPending())
+        assertEquals(1, edits().size)
+        // Se corrigió la hora: en la vuelta siguiente sale con la misma clave.
+        respond(path, takeawayBill(customer = "Juan"))
+        assertFalse(customers.sendPending())
+        assertTrue(edits().isEmpty())
+        val keys = requests(path).map { body(it).text("operation_id") }
+        assertEquals(2, keys.size)
+        assertEquals(keys[0], keys[1])
+    }
+
     @Test
     fun entregadoSoloComoLoDiceGo() = runBlocking {
         assertEquals(

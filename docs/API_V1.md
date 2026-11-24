@@ -50,7 +50,8 @@ sin conexión y el cursor de eventos de la recuperación (ver «Modo Mesero»). 
    `waiter-mode-v1` (lo del modo Mesero de la sección «Modo Mesero»); desde la etapa A2, `takeaway-v1` (lo de la
    sección «Para llevar»), `device-precheck-printer-v1` (lo de «Imprimir la precuenta») y `ready-alerts-v1` (lo de
    «Avisos de platillos listos»); desde la etapa A3, `permission-groups-v1`, que solo usa el escritorio (permisos
-   agrupados y roles de fábrica, `API_CONTRACTS.md`)). La aplicación Android 0.1.0 exige un servidor 0.12.0 o posterior; el escritorio 0.12.0 sigue
+   agrupados y roles de fábrica, `API_CONTRACTS.md`); desde la etapa L1, `license-v1` (lo de la sección «Licencia del
+   servidor principal»)). La aplicación Android 0.1.0 exige un servidor 0.12.0 o posterior; el escritorio 0.12.0 sigue
    funcionando con un servidor 0.11.0 y solo muestra lo del PIN si el servidor anuncia `waiter-pin-v1`.
 4. **Credenciales**: la terminal (o el teléfono) emparejada envía `X-Device-ID` y `X-Device-Token`; con sesión,
    además `Authorization: Bearer <token>` (desde la etapa A1, en `submitOfflineOrder` el teléfono puede enviar en su
@@ -115,6 +116,8 @@ sin conexión y el cursor de eventos de la recuperación (ver «Modo Mesero»). 
 | `renamePairingRequest`   | `POST /pairing/requests/{id}/name`             | Corregir el nombre propuesto mientras espera.                                  |
 | `cancelPairingRequest`   | `POST /pairing/requests/{id}/cancel`           | Dejar de esperar la aprobación.                                                |
 | `claimPairingCredential` | `POST /pairing/requests/{id}/claim`            | Recibir una sola vez la credencial de la terminal.                             |
+| `getLicenseStatus`       | `GET /license/status`                          | Estado de la licencia del servidor principal (etapa L1; también sin sesión).   |
+| `setKitchenDisplayMode`  | `POST /kitchen/display-mode`                   | Entrar o salir de Preparación: ocupa o libera el cupo de cocina (etapa L1).    |
 
 ## Encontrar el servidor y emparejarse (fases B y C)
 
@@ -828,6 +831,147 @@ cocina no usa el KDS, no hay avisos.
    código (`TEMPORARY` si la base no respondió a tiempo, o el código del rechazo) se reconecta con espera creciente.
    Al abrir, los errores son los de `getReadyAlerts`.
 
+## Cupos de la licencia (etapa L1, Fase D)
+
+El servidor Go aplica los cupos de sesiones simultáneas de la licencia (§7 del contrato de licencias, §5 de
+[etapas/ETAPA_L1_LICENCIAS_v2.md](etapas/ETAPA_L1_LICENCIAS_v2.md)): **cajas** (`cash_registers`), **comanderos**
+(`order_takers`) y **pantallas de cocina** (`kitchen_displays`). Cuentan **lo que hace cada terminal**, no su tipo. Go
+decide; el cliente solo muestra el mensaje o arma el suyo con `details`.
+
+| Cupo               | Lo ocupa                                                                                                                                                                                                                                                                                                                                                                                                                         | Se libera                                                                                                                                                                                                                                                                |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `cash_registers`   | La terminal que abre un turno de caja, y la terminal que crea o modifica un pedido con un turno activo en su caja aunque lo abriera otra (dos terminales con la misma caja física ocupan dos cupos, L1-D3). Cambiar de cajero en la misma terminal no ocupa otro.                                                                                                                                                                | Al cerrar ese turno (confirmar el arqueo), también desde otra computadora: se liberan todas las terminales que lo usaban. Si la terminal se cae o se revoca, el cupo sigue hasta cerrar el turno.                                                                        |
+| `order_takers`     | La **terminal** (no el usuario) que crea o modifica un pedido sin turno activo en su caja: varios meseros con su PIN en una tableta ocupan uno, y volver a «Selecciona tu usuario» no lo libera. El pedido que entrega la cola de una tableta sin sesión (con la credencial de envío) también lo ocupa. Cuenta por actividad. Consultar no ocupa nada; las previas (`previewEdit` y la del borrador) solo renuevan su actividad. | A los **15 minutos** sin crear ni modificar pedidos (valor del servidor), cuando se cierra la última sesión de esa terminal (cerrar sesión, revocarla, vencer), al revocar la terminal, al abrir turno en su caja o desde Terminales («Liberar cupo», `devices.manage`). |
+| `kitchen_displays` | La terminal de escritorio en Cocina › Preparación: `setKitchenDisplayMode` con `active: true`, ligado a la sesión que entra.                                                                                                                                                                                                                                                                                                     | Con `active: false`, al cerrar esa sesión o desde Terminales.                                                                                                                                                                                                            |
+
+- **Qué ocupa cupo**: `openAccount`, `saveDraft`, `confirmDraft`, `editUnits` y `submitOfflineOrder` (crear o modificar
+  un pedido); abrir turno; y `setKitchenDisplayMode`. **Cobrar y las operaciones de efectivo nunca piden cupo**, ni
+  cancelar, reorganizar cuentas, la precuenta, «Entregado», la cocina ya enviada, las lecturas o la administración.
+- **Sin cupo**: **409 `LICENSE_SEAT_UNAVAILABLE`** (`LicenseSeatUnavailable`) con `details.seat` (el cupo que falta),
+  `details.in_use` (los que usan otras terminales) y `details.limit` (el de la licencia). `message` ya lo dice en
+  español, por ejemplo «No hay cupo de comandero libre (3 de 3 en uso). Pide que se cierre la sesión de otra terminal.»;
+  si la licencia no trae ese cupo (límite 0), «La licencia no incluye comanderos (0 de 0): solo se capturan pedidos en
+  una terminal con el turno de caja abierto.». La operación **no se aplica**: no se guarda el pedido ni su
+  `operation_id`.
+- **El pedido sin conexión** (`submitOfflineOrder`) rechazado por cupo: el mismo 409 con `details.seat:
+"order_takers"`. Es **definitivo para ese envío**: el dispositivo lo marca rechazado con el mensaje y no lo reintenta
+  solo (la aplicación 0.3.0 ya trata un 409 con código propio como rechazo). Como la clave no quedó registrada, si el
+  mesero lo vuelve a enviar a propósito con la misma `operation_id`, Go lo evalúa otra vez.
+- **Lo que ya entró no vuelve a pedir cupo**: un reintento con una `operation_id` ya registrada (la respuesta se perdió)
+  recibe su resultado guardado aunque el cupo de esa terminal haya vencido mientras tanto.
+- **Licencia nueva con menos cupos**: nadie se interrumpe (quien tiene su cupo lo conserva y sigue capturando); no se
+  ocupan cupos nuevos hasta quedar dentro del límite.
+- **Reloj que saltó al futuro y se corrigió** (L1-D43): la actividad de un comandero registrada con la fecha adelantada
+  cuenta como de ahora y vence **15 minutos reales** después del primer intento de captura o previa con la hora
+  corregida (también si ese intento recibe `LICENSE_SEAT_UNAVAILABLE`); nunca espera a que el reloj real alcance la
+  fecha del salto. Con «Hora del equipo incorrecta» no se cambia.
+- **Sin licencia válida**: 409 `LICENSE_NOT_ACTIVATED` (la puerta de la licencia rechaza antes esas operaciones).
+- **`setKitchenDisplayMode`** (`POST /kitchen/display-mode`, `{active: boolean}` → `{active}`): lo llama la terminal al
+  entrar a Preparación y al salir. Requiere `kitchen.states.read`; repetirlo no ocupa otro cupo; salir nunca falla por
+  la licencia. En un teléfono o tableta de meseros, 400. Si la sesión se cerró mientras llegaba la petición, 401
+  `SESSION_REVOKED`.
+- **Terminales y `sessions-summary`** (administración, en `API_CONTRACTS.md`): `GET devices` dice en `seats` qué cupo
+  ocupa cada terminal; `POST devices/{id}/seat/release` libera su comandero o su cocina y cierra sus sesiones;
+  `devices/sessions-summary` conserva `by_kind` y agrega `seats` con `in_use` y `limit` por cupo (`limited: true`).
+
+## Licencia del servidor principal (etapa L1, fase B)
+
+Capacidad `license-v1` (servidor 0.15.0). La licencia es de la computadora principal: solo Go habla con el servidor de
+licencias (contrato de licencias §1). El escritorio y Android **solo muestran** el estado y los códigos de error.
+
+- **`getLicenseStatus`** (`GET /license/status`):
+  - **Con sesión**, el estado completo (`LicenseStatus`). Ver el estado no pide permiso.
+    - `state`: `active` (vigente), `grace` (tolerancia), `expired` (vencida), `revoked` (revocada; el motivo va en
+      `revocation_reason`: `deactivated`, `transferred` o `revoked`), `not_activated` o `not_activated_with_data`
+      (sin activar, con datos).
+    - `license`: plan, cliente, cupos (`limits`), vencimiento (`expires_at`, o `perpetual`), `grace_days` y
+      `grace_ends_at`; `null` sin licencia válida. También `license_id`, `activation_id`, `licensee_name`,
+      `license_type` (`perpetual`, `subscription` o `trial`), `billing_period`, `license_revision`, `plan`
+      (`plan_id`, `name` y `custom`), `features`, `issued_at`, `period_starts_at` y `updates_until`, tal como los firmó
+      el servidor de licencias.
+    - `copied`: la instalación se copió de otra computadora. `machine_unverified` e `identity_unavailable`: no se pudo
+      comprobar la computadora o falta su identidad.
+    - `environment`: `test` en las versiones de desarrollo (servidor de licencias de pruebas).
+    - `server_id`; `effective_now`, la hora con que Go calculó el estado (el máximo del reloj de la computadora
+      principal y la última hora confiable, §5.6 del contrato de licencias); `can_manage`, si quien consulta tiene
+      «Administrar la licencia», e `identity_regeneration_available`, si esa persona puede crear una identidad nueva (una
+      instalación copiada, en la computadora principal).
+  - **Con solo la credencial del dispositivo** (sin `Authorization`), el resumen `LicenseDeviceSummary`: `state`,
+    `environment` y `copied`. Sirve al teléfono o la tableta en «¿Quién eres?».
+- **La gestión** (activar, transferir, buscar actualización, liberar, la solicitud y el archivo sin internet, y la
+  identidad nueva de una instalación copiada) es del escritorio, con el permiso «Administrar la licencia»
+  (`license.manage`, solo el rol Administrador de fábrica). No es de este contrato: va en `API_CONTRACTS.md`.
+- **Códigos de las rutas de la licencia** (los da Go, con su texto en español; nunca el mensaje del servidor de
+  licencias):
+
+  | Código                        | Estado | Caso                                                                                         |
+  | ----------------------------- | ------ | -------------------------------------------------------------------------------------------- |
+  | `LICENSE_KEY_INVALID_FORMAT`  | 400    | El código no tiene el formato: 15 símbolos en grupos de 3, 4, 4 y 4.                         |
+  | `LICENSE_KEY_NOT_FOUND`       | 404    | No existe una licencia con ese código.                                                       |
+  | `LICENSE_SERVER_REVOKED`      | 409    | La licencia fue revocada.                                                                    |
+  | `LICENSE_ACTIVATION_LIMIT`    | 409    | Activa en otra computadora; `details.transfer_available` dice si se puede transferir.        |
+  | `LICENSE_TRANSFER_LIMIT`      | 409    | Tiene una transferencia pendiente: «Comunícate con soporte».                                 |
+  | `LICENSE_INSTALLATION_COPIED` | 409    | La instalación se copió de otra computadora: antes hay que crear una identidad nueva.        |
+  | `LICENSE_NOT_ACTIVATED`       | 409    | Buscar actualización, liberar o la solicitud de renovar o liberar sin una licencia activada. |
+  | `LICENSE_SERVER_BUSY`         | 429    | Demasiados intentos; `details.retry_after_seconds`.                                          |
+  | `LICENSE_SERVER_UNAVAILABLE`  | 503    | Sin conexión, falla temporal o TLS; `details.reason`. La licencia instalada no cambia.       |
+  | `LICENSE_SERVER_ERROR`        | 502    | El servidor de licencias rechazó la operación o respondió algo inesperado.                   |
+  | `LICENSE_RESPONSE_INVALID`    | 502    | La licencia recibida no pasó la verificación y no se instaló; `details.reason`.              |
+  | `LICENSE_FILE_INVALID`        | 400    | El archivo `.lic` no es válido para esta computadora; `details.reason`.                      |
+  | `LICENSE_STATE_NOT_SAVED`     | 503    | No se pudo guardar la licencia; no cambió nada.                                              |
+  | `IDENTITY_UNAVAILABLE`        | 503    | Falta la identidad o no se pudo comprobar la computadora (`details.reason`).                 |
+
+## Licencia: estado, hora del equipo y rechazos (etapa L1, Fase C)
+
+Go es la única autoridad de la licencia y de la hora: las terminales y Android solo muestran lo que responde, por el
+código de error y nunca por el `message` del servidor de licencias (Android no habla con él). La tabla de la §6 del
+contrato de licencias ([licencias/CONTRATO_LICENCIAS_ADEL_POS.md](licencias/CONTRATO_LICENCIAS_ADEL_POS.md)) se aplica
+en el servidor, en cada operación, antes que los cupos.
+
+- **El estado** llega en `license` (`LicenseSummary`) de `getIdentity` (`GET /auth/me`) y `getRecoveryState`
+  (`GET /restaurant/state`); un servidor anterior no lo envía.
+  - `state`: `active` (Vigente), `grace` (Tolerancia), `expired` (Vencida), `revoked` (Revocada, con
+    `revocation_reason`), `not_activated` (Sin activar) o `not_activated_with_data` (Sin activar con datos). `copied`:
+    la carpeta de datos se copió de otra computadora.
+  - `license_type`, `perpetual`, `expires_at`, `grace_days` y `grace_ends_at` describen el vencimiento.
+    `days_until_expiry` (Vigente con vencimiento) y `grace_days_remaining` (Tolerancia: días antes de que se bloquee la
+    captura) ya vienen calculados.
+  - `clock` (`LicenseClock`): la hora de la computadora principal. Con `blocked: true` el cliente muestra el aviso fijo
+    «No se puede registrar: la computadora principal tiene la fecha y hora incorrectas. Avisa al encargado.». Trae
+    `local_time` y `last_activity_time` (la última hora confiable; `null` si todavía no hay), `margin_minutes` (10),
+    `timezone`, las dos fechas en texto para la pantalla (`local_time_text` y `last_activity_time_text`, por ejemplo
+    «lunes 23 nov 2026, 10:15»), `license_state` y `license_ok` (Vigente o Tolerancia).
+- **El aviso**: cuando cambia el estado o el bloqueo por la hora, el canal de eventos (`streamEvents`) publica
+  `license.changed` (ámbito `configuration`, sin agregado) a **todas** las personas que lo leen, sin importar sus
+  permisos; el cliente vuelve a leer `getIdentity` o `getRecoveryState`.
+- **Qué se permite en cada estado** (tabla de la §6): capturar (abrir cuenta, borrador, enviar, modificar lo enviado y
+  el pedido sin conexión) solo en Vigente y Tolerancia; cobrar, cancelar y descuentos sobre lo capturado, cerrar turno,
+  cocina y administración también en Vencida y Revocada; abrir turno en Vencida y Revocada solo con cuentas pendientes
+  de cobro; sin activar, nada de lo anterior. Reportes, historial, respaldos, la sesión y la licencia, siempre.
+- **Rechazos de la licencia**: **409** `LICENSE_NOT_ACTIVATED`, `LICENSE_EXPIRED` o `LICENSE_REVOKED`
+  (`LicenseRejection`), con `details.operation` (la fila de la tabla) y, según el código, `details.state` y
+  `details.copied`, `details.expires_at` y `details.grace_ended_at`, o `details.reason`. Android muestra «La licencia
+  del sistema no permite capturar pedidos. Avisa al encargado.». No se guardó nada: un pedido de la cola queda
+  rechazado con su motivo y no se reintenta sin fin.
+- **Hora incorrecta**: **409** `SYSTEM_CLOCK_INVALID` (`SystemClockInvalid`): la computadora principal tiene la fecha y
+  hora más de 10 minutos antes de la última actividad registrada. Se rechaza todo lo que registra con fecha, **también
+  cobrar**; reportes, historial, respaldos, la sesión, la entrada con PIN, los avisos de platillos listos y el canal
+  de eventos siguen. `details` es `LicenseClock`, con las dos fechas completas en la zona horaria del restaurante. No
+  empieza con `LICENSE`: no es un problema de licencia. Se puede reenviar cuando el reloj se corrija (el bloqueo se
+  quita solo).
+- **Escritorio, solo en la computadora principal** (no son parte del contrato de Android): `POST license/time-check`
+  («Comprobar la hora con internet»; `409 LICENSE_TIME_MISMATCH` con `details.server_time` si no coincide),
+  `POST license/support-request` (código de solicitud del desbloqueo de soporte) y `POST license/support-unlock`
+  (`{response, source}`; `400 SUPPORT_UNLOCK_INVALID` con `details.reason`: `used`, `other_installation`, `expired`,
+  `altered` o `not_requested`). Ver [licencias/DESBLOQUEO_SOPORTE.md](licencias/DESBLOQUEO_SOPORTE.md).
+  - Desde otra terminal, las tres responden **409** `LICENSE_LOCAL_ONLY` («Esto se hace en la computadora principal…»):
+    no es un problema de permisos y no queda como acceso denegado.
+  - En una carpeta de datos copiada de otra computadora, las dos de soporte responden **409**
+    `LICENSE_INSTALLATION_COPIED`: primero se crea una identidad nueva, como para activar.
+  - La baja de la hora (la comprobación que coincide y el desbloqueo aceptado) se audita antes de aplicarse. Si después
+    no se puede guardar, responde **503** `LICENSE_STATE_NOT_SAVED`, la hora no cambia, la respuesta de soporte sigue
+    sin usar y la auditoría registra la misma acción con `success: false` y `applied: false`.
+
 ## Códigos de error más frecuentes
 
 | Código                                                   | Estado | Qué hacer                                                                                                                  |
@@ -861,3 +1005,7 @@ cocina no usa el KDS, no hay avisos.
 | `PIN_DEVICE_NOT_ALLOWED`                                 | 403    | La entrada con PIN solo existe en dispositivos `android` emparejados.                                                      |
 | `OFFLINE_CREDENTIAL_INVALID`                             | 401    | Conservar el pedido y pedir al mesero que entre con su PIN con conexión.                                                   |
 | `OFFLINE_CREDENTIAL_NOT_ALLOWED`                         | 401    | La credencial de envío solo se usa en `submitOfflineOrder`.                                                                |
+| `LICENSE_SEAT_UNAVAILABLE`                               | 409    | Sin cupo de la licencia (`details.seat`, `in_use`, `limit`): mostrar el mensaje; en la cola, marcar el pedido rechazado.   |
+| `LICENSE_NOT_ACTIVATED`                                  | 409    | La licencia no está activada: mostrar «La licencia del sistema no permite capturar pedidos.».                              |
+| `LICENSE_EXPIRED`, `LICENSE_REVOKED`                     | 409    | Licencia vencida o revocada: el mismo mensaje; lo abierto se sigue cobrando en la caja.                                    |
+| `SYSTEM_CLOCK_INVALID`                                   | 409    | Hora incorrecta en la computadora principal: mostrar su mensaje y el aviso fijo.                                           |

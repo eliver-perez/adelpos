@@ -63,6 +63,11 @@ var capabilities = []string{
 	// roles/{id}/defaults («Restablecer permisos predeterminados»). El escritorio muestra la pantalla agrupada solo con
 	// ella; con un servidor anterior, la lista de siempre (A3-D9).
 	"permission-groups-v1",
+	// Etapa L1 (fase B, servidor 0.15.0; L1-D22): la licencia del servidor principal: GET license/status (también con
+	// solo la credencial del dispositivo) y, con license.manage, activar, transferir, buscar actualización, liberar, la
+	// solicitud sin internet (.licreq), importar un .lic y crear una identidad nueva para una instalación copiada. El
+	// escritorio muestra la pantalla de la licencia solo con ella.
+	"license-v1",
 }
 
 type ErrorBody struct {

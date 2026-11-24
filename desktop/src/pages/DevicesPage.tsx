@@ -28,6 +28,15 @@ import {
   serverHas,
   waiterPINCapability,
 } from '../services/serverCapabilities';
+import {
+  licenseCapability,
+  licenseSeats,
+  releasableSeats,
+  seatLabels,
+  seatNames,
+  seatsHeldText,
+} from '../services/license';
+import { releaseDeviceSeat } from '../services/licenseOperations';
 
 // Etapa 9G (fase B, §3.2–§3.4): Sistema › Terminales también recibe las terminales nuevas que piden su
 // código (se aprueban escribiendo el código que muestra la terminal, solo en la computadora principal),
@@ -394,10 +403,38 @@ function PairingRequestsPanel({
   );
 }
 
-// Sesiones activas por tipo de dispositivo (§3.4, D9): solo se cuentan para las licencias futuras.
-function SessionsSummaryPanel() {
+// Sesiones activas por tipo de dispositivo (§3.4, D9). Etapa L1 (Fase E, §5): con un servidor que aplica los cupos
+// de la licencia, en su lugar se ven los cupos en uso y el límite de cada uno (lo que hace cada terminal, no su tipo).
+function SessionsSummaryPanel({ reloadKey }: { reloadKey: number }) {
   const summary = useResource<SessionsSummary>('devices_sessions_summary');
+  const reloadSummary = summary.reload;
+  useEffect(() => {
+    if (reloadKey > 0) void reloadSummary();
+  }, [reloadKey, reloadSummary]);
   const counts = summary.data?.by_kind;
+  const seats = summary.data?.seats;
+  if (seats && serverHas(licenseCapability)) {
+    return (
+      <section className="surface panel sessions-summary" aria-labelledby="license-seats-title">
+        <h2 id="license-seats-title">Cupos de la licencia</h2>
+        <dl className="sessions-summary-counts">
+          {licenseSeats.map((seat) => (
+            <div key={seat}>
+              <dt>{seatLabels[seat]}</dt>
+              <dd>
+                {seats[seat]?.in_use ?? 0} de {seats[seat]?.limit ?? 0}
+              </dd>
+            </div>
+          ))}
+        </dl>
+        <p className="muted text-sm">
+          Cada terminal ocupa un cupo según lo que hace: una caja con su turno abierto, un comandero
+          al capturar pedidos sin turno o una pantalla de cocina en Preparación. Las cajas se
+          liberan al cerrar el turno.
+        </p>
+      </section>
+    );
+  }
   if (!counts) {
     return null;
   }
@@ -807,8 +844,11 @@ export function DevicesPage({
   const [viewing, setViewing] = useState<Device | null>(null);
   const [invite, setInvite] = useState<{ code: string; expires_at: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  // Etapa L1: los cupos se vuelven a consultar después de «Liberar cupo».
+  const [seatsVersion, setSeatsVersion] = useState(0);
   const { confirm, dialog } = useConfirmDialog();
   const reloadDevices = devices.reload;
+  const showSeats = serverHas(licenseCapability);
   // La lista se vuelve a consultar sola: estado en línea, usuario actual y terminales recién aprobadas.
   useEffect(() => {
     const timer = window.setInterval(() => void reloadDevices(), devicesRefreshMilliseconds);
@@ -849,6 +889,40 @@ export function DevicesPage({
       setBusy(false);
     }
   }
+  // Etapa L1 (Fase E, §5): «Liberar cupo» de comandero o de pantalla de cocina. Cierra las sesiones de esa terminal; se
+  // vuelve a usar iniciando sesión otra vez. Las cajas se liberan cerrando el turno.
+  async function releaseSeat(device: Device) {
+    const seats = releasableSeats(device.seats);
+    const what = seats.map((seat) => seatNames[seat].toLowerCase()).join(' y de ');
+    const confirmed = await confirm({
+      title: `Liberar el cupo de ${device.name}`,
+      message: (
+        <>
+          <p>
+            Se cierra la sesión de quien esté usando esta terminal y su cupo de {what} queda libre
+            para otra terminal.
+          </p>
+          <p>Para volver a usarla, alguien inicia sesión otra vez.</p>
+        </>
+      ),
+      confirmLabel: 'Liberar cupo',
+      cancelLabel: 'Cancelar',
+    });
+    if (!confirmed) {
+      return;
+    }
+    setBusy(true);
+    try {
+      await releaseDeviceSeat(device.id);
+      notifySuccess(`Cupo de ${device.name} liberado.`);
+      await devices.reload();
+      setSeatsVersion((current) => current + 1);
+    } catch (error) {
+      notifyError(error, 'No se pudo liberar el cupo.');
+    } finally {
+      setBusy(false);
+    }
+  }
   return (
     <>
       <PageTitle
@@ -862,7 +936,7 @@ export function DevicesPage({
         )}
       </PageTitle>
       <PairingRequestsPanel can={can} onChanged={reloadDevices} />
-      <SessionsSummaryPanel />
+      <SessionsSummaryPanel reloadKey={seatsVersion} />
       <Notice>{devices.error || registers.error}</Notice>
       {invite && (
         <section className="surface panel">
@@ -909,6 +983,7 @@ export function DevicesPage({
               <th>Pantalla inicial</th>
               <th>Última conexión</th>
               <th>Usuario actual</th>
+              {showSeats && <th>Cupo</th>}
               <th>Estado</th>
               <th>Acciones</th>
             </tr>
@@ -932,6 +1007,7 @@ export function DevicesPage({
                   <td>{homeLabel(device)}</td>
                   <td>{device.last_seen_at ? dateTime(device.last_seen_at) : '—'}</td>
                   <td>{device.revoked_at ? '—' : (device.current_user ?? 'Nadie')}</td>
+                  {showSeats && <td>{seatsHeldText(device.seats)}</td>}
                   <td>
                     <span className="device-state">
                       <span className={`status-dot ${state.tone}`} aria-hidden="true" />
@@ -948,6 +1024,18 @@ export function DevicesPage({
                       <button className="secondary-button" onClick={() => setViewing(device)}>
                         Ver configuración
                       </button>
+                      {showSeats &&
+                        can('devices.manage') &&
+                        !device.revoked_at &&
+                        releasableSeats(device.seats).length > 0 && (
+                          <button
+                            className="secondary-button"
+                            disabled={busy}
+                            onClick={() => void releaseSeat(device)}
+                          >
+                            Liberar cupo
+                          </button>
+                        )}
                       {can('devices.manage') && !device.revoked_at && (
                         <button
                           className="danger-button"

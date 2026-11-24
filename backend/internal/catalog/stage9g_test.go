@@ -26,6 +26,7 @@ import (
 	"local/ad-el-pos/server/internal/businessday"
 	"local/ad-el-pos/server/internal/catalog"
 	"local/ad-el-pos/server/internal/database"
+	"local/ad-el-pos/server/internal/licenseseats/seatstest"
 )
 
 // Etapa 9G (fase D) contra PostgreSQL con la API real: «Agotado» (§5.4: permiso propio, idempotencia con reintentos
@@ -136,7 +137,7 @@ func newStage9GCatalog(t *testing.T) *stage9GCatalog {
 		t.Fatal(err)
 	}
 	fixture := &stage9GCatalog{ctx: ctx, pool: pool, provisioning: provisioning,
-		service: &administration.Service{Pool: pool, ProvisioningFile: filename}}
+		service: &administration.Service{Pool: pool, ProvisioningFile: filename, Seats: seatstest.Roomy()}}
 	setup := stage9GDecode[map[string]any](t, fixture.call(t, stage9GTerminal{}, "POST", "setup", map[string]string{
 		"name": "Catálogo 9G", "timezone": "America/Monterrey", "currency": "MXN", "theme": "light", "terminal_name": "Caja 9G",
 	}, 200))

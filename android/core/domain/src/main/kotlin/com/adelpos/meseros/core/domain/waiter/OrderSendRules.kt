@@ -50,6 +50,14 @@ sealed interface SendOutcome {
 
     /** Go lo rechazó por otro motivo que el mesero debe ver (permisos, datos). */
     data class Rejected(val message: String) : SendOutcome
+
+    /**
+     * Etapa L1: la licencia, un cupo o la hora de la computadora principal no lo permitieron (los
+     * códigos de `LicenseRefusal`, con el texto de `LicenseMessages` en [message]). Go no guardó
+     * nada: el pedido queda en «Requiere tu revisión» con su motivo y **no** se reintenta solo; el
+     * mesero lo envía de nuevo con la misma clave cuando se resuelva ([OrderReviewRules.resend]).
+     */
+    data class NotAllowed(val message: String) : SendOutcome
 }
 
 /** Estado siguiente de un pedido después de un envío (las transiciones de [OrderTransitions]). */
@@ -99,6 +107,18 @@ object OrderSendRules {
                     review =
                         OrderReview(
                             reason = ReviewReason.REJECTED,
+                            message = outcome.message,
+                            changes = emptyList(),
+                            catalogVersion = null,
+                        ),
+                    nowMillis = nowMillis,
+                )
+            is SendOutcome.NotAllowed ->
+                needsReview(
+                    order = order,
+                    review =
+                        OrderReview(
+                            reason = ReviewReason.NOT_ALLOWED,
                             message = outcome.message,
                             changes = emptyList(),
                             catalogVersion = null,

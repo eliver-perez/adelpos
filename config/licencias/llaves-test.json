@@ -1,0 +1,10 @@
+{
+  "environment": "test",
+  "keys": [
+    {
+      "kid": "adelpos-test-202611-1",
+      "environment": "test",
+      "public_key": "yxcFqz1rSQYi03-2slIpjx82xRhKkX_AtbguaV2zZ00"
+    }
+  ]
+}

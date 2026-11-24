@@ -14,6 +14,7 @@ import { PrintQueue } from './PrintQueue';
 import { PrintersAdmin } from './PrintersAdmin';
 import { RoutingAdmin } from './RoutingAdmin';
 import { StationsAdmin } from './StationsAdmin';
+import { PreparationSeat } from './PreparationSeat';
 
 export function KitchenPage({
   can,
@@ -122,13 +123,16 @@ export function KitchenPage({
         </div>
       )}
       {selected === 'preparation' && (
-        <PreparationBoard
-          can={can}
-          execute={execute}
-          busy={busy}
-          connectionLost={connectionLost}
-          onRetry={onRetryConnection}
-        />
+        // Etapa L1 (Fase E): Preparación ocupa el cupo de pantalla de cocina mientras está abierta.
+        <PreparationSeat>
+          <PreparationBoard
+            can={can}
+            execute={execute}
+            busy={busy}
+            connectionLost={connectionLost}
+            onRetry={onRetryConnection}
+          />
+        </PreparationSeat>
       )}
       {selected === 'tickets' && <KitchenTickets timezone={timezone} />}
       {selected === 'queue' && (

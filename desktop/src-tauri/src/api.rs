@@ -23,6 +23,9 @@ const REPORT_TIMEOUT_SECONDS: u64 = 45;
 // Tiempo de respuesta de «Quitar datos de prueba» (etapa 9F): Go crea antes un respaldo completo de la
 // base y responde en hasta 120 s.
 const MAINTENANCE_TIMEOUT_SECONDS: u64 = 130;
+// Etapa L1 (Fase E): activar, transferir, buscar actualización, liberar la licencia y comprobar la hora hablan con el
+// servidor de licencias con sus reintentos; Go les da hasta 75 s.
+const LICENSE_TIMEOUT_SECONDS: u64 = 80;
 
 pub(crate) fn resource_id(id: Option<&str>) -> Result<&str, String> {
     let value = id.ok_or("Falta el identificador del registro.")?;
@@ -82,6 +85,8 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         // Etapa 9B: imprimir una comanda histórica con la plantilla vigente (acción distinta de la
         // reimpresión exacta, con su propio permiso).
         "kitchen_rerender" => Some((Method::POST, "kitchen/print-jobs/rerender")),
+        // Etapa L1 (Fase E): Preparación avisa al entrar y al salir; ocupa o libera el cupo de pantalla de cocina.
+        "kitchen_display_mode" => Some((Method::POST, "kitchen/display-mode")),
 
         "setup_status" => Some((Method::GET, "setup/status")),
         // Etapa 9G (§5.1): versión del servidor para avisar si es más viejo de lo que necesita la aplicación.
@@ -152,6 +157,19 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         // Etapa 9G, fase B: solicitudes de emparejamiento y sesiones activas por tipo de dispositivo.
         "devices_pairing_requests" => Some((Method::GET, "devices/pairing-requests")),
         "devices_sessions_summary" => Some((Method::GET, "devices/sessions-summary")),
+        // Etapa L1 (Fase E): licencia del servidor principal (Configuración › Licencia, la activación y la pantalla
+        // de la fecha y hora). Go exige «Administrar la licencia» para cambiarla y la escucha local para la hora y
+        // el desbloqueo de soporte. La solicitud sin internet (.licreq) y la importación de archivos (.lic y la
+        // respuesta de soporte) no están aquí: solo las envía license_files.rs con los diálogos nativos.
+        "license_status" => Some((Method::GET, "license/status")),
+        "license_activate" => Some((Method::POST, "license/activate")),
+        "license_transfer" => Some((Method::POST, "license/transfer")),
+        "license_refresh" => Some((Method::POST, "license/refresh")),
+        "license_deactivate" => Some((Method::POST, "license/deactivate")),
+        "license_identity_regenerate" => Some((Method::POST, "license/identity/regenerate")),
+        "license_time_check" => Some((Method::POST, "license/time-check")),
+        "license_support_request" => Some((Method::POST, "license/support-request")),
+        "license_support_unlock" => Some((Method::POST, "license/support-unlock")),
         "sessions" => Some((Method::GET, "sessions")),
         "audit" => Some((Method::GET, "audit")),
         "preferences" => Some((Method::GET, "preferences")),
@@ -674,6 +692,8 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         "update_register" => (Method::PATCH, format!("registers/{identifier}")),
         "update_device" => (Method::PATCH, format!("devices/{identifier}")),
         "revoke_device" => (Method::POST, format!("devices/{identifier}/revoke")),
+        // Etapa L1 (Fase E): «Liberar cupo» de comandero o de pantalla de cocina (cierra las sesiones de la terminal).
+        "devices_seat_release" => (Method::POST, format!("devices/{identifier}/seat/release")),
         // Etapa 9G, fase B: configuración de una terminal y aprobación o rechazo de una solicitud de
         // emparejamiento (Go solo aprueba por la escucha local de la computadora principal).
         "device_configuration" => (Method::GET, format!("devices/{identifier}/configuration")),
@@ -883,6 +903,9 @@ pub async fn api_request(
     if operation == "maintenance_remove_test_data" || operation == "maintenance_backup_now" {
         request = request.timeout(Duration::from_secs(MAINTENANCE_TIMEOUT_SECONDS));
     }
+    if license_online(&operation) {
+        request = request.timeout(Duration::from_secs(LICENSE_TIMEOUT_SECONDS));
+    }
     if let Some(body) = body {
         request = request.json(&body);
     }
@@ -961,6 +984,19 @@ pub async fn api_request(
         status,
         body: result,
     })
+}
+
+// license_online dice si la operación de la licencia espera al servidor de licencias (Etapa L1, Fase E): activar,
+// transferir, buscar actualización, liberar y «Comprobar la hora con internet».
+pub(crate) fn license_online(operation: &str) -> bool {
+    matches!(
+        operation,
+        "license_activate"
+            | "license_transfer"
+            | "license_refresh"
+            | "license_deactivate"
+            | "license_time_check"
+    )
 }
 
 // Lista blanca de parámetros de consulta por operación: cualquier otro parámetro se rechaza antes
@@ -2607,6 +2643,64 @@ mod tests {
         assert!(response.get("device_token").is_none());
         assert!(response.get("session_token").is_none());
         assert!(response.get("device_id").is_some());
+    }
+
+    #[test]
+    fn license_and_seat_routes_are_closed() {
+        // Etapa L1 (Fase E): la licencia, el modo Cocina y «Liberar cupo» son operaciones cerradas.
+        for (operation, method, path) in [
+            ("license_status", Method::GET, "license/status"),
+            ("license_activate", Method::POST, "license/activate"),
+            ("license_transfer", Method::POST, "license/transfer"),
+            ("license_refresh", Method::POST, "license/refresh"),
+            ("license_deactivate", Method::POST, "license/deactivate"),
+            (
+                "license_identity_regenerate",
+                Method::POST,
+                "license/identity/regenerate",
+            ),
+            ("license_time_check", Method::POST, "license/time-check"),
+            (
+                "license_support_request",
+                Method::POST,
+                "license/support-request",
+            ),
+            (
+                "license_support_unlock",
+                Method::POST,
+                "license/support-unlock",
+            ),
+            ("kitchen_display_mode", Method::POST, "kitchen/display-mode"),
+        ] {
+            assert_eq!(
+                route(operation, None).unwrap(),
+                (method, path.to_string()),
+                "{operation}"
+            );
+        }
+        let identifier = "00000000-0000-4000-8000-000000000001";
+        assert_eq!(
+            route("devices_seat_release", Some(identifier)).unwrap(),
+            (Method::POST, format!("devices/{identifier}/seat/release"))
+        );
+        assert!(route("devices_seat_release", None).is_err());
+        assert!(route("devices_seat_release", Some("../../license/deactivate")).is_err());
+        // La solicitud sin internet y los archivos solo los envía license_files.rs: React nunca manda su contenido.
+        for operation in [
+            "license_offline_request",
+            "license_import",
+            "license_import_file",
+            "license_save_request",
+        ] {
+            assert!(route(operation, None).is_err(), "{operation}");
+        }
+        // Solo las que hablan con el servidor de licencias esperan más que el resto.
+        assert!(license_online("license_activate"));
+        assert!(license_online("license_deactivate"));
+        assert!(license_online("license_time_check"));
+        assert!(!license_online("license_status"));
+        assert!(!license_online("license_support_unlock"));
+        assert!(allowed_query_keys("license_status").is_empty());
     }
 
     #[test]

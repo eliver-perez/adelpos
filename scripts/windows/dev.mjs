@@ -708,6 +708,8 @@ function testIntegration() {
 // workflow-stage9h-migration.spec.ts, por ADEL_BROWSER_CLEAN_SERVER_URL).
 const BROWSER_SHARED_PORT = 8183;
 const BROWSER_CLEAN_PORT = 8185;
+// Etapa L1: las llaves de prueba del contrato de licencias, con las que native-driver.ts firma la licencia de prueba.
+const BROWSER_LICENSE_TRUST = path.join(ROOT, 'contracts/licencias/v1/fixtures/vectors.json');
 
 function prepareBrowserServer(port) {
   const name = 'adel_pos_test_browser_' + randomBytes(6).toString('hex');
@@ -733,6 +735,13 @@ async function startBrowserServer(server) {
   const log = fs.openSync(path.join(server.directory, 'server.log'), 'w');
   server.process = spawn(SERVER_BINARY, ['serve', '--config', server.filename], {
     cwd: ROOT,
+    // Etapa L1: el servidor temporal confía además en las llaves de prueba de vectors.json (solo con test_mode y en una
+    // compilación de desarrollo), para que native-driver.ts lo active con una licencia de prueba. Sin el servidor de
+    // licencias simulado ni el Go sin activar, las especificaciones de la activación y de la hora se omiten.
+    env: {
+      ...process.env,
+      ADEL_TEST_LICENSE_TRUST: BROWSER_LICENSE_TRUST,
+    },
     stdio: ['ignore', log, log],
     windowsHide: true,
   });

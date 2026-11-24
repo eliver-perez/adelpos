@@ -66,6 +66,24 @@ func (service *Service) completeDeferred(ctx context.Context, result any) (any, 
 	if removal, ok := result.(*testDataRemoval); ok {
 		return service.removeTestData(ctx, removal)
 	}
+	// Operaciones en línea de la licencia (etapa L1, fase B; license.go): la red, fuera de la transacción.
+	if operation, ok := result.(*licenseOperation); ok {
+		return service.completeLicenseOperation(ctx, operation)
+	}
+	// Etapa L1, fase C (license_clock.go): «Comprobar la hora con internet», también fuera de la transacción, y el aviso
+	// a las terminales después de importar un .lic o crear la identidad nueva.
+	if check, ok := result.(*timeCheck); ok {
+		return service.completeTimeCheck(ctx, check)
+	}
+	// Revisión R2 (hallazgo R2-1): el desbloqueo de soporte, también fuera de la transacción, con su auditoría confirmada
+	// antes de bajar la hora.
+	if attempt, ok := result.(*supportUnlockAttempt); ok {
+		return service.completeSupportUnlock(ctx, attempt)
+	}
+	if notice, ok := result.(*licenseNotice); ok {
+		service.notifyLicense(ctx)
+		return notice.result, nil
+	}
 	// Reinicio del servicio (etapa 9G, fase A): se programa ya auditado (service_host.go).
 	if _, ok := result.(*serviceRestart); ok {
 		return service.completeRestart()

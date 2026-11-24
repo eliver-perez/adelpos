@@ -61,6 +61,16 @@ import { setPrecheckName } from './services/documentNames';
 import { compatibilityNotices } from './services/compatibility';
 import { registerPrinterSetup } from './services/printProblems';
 import { requestPaymentPolicies } from './pages/payments/policiesRequest';
+import { ActivationStartPage } from './pages/license/ActivationStartPage';
+import { ClockBlockPage } from './pages/license/ClockBlockPage';
+import { LicenseNotices } from './pages/license/LicenseNotices';
+import { LicensePage } from './pages/license/LicensePage';
+import {
+  licenseCapability,
+  licenseChangeEvent,
+  licenseManagePermission,
+  notActivated,
+} from './services/license';
 
 const connectionNoticeID = 'connection';
 
@@ -193,6 +203,11 @@ function ApplicationContent({
   const operationMode = isOperation(screen);
   const can = (permission: string) => identity?.user.permissions.includes(permission) ?? false;
   const authenticated = session.phase === 'authenticated';
+  // Etapa L1 (Fase E): el estado de la licencia y de la hora llega con la sesión (auth/me, Fase C) y solo con un
+  // servidor que anuncia license-v1; contra uno anterior no se muestra nada nuevo.
+  const license = serverHas(licenseCapability) ? identity?.license : undefined;
+  // «Continuar sin activar» en la pantalla del primer arranque (por usuario y solo en esta sesión de la aplicación).
+  const [activationSkipped, setActivationSkipped] = useState<string | null>(null);
   const home = serverOnly
     ? 'server-status'
     : resolveHome(identity?.terminal.home_screen, permissions);
@@ -232,6 +247,15 @@ function ApplicationContent({
   useEffect(() => {
     setPrecheckName(precheckNameKey);
   }, [precheckNameKey]);
+
+  // Etapa L1 (Fase E): un rechazo por la hora o por el estado de la licencia, o el evento license.changed, hacen que
+  // la sesión vuelva a leer el estado enseguida (además de la consulta de cada 5 s).
+  const refreshSession = session.refresh;
+  useEffect(() => {
+    const changed = () => void refreshSession();
+    window.addEventListener(licenseChangeEvent, changed);
+    return () => window.removeEventListener(licenseChangeEvent, changed);
+  }, [refreshSession]);
 
   // Etapa 9F (§4.1): «Configurar impresora» de los avisos sin impresora lleva a Cobros › Políticas de
   // cobro con el único requestScreen, solo si el usuario puede elegir allí la impresora de tickets.
@@ -301,6 +325,17 @@ function ApplicationContent({
       onRetry={() => void session.refresh()}
     />
   ) : null;
+
+  // Etapa L1 (Fase E, §6.2): en la computadora principal, al detectarse el bloqueo por la fecha y hora se abre su
+  // pantalla, una vez por bloqueo (desde ahí se puede ir a Reportes y volver con el aviso fijo).
+  const clockBlocked = !!license?.clock?.blocked;
+  const wasClockBlocked = useRef(false);
+  useEffect(() => {
+    if (clockBlocked && !wasClockBlocked.current && mainComputer && !serverOnly) {
+      void requestScreenRef.current('clock');
+    }
+    wasClockBlocked.current = clockBlocked;
+  }, [clockBlocked, mainComputer, serverOnly]);
 
   // Inicio por terminal (§1.5 y §4.1): al iniciar sesión se abre la pantalla de la terminal (o la
   // primera sección permitida), nunca «Estado del sistema». Si la pantalla visible deja de estar
@@ -523,6 +558,19 @@ function ApplicationContent({
       </AccessShell>
     );
   }
+  // Etapa L1 (Fase E, §7): primer arranque sin licencia. «Continuar sin activar» entra al sistema con el aviso fijo.
+  if (license && notActivated(license.state) && activationSkipped !== identity.user.id) {
+    return (
+      <AccessShell overlay={commands.overlay}>
+        <ActivationStartPage
+          mainComputer={mainComputer}
+          onChanged={session.refresh}
+          onContinue={() => setActivationSkipped(identity.user.id)}
+          onLogout={() => void logout()}
+        />
+      </AccessShell>
+    );
+  }
 
   function content() {
     if (!identity) {
@@ -606,12 +654,38 @@ function ApplicationContent({
             can={can}
             onSaved={session.refresh}
             onOpenStatus={() => requestScreen('status')}
+            onOpenLicense={() => requestScreen('license')}
           />
         );
       case 'status':
         // «Información para soporte» solo para el administrador: quien administra la
         // configuración general del establecimiento.
         return <StatusPage support={can('settings.manage')} />;
+      case 'license':
+        // Etapa L1 (Fase E): Configuración › Licencia.
+        return (
+          <LicensePage
+            timezone={identity.establishment.timezone}
+            mainComputer={mainComputer}
+            canReadDevices={can('devices.read')}
+            summary={license}
+            onChanged={session.refresh}
+          />
+        );
+      case 'clock':
+        // Etapa L1 (Fase E, §6.2): la pantalla de la fecha y hora de la computadora principal.
+        return license ? (
+          <ClockBlockPage
+            license={license}
+            canOpenReports={canOpen('reports', identity.user.permissions)}
+            canOpenBackups={canOpen('maintenance', identity.user.permissions)}
+            onOpenReports={() => void requestScreen('reports')}
+            onOpenBackups={() => void requestScreen('maintenance')}
+            onOpenLicense={() => void requestScreen('license')}
+            onHome={() => void requestScreen(home)}
+            onChanged={session.refresh}
+          />
+        ) : null;
       case 'audit':
         return <AuditPage />;
       case 'maintenance':
@@ -662,6 +736,20 @@ function ApplicationContent({
     />
   );
   const navigation: NavigationValue = { screen, home, requestScreen, setTail };
+  // Etapa L1 (Fase E): avisos de la licencia y de la hora en todas las pantallas (en la captura, en un renglón).
+  const licenseNotices = license ? (
+    <LicenseNotices
+      license={license}
+      userID={identity.user.id}
+      timezone={identity.establishment.timezone}
+      canManage={can(licenseManagePermission)}
+      mainComputer={mainComputer}
+      screen={screen}
+      compact={reducedBar}
+      onOpenLicense={() => void requestScreen('license')}
+      onOpenClock={() => void requestScreen('clock')}
+    />
+  ) : null;
 
   // «Solo servidor» (etapa 9G, §2.3): barra reducida, pantalla de estado y, para quien la puede abrir,
   // Administración; nunca la interfaz de venta.
@@ -677,6 +765,7 @@ function ApplicationContent({
             onNavigate={(next) => void requestScreen(next)}
           />
           <main className="admin-main" inert={connectionLost}>
+            {licenseNotices}
             <Breadcrumb
               screen={screen}
               tail={tail?.screen === screen ? tail.label : null}
@@ -739,6 +828,7 @@ function ApplicationContent({
           {can('settings.manage') && screen === home && !reducedBar && (
             <BackupAlertBanner onOpen={() => void requestScreen('maintenance')} />
           )}
+          {licenseNotices}
           <Breadcrumb
             screen={screen}
             tail={tail?.screen === screen ? tail.label : null}

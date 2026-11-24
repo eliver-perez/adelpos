@@ -225,6 +225,9 @@ func TestClientMinimumVersionByKind(t *testing.T) {
 	if !found["permission-groups-v1"] {
 		t.Fatalf("capacidades de la etapa A3: %v", capabilities)
 	}
+	if !found["license-v1"] {
+		t.Fatalf("capacidades de la etapa L1: %v", capabilities)
+	}
 }
 
 func TestOpenAPIDocumentIsServed(t *testing.T) {

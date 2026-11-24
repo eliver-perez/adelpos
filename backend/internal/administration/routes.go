@@ -18,6 +18,10 @@ func (service *Service) protected(ctx context.Context, tx pgx.Tx, request Reques
 	if route == "events/snapshot" && request.Method == "GET" {
 		return service.eventSnapshot(ctx, tx, request, principal)
 	}
+	// Modo Cocina (etapa L1, Fase D; license_seats.go): ocupa o libera el cupo de cocina de la terminal.
+	if request.Method == "POST" && route == "kitchen/display-mode" {
+		return service.kitchenDisplayMode(ctx, tx, request, principal)
+	}
 	if strings.HasPrefix(route, "kitchen/") {
 		// La cola vuelve a preparar precuentas, tickets y documentos de caja con el renderizador de pagos
 		// cuando su impresora cambió de papel (revisión 9F, M2).
@@ -34,7 +38,12 @@ func (service *Service) protected(ctx context.Context, tx pgx.Tx, request Reques
 		return result, err
 	}
 	if request.Method == "GET" && route == "auth/me" {
-		return currentIdentity(ctx, tx, principal)
+		// Etapa L1, Fase C: con el estado de la licencia y de la hora (license_gate.go).
+		return service.attachLicense(ctx, tx)(currentIdentity(ctx, tx, principal))
+	}
+	// Etapa L1, Fase C (license_clock.go): «Comprobar la hora con internet» y el desbloqueo de soporte.
+	if licenseClockRoute(route) {
+		return service.licenseClockRoutes(ctx, tx, request, principal, route)
 	}
 	if request.Method == "POST" && route == "auth/logout" {
 		if _, err := tx.Exec(ctx, "UPDATE app.sessions SET revoked_at=now(),revoke_reason='logout' WHERE id=$1", principal.SessionID); err != nil {
@@ -58,7 +67,8 @@ func (service *Service) protected(ctx context.Context, tx pgx.Tx, request Reques
 	// Recuperación del estado al reconectar (etapa 9G, §5.6; recovery.go). Va antes del prefijo restaurant/ porque
 	// responde con la sesión aunque el usuario ya no pueda consultar cuentas.
 	if request.Method == "GET" && route == "restaurant/state" {
-		return recoveryState(ctx, tx, principal)
+		// Etapa L1, Fase C: con el estado de la licencia y de la hora (license_gate.go).
+		return service.attachLicense(ctx, tx)(recoveryState(ctx, tx, principal))
 	}
 	if strings.HasPrefix(route, "restaurant/") {
 		// Desde la etapa 9D la operación recibe el autorizador de supervisor, como los cobros, para
@@ -152,6 +162,11 @@ func (service *Service) protected(ctx context.Context, tx pgx.Tx, request Reques
 	if strings.HasPrefix(route, "reports/") {
 		return handleReports(ctx, tx, request, principal, route)
 	}
+	// Licencia (etapa L1, fase B; license.go): estado, activar, transferir, consultar, liberar, sin internet e identidad
+	// nueva. Las rutas de la hora de la Fase C van aparte.
+	if isLicenseCoreRoute(route) {
+		return service.licenseRoutes(ctx, tx, request, principal, route)
+	}
 	// Estado y reinicio del servicio del servidor (etapa 9G, fase A; service_host.go).
 	if route == "maintenance/service" || strings.HasPrefix(route, "maintenance/service/") {
 		return service.serviceRoutes(ctx, tx, request, principal, route)
@@ -186,7 +201,7 @@ func (service *Service) protected(ctx context.Context, tx pgx.Tx, request Reques
 		return service.pairingAdministration(ctx, tx, request, principal, route)
 	}
 	if route == "devices/sessions-summary" && request.Method == "GET" {
-		return sessionsSummary(ctx, tx, principal)
+		return sessionsSummary(ctx, tx, principal, service.seats())
 	}
 	// Catálogo agrupado de permisos (etapa A3, §3; permission_catalog.go).
 	if route == "permissions/catalog" && request.Method == "GET" {
@@ -217,7 +232,7 @@ func (service *Service) protected(ctx context.Context, tx pgx.Tx, request Reques
 	case "registers":
 		return registers(ctx, tx, request, principal, parts)
 	case "devices":
-		return devices(ctx, tx, request, principal, parts)
+		return devices(ctx, tx, request, principal, parts, service.seats())
 	case "sessions":
 		return sessions(ctx, tx, request, principal, parts)
 	case "audit":

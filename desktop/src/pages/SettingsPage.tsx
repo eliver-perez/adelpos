@@ -18,6 +18,8 @@ import { saveBusinessDay } from '../services/reports';
 import type { BusinessDaySettings } from '../services/reports';
 import { Select } from '../components/Select';
 import { TimeField } from '../components/TimeField';
+import { licenseCapability } from '../services/license';
+import { serverHas } from '../services/serverCapabilities';
 
 export const initialSettings: Settings = {
   name: '',
@@ -410,21 +412,31 @@ export function SettingsPage({
   can,
   onSaved,
   onOpenStatus,
+  onOpenLicense,
 }: {
   can: (key: string) => boolean;
   onSaved: () => Promise<void>;
   // Etapa 9C (§4.1): «Estado del sistema» salió de la navegación y se abre desde aquí.
   onOpenStatus?: () => void;
+  // Etapa L1 (Fase E): Configuración › Licencia, con un servidor que anuncia license-v1.
+  onOpenLicense?: () => void;
 }) {
   const resource = useResource<Settings>('settings');
   return (
     <>
       <PageTitle title="Configuración general" description="Datos del establecimiento.">
-        {onOpenStatus && (
-          <button type="button" className="secondary-button" onClick={onOpenStatus}>
-            <IconLabel icon="activity">Ver estado del sistema</IconLabel>
-          </button>
-        )}
+        <div className="button-row">
+          {onOpenLicense && serverHas(licenseCapability) && (
+            <button type="button" className="secondary-button" onClick={onOpenLicense}>
+              <IconLabel icon="key">Licencia</IconLabel>
+            </button>
+          )}
+          {onOpenStatus && (
+            <button type="button" className="secondary-button" onClick={onOpenStatus}>
+              <IconLabel icon="activity">Ver estado del sistema</IconLabel>
+            </button>
+          )}
+        </div>
       </PageTitle>
       <Notice>{resource.error}</Notice>
       {resource.data && (

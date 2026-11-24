@@ -129,7 +129,7 @@ class TakeawayRepository(
                 if (isAccessProblem(error)) {
                     server.report(error, userId)
                 }
-                DeliveryResult.Failed(problem.message)
+                DeliveryResult.Failed(ApiErrors.shownMessage(problem))
             }
         }
 
@@ -191,6 +191,12 @@ class CustomerEditSender(
                         isAccessProblem(error) -> server.report(error, edit.waiterUserId)
                         error is AppError.TryLater || error is AppError.ServerProblem ->
                             return@withLock true
+                        // Etapa L1: la hora de la computadora principal (o la licencia) no lo
+                        // permitió y Go no guardó nada. No es definitivo: la edición se conserva y
+                        // sale en una vuelta siguiente de la cola (al volver la red o el mesero, al
+                        // abrir la aplicación o la de cada 15 minutos), sin pedir reintentos
+                        // seguidos.
+                        error is AppError.LicenseRefused -> Unit
                         problem.code == IDEMPOTENCY_CONFLICT ->
                             // La clave ya se usó con otro contenido (no debería pasar: cada edición
                             // lleva una nueva): la misma edición con otra clave.

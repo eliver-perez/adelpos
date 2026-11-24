@@ -49,6 +49,20 @@ func Append(ctx context.Context, tx pgx.Tx, kind, scope string, aggregateID, sta
 	return err
 }
 
+// Etapa L1 (Fase C): license.changed avisa que cambió el estado de la licencia o el bloqueo por la hora del equipo. Lo
+// reciben todas las personas que leen el canal, sin importar sus permisos ni su estación, para el aviso fijo de cada
+// terminal; no lleva datos (solo dice que vuelvan a leer auth/me o restaurant/state). Se guarda en el ámbito
+// «configuration», que ya existe en la base, así que no necesita migración.
+const (
+	LicenseChangedKind  = "license.changed"
+	licenseChangedScope = "configuration"
+)
+
+// AppendLicenseChanged publica license.changed en la transacción (con el lock 7820148306, como todo productor).
+func AppendLicenseChanged(ctx context.Context, tx pgx.Tx) error {
+	return Append(ctx, tx, LicenseChangedKind, licenseChangedScope, nil, nil)
+}
+
 // Head es el cursor del último evento confirmado (0 si no hay ninguno). Etapa A1: GET restaurant/state lo entrega como
 // event_cursor para que el cliente abra el canal desde el momento de la lectura sin perder nada.
 func Head(ctx context.Context, tx pgx.Tx) (int64, error) {
@@ -87,6 +101,11 @@ func Read(ctx context.Context, tx pgx.Tx, after int64, permissions []string, sta
 			return nil, err
 		}
 		batch.Cursor = event.Sequence
+		// Etapa L1 (Fase C): el cambio de la licencia o de la hora llega a todas las terminales (ver LicenseChangedKind).
+		if event.Kind == LicenseChangedKind && event.Scope == licenseChangedScope {
+			batch.Events = append(batch.Events, event)
+			continue
+		}
 		if stationFilter != "" && (event.StationID == nil || *event.StationID != stationFilter) {
 			continue
 		}
