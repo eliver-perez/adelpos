@@ -1,15 +1,19 @@
 import { copyFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect } from '@playwright/test';
-import type { Page, TestInfo } from '@playwright/test';
-import type { installDriver } from './native-driver';
-import { issueTestLicense } from './native-driver';
+import type { Browser, Locator, Page, TestInfo } from '@playwright/test';
+import { installDriver, issueTestLicense } from './native-driver';
 import { openAdministration, topBar } from './navigation';
 
 // Ayudas de las especificaciones de la etapa L1 (Fase E): entrar, el tema claro de las capturas, Configuración ›
-// Licencia y una segunda terminal de administración para cambiar la licencia mientras la página usa otro usuario.
+// Licencia, otras terminales (por la API o con su propia página) y dejar el Go temporal compartido con la licencia de
+// las demás especificaciones al terminar.
 
 export type Driver = Awaited<ReturnType<typeof installDriver>>;
+
+// El Go temporal compartido (el mismo valor por omisión que native-driver.ts).
+export const sharedServerURL = process.env.ADEL_BROWSER_SERVER_URL ?? 'http://127.0.0.1:8183';
+export const admin = { username: 'admin', password: 'admin' };
 
 const clientHeaders = {
   'X-Client-Version': (
@@ -76,9 +80,8 @@ export async function shot(page: Page, testInfo: TestInfo, name: string) {
   }
 }
 
-// Otra terminal de escritorio con su propia credencial (alta con una invitación, como en la 9H) y una sesión de
-// administrador: con ella la prueba cambia la licencia sin tocar la sesión de la página.
-export async function otherTerminal(driver: Driver, serverURL: string, name: string) {
+// Alta de otra terminal de escritorio con su propia credencial (con una invitación, como en la 9H), sin caja.
+export async function enrollTerminal(driver: Driver, serverURL: string, name: string) {
   const invitation = (await call(driver, 'POST', 'devices/invitations')) as { code: string };
   const enrolled = await fetch(`${serverURL}/api/v1/devices/enroll`, {
     method: 'POST',
@@ -92,6 +95,31 @@ export async function otherTerminal(driver: Driver, serverURL: string, name: str
     register_id: null,
     keyboard_mode: 'disabled',
   });
+  return credentials;
+}
+
+// La página de otra terminal de escritorio con su credencial. Con `main: false` es una terminal emparejada con la
+// computadora principal (sin servidor propio), como la de una caja en otra computadora.
+export async function terminalPage(
+  browser: Browser,
+  credentials: { device_id: string; device_token: string },
+  options: { main?: boolean } = {},
+) {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const page = await context.newPage();
+  const driver = await installDriver(page, {
+    terminal: { deviceID: credentials.device_id, deviceToken: credentials.device_token },
+  });
+  if (options.main === false) {
+    driver.setInstallation({ chosen: true, mode: 'terminal-only', paired: true });
+  }
+  return { context, page, driver };
+}
+
+// Otra terminal de escritorio con su propia credencial y una sesión de administrador por la API: con ella la prueba
+// cambia la licencia u ocupa cupos sin tocar la sesión de la página.
+export async function otherTerminal(driver: Driver, serverURL: string, name: string) {
+  const credentials = await enrollTerminal(driver, serverURL, name);
   let session = '';
   async function request(method: string, route: string, body?: unknown) {
     const response = await fetch(`${serverURL}/api/v1/${route}`, {
@@ -124,4 +152,59 @@ export async function otherTerminal(driver: Driver, serverURL: string, name: str
     installLicense: (identity: string, args?: string[]) =>
       expectOK('POST', 'license/import', { license: issueTestLicense(identity, args) }),
   };
+}
+
+// Cupos de la licencia en uso y su límite (devices/sessions-summary, Fase D).
+export type Seat = 'cash_registers' | 'order_takers' | 'kitchen_displays';
+export async function seatUsage(control: ControlTerminal) {
+  const summary = (await control.expectOK('GET', 'devices/sessions-summary')) as {
+    seats: Record<Seat, { in_use: number; limit: number }>;
+  };
+  return summary.seats;
+}
+
+export type ControlTerminal = Awaited<ReturnType<typeof otherTerminal>>;
+
+// Deja el Go temporal compartido con la licencia de las demás especificaciones (perpetua, 20 de cada cupo), desde la
+// terminal de administración de la prueba. Va en el finally de cada especificación de la etapa que cambia la licencia,
+// también si la prueba falla.
+export async function restoreTestLicense(control: ControlTerminal, identity: string) {
+  await control.expectOK('POST', 'auth/login', admin);
+  await control.installLicense(identity);
+}
+
+// Una categoría con un producto sencillo (sin personalización) para capturar desde la página.
+export async function simpleProduct(driver: Driver, name: string, code: string) {
+  const category = (await call(driver, 'POST', 'catalog/categories', {
+    name: `Bebidas ${name}`,
+    active: true,
+    color: '#d64545',
+  })) as { id: string; name: string };
+  await call(driver, 'POST', 'catalog/products', {
+    name,
+    active: true,
+    category_id: category.id,
+    code,
+    kind: 'product',
+    base_price: '20',
+  });
+  return { category: category.name, product: name };
+}
+
+// Para llevar › Nuevo pedido › el producto: el pedido nace al agregar el primer producto (POST restaurant/accounts),
+// que es cuando Go pide el cupo y revisa la hora.
+export async function captureTakeaway(page: Page, item: { category: string; product: string }) {
+  await page.getByRole('button', { name: 'Nuevo pedido', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Para llevar · Pedido nuevo' })).toBeVisible();
+  await page
+    .getByRole('navigation', { name: 'Categorías' })
+    .getByRole('button', { name: new RegExp(item.category) })
+    .click();
+  await page.getByRole('button', { name: new RegExp(`^${item.product}`) }).click();
+}
+
+// El mensaje de una operación rechazada (en el panel de la operación o en la pila de avisos), aparte de los avisos de la
+// licencia y de la hora, que pueden decir lo mismo.
+export function operationMessage(page: Page, text: string | RegExp): Locator {
+  return page.locator('.notice, [data-sonner-toaster]').filter({ hasText: text }).first();
 }
