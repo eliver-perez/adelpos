@@ -10,7 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"local/ad-el-pos/server/internal/administration"
+	"local/ad-el-pos/server/internal/licenseseats"
 	"local/ad-el-pos/server/internal/licensing"
+	"local/ad-el-pos/server/internal/licensing/licensingtest"
 	"local/ad-el-pos/server/internal/localsetup"
 )
 
@@ -100,5 +103,29 @@ func TestLicenseTestHooksRequireTestMode(t *testing.T) {
 	}
 	if behind := time.Since(manager.LocalClock()); behind < 47*time.Hour || behind > 49*time.Hour {
 		t.Fatalf("el reloj del gestor es el reloj con desfase: %s", behind)
+	}
+}
+
+// Etapa L1, fase C: el arranque conecta los cupos con la licencia real del gestor (antes, sin fuente, toda captura se
+// rechazaba): sin licencia, ninguno; con la licencia aceptada, sus cupos; y el reloj del gestor.
+func TestStartupConnectsSeatsToTheLicense(t *testing.T) {
+	clock := licensingtest.NewClock(time.Date(2026, 11, 23, 18, 0, 0, 0, time.UTC))
+	licenses := licensingtest.New(t, clock)
+	manager := licenses.Start()
+	application := &administration.Service{}
+	useLicense(application, manager)
+	if application.License != manager || application.Seats == nil {
+		t.Fatal("el servicio queda con el gestor y sus cupos")
+	}
+	if _, valid := application.Seats.Limits(); valid {
+		t.Fatal("sin licencia no hay cupos")
+	}
+	licenses.Accept(manager, licensingtest.Perpetual(2, 4, 1))
+	limits, valid := application.Seats.Limits()
+	if !valid || limits != (licenseseats.Limits{CashRegisters: 2, OrderTakers: 4, KitchenDisplays: 1}) {
+		t.Fatalf("cupos de la licencia: %+v %v", limits, valid)
+	}
+	if now, _ := application.Seats.Window(); !now.Equal(clock.Now()) {
+		t.Fatal("los cupos usan el reloj del gestor")
 	}
 }

@@ -70,6 +70,15 @@ func (service *Service) completeDeferred(ctx context.Context, result any) (any, 
 	if operation, ok := result.(*licenseOperation); ok {
 		return service.completeLicenseOperation(ctx, operation)
 	}
+	// Etapa L1, fase C (license_clock.go): «Comprobar la hora con internet», también fuera de la transacción, y el aviso
+	// a las terminales después de importar un .lic o crear la identidad nueva.
+	if check, ok := result.(*timeCheck); ok {
+		return service.completeTimeCheck(ctx, check)
+	}
+	if notice, ok := result.(*licenseNotice); ok {
+		service.notifyLicense(ctx)
+		return notice.result, nil
+	}
 	// Reinicio del servicio (etapa 9G, fase A): se programa ya auditado (service_host.go).
 	if _, ok := result.(*serviceRestart); ok {
 		return service.completeRestart()
