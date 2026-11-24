@@ -406,8 +406,20 @@ class LicenseOnGoTest {
         waitForTables()
     }
 
+    /**
+     * Mesas: la lista o, en el teléfono, la mesa elegida a un toque, como en `WaiterModeOnGoTest`.
+     * En el teléfono, «Enviar a cocina» vuelve al panel de la mesa, no a la lista (Fase H, `l1` en
+     * `Pixel_8`).
+     */
     private fun waitForTables() {
-        waitFor(TAG_TABLES_SCREEN)
+        try {
+            compose.waitUntil(timeoutMillis = 40_000) {
+                present(TAG_TABLES_SCREEN) || present(TAG_ACCOUNT_PANE)
+            }
+        } catch (failure: Throwable) {
+            compose.onRoot(useUnmergedTree = true).printToLog(TAG)
+            throw failure
+        }
     }
 
     private fun openPending() {
