@@ -5,11 +5,9 @@ package operations_test
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"testing"
 	"time"
 
-	"local/ad-el-pos/server/internal/administration"
 	"local/ad-el-pos/server/internal/licensing"
 	"local/ad-el-pos/server/internal/licensing/licensingtest"
 	"local/ad-el-pos/server/internal/payments"
@@ -21,9 +19,11 @@ import (
 // Hallazgo R2-1: «Comprobar la hora con internet» (§6.3) y el desbloqueo de soporte (§6.4) bajan la última hora
 // confiable en identity/licencia/estado.json (ReplaceTrustedTime y AcceptSupportUnlock escriben el archivo de inmediato)
 // y solo después escriben su auditoría dentro de la transacción de la petición. Si la petición falla después de la
-// escritura del archivo (aquí: la inserción en audit_events espera un lock y se agota el plazo de la petición, como
-// pasaría con un servidor de licencias lento que consume casi todo el plazo de 10 s, una desconexión de la base o un
-// fallo al confirmar), la transacción se revierte:
+// escritura del archivo (aquí: la inserción en audit_events espera un lock y se agota el plazo; en producción, un
+// servidor de licencias lento que consume casi todo el plazo de 10 s, una desconexión de la base o un fallo al
+// confirmar), la transacción se revierte. Pasa igual en etapa-l1 (91f17ba), donde la comprobación con internet ya corre
+// fuera de la petición pero ReplaceTrustedTime sigue antes de futureOperations, la auditoría y el commit de su
+// transacción corta:
 //
 //   - la hora confiable ya bajó y no queda license.clock_corrected ni license.support_unlocked con los dos valores ni la
 //     lista de operaciones con fecha futura (§6.3: «se registra en la auditoría con los dos valores»);
@@ -48,10 +48,11 @@ func TestReviewR2DefectClockLoweringIsNotAtomicWithItsAudit(t *testing.T) {
 	fixture.use(fixture.manager)
 	fixture.licenses.Accept(fixture.manager, licensingtest.Perpetual(3, 3, 3))
 
-	// executeWhileAuditIsLocked hace la petición por Execute (la misma ruta que la API v1) con un plazo corto, mientras
-	// otra conexión tiene app.audit_events en modo EXCLUSIVE: las lecturas siguen, pero ninguna inserción en la
-	// auditoría puede terminar antes del plazo.
-	executeWhileAuditIsLocked := func(t *testing.T, route string, body any) error {
+	// sendWhileAuditIsLocked hace la petición por la API v1 (ServeHTTP, con su plazo de 10 s) mientras otra conexión tiene
+	// app.audit_events en modo EXCLUSIVE: las lecturas siguen, pero ninguna inserción en la auditoría termina antes de que
+	// se agote el plazo (el de la petición, o el de la transacción corta de la auditoría donde la comprobación con
+	// internet ya corre fuera de la petición). Devuelve la respuesta que vio la persona.
+	sendWhileAuditIsLocked := func(t *testing.T, route string, body any) licenseReply {
 		t.Helper()
 		locker, err := fixture.pool.Begin(fixture.ctx)
 		if err != nil {
@@ -61,14 +62,7 @@ func TestReviewR2DefectClockLoweringIsNotAtomicWithItsAudit(t *testing.T) {
 		if _, err := locker.Exec(fixture.ctx, "LOCK TABLE app.audit_events IN EXCLUSIVE MODE"); err != nil {
 			t.Fatal(err)
 		}
-		encoded, _ := json.Marshal(body)
-		ctx, cancel := context.WithTimeout(fixture.ctx, 3*time.Second)
-		defer cancel()
-		_, err = fixture.service.Execute(ctx, administration.Request{
-			Method: "POST", Path: "/api/v1/" + route, Body: encoded, Local: true,
-			DeviceID: fixture.admin.deviceID, DeviceToken: fixture.admin.deviceToken, SessionToken: fixture.admin.sessionToken,
-		})
-		return err
+		return fixture.send("POST", route, body)
 	}
 
 	t.Run("§6.3: la hora confiable baja aunque la petición falle y no queda la auditoría", func(t *testing.T) {
@@ -84,14 +78,14 @@ func TestReviewR2DefectClockLoweringIsNotAtomicWithItsAudit(t *testing.T) {
 		fixture.service.LicenseServerClock = &serverClock{instant: real.Add(time.Minute)}
 		defer func() { fixture.service.LicenseServerClock = nil }()
 
-		err := executeWhileAuditIsLocked(t, "license/time-check", map[string]any{})
-		if err == nil {
-			t.Fatal("preparación: con la auditoría bloqueada la petición debía fallar")
+		failed := sendWhileAuditIsLocked(t, "license/time-check", map[string]any{})
+		if failed.status == 200 {
+			t.Fatalf("preparación: con la auditoría bloqueada la petición debía fallar: %s", failed.body)
 		}
 		audited := fixture.count(t, "SELECT count(*)::int FROM app.audit_events WHERE action='license.clock_corrected'")
 		onDisk := fixture.licenses.Start().TrustedTime()
-		t.Logf("petición: %v; hora confiable antes %s, en memoria %s, en estado.json %s; license.clock_corrected: %d",
-			err, future.Format(time.RFC3339), fixture.manager.TrustedTime().Format(time.RFC3339), onDisk.Format(time.RFC3339), audited)
+		t.Logf("petición: %d %s; hora confiable antes %s, en memoria %s, en estado.json %s; license.clock_corrected: %d",
+			failed.status, failed.code, future.Format(time.RFC3339), fixture.manager.TrustedTime().Format(time.RFC3339), onDisk.Format(time.RFC3339), audited)
 		if audited == 0 && (!fixture.manager.TrustedTime().Equal(future) || !onDisk.Equal(future)) {
 			t.Errorf("R2-1: la petición falló, la última hora confiable bajó de %s a %s (también en estado.json) y no "+
 				"quedó license.clock_corrected con los dos valores ni las operaciones con fecha futura",
@@ -118,26 +112,22 @@ func TestReviewR2DefectClockLoweringIsNotAtomicWithItsAudit(t *testing.T) {
 		_ = json.Unmarshal(fixture.allowed(t, "POST", "license/support-request", map[string]any{"renew": true}, 200).body, &request)
 		response := key.Respond(t, request.Code, fixture.clock.Now(), fixture.clock.Now())
 
-		err := executeWhileAuditIsLocked(t, "license/support-unlock", map[string]any{"response": response, "source": "text"})
-		if err == nil {
-			t.Fatal("preparación: con la auditoría bloqueada la petición debía fallar")
+		failed := sendWhileAuditIsLocked(t, "license/support-unlock", map[string]any{"response": response, "source": "text"})
+		if failed.status == 200 {
+			t.Fatalf("preparación: con la auditoría bloqueada la petición debía fallar: %s", failed.body)
 		}
 		audited := fixture.count(t, "SELECT count(*)::int FROM app.audit_events WHERE action='license.support_unlocked'")
 		lowered := !fixture.manager.TrustedTime().Equal(future)
 		// La persona vio un error y vuelve a pegar la misma respuesta.
 		retry := fixture.send("POST", "license/support-unlock", map[string]any{"response": response, "source": "text"})
-		t.Logf("petición: %v; hora confiable antes %s, ahora %s; license.support_unlocked: %d; reintento: %d %s",
-			err, future.Format(time.RFC3339), fixture.manager.TrustedTime().Format(time.RFC3339), audited, retry.status, retry.body)
+		t.Logf("petición: %d %s; hora confiable antes %s, ahora %s; license.support_unlocked: %d; reintento: %d %s",
+			failed.status, failed.code, future.Format(time.RFC3339), fixture.manager.TrustedTime().Format(time.RFC3339), audited, retry.status, retry.body)
 		if audited == 0 && lowered {
 			t.Errorf("R2-1: la petición falló, la última hora confiable bajó sin license.support_unlocked y la respuesta " +
 				"quedó usada")
 		}
 		if retry.status == 400 && retry.details["reason"] == licensing.SupportReasonUsed {
 			t.Errorf("R2-1: al reintentar después del error, la respuesta ya se había gastado: %s", retry.body)
-		}
-		var fault *administration.Fault
-		if errors.As(err, &fault) {
-			t.Logf("código del error visto por la persona: %s", fault.Code)
 		}
 	})
 }
