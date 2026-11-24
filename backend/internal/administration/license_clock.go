@@ -20,6 +20,14 @@ import (
 // principal: solo se aceptan por la escucha local (request.Local) y con una sesión de cualquier usuario, sin permiso
 // especial, porque quien esté en la caja debe poder resolverlo. La puerta las deja pasar en todos los estados y con la
 // hora incorrecta (RowLicense). Las demás rutas license/* (activar, transferir, consultar…) son de la Fase B.
+//
+// Revisión R2, hallazgo R2-1: las dos formas de bajar la última hora confiable (la §6.3 y la §6.4) corren después de
+// confirmar la petición (completeDeferred) y siguen el mismo orden: se comprueba y se prepara todo sin cambiar nada; la
+// auditoría con los dos valores se confirma en su propia transacción corta; solo entonces se baja la hora, en sus dos
+// copias (R2-3). Si la auditoría no se puede confirmar, no se baja nada (y la respuesta de soporte no se gasta). Si la
+// baja falla después, se audita otra vez la misma acción con success=false y applied=false, y se responde con error: la
+// hora no cambió. Lo único que puede quedar es una auditoría de una baja que no llegó a aplicarse si el servidor se
+// apaga justo en medio; nunca una baja sin su auditoría.
 
 // LicenseServerClock entrega la hora del servidor de licencias para la §6.3 (L1-D5): con activación, el `server_time`
 // de la consulta de actualización (refresh, contractual); sin ella, el `expires_at` del desafío menos 300 s. Lo
@@ -32,6 +40,9 @@ type LicenseServerClock interface {
 // timeCheckTimeout limita la consulta al servidor de licencias: el cliente de la Fase B hace el desafío y la consulta,
 // con sus reintentos, dentro del plazo de las rutas de la licencia (licenseTimeout).
 const timeCheckTimeout = 60 * time.Second
+
+// clockAuditTimeout limita cada transacción corta de la auditoría de estas rutas.
+const clockAuditTimeout = 10 * time.Second
 
 // futureOperationsLimit es cuántos identificadores de cada tipo se listan en la auditoría de la §6.3.
 const futureOperationsLimit = 20
@@ -54,8 +65,10 @@ func (service *Service) licenseClockRoutes(ctx context.Context, tx pgx.Tx, reque
 	if request.Method != "POST" {
 		return nil, &Fault{Status: 404, Code: "NOT_FOUND", Message: "Ruta no disponible."}
 	}
+	// Revisión R2, hallazgo R2-6: desde otra terminal no es un problema de permisos, así que es un 409, como los rechazos
+	// de la puerta: un 403 dentro de runProtected quedaría en la auditoría como un acceso denegado.
 	if !request.Local {
-		return nil, &Fault{Status: 403, Code: "LICENSE_LOCAL_ONLY",
+		return nil, &Fault{Status: 409, Code: "LICENSE_LOCAL_ONLY",
 			Message: "Esto se hace en la computadora principal, en la pantalla de la fecha y hora."}
 	}
 	if service.License == nil {
@@ -78,6 +91,67 @@ func identityUnavailable() error {
 func stateNotSaved() error {
 	return &Fault{Status: 503, Code: "LICENSE_STATE_NOT_SAVED",
 		Message: "No se pudo guardar el cambio en esta computadora. Inténtalo de nuevo; si sigue igual, comunícate con soporte."}
+}
+
+// supportInstallationFault es el error de una instalación que no puede pedir ni aceptar un desbloqueo de soporte
+// (revisión R2, hallazgo R2-5), o nil si el error es otro. Una carpeta de datos copiada de otra computadora tiene la
+// misma identidad y la misma solicitud pendiente que la original: primero se crea una identidad nueva, como para activar.
+func supportInstallationFault(err error) *Fault {
+	switch {
+	case errors.Is(err, licensing.ErrIdentityUnavailable):
+		return identityUnavailable().(*Fault)
+	case errors.Is(err, licensing.ErrCopiedInstallation):
+		return &Fault{Status: 409, Code: "LICENSE_INSTALLATION_COPIED",
+			Message: "Esta instalación se copió de otra computadora. Crea una identidad nueva para esta computadora en la " +
+				"pantalla de la licencia y después pide el código de desbloqueo."}
+	case errors.Is(err, licensing.ErrMachineUnverified):
+		return &Fault{Status: 503, Code: "IDENTITY_UNAVAILABLE",
+			Message: "No se pudo comprobar esta computadora. Reinicia el servidor; si sigue igual, comunícate con soporte.",
+			Details: map[string]string{"reason": "machine_unverified"}}
+	case errors.Is(err, licensing.ErrStateNotSaved):
+		return stateNotSaved().(*Fault)
+	}
+	return nil
+}
+
+// clockAudit escribe una auditoría de estas rutas en su propia transacción corta y la confirma. Devuelve la zona horaria
+// del restaurante, para la respuesta.
+func (service *Service) clockAudit(ctx context.Context, principal Principal, action string, before, after any,
+	success bool) (*time.Location, string, error) {
+	tx, err := service.Pool.Begin(ctx)
+	if err != nil {
+		return time.UTC, "UTC", err
+	}
+	defer tx.Rollback(context.Background())
+	location, timezone, err := restaurantLocation(ctx, tx)
+	if err != nil {
+		return time.UTC, "UTC", err
+	}
+	if err := audit(ctx, tx, principal, action, "license", nil, before, after, success); err != nil {
+		return time.UTC, "UTC", err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return time.UTC, "UTC", err
+	}
+	return location, timezone, nil
+}
+
+// auditNotApplied registra que una baja de la hora ya auditada no se aplicó (R2-1): la misma acción, con success=false,
+// applied=false y el motivo. Corre con su propio plazo, aunque el de la petición ya se haya agotado; si tampoco se puede
+// escribir, solo queda en la bitácora.
+func (service *Service) auditNotApplied(ctx context.Context, principal Principal, action string, before any,
+	after map[string]any, reason string) {
+	details := make(map[string]any, len(after)+2)
+	for key, value := range after {
+		details[key] = value
+	}
+	details["applied"] = false
+	details["reason"] = reason
+	auditContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), clockAuditTimeout)
+	defer cancel()
+	if _, _, err := service.clockAudit(auditContext, principal, action, before, details, false); err != nil && service.Logger != nil {
+		service.Logger.Error("license_clock_not_applied_unaudited", "action", action, "reason", err.Error())
+	}
 }
 
 // decodeOptional lee un cuerpo JSON que puede venir vacío.
@@ -117,7 +191,8 @@ func (service *Service) checkTimeWithInternet(ctx context.Context, tx pgx.Tx, re
 //     decida.
 //   - Si no coinciden, se rechaza con LICENSE_TIME_MISMATCH y la hora del servidor, para corregir el reloj a esa hora.
 //
-// La auditoría va en una transacción corta aparte, después de la consulta.
+// La auditoría va en una transacción corta aparte, después de la consulta. Cuando la hora baja, esa auditoría se
+// confirma antes de bajarla (R2-1, ver arriba).
 func (service *Service) completeTimeCheck(ctx context.Context, check *timeCheck) (any, error) {
 	serverContext, cancel := context.WithTimeout(ctx, timeCheckTimeout)
 	serverTime, err := service.LicenseServerClock.ServerTime(serverContext)
@@ -138,8 +213,12 @@ func (service *Service) completeTimeCheck(ctx context.Context, check *timeCheck)
 		return nil, &Fault{Status: 502, Code: "LICENSE_RESPONSE_INVALID",
 			Message: "La hora que respondió el servidor de licencias no es válida. Inténtalo más tarde o comunícate con soporte."}
 	}
+	// Antes de preparar una posible baja se guarda la última hora confiable que está en memoria, en sus dos copias: el
+	// valor anterior que registra la auditoría es el que queda guardado si la baja no se aplica (R2-1). Si no se puede
+	// guardar, el trabajador lo reintenta cada minuto, y la baja tampoco se podría guardar.
+	_ = manager.Flush()
 	before := manager.Clock()
-	auditContext, cancelAudit := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	auditContext, cancelAudit := context.WithTimeout(context.WithoutCancel(ctx), clockAuditTimeout)
 	defer cancelAudit()
 	tx, err := service.Pool.Begin(auditContext)
 	if err != nil {
@@ -178,28 +257,34 @@ func (service *Service) completeTimeCheck(ctx context.Context, check *timeCheck)
 			}}
 	}
 	details["matches"] = true
-	replaced := false
-	if !before.LastActivity.IsZero() && before.LastActivity.After(serverTime) {
-		previous, err := manager.ReplaceTrustedTime(serverTime, licensing.ReplaceByInternetCheck)
-		if err != nil {
-			return nil, stateNotSaved()
-		}
-		replaced = true
+	replaced := !before.LastActivity.IsZero() && before.LastActivity.After(serverTime)
+	if replaced {
+		// La baja (R2-1): primero las operaciones con fecha futura y la auditoría con los dos valores, confirmadas; después
+		// la hora, en sus dos copias. Si la auditoría no se confirma, no se baja nada.
 		future, err := futureOperations(auditContext, tx, serverTime.Add(licensing.ClockMargin))
 		if err != nil {
 			return nil, err
 		}
-		details["previous_last_activity_time"] = previous
+		previous := map[string]any{"last_activity_time": before.LastActivity}
+		details["previous_last_activity_time"] = before.LastActivity
 		details["future_operations"] = future
-		if err := audit(auditContext, tx, check.principal, timeCorrectedAction, "license", nil,
-			map[string]any{"last_activity_time": previous}, details, true); err != nil {
+		if err := audit(auditContext, tx, check.principal, timeCorrectedAction, "license", nil, previous, details, true); err != nil {
 			return nil, err
 		}
-	} else if err := audit(auditContext, tx, check.principal, timeCheckAction, "license", nil, nil, details, true); err != nil {
-		return nil, err
-	}
-	if err := tx.Commit(auditContext); err != nil {
-		return nil, err
+		if err := tx.Commit(auditContext); err != nil {
+			return nil, err
+		}
+		if _, err := manager.ReplaceTrustedTime(serverTime, licensing.ReplaceByInternetCheck); err != nil {
+			service.auditNotApplied(ctx, check.principal, timeCorrectedAction, previous, details, "not_saved")
+			return nil, stateNotSaved()
+		}
+	} else {
+		if err := audit(auditContext, tx, check.principal, timeCheckAction, "license", nil, nil, details, true); err != nil {
+			return nil, err
+		}
+		if err := tx.Commit(auditContext); err != nil {
+			return nil, err
+		}
 	}
 	// Las terminales se enteran en el momento (el vigilante también lo vería en su siguiente revisión).
 	service.notifyLicense(ctx)
@@ -312,12 +397,10 @@ func (service *Service) supportRequest(ctx context.Context, tx pgx.Tx, request R
 		return nil, err
 	}
 	info, err := service.License.SupportRequest(input.Renew)
-	switch {
-	case errors.Is(err, licensing.ErrIdentityUnavailable):
-		return nil, identityUnavailable()
-	case errors.Is(err, licensing.ErrStateNotSaved):
-		return nil, stateNotSaved()
-	case err != nil:
+	if fault := supportInstallationFault(err); fault != nil {
+		return nil, fault
+	}
+	if err != nil {
 		return nil, err
 	}
 	location, timezone, err := restaurantLocation(ctx, tx)
@@ -360,9 +443,17 @@ func (service *Service) supportTrust() (licensing.SupportTrust, error) {
 	return licensing.CompiledSupportTrust()
 }
 
-// supportUnlock acepta la respuesta de soporte pegada como texto o importada de un archivo .desbloqueo (el escritorio
-// lee el archivo y envía su texto): una sola vez, solo en esta instalación y dentro de las 24 horas de la solicitud.
-// Cada intento queda en la auditoría, también los rechazados.
+// supportUnlockAttempt es un desbloqueo de soporte ya autorizado: se comprueba, se audita y se aplica después de
+// confirmar la petición (completeSupportUnlock), con su auditoría antes de bajar la hora (R2-1).
+type supportUnlockAttempt struct {
+	principal Principal
+	response  string
+	source    string
+	trust     licensing.SupportTrust
+}
+
+// supportUnlock autoriza la respuesta de soporte pegada como texto o importada de un archivo .desbloqueo (el escritorio
+// lee el archivo y envía su texto). La comprobación y el desbloqueo los hace completeSupportUnlock.
 func (service *Service) supportUnlock(ctx context.Context, tx pgx.Tx, request Request, principal Principal) (any, error) {
 	var input struct {
 		Response string `json:"response"`
@@ -385,42 +476,83 @@ func (service *Service) supportUnlock(ctx context.Context, tx pgx.Tx, request Re
 		return nil, &Fault{Status: 503, Code: "SUPPORT_UNLOCK_UNAVAILABLE",
 			Message: "El desbloqueo de soporte no está disponible en esta versión. Comunícate con soporte."}
 	}
+	return &supportUnlockAttempt{principal: principal, response: input.Response, source: input.Source, trust: trust}, nil
+}
+
+// completeSupportUnlock acepta la respuesta: una sola vez, solo en esta instalación y dentro de las 24 horas de la
+// solicitud. Cada intento queda en la auditoría, también los rechazados. Primero se comprueba sin cambiar nada; un
+// rechazo se audita y no gasta nada. Una respuesta válida se audita (license.support_unlocked, con los dos valores) y
+// solo después se aplica: si la auditoría no se confirma, la respuesta sigue sin usar y se puede volver a pegar (R2-1).
+func (service *Service) completeSupportUnlock(ctx context.Context, attempt *supportUnlockAttempt) (any, error) {
 	manager := service.License
-	result, err := manager.AcceptSupportUnlock(input.Response, trust)
-	var rejected *licensing.SupportUnlockError
-	switch {
-	case errors.As(err, &rejected):
-		if err := audit(ctx, tx, principal, supportUnlockRejectedAction, "license", nil, nil,
-			map[string]any{"reason": rejected.Reason, "source": input.Source}, false); err != nil {
-			return nil, err
-		}
-		return nil, &Fault{Status: 400, Code: "SUPPORT_UNLOCK_INVALID", Message: supportUnlockMessages[rejected.Reason],
-			Details: map[string]any{"reason": rejected.Reason}, Commit: true}
-	case errors.Is(err, licensing.ErrIdentityUnavailable):
-		return nil, identityUnavailable()
-	case errors.Is(err, licensing.ErrStateNotSaved):
-		return nil, stateNotSaved()
-	case err != nil:
-		return nil, err
+	auditContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), clockAuditTimeout)
+	defer cancel()
+	result, err := manager.CheckSupportUnlock(attempt.response, attempt.trust)
+	if err != nil {
+		return nil, service.supportUnlockFailed(auditContext, attempt, err)
 	}
-	location, timezone, err := restaurantLocation(ctx, tx)
+	clock := manager.Clock()
+	previous := map[string]any{"last_activity_time": nullableTime(result.PreviousTrustedTime)}
+	details := map[string]any{
+		"request_code": result.RequestCode, "last_activity_time": result.NewTrustedTime, "local_time": clock.LocalTime,
+		"source": attempt.source,
+	}
+	location, timezone, err := service.clockAudit(auditContext, attempt.principal, supportUnlockedAction, previous, details, true)
 	if err != nil {
 		return nil, err
 	}
-	clock := manager.Clock()
-	if err := audit(ctx, tx, principal, supportUnlockedAction, "license", nil,
-		map[string]any{"last_activity_time": nullableTime(result.PreviousTrustedTime)},
-		map[string]any{
-			"request_code": result.RequestCode, "last_activity_time": result.NewTrustedTime, "local_time": clock.LocalTime,
-			"source": input.Source,
-		}, true); err != nil {
-		return nil, err
+	applied, err := manager.AcceptSupportUnlock(attempt.response, attempt.trust)
+	if err != nil {
+		// Ya auditado y no aplicado: por ejemplo, no se pudo guardar, o la solicitud cambió en medio. El número de un solo
+		// uso no se gastó (salvo que otro intento lo haya usado justo antes).
+		reason := "not_saved"
+		var rejected *licensing.SupportUnlockError
+		if errors.As(err, &rejected) {
+			reason = rejected.Reason
+		}
+		service.auditNotApplied(ctx, attempt.principal, supportUnlockedAction, previous, details, reason)
+		return nil, supportUnlockFault(err)
 	}
 	service.wakeLicenseMonitor()
 	return map[string]any{
 		"accepted":                    true,
-		"previous_last_activity_time": nullableTime(result.PreviousTrustedTime),
-		"last_activity_time":          result.NewTrustedTime,
-		"clock":                       clockDetails(clock, manager.Status(), location, timezone),
+		"previous_last_activity_time": nullableTime(applied.PreviousTrustedTime),
+		"last_activity_time":          applied.NewTrustedTime,
+		"clock":                       clockDetails(manager.Clock(), manager.Status(), location, timezone),
 	}, nil
+}
+
+// supportUnlockFailed audita un desbloqueo rechazado antes de aplicarse (license.support_unlock_rejected, con el
+// motivo) y devuelve su error. Si la auditoría no se puede escribir, el error es ese: no se cambió nada.
+func (service *Service) supportUnlockFailed(ctx context.Context, attempt *supportUnlockAttempt, err error) error {
+	reason := ""
+	var rejected *licensing.SupportUnlockError
+	switch {
+	case errors.As(err, &rejected):
+		reason = rejected.Reason
+	case errors.Is(err, licensing.ErrCopiedInstallation):
+		reason = "installation_copied"
+	case errors.Is(err, licensing.ErrMachineUnverified):
+		reason = "machine_unverified"
+	}
+	if reason != "" {
+		if _, _, auditErr := service.clockAudit(ctx, attempt.principal, supportUnlockRejectedAction, nil,
+			map[string]any{"reason": reason, "source": attempt.source}, false); auditErr != nil {
+			return auditErr
+		}
+	}
+	return supportUnlockFault(err)
+}
+
+// supportUnlockFault es el error público de un desbloqueo que no se aplicó.
+func supportUnlockFault(err error) error {
+	var rejected *licensing.SupportUnlockError
+	if errors.As(err, &rejected) {
+		return &Fault{Status: 400, Code: "SUPPORT_UNLOCK_INVALID", Message: supportUnlockMessages[rejected.Reason],
+			Details: map[string]any{"reason": rejected.Reason}}
+	}
+	if fault := supportInstallationFault(err); fault != nil {
+		return fault
+	}
+	return err
 }

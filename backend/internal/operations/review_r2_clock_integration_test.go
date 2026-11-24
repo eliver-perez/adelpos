@@ -75,7 +75,8 @@ func TestReviewR2DefectClockLoweringIsNotAtomicWithItsAudit(t *testing.T) {
 		if !fixture.manager.Clock().Blocked {
 			t.Fatal("preparación: el reloj corregido debía quedar bloqueado")
 		}
-		fixture.service.LicenseServerClock = &serverClock{instant: real.Add(time.Minute)}
+		server := &serverClock{instant: real.Add(time.Minute)}
+		fixture.service.LicenseServerClock = server
 		defer func() { fixture.service.LicenseServerClock = nil }()
 
 		failed := sendWhileAuditIsLocked(t, "license/time-check", map[string]any{})
@@ -90,6 +91,15 @@ func TestReviewR2DefectClockLoweringIsNotAtomicWithItsAudit(t *testing.T) {
 			t.Errorf("R2-1: la petición falló, la última hora confiable bajó de %s a %s (también en estado.json) y no "+
 				"quedó license.clock_corrected con los dos valores ni las operaciones con fecha futura",
 				future.Format(time.RFC3339), onDisk.Format(time.RFC3339))
+		}
+		// Corrección de R2-1: la persona vuelve a intentar sin el lock y la baja se aplica, con su auditoría (las dos
+		// juntas). Así la subprueba siguiente parte de la hora corregida, como antes de la corrección.
+		retry := fixture.send("POST", "license/time-check", map[string]any{})
+		corrected := fixture.count(t, "SELECT count(*)::int FROM app.audit_events WHERE action='license.clock_corrected' AND success")
+		if retry.status != 200 || corrected != 1 || !fixture.manager.TrustedTime().Equal(server.instant.UTC()) ||
+			!fixture.licenses.Start().TrustedTime().Equal(server.instant.UTC()) {
+			t.Fatalf("al reintentar, la baja se aplica con su auditoría: %d %s; license.clock_corrected: %d", retry.status,
+				retry.body, corrected)
 		}
 	})
 
