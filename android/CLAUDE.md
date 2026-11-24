@@ -2,7 +2,8 @@
 
 Aplicación Android de meseros de AD-EL POS (etapa A1; la A2 agrega Para llevar, precuenta desde el dispositivo y
 aviso de platillos listos; la A3, la conexión tolerante con un solo estado de conexión, la regla de textos y los
-ajustes de pantallas de su §4). Es **un
+ajustes de pantallas de su §4; la L1, los mensajes y avisos de la licencia, los cupos y la hora de la computadora
+principal, sección «Licencia»). Es **un
 cliente más del servidor del restaurante** y usa la API v1 de la 9G
 ([docs/API_V1.md](../docs/API_V1.md), `backend/internal/apicontract/openapi.json`). Especificación de la etapa:
 [docs/etapas/ETAPA_A1_ANDROID.md](../docs/etapas/ETAPA_A1_ANDROID.md); decisiones y avance:
@@ -10,7 +11,9 @@ cliente más del servidor del restaurante** y usa la API v1 de la 9G
 [docs/etapas/ETAPA_A2_ANDROID.md](../docs/etapas/ETAPA_A2_ANDROID.md) y
 [docs/ETAPA_A2_AVANCE.md](../docs/ETAPA_A2_AVANCE.md) (decisiones A2-Dn). Los de la A3:
 [docs/etapas/ETAPA_A3_AJUSTES.md](../docs/etapas/ETAPA_A3_AJUSTES.md) y
-[docs/ETAPA_A3_AVANCE.md](../docs/ETAPA_A3_AVANCE.md) (decisiones A3-Dn). Las reglas generales del repositorio
+[docs/ETAPA_A3_AVANCE.md](../docs/ETAPA_A3_AVANCE.md) (decisiones A3-Dn). Los de la L1:
+[docs/etapas/ETAPA_L1_LICENCIAS_v2.md](../docs/etapas/ETAPA_L1_LICENCIAS_v2.md) (§8) y
+[docs/ETAPA_L1_AVANCE.md](../docs/ETAPA_L1_AVANCE.md) (decisiones L1-Dn). Las reglas generales del repositorio
 siguen en [CLAUDE.md](../CLAUDE.md) y [AGENTS.md](../AGENTS.md).
 
 ## Identificador y nombres (A2-D5)
@@ -161,6 +164,11 @@ paquetes que se desinstalan antes de las instrumentadas, en «Pruebas») y en es
     (`ForegroundServiceStartNotAllowedException`), se espera al siguiente disparador. Un aviso nunca se muestra dos
     veces (las `key` avisadas en Room y en los extras de la notificación) y nunca se pierde (cursor en Room, guardado
     **después** de mostrar).
+23. **La licencia la decide Go** (etapa L1): el dispositivo **nunca** habla con el servidor de licencias. Lo que
+    muestra sale de los cinco códigos de la puerta (L1-D17) y de sus `details`, o del `license` de `auth/me` y
+    `restaurant/state`, con los textos de `LicenseMessages` (`core:domain/error`, el único lugar), nunca del `message`
+    de la respuesta. Un pedido de la cola que la licencia, un cupo o la hora no permitieron no se pierde ni se reintenta
+    solo (sección «Licencia»).
 
 ## Estructura
 
@@ -180,7 +188,7 @@ Dependencias entre módulos: `app` → todos; `feature:*` → `core:ui` (→ `co
 `feature`.
 
 **Versión de la aplicación**: un solo lugar, `android/gradle.properties` (`adelpos.versionName`, `adelpos.versionCode`;
-0.2.0 y 2 en la A2; desde la A3, **0.3.0 y 3**). La usan el APK y la cabecera `X-Client-Version`
+0.2.0 y 2 en la A2; 0.3.0 y 3 en la A3; desde la L1, **0.4.0 y 4**). La usan el APK y la cabecera `X-Client-Version`
 (`BuildConfig.VERSION_NAME` → `ClientIdentity`).
 
 ## Comandos
@@ -314,10 +322,12 @@ mismo entorno. Los comentarios de línea (`//`) se escriben de 100 columnas como
   En cada uno: `connectedDebugAndroidTest` con `ANDROID_SERIAL` (contar los XML de cada módulo) y **`ANDROID_SERIAL=…
 ADELPOS_E2E_NEW_SERVER=<orden> scripts/android-e2e.sh --suite all`**, que levanta un servidor temporal nuevo para
   cada parte (access 1–5; access 6–7 con otra identidad sin reinstalar; catalog; waiter; field; takeaway; precheck;
-  alerts) con la orden
+  alerts; adjustments; license) con la orden
   de `ADELPOS_E2E_NEW_SERVER` (detiene el anterior, levanta otro en las mismas direcciones e imprime líneas
-  `ADELPOS_E2E_*=…`: provisioning y base temporal). Los agentes usan como orden `iso.sh - server-down` seguido de
-  `iso.sh <árbol> server-up`. Resultados en `<salida>/<suite>/` y `<salida>/summary.txt`.
+  `ADELPOS_E2E_*=…`: provisioning, base temporal y, desde la L1, `ADELPOS_E2E_CLOCK_FILE`). Los agentes usan como orden
+  `iso.sh - server-down` seguido de `iso.sh <árbol> server-up` (desde la L1, con `ISO_LICENSE_TRUST` y
+  `ISO_CLOCK_FILE`: cada servidor nuevo recibe su licencia de prueba en `prepare_server`). Resultados en
+  `<salida>/<suite>/` y `<salida>/summary.txt`.
 - **Corte de red**: `cmd connectivity airplane-mode enable|disable` en Android 11+ (desde la prueba con
   `UiAutomation.executeShellCommand`); en Android 8 solo desde la Mac con `adb root` + `svc wifi disable` +
   `svc data disable` (imágenes `google_apis`; las de Play no permiten root).
@@ -398,6 +408,11 @@ Estas formas son estables: la Fase E las usa tal cual y cambiarlas se avisa en e
   vuelva a existir. Observar `activeWaiter` para saber cuándo volvió a entrar (`mustReenterPin` en false). Errores
   que no son de acceso (`VALIDATION_ERROR`, `ORDER_REQUIRES_CONFIRMATION`…) los decide la pantalla: no pasan por
   `report`. 400 `CLIENT_KIND_MISMATCH` es un problema de soporte: `report` no cambia nada con él.
+- **Licencia, cupo u hora (etapa L1).** Un 409 con uno de los cinco códigos de la puerta llega como
+  `AppError.LicenseRefused` (no pasa por `report`: no es de acceso). En la cola, `SendOutcome.NotAllowed` deja el pedido
+  en «Requiere tu revisión» con `ReviewReason.NOT_ALLOWED` y el texto de su código; nunca vuelve solo a «Por enviar».
+  El mesero lo manda otra vez con «Enviar de nuevo» (`OrderReviewRules.resend`, la **misma clave**, sin
+  confirmación; Go no guardó nada y lo revisa todo otra vez). Los demás caminos de la revisión siguen igual.
 - **Borrar los datos de este dispositivo (M4).** La cola se registra una vez, al crearse en `AppContainer`:
   `deviceDataWipe.register("cola de pedidos") { /* borrar cola y borradores; WorkManager.cancelAllWork() */ }`
   (`DeviceDataPart.erase()` es `suspend`; se llama fuera del hilo principal). Al retirar el dispositivo o con «Emparejar
@@ -472,6 +487,51 @@ listo y un mesero **con sesión de Go**; la dirección se pide en cada uso por e
   `w10` las de «Enviar a cocina», `w11`–`w12c` el descarte con y sin conexión y `w13a`–`w13c` la cuenta combinada
   mientras el pedido espera). En la JVM, la cola de A1-D19: `OfflineNeverRepeatsTest`, `R6RulesTest` y
   `OrderSchedulerTest`.
+
+## Licencia (etapa L1, §8, para los demás módulos)
+
+Go aplica la licencia, los cupos y la hora en la puerta de cada operación (Fases C y D del servidor); el dispositivo
+solo muestra lo que responde. Android **no** habla con el servidor de licencias (regla 23).
+
+- **Rechazos** (`core:domain/error`): `LicenseRefusal` (`LicenseState` con el estado y la fila `details.operation`,
+  `NoSeat` con `seat`, `in_use` y `limit`, `ClockInvalid`) y `AppError.LicenseRefused`, que arma
+  `ApiErrors.toAppError` en `core:data` con un 409 y uno de `LicenseRefusal.CODES`. Los textos, en `LicenseMessages`:
+  «La licencia del sistema no permite capturar pedidos. Avisa al encargado.» (otra operación: «…no permite esta
+  operación…»), el de §5 con los números («No hay cupo de comandero libre (3 de 3 en uso)…»; con límite 0, «La licencia
+  no incluye comanderos (0 de 0)…», los mensajes de L1-D27, también los de caja y cocina por si Go los dice) y el de la
+  hora. Al emparejar con una computadora principal sin activar, `LicenseMessages.forPairing` («…no tiene la licencia
+  activada…», L1-D6). Quien muestra un rechazo usa `ApiErrors.shownMessage(problem)` o `AppError.shownMessage()`
+  (captura, modificar lo enviado, precuenta, «Entregado», «Descartar cuenta vacía», entrada con PIN).
+- **Cola** (contrato de arriba): `SendOutcome.NotAllowed` → «Requiere tu revisión» con `NOT_ALLOWED`;
+  `OrderReviewRules.offersResendAsIs` muestra «Enviar de nuevo» (`TAG_REVIEW_RESEND`) y la introducción propia de la
+  revisión. `confirmDraft` rechazado así no sigue como pedido sin conexión (pasaría por la misma puerta). Una edición
+  del cliente de Para llevar rechazada así **se conserva** (`CustomerEditSender`) y sale en una vuelta siguiente, sin
+  pedir reintentos seguidos. `NOT_ALLOWED` se guarda por su nombre en el JSON de `pending_orders.review`: **sin cambio
+  de esquema** de Room.
+- **Estado** (`core:domain/license`, `core:data/license`): `LicenseStatusRepository` (`AppContainer.licenseStatus`,
+  solo en memoria, registrado en `deviceDataWipe`) guarda lo último de `license` (`LicenseSummary` del contrato) que
+  traen `restaurant/state` (`RestaurantRepository`) y `auth/me` (`PrecheckRepository`). El evento `license.changed`
+  (ámbito `configuration`, `RealtimeKinds.LICENSE_CHANGED`) hace volver a leer `restaurant/state`. Un servidor anterior
+  no envía `license`: sin avisos.
+- **Avisos** (`LicenseNotices` en el dominio; `core:ui/components/LicenseNotices.kt`): con `clock.blocked`, el
+  **aviso fijo** `LicenseClockBanner` debajo de la barra en todas las pantallas (el texto de la hora y, si Go las dio,
+  las dos fechas); en Tolerancia, el **aviso discreto** `LicenseGraceBadge` en las acciones de la barra, «Licencia:
+  quedan 3 días» con ≥ 600 dp de ancho (`currentTopBarHasRoom`) o solo el ícono, 48 dp táctiles y el texto completo
+  al tocarlo. Los pone `AdelPosNavigation`.
+- **Pruebas**: JVM `LicenseMessagesTest` y `LicenseQueueRulesTest` (dominio), `LicenseErrorCodesTest` (las formas del
+  contrato); Robolectric `LicenseQueueTest` (sin cupo, hora y licencia vencida en la cola: revisión, sin reintentos del
+  trabajador, «Enviar de nuevo» con la misma clave, el motivo al reabrir la base), `LicenseStatusTest` (`license` de
+  `restaurant/state` y `license.changed`) y `TakeawayQueueTest` (la edición que la hora no permitió); instrumentada
+  `StageL1ScreensTest` (los dos avisos, la revisión y la barra de la aplicación). Contra el Go temporal,
+  `LicenseOnGoTest` con **`scripts/android-e2e.sh --suite license`** (pasos `l1`–`l8`): el guion importa entre pasos
+  cada licencia de prueba (0 comanderos, con cupos, en tolerancia, vencida) y mueve el reloj del servidor con
+  `ADELPOS_E2E_CLOCK_FILE` (su `ADEL_TEST_CLOCK_FILE`), nunca la hora de la Mac ni la del emulador.
+- **El Go temporal de todas las suites** necesita una licencia (sin ella no empareja ni deja capturar ni
+  administrar): `prepare_server` del guion la importa en **un solo lugar** (`ensure_test_license`) si el servidor dice
+  «Sin activar», una perpetua premium (5 cajas, 10 comanderos, 5 pantallas de cocina) firmada por
+  `backend/cmd/license-test` con las llaves de prueba de `vectors.json` (`ADELPOS_E2E_LICENSE_FIXTURES`; compila con
+  `ADELPOS_E2E_GO`) para la identidad de ese servidor, que lee de su solicitud sin internet. El servidor temporal debe
+  arrancar con `ADEL_TEST_LICENSE_TRUST` (`iso.sh server-up` con `ISO_LICENSE_TRUST`).
 
 ## Para llevar (etapa A2, Fase B, para los demás módulos)
 
@@ -777,7 +837,9 @@ antes. Todo registrado en `deviceDataWipe` (`WaiterDao.eraseAll`) y en la bitác
 cambia el esquema: el nombre visible y la impresora de precuentas van en `restaurant_snapshot` (tipo `precheck`). Fase
 D: el aviso de platillos listos agrega a la misma v6 `ready_alerts_state` (una fila: cursor, si está activo, fin del
 día y configuración de Terminales) y `ready_alerts_seen` (avisos ya mostrados con su `key` y su día), vacías al migrar;
-`READY_ALERTS_TABLES_V6` al final de la migración 5 → 6 y `ReadyAlertsDao.eraseAll` en `deviceDataWipe`.
+`READY_ALERTS_TABLES_V6` al final de la migración 5 → 6 y `ReadyAlertsDao.eraseAll` en `deviceDataWipe`. La etapa L1
+**no cambia el esquema**: el motivo nuevo de la revisión (`ReviewReason.NOT_ALLOWED`) va por su nombre en el JSON de
+`pending_orders.review`, y el estado de la licencia vive solo en memoria.
 
 Cada cambio de esquema: subir `version`, agregar la `Migration` a `AppDatabase.MIGRATIONS`, versionar el nuevo
 `core/data/schemas/…/<versión>.json` y un caso en `AppDatabaseMigrationTest`. **Nunca**
