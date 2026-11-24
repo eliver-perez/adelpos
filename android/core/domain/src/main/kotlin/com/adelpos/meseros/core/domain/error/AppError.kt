@@ -84,6 +84,19 @@ sealed interface AppError {
         override val requestId: String?,
     ) : AppError
 
+    /**
+     * La licencia, un cupo o la hora de la computadora principal no permiten la operación (etapa
+     * L1: 409 con uno de los cinco códigos de [LicenseRefusal.CODES]). Go no guardó nada. El texto
+     * que se muestra sale de [refusal] con [LicenseMessages] (también con [shownMessage]), nunca de
+     * [serverMessage].
+     */
+    data class LicenseRefused(
+        val refusal: LicenseRefusal,
+        override val code: String,
+        override val serverMessage: String?,
+        override val requestId: String?,
+    ) : AppError
+
     /** No se pudo llegar al servidor (sin red, apagado o sin respuesta a tiempo). */
     data object Unreachable : AppError {
         override val code: String? = null

@@ -2,6 +2,8 @@ package com.adelpos.meseros.core.data.api
 
 import com.adelpos.meseros.core.data.security.PinMismatchException
 import com.adelpos.meseros.core.domain.error.AppError
+import com.adelpos.meseros.core.domain.error.LicenseMessages
+import com.adelpos.meseros.core.domain.error.LicenseRefusal
 import java.io.IOException
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -9,6 +11,7 @@ import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.intOrNull
 
 /**
  * Rechazo del servidor tal como llega: `{"error": {"code", "message", "request_id", "details"}}`
@@ -87,9 +90,38 @@ object ApiErrors {
             problem.status >= 500 ->
                 AppError.ServerProblem(problem.status, code, message, requestId)
             code == null -> AppError.InvalidResponse(problem.status)
-            else -> AppError.Rejected(problem.status, code, message, requestId)
+            else ->
+                licenseRefusal(problem)?.let { refusal ->
+                    AppError.LicenseRefused(refusal, code, message, requestId)
+                } ?: AppError.Rejected(problem.status, code, message, requestId)
         }
     }
+
+    /**
+     * El motivo de un rechazo de la licencia, de un cupo o de la hora (etapa L1, los cinco códigos
+     * de L1-D17, siempre con 409); null con cualquier otro rechazo. Lo que falte en `details` queda
+     * como no dicho: el texto se arma igual ([LicenseMessages]).
+     */
+    fun licenseRefusal(problem: ApiProblem): LicenseRefusal? {
+        if (problem.status != CONFLICT || problem.code !in LicenseRefusal.CODES) {
+            return null
+        }
+        val details = problem.details
+        return LicenseRefusal.of(
+            code = problem.code,
+            operation = details.text("operation"),
+            seat = details.text("seat"),
+            inUse = details.number("in_use"),
+            limit = details.number("limit"),
+        )
+    }
+
+    /**
+     * El texto que se muestra de un rechazo: el de la licencia sale de su código
+     * ([LicenseMessages]); los demás, el mensaje en español de Go (null si no lo dio).
+     */
+    fun shownMessage(problem: ApiProblem): String? =
+        licenseRefusal(problem)?.let(LicenseMessages::of) ?: problem.message
 
     /**
      * Error de la aplicación para una petición que no recibió respuesta. Un certificado con otra
@@ -106,9 +138,16 @@ object ApiErrors {
     private val UPDATE_CODES =
         setOf("CLIENT_UPDATE_REQUIRED", "CLIENT_VERSION_INVALID", "CLIENT_KIND_INVALID")
 
+    private const val CONFLICT = 409
+
     private fun JsonObject?.text(key: String): String? {
         val value = this?.get(key) as? JsonPrimitive ?: return null
         return if (value.isString) value.content else null
+    }
+
+    private fun JsonObject?.number(key: String): Int? {
+        val value = this?.get(key) as? JsonPrimitive ?: return null
+        return if (value.isString) null else value.intOrNull
     }
 
     // Busca el tipo en las causas y en las excepciones suprimidas: OkHttp puede intentar varias

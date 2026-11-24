@@ -183,6 +183,9 @@ object ReadyAlertsLifecycle {
                 }
             // Una sesión no se usa en este canal (solo la credencial del dispositivo).
             is AppError.SessionEnded -> ErrorAction.RETRY
+            // Etapa L1: Go nunca detiene los avisos por la licencia ni por la hora (L1-D6); un 409
+            // así sería pasajero, como cualquier otro 409.
+            is AppError.LicenseRefused -> ErrorAction.RETRY
             is AppError.ServerProblem,
             is AppError.InvalidResponse,
             AppError.Unreachable -> ErrorAction.RETRY

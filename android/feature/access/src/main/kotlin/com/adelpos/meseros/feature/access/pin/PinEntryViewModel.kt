@@ -15,6 +15,7 @@ import com.adelpos.meseros.core.domain.access.EntryResult
 import com.adelpos.meseros.core.domain.access.WaiterProfile
 import com.adelpos.meseros.core.domain.access.WaiterRoster
 import com.adelpos.meseros.core.domain.error.AppError
+import com.adelpos.meseros.core.domain.error.shownMessage
 import com.adelpos.meseros.core.ui.components.AdelPinPadDefaults
 import kotlinx.coroutines.launch
 
@@ -71,7 +72,7 @@ internal fun entryMessageFor(result: EntryResult): EntryMessage? =
                     if (result.error.code == CLIENT_KIND_MISMATCH) {
                         EntryMessage.SupportProblem(CLIENT_KIND_MISMATCH)
                     } else {
-                        EntryMessage.Failed(result.error.serverMessage)
+                        EntryMessage.Failed(result.error.shownMessage())
                     }
             }
     }

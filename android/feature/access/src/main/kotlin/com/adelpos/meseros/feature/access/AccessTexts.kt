@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.stringResource
 import com.adelpos.meseros.core.domain.error.AppError
+import com.adelpos.meseros.core.domain.error.LicenseMessages
 import com.adelpos.meseros.core.domain.pairing.PairingProblem
 import com.adelpos.meseros.core.domain.server.ServerAddress
 import java.time.Instant
@@ -74,5 +75,7 @@ private fun serverErrorText(error: AppError): String =
         AppError.Unreachable -> stringResource(R.string.pairing_problem_unreachable)
         AppError.ServerIdentityChanged -> stringResource(R.string.pairing_problem_identity)
         is AppError.UpdateRequired -> stringResource(R.string.entry_update_required)
+        // Etapa L1: emparejar es administración; sin licencia activada, Go no lo permite (L1-D6).
+        is AppError.LicenseRefused -> LicenseMessages.forPairing(error.refusal)
         else -> error.serverMessage ?: stringResource(R.string.pairing_problem_server)
     }
