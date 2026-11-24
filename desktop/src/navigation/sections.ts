@@ -1,4 +1,5 @@
 import type { IconName } from '../components/Icon';
+import { serverHas } from '../services/serverCapabilities';
 
 // Registro único de secciones de la aplicación (etapa 9C, fase A). Es la sola fuente de la
 // navegación: la barra superior, los mosaicos de Administración, la ruta de navegación y la
@@ -32,6 +33,8 @@ export type ScreenID =
   | 'maintenance'
   | 'legacy-migration'
   | 'status'
+  | 'license'
+  | 'clock'
   | 'server-status'
   | 'preferences'
   | 'password'
@@ -68,6 +71,10 @@ export interface SectionEntry {
   home?: TerminalHome;
   // Solo existe en la modalidad «Solo servidor» (etapa 9G): la paleta no la ofrece en las demás.
   serverOnly?: boolean;
+  // Etapa L1: la pantalla usa rutas nuevas y solo existe con un servidor que anuncia esta capacidad.
+  capability?: string;
+  // Etapa L1: la paleta no la ofrece (se abre sola o desde su aviso).
+  hiddenFromPalette?: boolean;
 }
 
 export const sections: SectionEntry[] = [
@@ -281,6 +288,28 @@ export const sections: SectionEntry[] = [
     hiddenTile: true,
   },
   {
+    // Etapa L1 (Fase E, §7): Configuración › Licencia. Ver el estado no pide permiso (L1-D21); cambiarla pide
+    // «Administrar la licencia» y Go lo vuelve a exigir. Solo con un servidor que anuncia license-v1.
+    id: 'license',
+    label: 'Licencia',
+    icon: 'key',
+    group: 'administration',
+    parent: 'settings',
+    hiddenTile: true,
+    capability: 'license-v1',
+  },
+  {
+    // Etapa L1 (Fase E, §6.2): «Sistema detenido por la fecha y hora de la computadora», en la computadora principal.
+    // Se abre sola al detectar el bloqueo y desde su aviso fijo; no pide permiso, como «Comprobar la hora con internet»
+    // y el desbloqueo de soporte en Go (quien esté en la caja debe poder resolverlo).
+    id: 'clock',
+    label: 'Fecha y hora de la computadora',
+    icon: 'clock',
+    group: 'personal',
+    capability: 'license-v1',
+    hiddenFromPalette: true,
+  },
+  {
     // Etapa 9G (§2.3): pantalla de estado de la modalidad «Solo servidor» (servidor activo, terminales
     // conectadas y último respaldo). Es el inicio en esa modalidad y no existe en las demás.
     id: 'server-status',
@@ -323,6 +352,9 @@ export function sectionByID(id: ScreenID): SectionEntry {
 // Una pantalla se autoriza con su permiso propio, alguno de sus alternativos y todos los
 // adicionales. Una pantalla de mosaicos se autoriza si alguna de las que agrupa se autoriza.
 export function screenAuthorized(entry: SectionEntry, permissions: string[]): boolean {
+  if (entry.capability && !serverHas(entry.capability)) {
+    return false;
+  }
   if (entry.grouping) {
     return sections.some(
       (child) =>

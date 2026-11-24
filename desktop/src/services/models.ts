@@ -1,4 +1,5 @@
 import type { TerminalHome } from '../navigation/sections';
+import type { LicenseSeat, LicenseSummary, SeatUsage } from './license';
 
 export interface Preferences {
   theme: 'light' | 'dark';
@@ -32,6 +33,9 @@ export interface Identity {
   terminal: Device;
   // Desde la etapa 9F incluye el nombre visible de la precuenta (services/documentNames.ts).
   establishment: Pick<Settings, 'name' | 'timezone' | 'currency'> & { precheck_name?: string };
+  // Etapa L1 (Fase C): el estado de la licencia y de la hora de la computadora principal. Un servidor anterior no lo
+  // envía.
+  license?: LicenseSummary;
 }
 
 export interface Role {
@@ -94,6 +98,8 @@ export interface Device {
   ready_alerts_enabled?: boolean;
   ready_alerts_sound?: boolean;
   ready_alerts_vibration?: boolean;
+  // Etapa L1 (Fase D): cupos de la licencia que ocupa la terminal en este momento (vacío si ninguno).
+  seats?: LicenseSeat[];
 }
 
 // Impresora que se puede elegir para precuentas (etapa A2, parte C): Go dice por qué no sirve (problem: inactive o
@@ -149,6 +155,8 @@ export interface SessionsSummary {
   by_kind: Record<DeviceKind, number>;
   total: number;
   limited: boolean;
+  // Etapa L1 (Fase D): cupos en uso y límite de la licencia (con limited: true).
+  seats?: SeatUsage;
 }
 
 // Configuración de una terminal (etapa 9G, §3.3). Desde la fase E, sus impresoras: las de AD-EL POS conectadas a
