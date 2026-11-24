@@ -4235,7 +4235,8 @@ comercial.
     con `details.reason` (`invalid_signature`, `other_installation`, `stale_revision`…), auditado como
     `license.import_rejected`; correcto, `license.imported`.
   - `POST license/identity/regenerate {confirmed: true}`: «Crear una identidad nueva para esta computadora» (L1-D11),
-    **solo por la escucha local** (`LICENSE_IDENTITY_LOCAL_ONLY`, 403) y solo en una instalación copiada
+    **solo por la escucha local** (`LICENSE_IDENTITY_LOCAL_ONLY`, 409 desde la Fase H: no es un problema de permisos y
+    no queda como `access.denied`, L1-D56) y solo en una instalación copiada
     (`IDENTITY_REGENERATION_NOT_NEEDED`, 409). Revoca las terminales emparejadas por red (sesiones
     `identity_regenerated`, credenciales de envío `device_revoked`), aparta `identity/` a
     `identity-reemplazada-AAAAMMDD-HHMMSS/` y crea `server_id`, certificado y llave de licencias nuevos, con su registro
