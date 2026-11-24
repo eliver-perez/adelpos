@@ -2546,3 +2546,507 @@ Fusionada en `91f17ba`, con la Fase B ya unida en su rama. `go-unit` pasó sobre
 - **`GET kitchen/board` es una lectura (F6).** Entrar en modo Cocina lo controla `kitchen/display-mode` (F5, con cupo).
 - **Desde esta fusión, `etapa-l1` ya no rechaza toda captura.** Los cupos toman los límites de la licencia real. El Go
   temporal de las pruebas de interfaz y de Android necesita una licencia de prueba (`license-test issue`).
+
+---
+
+## Fase G · Pruebas contra `licensing.sicrat.com` (entorno `test`)
+
+Lo hizo el agente de la Fase G en `$SP/wt/l1-g`, rama `etapa-l1-g`.
+
+- **Árbol**: empezó en `a8dd193` (A, B y D fusionadas, con R1). Para los cupos se adelantó a `f32d740` (Fase C fusionada)
+  con `git merge --ff-only etapa-l1`.
+- **Sin emuladores y sin commits.** Los ayudantes llaman al servidor real, así que viven en `$SP/l1/fase-g/` y no en el
+  repositorio. El árbol quedó sin cambios.
+- El trabajo se hizo en dos tandas: la tarde del 23/11 (pruebas 1 a 6, 9 y 11 a 14) y la noche del 24/11 UTC (cupos,
+  prueba 14 completa y liberar). En medio hubo un corte por el límite de uso (ver «Comprobación al volver del corte»).
+
+**Las reglas de la fase:**
+
+- **Los códigos** se leyeron solo dentro de `g.py` y nunca se imprimieron ni se escribieron. Aquí se nombran «la
+  Perpetua», «la Mensual» y «la Prueba».
+- **Las instancias de desarrollo** salieron de `iso.sh server-up`, con una base `adel_pos_test_lg*_…` del clúster 55499.
+  - Cada una tiene su `identity/` y su llave de licencias propias. «Otra computadora» es otra identidad (`server_id` +
+    llave, §2 del contrato).
+  - La huella es la misma Mac en todas, así que ninguna queda como copiada.
+  - Para volver a levantar una instancia se usó `levantar.sh`, que conserva la identidad, y nunca otra vez
+    `server-up`.
+- **Nunca se tocó** la instalación real (8181/8443, 55432, `/Library/Application Support/AD-EL POS`), la hora de la
+  Mac, el contrato ni `contracts/`. Los MD5 de `docs/etapas/`, el contrato, la guía y `contracts/` son iguales; solo se
+  agregó `DESBLOQUEO_SOPORTE.md`, de la Fase C.
+- **El reloj**: cada instancia arrancó con `ADEL_TEST_CLOCK_FILE=$SP/l1/fase-g/reloj-<TAG>` vacío. Los tres
+  archivos quedaron vacíos.
+- **La consulta en segundo plano** corre de 1 a 5 min después de arrancar.
+  - Antes de la cadena de la Prueba se esperó a que ese primer turno pasara sin activación en las tres instancias. Así
+    ninguna consulta automática de la computadora anterior podía confirmar la transferencia antes de la prueba 5.
+  - En M y P sí hubo consultas automáticas, inofensivas: la misma revisión.
+
+### Ayudantes (en `$SP/l1/fase-g/`; copia para el propietario en `~/.adel-pos-dev/instancias-l1/herramientas/`)
+
+| Archivo                      | Qué hace                                                                                                                                                                                                                                         |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `up.sh`                      | `iso.sh server-up` con `ISO_LICENSE_URL=https://licensing.sicrat.com`, `ISO_ALLOW_REMOTE=1` e `ISO_CLOCK_FILE` (identidad nueva)                                                                                                                 |
+| `levantar.sh`                | Vuelve a levantar una instancia **con su misma identidad** y una base nueva (`up`, `down` y `pg-down`). `--en-linea` permite el servidor de licencias; `--reloj` usa el reloj simulado. Rechaza 8181 y 8443                                      |
+| `g.py`                       | La API local de una instancia: `setup`, `status`, `activate` y `transfer <perpetua\|mensual\|prueba\|inexistente>`, `refresh`, `deactivate`, `licreq`, `import`, `savelic` y `raw`. Lee los códigos dentro del proceso y **redacta** toda salida |
+| `cupos.py`                   | Los cupos reales de la licencia instalada, por la API v1 y con terminales de escritorio enroladas (invitación y `devices/enroll`)                                                                                                                |
+| `raw/`                       | Programa Go (solo la biblioteca estándar) que habla directo con el servidor de licencias con la llave de una instancia: `notfound` (prueba 11), `retry` y `conflict` (prueba 12) y `consult` (una consulta sin instalar la respuesta)            |
+| `alter.py`                   | Un `.lic` con la firma alterada, o con los cupos subidos sin volver a firmar (prueba 13)                                                                                                                                                         |
+| `conservar.sh`               | Copia una instancia apagada (`identity/` y la configuración, sin la base) a `~/.adel-pos-dev/instancias-l1/<nombre>/` (0700)                                                                                                                     |
+| `scan.py` y `auditoria.py`   | Buscan los códigos, sin mostrarlos, en archivos y en toda `app.audit_events`. `auditoria.py` además lista la auditoría `license.*`                                                                                                               |
+| `resultados*.jsonl` y `lic/` | Lo que se obtuvo, ya redactado, y las copias de cada `.lic` (sin códigos)                                                                                                                                                                        |
+
+### Instancias
+
+| Nombre             | TAG y puertos   | `server_id`  | Uso                                                                                | Estado final                                                                                          |
+| ------------------ | --------------- | ------------ | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| A                  | LG1 · 8211/8481 | `b1ae86fa-…` | La Prueba: la primera computadora (pruebas 1, 2, 6 y 13)                           | «Revocada» (`transferred`), rev. 2. Ya no existe                                                      |
+| B                  | LG2 · 8215/8485 | `60453b51-…` | La Prueba: transferencia y liberación (3, 4, 9 y 13)                               | «Revocada» (`deactivated`), rev. 4. Ya no existe                                                      |
+| C                  | LG3 · 8217/8487 | `33fe13ad-…` | La Prueba: `TRANSFER_LIMIT`, confirmación, activar tras liberar, cupos y prueba 14 | La Prueba liberada (`deactivated`), rev. 6. Hora confiable adelantada: no se conserva                 |
+| `sin-internet` (S) | LG1             | `8f54fcd0-…` | El `.licreq` de `activate` con el código de la Mensual (prueba 10)                 | Sin activar. **Conservada**                                                                           |
+| M                  | LG1             | `c5492804-…` | La Mensual: activar, consultar y `renew`/`deactivate`; pruebas 12, 14 y cupos      | La Mensual liberada (`deactivated`), rev. 2. **Conservada** (`~/.adel-pos-dev/instancias-l1/mensual`) |
+| `en-linea` (O)     | LG2             | `6230543c-…` | Para el propietario: pruebas 7 y 8 en línea                                        | Sin activar. **Conservada**                                                                           |
+| P                  | LG2             | `0ced796e-…` | La Perpetua: activar, cupos y liberar                                              | La Perpetua liberada (`deactivated`), rev. 2                                                          |
+
+- Todo quedó apagado. Las bases temporales se borraron al apagar.
+- `~/.adel-pos-dev/instancias-l1/` (0700) tiene:
+  - `sin-internet/`, `en-linea/` y `mensual/`: cada una con `identity/`, `server.json` sin contraseña, `backups/` y su
+    `server.log`;
+  - `herramientas/`: `levantar.sh`, `g.py` y `cupos.py`;
+  - `bin/ad-el-pos-server`: la compilación de desarrollo de `f32d740`.
+
+### Plan y cupos de cada licencia
+
+| Licencia    | Tipo                                 | Plan                         | Cajas | Comanderos | KDS |
+| ----------- | ------------------------------------ | ---------------------------- | ----- | ---------- | --- |
+| La Perpetua | `perpetual` (`billing_period: null`) | Plan básico (`basico`)       | 1     | **0**      | 0   |
+| La Mensual  | `subscription`, `monthly`            | Plan premium (`premium`)     | 5     | 10         | 5   |
+| La Prueba   | `trial` (`billing_period: null`)     | Plan elemental (`elemental`) | 3     | 3          | 3   |
+
+**Las fechas que firmó el servidor:**
+
+- **La Perpetua**:
+  - `expires_at: null` y `grace_days` 0;
+  - `period_starts_at` es la activación (23/11/2026 21:28:31Z);
+  - `updates_until` es el 23/05/2027: 6 meses, el valor por omisión.
+- **La Mensual**:
+  - `period_starts_at` es la activación (23/11/2026 21:26:46Z);
+  - `expires_at` es el 23/12/2026 21:26:46Z: un mes de calendario;
+  - `grace_days` 5, así que la tolerancia termina el 28/12/2026 21:26:46Z;
+  - `updates_until` = `expires_at`.
+- **La Prueba**:
+  - `period_starts_at` es la primera activación (23/11/2026 21:24:07Z);
+  - `expires_at` es el 23/02/2027 21:24:07Z: una prueba de 3 meses;
+  - `grace_days` 0, y `updates_until` = `expires_at`.
+
+**Lo común a las tres:**
+
+- `custom: false`, `features: {}`, `kid` `adelpos-test-202611-1` y `environment: test`;
+- ninguna se había activado antes, así que la primera activación empezó su primer periodo (§5.2);
+- **el plan con 0 comanderos es el de la Perpetua.**
+
+### Resultados de la §7 de la guía
+
+#### Pruebas 1 a 6: la cadena de la Prueba (A, B y C)
+
+1. **Activar por primera vez (A). Aprobada.**
+   - **Esperado**: revisión 1, con las fechas del servidor.
+   - **Obtenido**: 200, rev. **1**, `active` («Vigente»), con las fechas de arriba.
+   - Que la computadora aparezca en «Computadoras y transferencias» del panel lo revisa el propietario.
+2. **Activar otra vez desde A. Aprobada.**
+   - **Esperado**: la misma revisión, sin otra activación.
+   - **Obtenido**: 200, rev. 1, el mismo `activation_id`. El `vigente.lic` es **idéntico byte por byte** (el mismo
+     SHA-256).
+3. **Activar desde B. Aprobada.**
+   - **Esperado**: `409 ACTIVATION_LIMIT` con `transfer_available: true`.
+   - **Obtenido**: el servidor responde `ACTIVATION_LIMIT`, y AD-EL POS 409 `LICENSE_ACTIVATION_LIMIT` con
+     `{transfer_available: true}`. B sigue «Sin activar».
+4. **Transferir a B. Aprobada.**
+   - **Esperado**: B activa, con las mismas fechas, cupos, plan y módulos; la transferencia queda pendiente.
+   - **Obtenido**: 200, rev. **3**, activación nueva. Son iguales a las de A: `expires_at`, `period_starts_at`,
+     `updates_until`, plan, cupos y `features`. Solo cambia `issued_at`.
+   - A sigue con su rev. 1: todavía no se entera.
+5. **Transferir otra vez antes de que A consulte (desde C). Aprobada.**
+   - **Esperado**: `409 TRANSFER_LIMIT` y una alerta en el panel.
+   - **Obtenido**:
+     - antes, activar desde C da `ACTIVATION_LIMIT` con **`transfer_available: false`**;
+     - transferir: el servidor responde `TRANSFER_LIMIT`, y AD-EL POS 409 `LICENSE_TRANSFER_LIMIT` («Comunícate con
+       soporte»).
+   - La alerta del panel la revisa el propietario.
+6. **Consultar desde A. Aprobada.**
+   - **Esperado**: su cierre `revoked` / `transferred`, y la transferencia confirmada.
+   - **Obtenido**: 200, rev. **2**, `revoked` / `transferred`: «Revocada» con motivo `transferred`.
+   - Confirmada: después, activar desde C vuelve a dar `ACTIVATION_LIMIT` con **`transfer_available: true`**.
+
+#### Pruebas 7, 8 y 10: las hace el propietario
+
+- **7**, renovar o cambiar de plan en el panel y consultar. Se espera una revisión mayor, que AD-EL POS acepta.
+- **8**, revocar en el panel y consultar. Se espera el cierre `revoked` y el estado «Revocada».
+- **10**, sin internet. Los `.licreq` ya están generados y guardados (ver «`.licreq`»); el propietario los aprueba y
+  AD-EL POS importa cada `.lic`.
+- Los pasos están en «Lista para el propietario».
+
+#### Prueba 9: liberar y activar en otra computadora (B y C). Aprobada
+
+- **Esperado**: el cierre `deactivated`, y la otra computadora activa sin soporte.
+- **Obtenido**:
+  - B: 200, rev. **4**, `revoked` / `deactivated`: «Revocada» con motivo `deactivated`;
+  - C: 200, rev. **5**, activa, con las mismas fechas de la licencia.
+
+#### Prueba 11: un código inexistente o mal escrito. Aprobada
+
+- **Esperado**: `404 LICENSE_NOT_FOUND`, igual en todos los casos.
+- **Por AD-EL POS**: dos códigos inexistentes, con el formato correcto, dan 404 `LICENSE_KEY_NOT_FOUND`. El servidor
+  responde `LICENSE_NOT_FOUND`.
+- **Directo al servidor** (`raw`), cuatro variantes:
+  - inexistente;
+  - inexistente en minúsculas y sin guiones;
+  - con símbolos fuera del alfabeto y corto;
+  - de 40 símbolos.
+- Las cuatro dan **404 `LICENSE_NOT_FOUND` con el mismo cuerpo** y `details: {}`. Solo cambia el `request_id`, que es
+  el que se envió.
+- Un código con un formato equivocado nunca sale de AD-EL POS: responde 400 `LICENSE_KEY_INVALID_FORMAT` (L1-D4).
+
+#### Prueba 12: reintento y `REQUEST_CONFLICT`. Aprobada, con una observación
+
+- **Esperado**: el reintento recibe la misma respuesta; después, `409 REQUEST_CONFLICT`.
+- **Obtenido**, con `raw` y el `refresh` de M:
+  - **el mismo cuerpo dos veces**: 200 y 200, con la **respuesta idéntica byte por byte** (el mismo `server_time`);
+  - **el mismo `request_id`, el mismo desafío y la misma prueba, con otro `app_version`**: **409
+    `REQUEST_CONFLICT`**;
+  - **el primer cuerpo otra vez**, después del conflicto: idéntico al primero.
+- **La observación**: el mismo `request_id` con **otro desafío** (y su prueba válida) responde **401
+  `INVALID_PROOF`**, no `REQUEST_CONFLICT`. Es G-1, en «Defectos y propuestas».
+
+#### Prueba 13: un `.lic` alterado, de otra instalación o con una revisión menor. Aprobada
+
+- **Esperado**: se ignora y sigue la última licencia válida.
+- **Obtenido** (los rechazos son 400 `LICENSE_FILE_INVALID`):
+
+  | Archivo                                         | `details.reason`     |
+  | ----------------------------------------------- | -------------------- |
+  | Con la firma alterada                           | `invalid_signature`  |
+  | Con los cupos subidos a 999 y la firma original | `invalid_signature`  |
+  | El de B, importado en C y en A                  | `other_installation` |
+  | La rev. 1 de A, en A (que ya tenía la rev. 2)   | `stale_revision`     |
+  | La rev. 3 de B, en B (con la rev. 4)            | `stale_revision`     |
+  | La rev. 1 de M, en M conservada (con la rev. 2) | `stale_revision`     |
+
+- En todos los casos el estado, la revisión y `vigente.lic` (con el mismo SHA-256) no cambiaron.
+- Importar en M el mismo cierre que ya tenía (rev. 2) da 200 y no cambia nada.
+
+#### Prueba 14: atrasar el reloj. Aprobada
+
+- **Esperado**: la licencia no se prolonga.
+- **1) Atrasar (M, la Mensual)**: reloj simulado 30 días y 1 año atrás.
+  - `effective_now` se queda en la última hora confiable, de unos segundos antes.
+  - Sigue «Vigente», con el mismo `expires_at` y el mismo fin de la tolerancia: no gana días.
+- **2) Volver atrás después de vencer (C, la Prueba, con la Fase C)**:
+  - Reloj **93 días adelante**: «Vencida», y capturar da 409 `LICENSE_EXPIRED` con `expires_at` y `grace_ended_at`.
+  - Al minuto, `estado.json` guardó la hora confiable (25/02/2027 04:16:31Z).
+  - **Reloj de vuelta a la hora real**: **sigue «Vencida»**, con `effective_now` en la hora confiable. Capturar da 409
+    **`SYSTEM_CLOCK_INVALID`**, con:
+    - `local_time_text` «lunes 23 nov 2026, 22:17» y `last_activity_time_text` «miércoles 24 feb 2027, 22:16», en
+      America/Monterrey;
+    - `margin_minutes` 10, `license_state: expired` y `license_ok: false`.
+  - `auth/me` trae el mismo `license.clock` y `sessions-summary` (una lectura) responde 200.
+  - Se auditó `license.clock_blocked`.
+  - **Al reiniciar** (otra base, la misma identidad): sigue «Vencida» y bloqueada.
+  - Liberar la licencia sí se pudo así (fila F8).
+
+**La Mensual, además** (§9.2 de la especificación):
+
+- «Buscar actualización» (`license/refresh`) da 200 con la misma rev. 1 y su vencimiento informado: `expires_at`
+  23/12/2026 21:26:46Z y fin de la tolerancia el 28/12/2026 21:26:46Z.
+- El `.licreq` de `renew` se generó y se guardó; también uno de `deactivate`.
+
+**La Perpetua**: se activó (rev. 1, «Vigente», perpetua) y se liberó (rev. 2, `deactivated`). **Nunca se transfirió.**
+
+### Cupos reales de cada plan (con la Fase C, por la API v1)
+
+Las pruebas usaron `cupos.py`, con terminales de escritorio enroladas (invitación y `devices/enroll`) y el usuario
+administrador. Cada instancia tenía su licencia real, una base nueva y el binario de `f32d740`.
+
+- **Capturar** es abrir una cuenta para llevar, sin turno.
+- **Cocina** es `POST kitchen/display-mode {active: true}`.
+- **Caja** es abrir un turno, con una caja física propia asignada en Terminales.
+- Además, **otra terminal de la caja física 1** (que ya tiene turno) intenta capturar (L1-D3).
+- En la tabla, «409 _cupo_ N de N» es `LICENSE_SEAT_UNAVAILABLE` con ese `details.seat`, `in_use` y `limit`.
+
+| Licencia y plan              | Comanderos                                          | Cocina                                              | Cajas                                                                                                                                                       | Resultado |
+| ---------------------------- | --------------------------------------------------- | --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| La Perpetua, básico (1/0/0)  | La 1.ª ya se rechaza: 409 `order_takers` **0 de 0** | La 1.ª ya se rechaza: 409 `kitchen_displays` 0 de 0 | Turno en la caja 1 sí. La 2.ª: 409 `cash_registers` 1 de 1. La caja 1 con su turno captura. La otra terminal de su caja física: 409 `cash_registers` 1 de 1 | Aprobada  |
+| La Prueba, elemental (3/3/3) | 3 capturan; la 4.ª: 409 `order_takers` 3 de 3       | 3 entran; la 4.ª: 409 `kitchen_displays` 3 de 3     | 3 turnos; el 4.º: 409 `cash_registers` 3 de 3. La caja 1 captura; la otra de su caja física: 409 3 de 3                                                     | Aprobada  |
+| La Mensual, premium (5/10/5) | 10 capturan; la 11.ª: 409 `order_takers` 10 de 10   | 5 entran; la 6.ª: 409 `kitchen_displays` 5 de 5     | 5 turnos; el 6.º: 409 `cash_registers` 5 de 5. La caja 1 captura; la otra de su caja física: 409 5 de 5                                                     | Aprobada  |
+
+**Los mensajes**, en español y sin el `message` del servidor de licencias:
+
+- **0 comanderos**: «La licencia no incluye comanderos (0 de 0): solo se capturan pedidos en una terminal con el turno
+  de caja abierto.»
+- **0 KDS**: «La licencia no incluye pantallas de cocina (0 de 0): Preparación no está disponible.»
+- **Comanderos llenos**: «No hay cupo de comandero libre (3 de 3 en uso). Pide que se cierre la sesión de otra
+  terminal.»
+- **Cocina llena**: «No hay cupo de pantalla de cocina libre (5 de 5 en uso). Pide que otra terminal salga de
+  Preparación.»
+- **Cajas llenas**: «No hay cupo de caja libre (1 de 1 en uso). Se libera al cerrar un turno de caja.»
+
+`sessions-summary` mostró en cada paso `seats` con su `in_use` y su `limit`, y `limited: true`.
+
+### `.licreq` guardados en `~/.adel-pos-dev/licreq/` (carpeta 0700, archivos 0600)
+
+| Archivo                                | Instancia                                            | Acción       | ¿Lleva código?                             | `request_id` | Qué hacer                                                         |
+| -------------------------------------- | ---------------------------------------------------- | ------------ | ------------------------------------------ | ------------ | ----------------------------------------------------------------- |
+| `sin-internet-activate-mensual.licreq` | `sin-internet` (`8f54fcd0-…`)                        | `activate`   | Sí, el de la Mensual (lo pide el contrato) | `fce3d2fd-…` | Prueba 10: activar sin internet (lista, paso 10.1)                |
+| `mensual-renew.licreq`                 | `mensual` (M, `c5492804-…`), activación `8aa5b416-…` | `renew`      | No                                         | `e45065a1-…` | §9.2. Al aprobarlo, el panel entrega el cierre (lista, paso 10.4) |
+| `mensual-deactivate.licreq`            | `mensual` (M), activación `8aa5b416-…`               | `deactivate` | No                                         | `df4bf50b-…` | Lo mismo, con la acción de liberar (paso 10.4)                    |
+
+- AD-EL POS comprueba cada uno con `VerifyOfflineRequest` antes de entregarlo. Sus campos son los de la §9.1:
+  - `renew` y `deactivate` llevan `license_id` y `activation_id`;
+  - `activate` lleva `license_key`.
+- Un `renew` o un `deactivate` con código no se genera: AD-EL POS responde 400 («El código de la licencia solo va en la
+  solicitud de activación.»).
+- **Por qué los de M entregan el cierre**: los dos se generaron con la Mensual activa en M, pero la Mensual se liberó
+  en línea al terminar, como pide la fase. Su activación ya terminó.
+  - Según la §9.1, el panel los atiende y entrega la **revisión de cierre** (rev. 2, `deactivated`).
+  - M la importa sin cambios: ya la tiene, y se comprobó con el mismo archivo.
+- **El `renew` y el `deactivate` de `sin-internet`** solo se pueden generar después de importar su activación: llevan su
+  `activation_id`. Los genera el propietario con `g.py` (pasos 10.2 y 10.3), sin internet.
+
+### Lo que quedó en el panel
+
+- **Ninguna licencia tiene una activación vigente**:
+  - la Prueba quedó liberada desde C (rev. 6);
+  - la Mensual, desde M (rev. 2);
+  - la Perpetua, desde P (rev. 2).
+- **Ninguna transferencia por confirmar.** La de la Prueba (A → B, autoservicio) se confirmó en la prueba 6.
+- **Una alerta por revisar**: el intento bloqueado con `TRANSFER_LIMIT`, desde C (`33fe13ad-…`), el 23/11/2026 hacia las
+  21:24:38Z.
+  - No debería haber alerta de «dos o más transferencias en 12 meses»: hubo una sola.
+- **Historial de computadoras**:
+  - **la Prueba**: A `b1ae86fa-…` (transferida), B `60453b51-…` (liberada) y C `33fe13ad-…` (liberada);
+  - **la Mensual**: M `c5492804-…` (liberada);
+  - **la Perpetua**: P `0ced796e-…` (liberada).
+- **Ningún `.licreq` importado todavía.**
+- **Límites usados**: el de código (10 cada 15 minutos) llegó a 8 con la Prueba en la cadena 1 a 6 y 9. El resto quedó
+  muy por debajo. No hubo ningún `RATE_LIMITED`.
+
+### Defectos y propuestas para la V1.1
+
+**G-1 · El mismo `request_id` con otro desafío responde `INVALID_PROOF`, no `REQUEST_CONFLICT`** (servidor de licencias,
+§8.7).
+
+- **Qué dice el contrato**: «Reutilizar un `request_id` con otro contenido … recibe `409 REQUEST_CONFLICT`».
+- **Qué hace el servidor**: primero verifica la prueba nueva contra el mensaje **guardado** del primer intento
+  (`ActivationService::authenticateSaved`).
+  - Con otro desafío, la prueba no verifica aunque sea válida para la misma llave: `401 INVALID_PROOF`.
+  - Solo con el mismo desafío y la misma prueba, y otro dato, responde `REQUEST_CONFLICT`.
+- **Efecto en AD-EL POS: ninguno.** El cliente reintenta siempre con el mismo cuerpo, y los dos códigos se muestran
+  como `LICENSE_SERVER_ERROR`.
+- **Propuesta para la V1.1** (que decida el propietario), una de dos:
+  - que el servidor responda `REQUEST_CONFLICT` también en ese caso;
+  - o que el contrato aclare que un `request_id` reutilizado sin la prueba del original responde `INVALID_PROOF`.
+- Parece una decisión de seguridad deliberada (no revelar que un `request_id` existe sin la prueba del original), así
+  que lo más probable es aclararlo en el contrato.
+
+**Observación (AD-EL POS, no es un defecto).** `POST license/transfer` no exige un `ACTIVATION_LIMIT` previo: eso lo
+hace la pantalla (Fase E). Si se llama sin que la licencia esté activa en otra computadora, el servidor la trata como
+una activación normal (§8.4, regla 4), así que no hay daño.
+
+Fuera de G-1, el servidor cumplió el contrato en todo lo probado.
+
+### Seguridad de los códigos
+
+- **Archivos**: `scan.py` revisó 141 archivos y **ninguno contiene un código**. Revisó:
+  - `$SP/l1/fase-g/`, `doc-G.md` y `estado-G.md`;
+  - `$SP/run-LG1..3/`: configuración, identidad y `server.log`;
+  - `~/.adel-pos-dev/instancias-l1/`.
+- **Auditoría**: `auditoria.py` revisó seis bases: las de M, P y C de la primera tanda, y las de M, P y C (esta, la del
+  reinicio de la prueba 14) de la segunda. **Ningún** evento de `app.audit_events` contiene un código. La base de C con
+  los cupos se borró al reiniciarla, antes de revisarla; esos cupos no usan códigos.
+  - La licencia deja:
+    - `license.activated`, `license.refreshed`, `license.deactivated` y `license.offline_request_created`;
+    - `license.activation_failed` (`LICENSE_KEY_NOT_FOUND`, `LICENSE_ACTIVATION_LIMIT`) y `license.transfer_failed`
+      (`LICENSE_TRANSFER_LIMIT`);
+    - `license.import_rejected` (`LICENSE_FILE_INVALID`), `license.state_changed` y `license.clock_blocked`.
+  - Cada uno lleva el código de error y la revisión, nunca el código comercial.
+  - `app.license_revisions` tiene su fila (R1-3).
+- **Bitácora**: `server.log` solo deja `license_server_ok` y `license_server_error`, con la acción, el código de error
+  y la revisión.
+- **El `.licreq` de `activate`** sí lleva el código de la Mensual, como manda el contrato. Está solo en la carpeta del
+  propietario (0700/0600).
+
+### Comprobación al volver del corte (24/11/2026, 04:10Z)
+
+Después del corte por el límite de uso se hizo **una sola consulta** (`raw consult`, sin instalar la respuesta) de
+cada activación vigente. Así no se repitió nada ni se gastó el límite por código.
+
+- **Qué tenía el servidor**: la Prueba en C (rev. 5), la Mensual en M (rev. 1) y la Perpetua en P (rev. 1), todas
+  `active`. Eran las mismas revisiones instaladas.
+- **Ninguna transferencia pendiente.**
+
+Después:
+
+- se trajo `f32d740`;
+- se levantaron M, P y C con `levantar.sh` (la misma identidad, una base nueva y el binario nuevo);
+- se hicieron los cupos y la prueba 14 completa;
+- se liberaron las tres.
+
+### Lista para el propietario
+
+Todo se hace en la Mac con las instancias conservadas, sin tocar la instalación real.
+
+- **Dónde está todo**: `H=~/.adel-pos-dev/instancias-l1`.
+- **Cómo se levanta una instancia**: `$H/herramientas/levantar.sh up <carpeta> <puerto> <puerto de red>`.
+  - Usa el clúster de pruebas 55499. Si el scratchpad se borró, crea uno propio en `$H/pg`; se apaga con
+    `levantar.sh pg-down`.
+  - Con una base nueva hay que correr `g.py <carpeta> setup` (crea el establecimiento y la sesión de `admin`).
+- **Los resultados** quedan en `$H/herramientas/resultados.jsonl`, redactados.
+- **Los códigos** los lee `g.py` del archivo del propietario: nunca hay que escribirlos.
+
+**Pruebas 7 y 8 (en línea, con la Prueba, instancia `en-linea`).**
+
+1. Levantar y activar:
+
+   ```sh
+   $H/herramientas/levantar.sh up $H/en-linea 8211 8481 --en-linea
+   python3 -I $H/herramientas/g.py $H/en-linea setup
+   python3 -I $H/herramientas/g.py $H/en-linea activate prueba
+   ```
+
+   Se espera 200, «Vigente», una revisión mayor que 6, Plan elemental y vence el 23/02/2027 21:24:07Z. El panel
+   muestra la computadora `6230543c-…`.
+
+2. **Prueba 7.** En el panel, cambiar el plan de la Prueba (en una prueba es libre y no cambia las fechas), por
+   ejemplo a Plan premium, o convertirla. Después, «Buscar actualización»:
+
+   ```sh
+   python3 -I $H/herramientas/g.py $H/en-linea refresh
+   ```
+
+   Se espera 200, una **revisión mayor** con los cupos nuevos, aceptada y «Vigente». Para ver los cupos nuevos en
+   uso: `python3 -I $H/herramientas/cupos.py $H/en-linea`.
+
+3. **Prueba 8, al final.** En el panel, **revocar** la Prueba. Después, «Buscar actualización» otra vez con el mismo
+   `refresh` del paso 2.
+   - Se espera el cierre `revoked` / `revoked`: «Revocada», con `revocation_reason: revoked`.
+   - Opcional: `g.py $H/en-linea activate prueba` debe dar 409 `LICENSE_SERVER_REVOKED` (el servidor responde
+     `REVOKED`).
+4. Apagar: `$H/herramientas/levantar.sh down $H/en-linea`.
+
+**Prueba 10 (sin internet, con la Mensual, instancia `sin-internet`; y M).**
+
+1. **El `activate`.**
+   - En el panel, en **Sin internet**, importar `~/.adel-pos-dev/licreq/sin-internet-activate-mensual.licreq`.
+   - Revisar que corresponde a la Mensual (computadora `8f54fcd0-…`), aprobarla y descargar el `.lic`. Por ejemplo,
+     guardarlo como `~/.adel-pos-dev/licreq/sin-internet-activate.lic`.
+   - Levantar `sin-internet` **sin** `--en-linea`, así que no puede hablar con el servidor, e importar el `.lic`:
+
+     ```sh
+     $H/herramientas/levantar.sh up $H/sin-internet 8211 8481
+     python3 -I $H/herramientas/g.py $H/sin-internet setup
+     python3 -I $H/herramientas/g.py $H/sin-internet import ~/.adel-pos-dev/licreq/sin-internet-activate.lic
+     ```
+
+   - Se espera 200, «Vigente», la Mensual con una revisión mayor que 2 y las fechas de la licencia: vence el
+     23/12/2026 21:26:46Z. Las fechas son de la licencia, no de la activación.
+2. **El `renew`.** Generarlo con la instancia encendida:
+
+   ```sh
+   python3 -I $H/herramientas/g.py $H/sin-internet licreq renew sin-internet-renew
+   ```
+
+   - Importar `~/.adel-pos-dev/licreq/sin-internet-renew.licreq` en Sin internet y aprobarlo. Opcional: registrar ahí
+     una renovación con su pago.
+   - Importar el `.lic` con `g.py … import`.
+   - Se espera una revisión mayor, con el nuevo `expires_at` si se renovó. Sin renovar llega la misma revisión, que se
+     acepta sin cambios.
+
+3. **El `deactivate`.** Generarlo y aprobarlo:
+
+   ```sh
+   python3 -I $H/herramientas/g.py $H/sin-internet licreq deactivate sin-internet-deactivate
+   ```
+
+   - Aprobar el archivo e importar el `.lic`.
+   - Se espera «Revocada», con `revocation_reason: deactivated`. **La Mensual queda libre otra vez.**
+   - Apagar: `levantar.sh down $H/sin-internet`.
+
+4. **Los dos de M** (`mensual-renew.licreq` y `mensual-deactivate.licreq`).
+   - Importarlos y aprobarlos en Sin internet. Como esa activación ya terminó, el panel debe entregar **el cierre
+     existente** (rev. 2, `deactivated`) sin firmar otro (§8.6 y §9.1).
+   - Importarlo en M:
+
+     ```sh
+     $H/herramientas/levantar.sh up $H/mensual 8215 8485
+     python3 -I $H/herramientas/g.py $H/mensual setup
+     python3 -I $H/herramientas/g.py $H/mensual import <el .lic>
+     ```
+
+   - Se espera 200, «Revocada» (`deactivated`), rev. 2, sin cambios.
+   - Si el panel firmara otra revisión, AD-EL POS la aceptaría por ser mayor, pero sería una desviación de la §9.1 que
+     conviene anotar.
+   - Apagar: `levantar.sh down $H/mensual`.
+
+**Además, en el panel:**
+
+- **la Prueba**: «Computadoras y transferencias» muestra A, B y C, y la transferencia confirmada (pruebas 1, 4 y 6);
+- **la alerta** de `TRANSFER_LIMIT` (prueba 5) se revisa;
+- **las tres** quedaron sin activación vigente.
+
+**Para la activación final de la Mac** (Fase H): la Perpetua está libre. No interviene en ninguna prueba de esta lista.
+
+### Volver a levantar una instancia (misma identidad, base nueva)
+
+```sh
+G=$SP/l1/fase-g    # o, sin el scratchpad, H=~/.adel-pos-dev/instancias-l1 y $H/herramientas
+$G/levantar.sh up <carpeta> <puerto local> <puerto de red> [--bin <binario>] [--en-linea] [--reloj <archivo>]
+python3 -I $G/g.py <carpeta> setup     # establecimiento nuevo y sesión de admin (la base es nueva)
+python3 -I $G/g.py <carpeta> status    # la licencia sigue: vive en identity/licencia
+$G/levantar.sh down <carpeta>          # apaga y borra la base; la identidad se queda
+```
+
+- **Qué hace `levantar.sh up`**:
+  - crea la base y pone su nombre y su contraseña en `server.json`;
+  - corre `migrate` y `prepare-setup` y arranca `serve`.
+- **El binario**: por omisión, `<carpeta>/../bin/ad-el-pos-server`, que en `~/.adel-pos-dev/instancias-l1` ya existe.
+- **Sin `--en-linea`** la instancia no puede hablar con el servidor de licencias (en `test_mode` solo habla con
+  loopback). Sirve para importar un `.lic` o generar un `.licreq`.
+- **Comprobado** con `sin-internet`, `en-linea` y `mensual` ya conservadas, y con M, P y C al pasar a `f32d740`:
+  - el mismo `server_id`;
+  - nunca quedaron como copiadas;
+  - la licencia (o su falta) siguió igual.
+
+### Pruebas realmente ejecutadas
+
+- **La §7 de la guía**: la 1, 2, 3, 4, 5, 6, 9, 11, 12, 13 y 14, contra `licensing.sicrat.com`, con lo que se obtuvo
+  en cada una (arriba).
+- **Los cupos reales de los tres planes**, por la API v1, con `f32d740`. Los tres recorridos se aprobaron, sin
+  fallas.
+- **La consulta del estado del servidor** al volver del corte.
+- **Volver a levantar instancias conservadas**, sin internet: `sin-internet`, `en-linea` y `mensual`.
+- **Las búsquedas de códigos** en archivos y en la auditoría.
+- **Los MD5** de lo protegido.
+
+### Lo no verificado
+
+- **Lo del panel**: «Computadoras y transferencias», la alerta de `TRANSFER_LIMIT` y la aprobación de los `.licreq`.
+  Son de la lista del propietario.
+- **Las pruebas 7, 8 y 10**: las hace el propietario.
+- **La liberación del comandero a los 15 minutos**, la tableta compartida y la concurrencia: no se repitieron contra el
+  servidor real. Las cubren las pruebas automáticas de la Fase D, y el servidor de licencias no participa.
+- **Android y el escritorio**: no se usaron. Los cupos se probaron solo con terminales de escritorio por la API.
+
+### Para el coordinador
+
+- **Ningún commit.** El árbol `$SP/wt/l1-g` quedó en `f32d740`, sin cambios.
+- **Nada está encendido**: ni Go temporal ni emuladores. Los tres relojes simulados quedaron vacíos.
+- **Decisión propuesta**: ninguna. **G-1 es para el propietario** (V1.1).
+- **Las identidades de A y B ya no existen**: sus carpetas se reutilizaron. Sus `.lic` quedan en `$SP/l1/fase-g/lic/`.
+- **C queda con la hora confiable en 2027** (por la prueba 14). No se conservó y no debe usarse para nada más.
+
+### Decisiones del coordinador sobre la Fase G
+
+- **L1-D40 · El defecto G-1 del servidor de licencias**: un `request_id` reutilizado con otro desafío responde
+  `INVALID_PROOF` en vez de `REQUEST_CONFLICT` (§8.7). No afecta a AD-EL POS, que reintenta siempre con el mismo cuerpo.
+  Va como defecto del servidor o propuesta para la V1.1, y lo decide el propietario.
+- **L1-D41 · La Perpetua es del plan básico (1 / 0 / 0).** Si el propietario activa con ella la Mac real (§10 de la
+  especificación), la Mac funciona como caja, pero las tabletas Android no capturan y Preparación no se abre. Va en la
+  entrega final.
