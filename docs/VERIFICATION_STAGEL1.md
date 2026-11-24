@@ -52,7 +52,8 @@ Este documento registra **solo lo que se ejecutó**.
 **Alcance de esta evidencia.** Las cifras de las fases son las que cada agente registró sobre su propia copia, según el
 avance. Lo que valida el código completo de la etapa es la «Regresión final», sobre una copia exacta (`git archive`) de
 la cabeza de la parte del servidor y el escritorio (`623d089`, con todas las fases unidas y los dos cambios de la Fase
-H). Desde ahí solo cambió Markdown.
+H). Desde ahí cambiaron Markdown y un comentario de la `0028` (`842e088`); con ese cambio se repitieron `go-unit` y
+la integración de `database` y de `cmd/ad-el-pos-server`, que aprobaron.
 
 **Las pruebas no tocaron la instalación real**: ni el servicio `local.adel.pos.server` (0.14.0), ni `/Library/Application
 Support/AD-EL POS`, ni `/Applications/AD-EL POS.app`, ni `.local` del repositorio, ni el Keychain, ni PostgreSQL en
@@ -211,7 +212,7 @@ identidad, y los códigos leídos dentro de un script sin mostrarlos. Detalle en
 > todas las fases unidas y los dos cambios de la Fase H. **Aprobó todo a la primera**: el servidor (Go, integración de
 > los **16 paquetes**, `cargo` y los scripts del instalador), Vitest y `build`, y **Playwright 50 de 50 en Chromium y
 > 50 de 50 en WebKit**, con las cuatro de «instalación limpia» de la 9H. No hubo que corregir código ni
-> pruebas. Desde `623d089` solo cambió Markdown (`git diff --name-only 623d089 <cabeza>`).
+> pruebas. Desde `623d089` cambiaron Markdown y un comentario de la `0028` (`842e088`, abajo).
 
 La copia salió de `git archive` (`git rev-parse` = `623d089ba2d340eb50b3fd5f599da7e429533557`; 1 976 archivos), sin
 `.git`, con `.tools`, `.cache/go-mod`, `.cache/playwright` y `desktop/node_modules` enlazados, y con el arnés aislado
@@ -272,13 +273,17 @@ repositorio lo nombra.
 
 | Archivo                                                                  | Bytes      | SHA-256                                                            | Qué es                                                                                                                                                                     |
 | ------------------------------------------------------------------------ | ---------- | ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `desktop/src-tauri/target/release/bundle/macos-pkg/AD-EL POS_0.15.0.pkg` | 23 850 140 | `fe60d29211fcef9f727d9e8d2bcbb45e6aa62747aa65ef3b58a92048a6369443` | Aplicación y servidor 0.15.0 (esquema 28), **versión de desarrollo** (confía en el entorno `test`), compilado sobre una copia exacta de `16090b8`; firma ad hoc verificada |
+| `desktop/src-tauri/target/release/bundle/macos-pkg/AD-EL POS_0.15.0.pkg` | 23 850 119 | `2ef89832bb703f5bc69ccf01b621c5b28eed4f6b1537b171e2fd01ea3f6b669b` | Aplicación y servidor 0.15.0 (esquema 28), **versión de desarrollo** (confía en el entorno `test`), compilado sobre una copia exacta de `842e088`; firma ad hoc verificada |
 | El APK 0.4.0                                                             | —          | —                                                                  | **Lo completa el coordinador**, con la sección «Android»                                                                                                                   |
 
-**El `.pkg` 0.15.0** se construyó con `./scripts/dev.sh build-macos-pkg` en una copia exacta de `16090b8` (`git archive`,
-1 978 archivos, con `CARGO_NET_OFFLINE=true`, `GOFLAGS=-mod=readonly` y `GOPROXY=off`), en 123 s, sin instalar nada (ni
-`sudo`, ni `installer`, ni `launchctl`). Desde `623d089`, la copia de la regresión, solo cambió Markdown, así que el
-paquete lleva el mismo código que se probó. Comprobaciones:
+**El `.pkg` 0.15.0** se construyó con `./scripts/dev.sh build-macos-pkg` en una copia exacta de `842e088` (`git archive`,
+1 979 archivos, con `CARGO_NET_OFFLINE=true`, `GOFLAGS=-mod=readonly` y `GOPROXY=off`), en 122 s, sin instalar nada (ni
+`sudo`, ni `installer`, ni `launchctl`). Desde `623d089`, la copia de la regresión, cambiaron Markdown y **un comentario
+de la `0028`** (`842e088`): decía que el comandero cuenta con una sesión vigente, y desde L1-D36 cuenta por actividad. Se
+corrigió antes de instalar, porque las migraciones llevan su SHA-256 en `schema_migrations` y después ya no se podría.
+Con ese cambio se repitieron `go-unit` y la integración de `database` y de `cmd/ad-el-pos-server`: aprobaron. El
+servidor de dentro lleva la `0028` con el comentario nuevo. Un primer paquete sobre `16090b8` (SHA-256 `fe60d292…9443`)
+se reemplazó por este. Comprobaciones:
 
 - **`pkgutil --expand-full`**:
   - Los tres paquetes son 0.15.0: `local.adel.pos.app`, `.server` y `.service`.
