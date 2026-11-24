@@ -1,7 +1,7 @@
 # Teléfonos y tabletas de meseros
 
 Guía corta para usar la aplicación **AD-EL POS para Android** en los teléfonos y tabletas de los meseros (etapas A1 a
-A3). Con ella cada mesero:
+A3 y L1). Con ella cada mesero:
 
 - Entra con **su nombre y su PIN** en un teléfono o una tableta que comparten varios meseros.
 - Ve las mesas y sus cuentas, captura los pedidos y los manda a cocina con **«Enviar a cocina»**.
@@ -16,7 +16,7 @@ La **computadora principal** sigue mandando en todo: precios, impuestos, permiso
 cada pedido. Los precios que muestra el teléfono son de referencia. **El teléfono o la tableta no cobra**: se cobra en
 la caja, como siempre.
 
-> **Versión de prueba.** Esta es la versión **0.3.0** de la aplicación. No viene de la tienda de Google (Play Store):
+> **Versión de prueba.** Esta es la versión **0.4.0** de la aplicación. No viene de la tienda de Google (Play Store):
 > se instala con un archivo y está firmada con una llave de desarrollo, por eso Android avisa al instalarla. Todavía no
 > se ha probado en un teléfono ni en una tableta reales (solo en los emuladores de la Mac de pruebas).
 
@@ -24,7 +24,7 @@ la caja, como siempre.
 
 Sirve cualquier teléfono o tableta con **Android 8.0 o posterior**.
 
-1. **Pasa el archivo `AD-EL-POS-Android-0.3.0.apk`** al teléfono o la tableta, de la forma que te sea más fácil:
+1. **Pasa el archivo `AD-EL-POS-Android-0.4.0.apk`** al teléfono o la tableta, de la forma que te sea más fácil:
    - **Carpeta compartida** (por ejemplo, Google Drive): súbelo desde la computadora y ábrelo en el dispositivo.
    - **Correo**: envíalo como archivo adjunto y ábrelo desde el correo del dispositivo. Algunos correos (Gmail, por
      ejemplo) no dejan adjuntar archivos `.apk`; si te pasa, usa una carpeta compartida.
@@ -48,7 +48,8 @@ Sirve cualquier teléfono o tableta con **Android 8.0 o posterior**.
 **Instalar una versión nueva.** Instálala **encima** de la que ya tienes, con los mismos pasos: se conservan el
 emparejamiento, los meseros y los pedidos sin enviar. Eso funciona si la versión nueva viene firmada con la misma llave;
 si Android dice que no puede instalarla porque choca con la que ya está, **no la desinstales** (sobre todo si hay
-pedidos sin enviar) y avisa a soporte. La 0.3.0 se instala así encima de la 0.2.0. **De la 0.1.0 a una versión
+pedidos sin enviar) y avisa a soporte. La 0.4.0 se instala así encima de la 0.3.0 (y la 0.3.0 encima de la 0.2.0).
+**De la 0.1.0 a una versión
 posterior es distinto**: no se instala encima (ver «Pasar de la 0.1.0 a la 0.2.0», al final de esta sección).
 
 **Si desinstalas la aplicación** (o borras sus datos en los Ajustes de Android), el dispositivo olvida el
@@ -85,7 +86,7 @@ En cada teléfono o tableta que tenga la 0.1.0, en este orden:
    (sección 8, «Si los avisos no llegan»). Si no das el de notificaciones, la explicación vuelve a salir cada vez que un
    mesero entra con conexión, hasta que lo des. La 0.1.0 no tenía avisos: no hay nada que pasar de una a otra.
 
-Si instalas directamente la 0.3.0 en lugar de la 0.2.0, los pasos son los mismos: donde dice 0.2.0, usa la 0.3.0.
+Si instalas directamente la 0.4.0 en lugar de la 0.2.0, los pasos son los mismos: donde dice 0.2.0, usa la 0.4.0.
 Si en un dispositivo nunca se instaló la 0.1.0, no hace falta nada de esto: instala la versión nueva directamente. Si
 por error quedaron las dos, la 0.1.0 es la que ya estaba emparejada (en **Ajustes › Aplicaciones › AD-EL POS** se ve la
 versión de cada una): envía lo pendiente desde ella y sigue desde el paso 2.
@@ -97,8 +98,14 @@ versión de cada una): envía lo pendiente desde ella y sigue desde el paso 2.
   versión anterior, el teléfono lo dice antes de pedir el código (y también si ya estaba emparejado):
   **«Actualiza el servidor del restaurante»**, con «Volver a comprobar» y «Elegir otra computadora principal». Lo que
   hay que actualizar es la computadora principal: soporte o el administrador instala la versión más reciente (hoy, la
-  0.14.0) con su instalador (pide la contraseña de administrador de la Mac). Cómo se instala la computadora principal:
+  0.15.0) con su instalador (pide la contraseña de administrador de la Mac). Cómo se instala la computadora principal:
   [INSTALAR_EN_RED.md](INSTALAR_EN_RED.md).
+- **Activa la computadora principal antes de emparejar.** Desde la 0.15.0, la computadora principal necesita su
+  **licencia activada** para emparejar teléfonos y tabletas (y para capturar pedidos). Se activa en la computadora
+  principal, en **Configuración › Licencia**, con el código de la licencia. Si no está activada, el dispositivo lo dice
+  al pedir el código: **«La computadora principal no tiene la licencia activada. Pide al encargado que la active y
+  vuelve a intentarlo.»**. El teléfono o la tableta nunca habla con el servidor de licencias: solo muestra lo que dice
+  la computadora principal (sección 11).
 - **El teléfono o la tableta debe estar en la misma red wifi del restaurante** que la computadora principal (la red
   principal, no la de invitados).
 - Necesitas un usuario con permiso para administrar terminales en la computadora principal (el administrador lo
@@ -275,6 +282,10 @@ Cada pedido tiene uno de estos estados:
   («Malteada de fresa: agotado. Quítalo del pedido.») o la mesa ya se cobró («La cuenta «Mesa 4» ya se cobró.»). El
   mesero lo abre en **«Pendientes» › «Revisar»**, ve la lista de cambios y elige **«Aceptar los cambios y
   enviar»**, quitar o corregir lo que haga falta, o **«Descartar el pedido»**. Para eso necesita conexión y su PIN.
+- También queda en **«Requiere tu revisión»** un pedido que la computadora principal **no aceptó por la licencia, por
+  falta de cupo o por su fecha y hora** (sección 11). No se pierde ni se reintenta solo: cuando el encargado lo
+  resuelva, el mesero lo abre en **«Pendientes» › «Revisar»** y toca **«Enviar de nuevo»** (es el mismo pedido: nunca
+  se duplica).
 - Sin conexión se ven las mesas de la última vez que hubo conexión. **Modificar o cancelar lo ya enviado** necesita
   conexión.
 - **No se puede cambiar de mesero** con pedidos sin enviar (sección 4).
@@ -477,7 +488,30 @@ Otros avisos que puede mostrar el dispositivo:
    el restaurante. Por precaución, cambia el PIN de los meseros que lo usaban.
 5. Para volver a usarlo, toca **«Emparejar de nuevo»** en el dispositivo y apruébalo otra vez con su código (sección 3).
 
-## 11. Lo que todavía no hace esta versión de prueba
+## 11. La licencia de la computadora principal
+
+La licencia es **de la computadora principal**: ahí se activa y se renueva (**Configuración › Licencia**). Los
+teléfonos y las tabletas no la piden ni hablan con el servidor de licencias; solo muestran lo que dice la computadora
+principal. Lo ya capturado se sigue cobrando en la caja aunque la licencia venza.
+
+Lo que puede mostrar el dispositivo:
+
+| Aviso                                                                                                                | Qué pasa y qué hacer                                                                                                                                                                                                                                            |
+| -------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| «No hay cupo de comandero libre (3 de 3 en uso). Pide que se cierre la sesión de otra terminal.»                     | La licencia permite cierto número de teléfonos y tabletas capturando a la vez, y ya están todos en uso. Se libera uno al cerrar la sesión de otra terminal, tras 15 minutos sin capturar en ella, o desde **Administración › Sistema › Terminales**.            |
+| «La licencia no incluye comanderos (0 de 0): solo se capturan pedidos en una terminal con el turno de caja abierto.» | El plan de la licencia no incluye teléfonos ni tabletas para capturar: se captura en la caja.                                                                                                                                                                   |
+| «La licencia del sistema no permite capturar pedidos. Avisa al encargado.»                                           | La licencia venció, se revocó o no está activada. El encargado la renueva o la activa en la computadora principal.                                                                                                                                              |
+| «No se puede registrar: la computadora principal tiene la fecha y hora incorrectas. Avisa al encargado.»             | La fecha y hora de la computadora principal está atrasada respecto a lo último que se registró. **No es un problema de la licencia.** Mientras dure, ese aviso se ve fijo arriba en todas las pantallas, con las dos fechas; se quita solo al corregir la hora. |
+| «Licencia: quedan 3 días» (arriba, junto a «En línea»)                                                               | La licencia venció y está en sus días de tolerancia: todavía se captura, pero al terminar esos días ya no. Tócalo para ver el aviso completo. En el teléfono en vertical solo se ve el ícono del reloj.                                                         |
+
+- Un pedido que la computadora principal no aceptó por cualquiera de estos motivos **no se pierde**: queda en
+  **«Requiere tu revisión»** con el motivo y no se reintenta solo. Cuando se resuelva (se libera un cupo, se corrige la
+  hora o se renueva la licencia), toca **«Pendientes» › «Revisar» › «Enviar de nuevo»**. Si ya no hace falta, toca
+  **«Descartar el pedido»**.
+- Un nombre y teléfono de un pedido para llevar que la hora no dejó guardar se queda en el dispositivo y se manda solo
+  más tarde.
+
+## 12. Lo que todavía no hace esta versión de prueba
 
 - El aviso de platillos listos **no se ha probado con la pantalla apagada en un dispositivo real** (Doze y gestores de
   batería de cada marca), solo en emuladores.
