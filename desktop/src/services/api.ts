@@ -1,5 +1,6 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { changesLicenseState, licenseChangeEvent, licenseErrorText } from './license';
+import { serverLink } from '../navigation/serverLink';
 
 export type Operation =
   | 'kitchen_outputs'
@@ -476,9 +477,14 @@ export async function api<T>(
       query: options.query ?? null,
     });
   } catch (error) {
+    // Etapa K1 (Fase E, K1-D10): no llegar al servidor es una falla del estado único de conexión, que solo dice «Sin
+    // conexión» tras varias seguidas durante unos 20 s (navigation/serverLink.ts).
+    serverLink.noAnswer();
     const message = typeof error === 'string' ? error : 'No se pudo comunicar con el servidor.';
     throw new APIError('CONNECTION_ERROR', message);
   }
+  // Cualquier respuesta del servidor, también un rechazo, dice que la conexión funciona.
+  serverLink.answer();
   if (response.status >= 400) {
     throw rejectionOf(response);
   }

@@ -8,6 +8,7 @@ import { identityChangeEvent } from '../services/documentIdentity';
 import { templatesChangeEvent } from '../services/documents';
 import type { TemplatesChange } from '../services/documents';
 import { licenseChangeEvent } from '../services/license';
+import { serverLink } from '../navigation/serverLink';
 
 interface Change {
   id: string;
@@ -50,6 +51,7 @@ export function useRealtime(identityKey: string, enabled: boolean) {
     }
     if (!enabled) {
       setStatus(realtimeLabels.periodic);
+      serverLink.channelClosed();
       return;
     }
     let active = true;
@@ -64,6 +66,14 @@ export function useRealtime(identityKey: string, enabled: boolean) {
             : realtimeLabels.reconnecting,
         );
       if (message.error) setStatus(realtimeLabels.interrupted);
+      // Etapa K1 (Fase E, K1-D10): el canal alimenta el estado único de conexión. Rust manda «reconnecting» solo con una
+      // falla real (la renovación normal del canal cada 30 s no manda nada) y «connected» solo al volver de una falla;
+      // cada mensaje de cambios dice que el canal está vivo.
+      if (message.connection === 'reconnecting') {
+        serverLink.channelFailure();
+      } else if (message.connection === 'connected' || message.cursor !== undefined) {
+        serverLink.channelAlive();
+      }
       let changed = !!message.reset || message.connection === 'connected';
       // Los eventos de caja (etapa 7) se publican además con su tipo y su turno o caja, para que
       // Caja y el cobro vuelvan a consultar de inmediato. Un reinicio del cursor también los avisa.
@@ -139,6 +149,7 @@ export function useRealtime(identityKey: string, enabled: boolean) {
       });
     return () => {
       active = false;
+      serverLink.channelClosed();
       if (subscriptionID !== null)
         void invoke('events_stop', { subscriptionId: subscriptionID }).catch(() => undefined);
     };

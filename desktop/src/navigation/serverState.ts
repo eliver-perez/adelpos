@@ -1,31 +1,22 @@
-import { realtimeLabels } from '../hooks/useRealtime';
+import type { LinkSnapshot } from './serverLink';
 
-// Estado del servidor en la barra superior (etapa 9C, §1.1): sustituye a «Sesión verificada · En
-// tiempo real». Se deriva de las dos fuentes reales de la aplicación:
-// - useSession: la consulta de la sesión cada 5 s; si falla, la terminal no alcanza al servidor
-//   (sin conexión).
-// - useRealtime: el canal de eventos (solo con events.read). Conectado es «en línea»; recuperando,
-//   interrumpido o no disponible es «reconectando» (la terminal sigue al día por sondeo).
-// Sin events.read no hay canal: con la sesión verificada el estado es «en línea».
+// Estado del servidor en la barra superior (etapa 9C, §1.1). Desde la etapa K1 (Fase E, K1-D10) sale de un solo estado
+// de conexión con la tolerancia de la A3 (navigation/serverLink.ts), que alimentan la sesión, cada respuesta de la API y
+// el canal de eventos:
+// - «Sin conexión» solo con varias fallas seguidas durante unos 20 s (o sin red del sistema en una terminal por la red);
+// - «Reconectando» solo si el canal de eventos (con events.read) está caído más de esa tolerancia mientras Go responde:
+//   la renovación normal del canal cada 30 s y un corte breve no se notan;
+// - «En línea» en cualquier otro caso, y con el primer éxito.
 export type ServerState = 'online' | 'reconnecting' | 'offline';
 
-export function serverState(
-  connectionError: string,
-  realtimeEnabled: boolean,
-  realtimeStatus: string,
-): ServerState {
-  if (connectionError) {
+export function serverState(link: LinkSnapshot, realtimeEnabled: boolean): ServerState {
+  if (link.offline) {
     return 'offline';
   }
-  if (!realtimeEnabled) {
-    return 'online';
+  if (realtimeEnabled && link.channelDown) {
+    return 'reconnecting';
   }
-  // Antes del primer mensaje del canal el estado inicial es la actualización periódica: la sesión
-  // está verificada y el canal aún se abre.
-  if (realtimeStatus === realtimeLabels.connected || realtimeStatus === realtimeLabels.periodic) {
-    return 'online';
-  }
-  return 'reconnecting';
+  return 'online';
 }
 
 export const serverStateLabels: Record<ServerState, string> = {
@@ -39,7 +30,7 @@ export const serverStateLabels: Record<ServerState, string> = {
 export const serverStateDescriptions: Record<ServerState, string> = {
   online: 'El equipo servidor responde y los cambios llegan al momento.',
   reconnecting:
-    'El equipo servidor responde, pero el aviso inmediato de cambios se está recuperando; la terminal se actualiza cada pocos segundos.',
+    'El equipo servidor responde, pero el aviso inmediato de cambios no llega desde hace un rato; la terminal sigue intentándolo y se actualiza cada pocos segundos.',
   offline:
     'No hay comunicación con el equipo servidor. Se reintenta automáticamente; espera a que vuelva la conexión para guardar cambios.',
 };
