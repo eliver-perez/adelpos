@@ -135,6 +135,7 @@ class ScreenHost(private val compose: ComposeContentTestRule) {
 fun screenshot(name: String) {
     val instrumentation = InstrumentationRegistry.getInstrumentation()
     SystemDialogs.dismissNotResponding(instrumentation.uiAutomation)
+    SystemDialogs.dismissFullScreenNotice(instrumentation.uiAutomation)
     Thread.sleep(SETTLE_MILLIS)
     val bitmap = instrumentation.uiAutomation.takeScreenshot() ?: return
     val folder = File(instrumentation.targetContext.getExternalFilesDir(null), "screens")
