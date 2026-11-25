@@ -134,7 +134,8 @@ test('cupos: sin cupo de comandero y de pantalla de cocina, «Liberar cupo» en 
       bar.page.getByRole('heading', { name: 'Preparación no está disponible en esta terminal' }),
     ).toBeVisible({ timeout: 15000 });
     await expect(bar.page.getByRole('alert')).toContainText(
-      `No hay cupo de pantalla de cocina libre (${kitchens} de ${kitchens} en uso). Pide que otra terminal salga de Preparación.`,
+      // Etapa K1: con tabletas de cocina, también se libera el cupo de una tableta emparejada en Terminales.
+      `No hay cupo de pantalla de cocina libre (${kitchens} de ${kitchens} en uso). Pide que otra terminal salga de Preparación o que se libere el cupo de una tableta de cocina en Terminales.`,
     );
     await shot(bar.page, testInfo, 'cupo-cocina');
     await openAdministration(page, 'Configuración');

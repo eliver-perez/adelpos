@@ -1,3 +1,4 @@
+import { kitchenDisplayCapability, serverHas } from './serverCapabilities';
 import { countLabel, pluralWord } from './plural';
 
 // Licencia del sistema en el escritorio (etapa L1, Fase E; §7 de la especificación y decisiones L1-D4, L1-D11,
@@ -399,7 +400,10 @@ export function seatUnavailableText(details: {
     case 'cash_registers':
       return `No hay cupo de caja libre ${count}. Se libera al cerrar un turno de caja.`;
     case 'kitchen_displays':
-      return `No hay cupo de pantalla de cocina libre ${count}. Pide que otra terminal salga de Preparación.`;
+      // Etapa K1: las tabletas de cocina ocupan el cupo mientras están emparejadas (no solo Preparación).
+      return serverHas(kitchenDisplayCapability)
+        ? `No hay cupo de pantalla de cocina libre ${count}. Pide que otra terminal salga de Preparación o que se libere el cupo de una tableta de cocina en Terminales.`
+        : `No hay cupo de pantalla de cocina libre ${count}. Pide que otra terminal salga de Preparación.`;
     default:
       return `No hay cupo de comandero libre ${count}. Pide que se cierre la sesión de otra terminal.`;
   }
