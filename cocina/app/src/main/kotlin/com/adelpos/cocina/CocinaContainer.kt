@@ -6,9 +6,15 @@ import android.os.SystemClock
 import android.util.Log
 import com.adelpos.cocina.access.KitchenAccess
 import com.adelpos.cocina.access.KitchenServerRequirements
+import com.adelpos.cocina.board.HttpKitchenDisplayService
+import com.adelpos.cocina.board.KitchenBoard
+import com.adelpos.cocina.board.KitchenDisplayService
 import com.adelpos.cocina.db.KitchenDatabase
 import com.adelpos.core.model.connection.LinkState
+import com.adelpos.core.model.error.AppError
 import com.adelpos.core.model.pairing.PairingFlow
+import com.adelpos.core.model.realtime.AccessInterruption
+import com.adelpos.core.model.realtime.RealtimeState
 import com.adelpos.core.model.server.ServerAnnouncements
 import com.adelpos.core.model.server.ServerRelocator
 import com.adelpos.core.network.api.ClientIdentity
@@ -19,12 +25,15 @@ import com.adelpos.core.network.connection.ServerLinkMonitor
 import com.adelpos.core.network.discovery.HttpsServerProbe
 import com.adelpos.core.network.discovery.NsdServerBrowser
 import com.adelpos.core.network.pairing.PairingRepository
+import com.adelpos.core.network.realtime.RealtimeClient
 import com.adelpos.core.network.security.KeystoreSecretSealer
 import com.adelpos.core.network.wipe.DeviceDataWipe
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
 
 /**
  * Dependencias de la aplicación de cocina (inyección manual, como la de meseros): una instancia de
@@ -47,7 +56,7 @@ class CocinaContainer(context: Context, private val settings: Settings = Setting
     private val appContext: Context = context.applicationContext
 
     /** Trabajo de fondo que sobrevive a las pantallas (comprobaciones, revocación). */
-    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     /**
      * Identificación ante el servidor: la versión sale de versionName (cocina/gradle.properties) y
@@ -66,15 +75,16 @@ class CocinaContainer(context: Context, private val settings: Settings = Setting
      * **El estado único de conexión** con la computadora principal (etapa A3, el mismo de la
      * aplicación de meseros): lo leen la barra y la pantalla de pedidos; lo alimentan la red de
      * Android y cada respuesta de Go del cliente del servidor emparejado. Lo arranca
-     * [CocinaApplication]. El canal de eventos llega en las fases siguientes: hasta entonces la
-     * revisión es la de «sin canal».
+     * [CocinaApplication]. Con el canal de eventos abierto no hace falta la sonda periódica (como
+     * en meseros).
      */
     val serverLink: ServerLinkMonitor by lazy {
         ServerLinkMonitor(
             network = connectionMonitor.reportedLinkState,
             initialNetwork = connectionMonitor.current().takeIf { it == LinkState.ONLINE },
             foreground = appForeground.inForeground,
-            channelOpen = flowOf(false),
+            // Se arma al recogerse: el canal necesita la entrada, que necesita este estado.
+            channelOpen = flow { emitAll(realtime.state.map { it is RealtimeState.Connected }) },
             probing = { relocate, quick -> access.probeServer(relocate, quick) },
             scope = appScope,
             clock = SystemClock::elapsedRealtime,
@@ -119,6 +129,35 @@ class CocinaContainer(context: Context, private val settings: Settings = Setting
         )
     }
 
+    /** Las rutas de la pantalla de cocina (`kitchen-display/…`). */
+    private val displayService: KitchenDisplayService by lazy { HttpKitchenDisplayService(access) }
+
+    /**
+     * La pantalla de pedidos frente a Go (§4): `connect`, `orders`, el canal de eventos y las
+     * marcas. La arranca [CocinaApplication].
+     */
+    val board: KitchenBoard by lazy {
+        KitchenBoard(
+            access = access,
+            service = displayService,
+            signals = flow { emitAll(realtime.signals) },
+            monotonic = SystemClock::elapsedRealtime,
+        )
+    }
+
+    /**
+     * **El único canal de eventos** del proceso, con la credencial del dispositivo (sin sesión,
+     * K1-D4): abierto con la aplicación a la vista y la pantalla emparejada. Un `interrupted` por
+     * el dispositivo o la versión va a la entrada, como cualquier rechazo.
+     */
+    val realtime: RealtimeClient by lazy {
+        RealtimeClient(
+            access = board.channelAccess,
+            active = appForeground.inForeground,
+            interruptions = { interruption, _ -> access.report(appError(interruption)) },
+        )
+    }
+
     /** Emparejamiento como pantalla de cocina (`device_kind: kitchen`, K1-D3). */
     val pairing: PairingFlow by lazy {
         PairingRepository(
@@ -133,5 +172,21 @@ class CocinaContainer(context: Context, private val settings: Settings = Setting
 
     private companion object {
         const val SERVER_LINK_TAG = "CocinaLink"
+
+        // La interrupción del canal como el error que decide la entrada (revocada, 426…).
+        fun appError(interruption: AccessInterruption): AppError =
+            when (interruption) {
+                AccessInterruption.DeviceRevoked ->
+                    AppError.DeviceRevoked(serverMessage = null, requestId = null)
+                is AccessInterruption.UpdateRequired ->
+                    AppError.UpdateRequired(
+                        code = interruption.code,
+                        minClientVersion = null,
+                        serverVersion = null,
+                        serverMessage = null,
+                        requestId = null,
+                    )
+                else -> AppError.DeviceNotRecognized(interruption.code, null, null)
+            }
     }
 }

@@ -46,25 +46,29 @@ class LicenseStatusRepository : LicenseStatusSource {
 
     /** Lo que trajo una lectura de Go (null: el servidor no lo envía). */
     fun apply(dto: LicenseSummaryDto?) {
-        mutableSummary.value = dto?.let(::toSummary)
+        mutableSummary.value = dto?.toSummary()
     }
 
     /** Al borrar los datos de este dispositivo (retiro o «Emparejar de nuevo»). */
     fun forget() {
         mutableSummary.value = null
     }
-
-    private fun toSummary(dto: LicenseSummaryDto): LicenseSummary =
-        LicenseSummary(
-            state = LicenseStateName.fromWireName(dto.state),
-            graceDaysRemaining = dto.graceDaysRemaining?.takeIf { it >= 0 },
-            clock =
-                dto.clock?.let { clock ->
-                    LicenseClock(
-                        blocked = clock.blocked,
-                        localTimeText = clock.localTimeText,
-                        lastActivityText = clock.lastActivityTimeText,
-                    )
-                } ?: LicenseClock.NOT_BLOCKED,
-        )
 }
+
+/**
+ * El resumen de la licencia como lo usa el dispositivo (etapa K1: el único lugar de esta lectura,
+ * para la aplicación de meseros y la de cocina). Un tiempo de tolerancia negativo no se muestra.
+ */
+fun LicenseSummaryDto.toSummary(): LicenseSummary =
+    LicenseSummary(
+        state = LicenseStateName.fromWireName(state),
+        graceDaysRemaining = graceDaysRemaining?.takeIf { it >= 0 },
+        clock =
+            clock?.let { clock ->
+                LicenseClock(
+                    blocked = clock.blocked,
+                    localTimeText = clock.localTimeText,
+                    lastActivityText = clock.lastActivityTimeText,
+                )
+            } ?: LicenseClock.NOT_BLOCKED,
+    )

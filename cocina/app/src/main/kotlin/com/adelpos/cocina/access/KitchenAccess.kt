@@ -1,12 +1,12 @@
 package com.adelpos.cocina.access
 
+import com.adelpos.cocina.board.BoardAccess
 import com.adelpos.cocina.db.PairedServerDao
 import com.adelpos.cocina.db.PairedServerEntity
 import com.adelpos.core.model.access.RepairReason
 import com.adelpos.core.model.connection.ServerAnswers
 import com.adelpos.core.model.connection.ServerLink
 import com.adelpos.core.model.error.AppError
-import com.adelpos.core.model.error.LicenseMessages
 import com.adelpos.core.model.security.SecretSealer
 import com.adelpos.core.model.security.SecretUnavailableException
 import com.adelpos.core.model.server.ServerCompatibility
@@ -16,11 +16,11 @@ import com.adelpos.core.network.api.ApiErrors
 import com.adelpos.core.network.api.ApiOutcome
 import com.adelpos.core.network.api.ClientIdentity
 import com.adelpos.core.network.api.DeviceCredentials
-import com.adelpos.core.network.api.IgnoredBody
 import com.adelpos.core.network.api.ServerApi
 import com.adelpos.core.network.pairing.PairedConnection
 import com.adelpos.core.network.pairing.PairedDevice
 import com.adelpos.core.network.pairing.PairingStore
+import com.adelpos.core.network.session.AuthorizedServer
 import com.adelpos.core.network.session.ServerTransport
 import com.adelpos.core.network.wipe.DeviceDataWipe
 import kotlinx.coroutines.CoroutineScope
@@ -30,8 +30,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.serialization.SerialName
-import kotlinx.serialization.Serializable
+import okhttp3.Headers
 
 /**
  * La pantalla de cocina frente a la computadora principal (etapa K1): el servidor emparejado en su
@@ -59,15 +58,10 @@ class KitchenAccess(
     private val scope: CoroutineScope,
     private val wipe: DeviceDataWipe = DeviceDataWipe(),
     private val answers: ServerAnswers? = null,
-) : PairingStore {
+) : PairingStore, BoardAccess {
     private val mutableStatus = MutableStateFlow<KitchenStatus>(KitchenStatus.Starting)
 
-    val status: StateFlow<KitchenStatus> = mutableStatus.asStateFlow()
-
-    private val mutableDisplay = MutableStateFlow<DisplayConnection>(DisplayConnection.Connecting)
-
-    /** Si la pantalla ya se conectó como pantalla de cocina (`kitchen-display/connect`). */
-    val display: StateFlow<DisplayConnection> = mutableDisplay.asStateFlow()
+    override val status: StateFlow<KitchenStatus> = mutableStatus.asStateFlow()
 
     // Un cambio de estado a la vez (comprobar, emparejar, olvidar).
     private val mutex = Mutex()
@@ -122,7 +116,7 @@ class KitchenAccess(
      * `DEVICE_*` u otra huella piden emparejar de nuevo; 426 pide actualizar la aplicación. Ninguno
      * dice «sin conexión»: eso lo decide el estado único de conexión.
      */
-    fun report(error: AppError) {
+    override fun report(error: AppError) {
         scope.launch { mutex.withLock { applyErrorLocked(error) } }
     }
 
@@ -159,9 +153,31 @@ class KitchenAccess(
     /** Dirección vigente y cliente con la huella fijada, para el canal de eventos. */
     fun serverTransport(): ServerTransport? = connection?.transport()
 
+    /**
+     * La conexión del canal de eventos de la pantalla: la credencial del dispositivo, sin sesión
+     * (K1-D4), en la dirección vigente (se pide en cada uso por el cambio de IP).
+     */
+    override fun channelServer(): AuthorizedServer? {
+        val current = connection ?: return null
+        return AuthorizedServer(
+            transport = { current.transport() },
+            credentials = current.credentials.headers(),
+            userId = null,
+        )
+    }
+
+    /**
+     * Una llamada de la pantalla de cocina (`kitchen-display/…`) con la credencial del dispositivo
+     * (sin sesión: K1-D4), en la dirección vigente y, si la petición no llegó a salir, una sola vez
+     * en la nueva dirección del servidor (`PairedConnection.call`). null sin servidor emparejado.
+     */
+    suspend fun <T> call(block: suspend (ServerApi, Headers) -> ApiOutcome<T>): ApiOutcome<T>? {
+        val current = connection ?: return null
+        return current.call { api -> block(api, current.credentials.headers()) }
+    }
+
     private suspend fun loadLocked() {
         val entity = dao.pairedServer()
-        mutableDisplay.value = DisplayConnection.Connecting
         if (entity == null) {
             connection = null
             mutableStatus.value = KitchenStatus.Unpaired
@@ -225,45 +241,10 @@ class KitchenAccess(
                             KitchenStatus.UpdateApp(identity.version, verdict.minClientVersion)
                         ServerCompatibility.Verdict.Compatible -> readyOrStatus(status)
                     }
-                if (verdict == ServerCompatibility.Verdict.Compatible) {
-                    connectLocked(current)
-                }
             }
             is ApiOutcome.Rejected -> applyErrorLocked(ApiErrors.toAppError(version.problem))
             is ApiOutcome.NoAnswer -> applyErrorLocked(version.error)
             // Una respuesta que esta versión no entiende: nada cambia.
-            is ApiOutcome.Malformed -> Unit
-        }
-    }
-
-    /**
-     * Se conecta como pantalla de cocina (§4 del orden de arranque de la Fase A): `POST
-     * kitchen-display/connect` con `{}` ocupa su cupo de cocina si no lo tiene y es idempotente.
-     * Sin respuesta, nada cambia (se vuelve a intentar al comprobar); un rechazo de acceso va a
-     * [applyErrorLocked]; uno de la licencia, el cupo o la hora se muestra con su texto.
-     */
-    private suspend fun connectLocked(current: PairedConnection) {
-        val outcome = current.call { api ->
-            api.post(
-                CONNECT_PATH,
-                ConnectRequest(),
-                ConnectRequest.serializer(),
-                IgnoredBody.serializer(),
-                current.credentials.headers(),
-            )
-        }
-        when (outcome) {
-            is ApiOutcome.Success -> mutableDisplay.value = DisplayConnection.Connected
-            is ApiOutcome.Rejected -> {
-                val error = ApiErrors.toAppError(outcome.problem)
-                if (error is AppError.LicenseRefused) {
-                    mutableDisplay.value =
-                        DisplayConnection.Refused(LicenseMessages.of(error.refusal))
-                } else {
-                    applyErrorLocked(error)
-                }
-            }
-            is ApiOutcome.NoAnswer -> applyErrorLocked(outcome.error)
             is ApiOutcome.Malformed -> Unit
         }
     }
@@ -317,7 +298,6 @@ class KitchenAccess(
         wipe.eraseAll()
         dao.forget()
         connection = null
-        mutableDisplay.value = DisplayConnection.Connecting
         try {
             destroyKey()
         } catch (_: SecretUnavailableException) {
@@ -325,15 +305,7 @@ class KitchenAccess(
         }
     }
 
-    /**
-     * Cuerpo de `kitchen-display/connect`: `{}` al arrancar o reconectar. `take_seat` (solo con
-     * «Usar esta pantalla», después de «Liberar cupo») lo usa la Fase E.
-     */
-    @Serializable
-    private class ConnectRequest(@SerialName("take_seat") val takeSeat: Boolean? = null)
-
     private companion object {
-        const val CONNECT_PATH = "kitchen-display/connect"
         const val CLIENT_KIND_INVALID = "CLIENT_KIND_INVALID"
         const val CLIENT_KIND_MISMATCH = "CLIENT_KIND_MISMATCH"
     }

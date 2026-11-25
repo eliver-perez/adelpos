@@ -1,5 +1,6 @@
 package com.adelpos.core.testing
 
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.app.UiAutomation
 import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
@@ -30,6 +31,42 @@ object SystemDialogs {
                 Log.i("AdelOnGo", "diálogo del sistema «no responde» cerrado con «$label»")
                 Thread.sleep(500)
                 return true
+            }
+        }
+        return false
+    }
+
+    private val FULL_SCREEN = listOf("Viewing full screen", "pantalla completa")
+    private val GOT_IT = listOf("Got it", "GOT IT", "Entendido", "ENTENDIDO")
+
+    /**
+     * Cierra el aviso del sistema «Viewing full screen» con «Got it»/«Entendido»: Android lo
+     * muestra la primera vez que una aplicación a pantalla completa (la de cocina, etapa K1) se
+     * abre y tapa las capturas. Es una ventana del sistema que no toma el foco: se busca entre
+     * todas las ventanas. Solo actúa si el aviso está a la vista; true si lo cerró.
+     */
+    fun dismissFullScreenNotice(automation: UiAutomation): Boolean {
+        val info = automation.serviceInfo
+        if (
+            info != null &&
+                info.flags and AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS == 0
+        ) {
+            info.flags = info.flags or AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+            automation.serviceInfo = info
+        }
+        val roots =
+            listOfNotNull(automation.rootInActiveWindow) + automation.windows.mapNotNull { it.root }
+        for (root in roots) {
+            if (FULL_SCREEN.none { root.findAccessibilityNodeInfosByText(it).isNotEmpty() }) {
+                continue
+            }
+            for (label in GOT_IT) {
+                val button = root.findAccessibilityNodeInfosByText(label).firstOrNull() ?: continue
+                if (clickable(button)?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true) {
+                    Log.i("AdelOnGo", "aviso del sistema de pantalla completa cerrado con «$label»")
+                    Thread.sleep(500)
+                    return true
+                }
             }
         }
         return false

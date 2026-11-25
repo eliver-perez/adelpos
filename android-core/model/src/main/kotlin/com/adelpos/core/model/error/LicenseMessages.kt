@@ -35,6 +35,45 @@ object LicenseMessages {
     /** Sin cupo, cuando Go no dijo cuál falta o con cuántos. */
     const val NO_SEAT = "No hay cupo libre en la licencia del sistema. Avisa al encargado."
 
+    /**
+     * Etapa K1 (§6): la pantalla de cocina de Android después de «Liberar cupo» en Terminales
+     * (`KITCHEN_DISPLAY_SEAT_RELEASED`); lo vuelve a pedir solo con «Usar esta pantalla».
+     */
+    const val KITCHEN_DISPLAY_SEAT_RELEASED = "Esta pantalla dejó su cupo de cocina."
+
+    /** Etapa K1 (§2): la pantalla de cocina con la computadora principal sin activar. */
+    const val KITCHEN_DISPLAY_NOT_ACTIVATED =
+        "La computadora principal no tiene la licencia activada: esta pantalla no muestra " +
+            "pedidos. Avisa al encargado."
+
+    /**
+     * Etapa K1 (K1-D16): la pantalla de cocina con la hora de la computadora principal incorrecta;
+     * sigue mostrando los pedidos, pero no se pueden marcar.
+     */
+    const val KITCHEN_DISPLAY_CLOCK_INVALID =
+        "La computadora principal tiene la fecha y hora incorrectas: los pedidos se siguen viendo, " +
+            "pero no se pueden marcar hasta corregirla. Avisa al encargado."
+
+    /** Etapa K1 (§2): la licencia vencida no detiene la pantalla de cocina. */
+    const val KITCHEN_DISPLAY_EXPIRED =
+        "La licencia del sistema venció. Esta pantalla sigue mostrando y marcando los pedidos. " +
+            "Avisa al encargado."
+
+    /** Etapa K1 (§2): la licencia revocada tampoco. */
+    const val KITCHEN_DISPLAY_REVOKED =
+        "La licencia del sistema fue revocada. Esta pantalla sigue mostrando y marcando los " +
+            "pedidos. Avisa al encargado."
+
+    /**
+     * Etapa K1 (§6): la pantalla de cocina de Android sin cupo (`LICENSE_SEAT_UNAVAILABLE` de
+     * `kitchen-display/connect`), con cuántas están en uso y el límite de la licencia.
+     */
+    fun kitchenDisplayNoSeat(inUse: Int?, limit: Int?): String {
+        val usage = if (inUse != null && limit != null) " ($inUse de $limit en uso)" else ""
+        return "No hay cupo de pantalla de cocina libre$usage. Revoca otra pantalla en Terminales " +
+            "o amplía tu licencia."
+    }
+
     /** El texto de un rechazo de la licencia. */
     fun of(refusal: LicenseRefusal): String =
         when (refusal) {

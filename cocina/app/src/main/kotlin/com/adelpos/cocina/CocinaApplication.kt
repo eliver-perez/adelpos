@@ -22,5 +22,8 @@ class CocinaApplication : Application() {
         // (etapa A3). CocinaTestRunner ya dejó sus ajustes antes de este punto.
         ProcessLifecycleOwner.get().lifecycle.addObserver(container.appForeground)
         container.serverLink.start()
+        // La pantalla de pedidos y su canal de eventos (con la aplicación a la vista).
+        container.realtime.start(container.appScope)
+        container.board.start(container.appScope)
     }
 }

@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Aplicación de cocina (etapa K1): textos del restaurante, sin tecnicismos ni textos provisionales (§4, «Regla de
-     textos»). Los de la entrada al dispositivo son los compartidos de android-core:ui. -->
+     textos»). Los de la entrada al dispositivo son los compartidos de android-core:ui; los de la licencia y el cupo,
+     los de LicenseMessages (android-core:model). -->
 <resources xmlns:tools="http://schemas.android.com/tools" tools:locale="es">
     <string name="app_name">AD-EL POS Cocina</string>
     <!-- Nombre que se propone al emparejar (se puede cambiar antes de pedir el código). -->
@@ -11,4 +12,39 @@
     <string name="orders_empty">No hay pedidos</string>
     <string name="orders_connecting">Conectando con la computadora principal…</string>
     <string name="orders_empty_detail">Los pedidos que envíen los meseros a las estaciones de esta pantalla aparecen aquí.</string>
+    <plurals name="orders_hidden">
+        <item quantity="one">Hay %d pedido más: desliza para verlo</item>
+        <item quantity="many">Hay %d pedidos más: desliza para verlos</item>
+        <item quantity="other">Hay %d pedidos más: desliza para verlos</item>
+    </plurals>
+    <string name="notice_close">Entendido</string>
+
+    <!-- Tarjeta de pedido. -->
+    <string name="card_sent_at">Enviado a las %1$s</string>
+    <string name="card_attention">Atención: lleva tiempo esperando</string>
+    <string name="card_late">Retrasado</string>
+    <string name="card_ready">Pedido listo</string>
+    <string name="card_dismiss">Quitar de la pantalla</string>
+    <string name="card_by_order">En esta estación se marca el pedido completo con el botón de abajo.</string>
+    <string name="dish_by_order">Se marca con el botón «Pedido listo».</string>
+    <string name="dish_line">%1$d × %2$s</string>
+    <string name="dish_new">NUEVO</string>
+    <string name="dish_cancelled">CANCELADO</string>
+    <string name="dish_ready">Listo</string>
+    <string name="dish_notes">Nota: %1$s</string>
+    <string name="dish_pending_change">Tiene un cambio pendiente del mesero: se puede marcar cuando llegue.</string>
+
+    <!-- Recientes (§4). -->
+    <string name="recent_open">Recientes</string>
+    <string name="recent_title">Recientes</string>
+    <string name="recent_help">Lo marcado listo en los últimos 30 minutos. «Recuperar» lo regresa a la pantalla.</string>
+    <string name="recent_close">Cerrar</string>
+    <string name="recent_empty">No hay nada marcado listo en los últimos 30 minutos.</string>
+    <string name="recent_marked_at">Listo a las %1$s</string>
+    <string name="recent_recover">Recuperar</string>
+    <string name="recent_recover_order">Recuperar el pedido</string>
+
+    <!-- Cupo de cocina (§6, K1-D6 y K1-D30). -->
+    <string name="seat_released_detail">Otra pantalla puede usar el cupo. Para volver a mostrar aquí los pedidos, toca «Usar esta pantalla».</string>
+    <string name="seat_take">Usar esta pantalla</string>
 </resources>
