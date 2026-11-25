@@ -2300,3 +2300,161 @@ corte. Era un error del guion, no del emulador: se corrigió y se volvió a medi
   - Con la red cortada, el aviso sale a los 10 s del margen.
   - No se cambia la regla de la A3, que las dos aplicaciones comparten. Mientras tanto la tableta sigue mostrando los
     pedidos y reintenta en silencio.
+
+---
+
+## Fase F · Versiones, regresión final y entregables (§8 y §9)
+
+Agente F, 24 y 25/11/2026, en `$SP/wt/k1-f` (rama `etapa-k1-f`, desde `etapa-k1` `e6c03a4`). Usó estos recursos:
+
+- `ISO_TAG=F`, con el Go temporal en 8231/8501;
+- Playwright con la vista previa 1443, el simulador de licencias 8511 y el Go sin activar 8233;
+- un Go limpio (`ISO_TAG=FC`, 8232/8502) para las cuatro pruebas de «instalación limpia»;
+- los emuladores `Pixel_Tablet` (Android 17, consola 5580), `ADEL_A1_Tablet_API26` (Android 8.0, 5582) y el teléfono
+  `Pixel_8` (Android 17, 5586), sin ventana y de solo lectura.
+
+Los guiones y registros (fuera del repositorio) están en `$SP/k1/F/`. El detalle completo, con los entregables, está en
+[VERIFICATION_STAGEK1.md](VERIFICATION_STAGEK1.md).
+
+### Resumen
+
+- **Versiones** (`4debb8c`):
+  - servidor **0.16.0**, con el esquema 29 y `min_client_versions` sin cambio;
+  - la aplicación de cocina exige el servidor 0.16.0 con `kitchen-display-v1` (K1-D27);
+  - meseros queda en 0.4.1 (5) y cocina en 0.1.0 (1).
+- **Regresión**: el servidor y el escritorio, sobre una copia exacta de `4debb8c`; Android, sobre una de `43b2bd4`, con
+  la corrección del texto compartido. Todo aprobó, con tres salvedades explicadas:
+  - `TestOperationalReports` corrió a las 00:00 y falló en su franja conocida de 00:00 a 05:00 (§6 de `CLAUDE.md`). El
+    coordinador la repitió después de las 05:00 (K1-D40);
+  - Playwright tuvo que repetirse, sin ningún cambio en la aplicación (K1-D39):
+    - en Chromium, por la medianoche (`workflow-stagel1-notices` y su cascada);
+    - en WebKit, por una carrera de `workflow-stage9d-accounts`;
+    - al final, 53 de 53 en cada motor;
+  - `takeaway t6` en Android 8, el pendiente conocido A3-D32.
+- **El «Reconectando»**: la prueba de 10 minutos sin uso, por la escucha local y por la de red a la vez, terminó con
+  **0 `reconnecting`** en las dos.
+- **Dos correcciones**:
+  - `dd532f8`: una prueba de Vitest de la 9F con una carrera;
+  - `43b2bd4`: el texto «Actualiza el servidor del restaurante» de la tableta de cocina, que nombraba a meseros y su
+    versión.
+- **Entregables**: el APK de meseros 0.4.1, el de cocina 0.1.0 y el `.pkg` 0.16.0, con sus comprobaciones.
+  - Se compilaron sobre una copia exacta de `9b9f472`; después solo cambió Markdown.
+  - El `.pkg` no se instaló.
+- **Documentos**:
+  - `cocina/CLAUDE.md`, `android-core/CLAUDE.md` y `android/CLAUDE.md`, al día con las fases C y D;
+  - `CLAUDE.md`, sin nada «en curso» de la K1;
+  - `docs/COCINA_INSTALAR.md`, con el nombre del APK;
+  - `docs/licencias`, que ahora dice que la 0.16.0 también es de desarrollo;
+  - y `docs/VERIFICATION_STAGEK1.md`, nuevo.
+
+### Commits (rama `etapa-k1-f`)
+
+- `4debb8c`: versión 0.16.0 del servidor; la aplicación de cocina exige el servidor 0.16.0.
+- `dd532f8`: la prueba del primer toque de Preparación espera a que el efecto lo escuche.
+- `43b2bd4`: «Actualiza el servidor del restaurante» con la versión que pide cada aplicación.
+- `9b9f472`: `cocina/CLAUDE.md`, `android-core/CLAUDE.md` y `android/CLAUDE.md`, al día con las fases C y D.
+- `2e81ff1`: `CLAUDE.md` y `docs/VERIFICATION_STAGEK1.md`, con la regresión final y los entregables.
+
+### Pruebas reales
+
+| Qué                                                                                                    | Commit                | Resultado                                                                                                                                                                                                                                                                          |
+| ------------------------------------------------------------------------------------------------------ | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fmt-check`, `sync-check` y `md5` de `docs/etapas`, `contracts/` y del contrato y la guía de licencias | todos                 | Aprobados; los protegidos, sin cambios                                                                                                                                                                                                                                             |
+| `go-unit` (vet, `-race`, `GOOS=windows` build y vet) y `go vet` con `legacydocker`                     | `4debb8c`             | Aprobado (39 paquetes `ok`)                                                                                                                                                                                                                                                        |
+| `go-int` de los 16 paquetes de `scripts/database.py` y `./internal/kitchen`                            | `4debb8c`             | 16 de 17 (`operations` 886 s, `administration` 325 s, `cmd` 70 s con el candado); `reports/operational`: fallaron las 4 subpruebas de siempre de la franja de 00:00 a 05:00 (corrió a las 00:00)                                                                                   |
+| `go-int ./internal/reports/operational`, repetida por el coordinador después de las 05:00              | `2e81ff1`             | **Aprobado** a las 05:02 (42 s), con las 4 subpruebas de la franja de 00:00 a 05:00                                                                                                                                                                                                |
+| Vitest con `tsc`                                                                                       | `4debb8c` y `9b9f472` | 1 014 de 1 015 (la de la 9F, corregida en `dd532f8`); sobre `9b9f472`, **1 015 de 1 015** con la Mac cargada (carga 20)                                                                                                                                                            |
+| `npm run build` y `cargo test`                                                                         | `4debb8c`             | Aprobado; 122 y 4 ignoradas                                                                                                                                                                                                                                                        |
+| Scripts del instalador sin root y `bash -n`                                                            | `4debb8c`             | 31 comprobaciones aprobadas                                                                                                                                                                                                                                                        |
+| Playwright Chromium completo (53)                                                                      | `4debb8c`             | 47 + las 6 repetidas: **53 de 53**                                                                                                                                                                                                                                                 |
+| Playwright WebKit completo (53)                                                                        | `4debb8c`             | Segunda corrida: **53 de 53**                                                                                                                                                                                                                                                      |
+| La prueba de Rust de 10 minutos, local y por la red                                                    | `4debb8c`             | 817 y 818 mensajes, **1 connected, 0 reconnecting** en las dos                                                                                                                                                                                                                     |
+| JVM, Robolectric, Lint y ktfmt de los tres builds                                                      | `4debb8c` y `43b2bd4` | 68 XML, **476 pruebas**, 0 fallas; Lint y ktfmt aprobados                                                                                                                                                                                                                          |
+| Instrumentadas: `android-core` / meseros / cocina                                                      | `43b2bd4`             | `Pixel_Tablet` 10 / 159 / 28; `ADEL_A1_Tablet_API26` 10 / 159 / 28; `Pixel_8` 10 / 159; 0 fallas                                                                                                                                                                                   |
+| Capturas de cocina (14 por tableta)                                                                    | `43b2bd4`             | Revisadas; el defecto de `b4` se corrigió en `43b2bd4`                                                                                                                                                                                                                             |
+| `--suite all` de meseros                                                                               | `43b2bd4`             | **84/84** en `Pixel_Tablet` y en `Pixel_8`; **83/84** en Android 8, por partes (`takeaway t6`, A3-D32; repetida, 8/9 otra vez)                                                                                                                                                     |
+| `--suite kitchen` (con `kill -STOP` solo al Go temporal)                                               | `43b2bd4`             | **14/14** en las dos tabletas; `k10`: 2,9/4,0/6,1/36,1 s y 1,3/3,3/5,3/35,3 s sin red, aviso solo en el largo                                                                                                                                                                      |
+| `--suite endtoend`                                                                                     | `43b2bd4`             | **4/4** en las dos tabletas                                                                                                                                                                                                                                                        |
+| Actualizar 0.4.0 → 0.4.1 encima, datos y firma                                                         | `43b2bd4`             | Aprobada en `Pixel_Tablet`                                                                                                                                                                                                                                                         |
+| APK y `.pkg` de entrega                                                                                | `9b9f472`             | `apksigner` (v2, `fb6a4bac…7c86` en los dos), `aapt2` (`minSdk` 26, `targetSdk` 36, nombres e íconos), `pkgutil --expand-full` (0.16.0 en los tres paquetes, esquema 29 y la `0029` embebida), `codesign --verify` y sin llaves ni archivos de prueba; los anteriores, sin cambios |
+
+### Lo corregido
+
+- **`dd532f8`** (solo una prueba):
+  - el problema: la prueba de Vitest del primer toque de Preparación (revisión 9F) tocaba antes de que React corriera
+    el efecto que lo escucha, y con la Mac cargada falló una vez;
+  - la corrección: ahora toca hasta que el efecto escucha;
+  - la comprobación: con el efecto retrasado a propósito, la prueba anterior falla y la nueva aprueba.
+- **`43b2bd4`** (regla de textos, `android-core`):
+  - el problema: en la tableta de cocina, «Actualiza el servidor del restaurante» decía «…la aplicación de meseros…
+    (necesita la versión 0.13.0 o posterior)»;
+  - la corrección: el texto ya no nombra ninguna aplicación y recibe la versión mínima de cada una (meseros 0.13.0,
+    cocina 0.16.0); `KitchenScreensTest` lo comprueba;
+  - como toca código compartido de Android, toda la regresión de Android corrió sobre `43b2bd4`.
+
+### Entregables
+
+| Archivo                                                                  | Bytes      | SHA-256                                                            |
+| ------------------------------------------------------------------------ | ---------- | ------------------------------------------------------------------ |
+| `desktop/src-tauri/target/release/bundle/macos-pkg/AD-EL POS_0.16.0.pkg` | 23 957 122 | `add1e9e7e9fb46cdc6649cfc3edc7e692ecabea989d66339a775faf5307d3f47` |
+| `android/app/build/outputs/apk/release/AD-EL-POS-Android-0.4.1.apk`      | 2 674 583  | `d783157306448bcde7368285e9fa6121fadea01e1720e3c75464099d1c9e8cfd` |
+| `cocina/app/build/outputs/apk/release/AD-EL-POS-Cocina-0.1.0.apk`        | 1 878 017  | `36bb9822660cda64a2fc37f0941d79d7f68ce4cfae97bcc8eb556b91f44ae039` |
+
+Hay copias en `$SP/`. El coordinador volvió a comprobar los tres SHA-256 en las dos ubicaciones, más:
+
+- la firma de los dos APK (`fb6a4bac…7c86`);
+- `minSdk` 26 y `targetSdk` 36;
+- los paquetes `com.adelpos.meseros` 0.4.1 (5) y `com.adelpos.cocina` 0.1.0 (1), con los nombres «AD-EL POS» y «AD-EL POS
+  Cocina».
+
+El `.pkg` va sin firma de instalador, como el 0.15.0 (es de desarrollo). Los entregables anteriores no cambiaron.
+
+### No verificado
+
+- El `.pkg` instalado, que es la parada del propietario.
+- Dispositivos físicos, wifi real, la aplicación real de Tauri, Windows y Docker.
+- `ADEL_A1_Phone_API33` (del propietario), la suite `connection` y la aplicación de cocina en un teléfono.
+- `takeaway t6` en Android 8 (A3-D32).
+
+### Decisiones del coordinador al cerrar la Fase F y la etapa
+
+Fusionada en `etapa-k1` con avance rápido (`2e81ff1`).
+
+- **K1-D38. Se aceptan las dos correcciones de la Fase F.**
+  - `dd532f8` solo cambia una prueba.
+  - `43b2bd4` corrige la regla de textos del código compartido, con la versión mínima de cada aplicación (K1-D27).
+  - Ninguna cambia una decisión de la especificación ni del avance.
+- **K1-D39. Las repeticiones de Playwright son fragilidad de las pruebas, no de la aplicación.**
+  - **Chromium**: `workflow-stagel1-notices` cerró el aviso diario a las 23:59:58 y volvió a entrar a las 00:00:05. Ya
+    era otro día y el aviso volvió a salir, como debe.
+  - **WebKit**: `workflow-stage9d-accounts` vuelve a entrar por la API con la misma terminal justo después de entrar por
+    la página.
+    - Una petición de la página que ya iba en camino con la sesión anterior recibe «sesión reemplazada», que es lo
+      correcto.
+    - La aplicación no tiene ese segundo inicio de sesión.
+  - Las dos aprobaron al repetirse.
+  - Quedan anotadas para una etapa siguiente: que la de la L1 no dependa de la medianoche, y que la de la 9D espere a
+    que la página termine sus peticiones antes de volver a entrar.
+- **K1-D40. `TestOperationalReports` aprobó fuera de su franja.** El coordinador repitió
+  `go-int ./internal/reports/operational` a las 05:02 del 25/11/2026 sobre `2e81ff1`, con el mismo código que el
+  final, y aprobó entero (42 s), con las 4 subpruebas que habían fallado a las 00:00. Con eso la integración queda en
+  17 de 17. La K1 no tocó `internal/reports`.
+- **K1-D41. `takeaway t6` en Android 8 sigue como el pendiente conocido** (A3-D32, L1-D63).
+  - Falló igual que en la A3 y la L1, sin rechazos de licencia, cupo u hora.
+  - No lo causa la K1 y no detiene la etapa.
+- **K1-D42. Se acepta el Go limpio en 8232/8502** (`ISO_TAG=FC`), un puerto que no estaba en el encargo. No choca con el
+  servicio real (8181, 8443) ni con otro agente.
+- **K1-D43. La etapa K1 queda terminada**: se fusiona con `main` y se sube.
+  - **Lo que hace el propietario**:
+    - instala el `.pkg` 0.16.0 con «Servidor del restaurante» marcado. El `host` respalda y aplica la `0029`, y las
+      terminales y tabletas emparejadas siguen emparejadas;
+    - instala la 0.4.1 encima de la 0.4.0 en los teléfonos y tabletas de meseros, sin desemparejarlos;
+    - instala la aplicación de cocina en las tabletas de la cocina, con `docs/COCINA_INSTALAR.md`.
+  - **Avisos para el propietario**:
+    - después de «Liberar cupo», la tableta no vuelve a tomar su cupo sola: hay que tocar «Usar esta pantalla» en ella,
+      y lo definitivo es «Revocar» (K1-D6, K1-D30);
+    - Go no se tocó para el «Reconectando» y la renovación del canal cada 30 s sigue (K1-D10).
+  - **Quedan para etapas siguientes**:
+    - las limitaciones conocidas: el tope de 200 tarjetas (K1-D31) y los unos 41 s del aviso con la computadora
+      principal colgada (K1-D37);
+    - lo anotado en K1-D39.
