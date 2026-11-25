@@ -246,6 +246,31 @@ describe('acceso y recuperación de la interfaz', () => {
     expect(screen.queryByRole('status', { name: 'Servidor: Sin conexión' })).toBeNull();
   });
 
+  // Etapa K1 (Fase E, K1-D10): la pantalla de inicio de sesión ya cargada tampoco cambia por una falla aislada de su
+  // consulta periódica; con «Sin conexión» (3 fallas seguidas durante 20 s) pasa a «Revisa la conexión».
+  it('en el inicio de sesión una falla aislada no cambia la pantalla y un corte largo sí', async () => {
+    vi.useFakeTimers();
+    render(<App />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.getByRole('heading', { name: 'Inicia sesión' })).toBeTruthy();
+    offline = true;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(screen.getByRole('heading', { name: 'Inicia sesión' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Revisa la conexión' })).toBeNull();
+    await advanceInSteps(30000);
+    expect(screen.getByRole('heading', { name: 'Revisa la conexión' })).toBeTruthy();
+    offline = false;
+    fireEvent.click(screen.getByRole('button', { name: 'Volver a comprobar' }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.getByRole('heading', { name: 'Inicia sesión' })).toBeTruthy();
+  });
+
   // Etapa 9G, fase C (§4.2, D11): la capa «Sin conexión con el servidor» bloquea las operaciones sin desmontar la
   // pantalla (lo escrito se conserva), se reintenta sola con espera creciente y al volver pide a todas las
   // pantallas que consulten el estado vigente.
