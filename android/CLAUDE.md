@@ -341,6 +341,16 @@ Los agentes de la etapa usan el arnés aislado (`$SP/iso.sh <árbol> gradle <tar
   repite hasta dos veces, con 2 s de pausa y una línea `AdelOnGo`, una lectura o un `auth/login` que no tuvo ninguna
   respuesta de Go (`alerts r3` en Android 13: con la red del emulador cortada un momento, la petición llegó a la escucha
   local más de 5 s después de abrir la conexión y Go la cerró sin leerla, `ReadHeaderTimeout`); nunca una escritura.
+- **Actualizar encima sin emparejar de nuevo** (etapa K1, 0.4.0 → 0.4.1; repetirla en cada versión que mueva código o
+  cambie lo que se guarda): (1) datos, con las compilaciones debug de las dos versiones y el ejecutor de pruebas
+  (nunca la búsqueda real): instalar la anterior y su APK de pruebas, `android-e2e.sh --suite waiter --no-install
+--steps "w1 w3"` (empareja, entra Ana y deja un pedido «Por enviar»), instalar **encima** la nueva y su APK de pruebas
+  con `adb install -r -t` (sin desinstalar) y `--no-install --steps "w4"` con la misma terminal principal
+  (`ADELPOS_E2E_MAIN_DEVICE`/`_TOKEN`): sin volver a entrar, el pedido sale una sola vez con la credencial de envío de
+  Ana, así que siguen el emparejamiento, el mesero y la cola; (2) firma, con el APK anterior entregado y la nueva
+  release firmada con la llave de desarrollo: `adb install` de la anterior, `adb install -r` de la nueva (mismo
+  `firstInstallTime`, `versionCode` mayor) y la misma huella en `apksigner verify --print-certs`, **sin abrir** la
+  aplicación (sin emparejar haría la búsqueda automática en la red real).
 - **Ejecutor de pruebas de `app`**: `com.adelpos.meseros.AdelTestRunner` (`testInstrumentationRunner` de
   `app/build.gradle.kts`; paquete de pruebas `com.adelpos.meseros.test`). Antes de crear el contenedor, busca por NSD
   el tipo `_adelpostest._tcp` y toma `clientVersion` de los argumentos. Ayudantes: `TestDevice` (un servidor
