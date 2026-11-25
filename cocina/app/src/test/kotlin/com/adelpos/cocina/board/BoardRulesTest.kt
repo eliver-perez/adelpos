@@ -168,6 +168,12 @@ class BoardRulesTest {
         assertTrue("el botón del pedido sí", BoardRules.orderButtonEnabled(card, true))
         assertFalse(BoardRules.orderButtonEnabled(card, false))
         assertTrue(BoardRules.hasByOrderDishes(card))
+        assertFalse("solo por pedido: el texto va al pie", BoardRules.mixesTracking(card))
+        val mixed = card.copy(dishes = card.dishes + pending.copy(id = "otro"))
+        assertTrue(
+            "mezclada: el texto va en cada platillo por pedido",
+            BoardRules.mixesTracking(mixed),
+        )
         assertTrue(BoardRules.markingAllowed(null))
         val blocked =
             LicenseSummary(

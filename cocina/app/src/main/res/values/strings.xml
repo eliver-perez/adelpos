@@ -26,6 +26,7 @@
     <string name="card_ready">Pedido listo</string>
     <string name="card_dismiss">Quitar de la pantalla</string>
     <string name="card_by_order">En esta estación se marca el pedido completo con el botón de abajo.</string>
+    <string name="dish_by_order">Se marca con el botón «Pedido listo».</string>
     <string name="dish_line">%1$d × %2$s</string>
     <string name="dish_new">NUEVO</string>
     <string name="dish_cancelled">CANCELADO</string>

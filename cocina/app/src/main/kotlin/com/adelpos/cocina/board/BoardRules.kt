@@ -138,6 +138,14 @@ object BoardRules {
     fun hasByOrderDishes(card: OrderCard): Boolean =
         card.dishes.any { it.byOrder && it.state == DishState.PENDING }
 
+    /**
+     * Si la tarjeta mezcla estaciones (platillos que se marcan al tocarlos y otros «por pedido»):
+     * entonces el texto que lo explica va debajo de cada platillo «por pedido», no al pie, para que
+     * se sepa cuáles no se marcan al tocarlos.
+     */
+    fun mixesTracking(card: OrderCard): Boolean =
+        hasByOrderDishes(card) && card.dishes.any { !it.byOrder && it.state == DishState.PENDING }
+
     /** Cuántas tarjetas quedan fuera de la vista: las que no se ven, ni siquiera en parte. */
     fun hiddenCount(total: Int, visible: Int): Int = (total - visible).coerceAtLeast(0)
 

@@ -267,14 +267,25 @@ class OrdersScreenTest {
 
     @Test
     fun losDosTamanosDeLetraPorLosDosTemas() {
+        val heights = mutableMapOf<TextSize, Int>()
         for (theme in DisplayTheme.entries) {
             for (size in TextSize.entries) {
                 val settings = DisplaySettings.DEFAULT.copy(theme = theme, textSize = size)
                 host.show(board = Fixtures.board(Fixtures.mixed(), settings = settings))
                 compose.onNodeWithText("3 × Tacos al pastor").assertIsDisplayed()
+                heights[size] =
+                    compose
+                        .onNodeWithText("3 × Tacos al pastor", useUnmergedTree = true)
+                        .fetchSemanticsNode()
+                        .size
+                        .height
                 screenshot("c8-${theme.name.lowercase()}-${size.name.lowercase()}")
             }
         }
+        // La letra grande agranda parejo (×1.25), también los nombres de los platillos.
+        val normal = heights.getValue(TextSize.NORMAL)
+        val large = heights.getValue(TextSize.LARGE)
+        assertTrue("alto del platillo: $normal → $large", large >= normal * 1.2)
         // Sin pedidos y conectando también respetan el tema claro.
         host.show(
             board =

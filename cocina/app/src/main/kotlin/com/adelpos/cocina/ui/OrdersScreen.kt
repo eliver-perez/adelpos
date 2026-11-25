@@ -16,8 +16,8 @@ import androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridS
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.Typography
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
@@ -25,14 +25,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.isSpecified
 import com.adelpos.cocina.R
 import com.adelpos.cocina.board.BoardActions
 import com.adelpos.cocina.board.BoardRules
@@ -51,6 +51,37 @@ import kotlinx.coroutines.delay
 private const val LARGE_TEXT_SCALE = 1.25f
 
 /**
+ * La letra grande (ajuste de Go): cada estilo de [Typography] por [scale], tamaño y alto de línea,
+ * **parejo**. No se cambia `fontScale` de la densidad: Compose escala la letra grande de forma no
+ * lineal (como Android 14) y los nombres de los platillos crecían menos de un 10 %. El tamaño de
+ * letra del sistema se sigue aplicando encima.
+ */
+private fun Typography.scaled(scale: Float): Typography =
+    copy(
+        displayLarge = displayLarge.scaled(scale),
+        displayMedium = displayMedium.scaled(scale),
+        displaySmall = displaySmall.scaled(scale),
+        headlineLarge = headlineLarge.scaled(scale),
+        headlineMedium = headlineMedium.scaled(scale),
+        headlineSmall = headlineSmall.scaled(scale),
+        titleLarge = titleLarge.scaled(scale),
+        titleMedium = titleMedium.scaled(scale),
+        titleSmall = titleSmall.scaled(scale),
+        bodyLarge = bodyLarge.scaled(scale),
+        bodyMedium = bodyMedium.scaled(scale),
+        bodySmall = bodySmall.scaled(scale),
+        labelLarge = labelLarge.scaled(scale),
+        labelMedium = labelMedium.scaled(scale),
+        labelSmall = labelSmall.scaled(scale),
+    )
+
+private fun TextStyle.scaled(scale: Float): TextStyle =
+    copy(
+        fontSize = if (fontSize.isSpecified) fontSize * scale else fontSize,
+        lineHeight = if (lineHeight.isSpecified) lineHeight * scale else lineHeight,
+    )
+
+/**
  * La pantalla de pedidos de la cocina (§4 de la etapa K1): las tarjetas en columnas, del pedido más
  * antiguo al más nuevo, con su tiempo de espera en vivo; o lo que dice Go en su lugar (conectando,
  * sin cupo, cupo liberado, sin licencia activada). Arriba, los avisos de la licencia y de la hora.
@@ -63,14 +94,17 @@ fun OrdersScreen(
     clock: () -> Long,
     modifier: Modifier = Modifier,
 ) {
-    val density = LocalDensity.current
+    val typography = MaterialTheme.typography
+    val large = state.settings.textSize == TextSize.LARGE
     val scaled =
-        if (state.settings.textSize == TextSize.LARGE) {
-            Density(density.density, density.fontScale * LARGE_TEXT_SCALE)
-        } else {
-            density
+        remember(typography, large) {
+            if (large) typography.scaled(LARGE_TEXT_SCALE) else typography
         }
-    CompositionLocalProvider(LocalDensity provides scaled) {
+    MaterialTheme(
+        colorScheme = MaterialTheme.colorScheme,
+        shapes = MaterialTheme.shapes,
+        typography = scaled,
+    ) {
         Box(modifier = modifier.fillMaxSize().testTag(TAG_ORDERS)) {
             when (val screen = state.screen) {
                 BoardScreen.Connecting ->
@@ -132,42 +166,41 @@ private fun Board(state: BoardState, actions: BoardActions, clock: () -> Long) {
         val gridState = rememberLazyStaggeredGridState()
         val visible by remember { derivedStateOf { gridState.layoutInfo.visibleItemsInfo.size } }
         val hidden = BoardRules.hiddenCount(cards.size, visible)
-        Box(modifier = Modifier.fillMaxSize()) {
-            LazyVerticalStaggeredGrid(
-                columns = StaggeredGridCells.Adaptive(CARD_MIN_WIDTH),
-                state = gridState,
-                modifier = Modifier.fillMaxSize().testTag(TAG_ORDERS_GRID),
-                contentPadding = PaddingValues(AdelDimens.ScreenPadding),
-                horizontalArrangement = Arrangement.spacedBy(AdelDimens.Gap),
-                verticalItemSpacing = AdelDimens.Gap,
-            ) {
-                items(cards, key = { it.id }) { card ->
-                    OrderCardView(
-                        card = card,
-                        settings = state.settings,
-                        waitSeconds = BoardRules.waitSeconds(card, board.readAtMonotonic, now),
-                        markingDishes = state.markingDishes,
-                        markingAllowed = state.markingAllowed,
-                        timezone = board.timezone,
-                        onDish = { dishId -> actions.markDish(card.id, dishId) },
-                        onOrder = { actions.markOrder(card.id) },
-                    )
-                }
-            }
-            if (hidden > 0) {
-                Text(
-                    text = pluralStringResource(R.plurals.orders_hidden, hidden, hidden),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = AdelTheme.colors.onAccent,
-                    modifier =
-                        Modifier.align(Alignment.BottomCenter)
-                            .padding(AdelDimens.ScreenPadding)
-                            .background(AdelTheme.colors.blue, RoundedCornerShape(24.dp))
-                            .padding(horizontal = 20.dp, vertical = 10.dp)
-                            .testTag(TAG_ORDERS_HIDDEN),
+        // El indicador va debajo de las columnas, nunca encima de una tarjeta (taparía su botón).
+        LazyVerticalStaggeredGrid(
+            columns = StaggeredGridCells.Adaptive(CARD_MIN_WIDTH),
+            state = gridState,
+            modifier = Modifier.weight(1f).fillMaxWidth().testTag(TAG_ORDERS_GRID),
+            contentPadding = PaddingValues(AdelDimens.ScreenPadding),
+            horizontalArrangement = Arrangement.spacedBy(AdelDimens.Gap),
+            verticalItemSpacing = AdelDimens.Gap,
+        ) {
+            items(cards, key = { it.id }) { card ->
+                OrderCardView(
+                    card = card,
+                    settings = state.settings,
+                    waitSeconds = BoardRules.waitSeconds(card, board.readAtMonotonic, now),
+                    markingDishes = state.markingDishes,
+                    markingAllowed = state.markingAllowed,
+                    timezone = board.timezone,
+                    onDish = { dishId -> actions.markDish(card.id, dishId) },
+                    onOrder = { actions.markOrder(card.id) },
                 )
             }
+        }
+        if (hidden > 0) {
+            Text(
+                text = pluralStringResource(R.plurals.orders_hidden, hidden, hidden),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = AdelTheme.colors.onAccent,
+                modifier =
+                    Modifier.align(Alignment.CenterHorizontally)
+                        .padding(bottom = AdelDimens.ScreenPadding)
+                        .background(AdelTheme.colors.blue, RoundedCornerShape(24.dp))
+                        .padding(horizontal = 20.dp, vertical = 10.dp)
+                        .testTag(TAG_ORDERS_HIDDEN),
+            )
         }
     }
 }

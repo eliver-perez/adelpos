@@ -90,16 +90,18 @@ fun OrderCardView(
             Column(
                 modifier = Modifier.padding(vertical = 4.dp),
             ) {
+                val mixed = BoardRules.mixesTracking(card)
                 for (dish in card.dishes) {
                     DishRow(
                         dish = dish,
                         marking = dish.id in markingDishes,
                         tappable = BoardRules.dishTappable(dish, markingAllowed),
+                        byOrderHint = mixed && dish.byOrder && dish.state == DishState.PENDING,
                         onClick = { onDish(dish.id) },
                     )
                 }
             }
-            if (BoardRules.hasByOrderDishes(card)) {
+            if (BoardRules.hasByOrderDishes(card) && !BoardRules.mixesTracking(card)) {
                 Text(
                     text = stringResource(R.string.card_by_order),
                     style = MaterialTheme.typography.bodyMedium,
@@ -198,7 +200,13 @@ private fun Header(
 }
 
 @Composable
-private fun DishRow(dish: Dish, marking: Boolean, tappable: Boolean, onClick: () -> Unit) {
+private fun DishRow(
+    dish: Dish,
+    marking: Boolean,
+    tappable: Boolean,
+    byOrderHint: Boolean,
+    onClick: () -> Unit,
+) {
     val colors = AdelTheme.colors
     val cancelled = dish.state == DishState.CANCELLED
     val ready = dish.state == DishState.READY || marking
@@ -287,6 +295,13 @@ private fun DishRow(dish: Dish, marking: Boolean, tappable: Boolean, onClick: ()
                 text = stringResource(R.string.dish_pending_change),
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.amber,
+            )
+        }
+        if (byOrderHint) {
+            Text(
+                text = stringResource(R.string.dish_by_order),
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.muted,
             )
         }
     }
