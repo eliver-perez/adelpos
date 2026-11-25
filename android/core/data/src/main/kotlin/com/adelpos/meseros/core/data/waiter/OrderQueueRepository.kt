@@ -1,8 +1,8 @@
 package com.adelpos.meseros.core.data.waiter
 
+import com.adelpos.core.model.access.UnsentOrder
 import com.adelpos.meseros.core.data.waiter.db.WaiterDao
 import com.adelpos.meseros.core.data.waiter.db.WaiterStorage
-import com.adelpos.meseros.core.domain.access.UnsentOrder
 import com.adelpos.meseros.core.domain.access.UnsentOrdersSource
 import com.adelpos.meseros.core.domain.access.WaiterWork
 import com.adelpos.meseros.core.domain.access.WaiterWorkGate

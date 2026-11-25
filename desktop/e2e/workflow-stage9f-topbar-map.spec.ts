@@ -385,7 +385,8 @@ test('barra compacta y leyenda del mapa (etapa 9F, fase D)', async ({
     (window as unknown as { __adelOffline: boolean }).__adelOffline = true;
   });
   const offline = page.locator('.app-topbar .server-status-offline');
-  await expect(offline).toHaveText('Sin conexión', { timeout: 15000 });
+  // Etapa K1 (K1-D10): «Sin conexión» solo tras 3 fallas seguidas durante 20 s, con la tolerancia de la A3.
+  await expect(offline).toHaveText('Sin conexión', { timeout: 35000 });
   await expect(offline).toHaveAttribute('title', /^Sin conexión: /);
   // El aviso de error no se cierra solo y queda sobre la barra: se cierra para comprobarla.
   await clearToasts(page);

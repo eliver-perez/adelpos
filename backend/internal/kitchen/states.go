@@ -2,6 +2,7 @@ package kitchen
 
 import (
 	"context"
+	"sort"
 
 	"github.com/jackc/pgx/v5"
 
@@ -89,39 +90,59 @@ func (handler *service) saveStates() (any, error) {
 	if len(tasks) == 0 {
 		return nil, invalid("No quedan unidades activas en ese alcance.")
 	}
+	if err := handler.advanceTasks(tasks, input.State); err != nil {
+		return nil, err
+	}
+	result := map[string]any{"updated": len(tasks), "state": input.State}
+	return result, handler.history("states.changed", nil, tasks, result)
+}
+
+// advanceTasks valida el lote completo y lo avanza a «En preparación» o «Listo» (etapa 9F; extraído en la etapa K1 para
+// que la pantalla de cocina Android avance con las mismas reglas, sin repetirlas): cada tarea en una estación visible,
+// sin una modificación pendiente, ni cancelada ni retrocediendo un «Listo». Después sube la revisión de sus
+// liberaciones, anota las cuentas cuya preparación cambió (el aviso de platillos listos se registra al publicarlas,
+// preparation.go) y publica kitchen.state.changed por estación. El historial lo escribe quien llama.
+func (handler *service) advanceTasks(tasks []Task, state string) error {
 	releases := map[string]bool{}
 	stations := map[string]bool{}
 	// Validar el lote completo antes de modificar la primera unidad.
 	for _, task := range tasks {
 		if err := handler.stationAccess(task.StationID); err != nil {
-			return nil, err
+			return err
 		}
 		var commercialState, currentVersion string
 		err := handler.tx.QueryRow(handler.ctx,
 			"SELECT state,version_id FROM app.restaurant_item_units WHERE id=$1", task.UnitID).
 			Scan(&commercialState, &currentVersion)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if currentVersion != task.VersionID {
-			return nil, invalid("La preparación tiene una modificación pendiente. Revisa y resuelve sus avisos antes de avanzar.")
+			return invalid("La preparación tiene una modificación pendiente. Revisa y resuelve sus avisos antes de avanzar.")
 		}
-		if commercialState != "active" || task.State == "cancelled" || (task.State == "ready" && input.State != "ready") {
-			return nil, invalid("No se puede retroceder ni preparar una unidad cancelada. Actualiza el pedido.")
+		if commercialState != "active" || task.State == "cancelled" || (task.State == "ready" && state != "ready") {
+			return invalid("No se puede retroceder ni preparar una unidad cancelada. Actualiza el pedido.")
 		}
 		releases[task.ReleaseID], stations[task.StationID] = true, true
 	}
 	for _, task := range tasks {
 		_, err := handler.tx.Exec(handler.ctx, `UPDATE app.kitchen_tasks SET state=$1,
             started_at=coalesce(started_at,now()),ready_at=CASE WHEN $1='ready' THEN coalesce(ready_at,now()) ELSE ready_at END,
-            revision=revision+1,updated_at=now() WHERE id=$2`, input.State, task.ID)
+            revision=revision+1,updated_at=now() WHERE id=$2`, state, task.ID)
 		if err != nil {
-			return nil, err
+			return err
 		}
 	}
-	for id := range releases {
+	return handler.taskStatesChanged(tasks, releases, stations)
+}
+
+// taskStatesChanged es lo que sigue a cambiar el estado de unas tareas (avanzar o, desde la etapa K1, recuperar en la
+// pantalla de cocina): sube la revisión de sus liberaciones, anota las cuentas cuya preparación cambió y publica
+// kitchen.state.changed por estación (en orden estable).
+func (handler *service) taskStatesChanged(tasks []Task, releases, stations map[string]bool) error {
+	for _, id := range sortedKeys(releases) {
 		if _, err := handler.tx.Exec(handler.ctx, "UPDATE app.kitchen_releases SET revision=revision+1 WHERE id=$1", id); err != nil {
-			return nil, err
+			return err
 		}
 	}
 	// Etapa A1 (A1-D11): el mesero de cada cuenta afectada se entera por el ámbito restaurant (preparation.go).
@@ -130,15 +151,25 @@ func (handler *service) saveStates() (any, error) {
 		units = append(units, task.UnitID)
 	}
 	if err := handler.notePreparationUnits(units); err != nil {
-		return nil, err
+		return err
 	}
-	for id := range stations {
-		if err := events.Append(handler.ctx, handler.tx, "kitchen.state.changed", "kitchen", nil, &id); err != nil {
-			return nil, err
+	for _, id := range sortedKeys(stations) {
+		station := id
+		if err := events.Append(handler.ctx, handler.tx, "kitchen.state.changed", "kitchen", nil, &station); err != nil {
+			return err
 		}
 	}
-	result := map[string]any{"updated": len(tasks), "state": input.State}
-	return result, handler.history("states.changed", nil, tasks, result)
+	return nil
+}
+
+// sortedKeys son las llaves de un conjunto en orden estable.
+func sortedKeys(set map[string]bool) []string {
+	keys := make([]string, 0, len(set))
+	for key := range set {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // HasAccountRecords indica si la cocina conserva registros de la cuenta: liberaciones (en cualquier

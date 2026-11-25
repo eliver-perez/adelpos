@@ -14,6 +14,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.adelpos.core.ui.theme.AdelTheme
 import com.adelpos.meseros.core.ui.components.ActiveWaiterMenu
 import com.adelpos.meseros.core.ui.components.PinPad
 import com.adelpos.meseros.core.ui.components.TAG_PIN_DELETE
@@ -22,7 +23,6 @@ import com.adelpos.meseros.core.ui.components.TAG_PIN_KEY_PREFIX
 import com.adelpos.meseros.core.ui.components.TAG_PIN_SUBMIT
 import com.adelpos.meseros.core.ui.components.TAG_WAITER_MENU
 import com.adelpos.meseros.core.ui.components.TAG_WAITER_SWITCH
-import com.adelpos.meseros.core.ui.theme.AdelTheme
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test

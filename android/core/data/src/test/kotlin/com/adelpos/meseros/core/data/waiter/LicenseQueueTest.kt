@@ -5,6 +5,7 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.work.ListenableWorker
 import androidx.work.testing.TestListenableWorkerBuilder
+import com.adelpos.core.model.error.LicenseMessages
 import com.adelpos.meseros.core.data.db.AppDatabase
 import com.adelpos.meseros.core.data.waiter.WaiterTestSupport.ANA
 import com.adelpos.meseros.core.data.waiter.WaiterTestSupport.BURGER
@@ -12,7 +13,6 @@ import com.adelpos.meseros.core.data.waiter.WaiterTestSupport.accepted
 import com.adelpos.meseros.core.data.waiter.WaiterTestSupport.error
 import com.adelpos.meseros.core.data.waiter.WaiterTestSupport.queuedOrder
 import com.adelpos.meseros.core.data.waiter.db.WaiterStorage
-import com.adelpos.meseros.core.domain.error.LicenseMessages
 import com.adelpos.meseros.core.domain.waiter.OrderState
 import com.adelpos.meseros.core.domain.waiter.PendingOrder
 import com.adelpos.meseros.core.domain.waiter.ReviewReason

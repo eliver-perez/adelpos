@@ -10,7 +10,7 @@
 #   ADELPOS_E2E_NETWORK_URL=https://127.0.0.1:8454 \
 #   ADELPOS_E2E_PROVISIONING_FILE=/ruta/al/provisioning-token \
 #   [ADELPOS_E2E_DATABASE_URL=postgresql://usuario:clave@127.0.0.1:55499/adel_pos_test_…] \
-#   scripts/android-e2e.sh [--suite access|catalog|waiter|field|takeaway|precheck|alerts|adjustments|license|connection|all] \
+#   scripts/android-e2e.sh [--suite access|catalog|waiter|field|takeaway|precheck|alerts|adjustments|license|connection|kitchen|endtoend|all] \
 #       [--steps "…"] \
 #       [--no-install] [--out <carpeta>]
 #
@@ -152,6 +152,26 @@
 # <salida>/<suite>.
 # La suite `connection` se corre aparte.
 #
+# Suite `kitchen` (etapa K1, KitchenOnGoTest de la APLICACIÓN DE COCINA, com.adelpos.cocina, con su CocinaTestRunner y el
+# mismo tipo NSD de pruebas; con un servidor temporal nuevo): k1 emparejar la tableta como pantalla de cocina con el
+# código (la prueba hace de computadora principal por la escucha local) · k2 conectar (`kitchen-display/connect`, el
+# cupo de cocina) y la pantalla de pedidos vacía, «No hay pedidos» · k3 pedidos reales creados en Go (mesa con un
+# modificador y una nota, para llevar, un agregado y una cancelación) que aparecen sin tocar nada · k4 marcar un
+# platillo, el cierre automático y el botón del pedido; Go lo registra y deja el aviso al mesero (`ready_notices`, en
+# la base temporal: con ADELPOS_E2E_DATABASE_URL; sin ella, ese paso queda omitido) · k5 «Recientes» y «Recuperar»
+# (el aviso del platillo recuperado se quita) · k6 el tamaño de letra y el tema de `PATCH devices/{id}` llegan al
+# momento · Fase D (§5): k7 cortes de 1 a 5 s del Go temporal (`kill -STOP`/`-CONT` solo a su PID, el que escucha en
+# los dos puertos de la prueba) sin ningún aviso · k8 una marca durante un corte de 18 s se repite sola y Go la registra
+# una vez · k9 un corte de 45 s muestra el aviso, no deja marcar y se recupera solo · k10 cortes de red de 1, 3 y 5 s
+# y uno de 35 s (modo avión en Android 11+; wifi y datos con root antes), con lo que tarda Android en volver a tener
+# red y el aviso solo cuando pasa del margen de 10 s (K1-D33) · k11 los ajustes con la contraseña del administrador ·
+# k13 «Volver a emparejar» suelta el cupo. Se corre aparte (no entra en `all`, que es de la aplicación de meseros).
+#
+# Suite `endtoend` (etapa K1, §8): la prueba de punta a punta con las dos aplicaciones en el mismo dispositivo y un
+# servidor temporal nuevo: m1 (meseros, AlertsOnGoTest r1) prepara el restaurante y entra Ana con su servicio de
+# avisos · c1 (cocina, k1) empareja la pantalla de cocina · m2 Ana envía a cocina desde la aplicación de meseros y
+# espera el aviso mientras el guion corre la pantalla de cocina (k12), que marca listo el pedido.
+#
 # Seguridad: se niega a correr con los puertos del servicio real (8181, 8443), con un host que no sea la propia Mac
 # o si `GET version` de alguna de las dos escuchas no responde `test_mode: true`; la base solo con las guardas de
 # arriba. Las pruebas usan el tipo NSD `_adelpostest._tcp` (AdelTestRunner): nunca buscan ni prueban el servidor real
@@ -159,7 +179,8 @@
 #
 # Aplicación: `com.adelpos.meseros` (A2-D5) con su paquete de pruebas `com.adelpos.meseros.test`. Antes de instalar
 # se desinstalan también los de la 0.1.0 (`local.adel.pos.android` y su `.test`): para Android son otra aplicación y
-# no deben quedar en el emulador junto a la nueva.
+# no deben quedar en el emulador junto a la nueva. La suite `kitchen` usa la aplicación de cocina (`com.adelpos.cocina`,
+# proyecto Gradle cocina/, etapa K1) con su paquete de pruebas `com.adelpos.cocina.test`.
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -196,7 +217,9 @@ suite_class() {
         adjustments) echo "AdjustmentsOnGoTest" ;;
         license) echo "LicenseOnGoTest" ;;
         connection) echo "ConnectionOnGoTest" ;;
-        *) fail "suite desconocida: $1 (access, catalog, waiter, field, takeaway, precheck, alerts, adjustments, license, connection o all)" ;;
+        kitchen) echo "KitchenOnGoTest" ;;
+        endtoend) echo "AlertsOnGoTest" ;;
+        *) fail "suite desconocida: $1 (access, catalog, waiter, field, takeaway, precheck, alerts, adjustments, license, connection, kitchen, endtoend o all)" ;;
     esac
 }
 
@@ -212,6 +235,8 @@ suite_steps() {
         adjustments) echo "a1 a2 a3 a4 a5 a6 a7" ;;
         license) echo "l1 l2 l3 l4 l5 l6 l7 l8" ;;
         connection) echo "c1" ;;
+        kitchen) echo "k1 k2 k3 k4 k5 k6 k7 k8 k9 k10 k11 k13" ;;
+        endtoend) echo "m1 c1 m2" ;;
     esac
 }
 
@@ -246,6 +271,26 @@ APP_ID="com.adelpos.meseros"
 TEST_PACKAGE="$APP_ID.test"
 TEST_RUNNER="$TEST_PACKAGE/$APP_ID.AdelTestRunner"
 LEGACY_APP_ID="local.adel.pos.android"
+# Proyecto Gradle de la aplicación que se instala (etapa K1: android para meseros, cocina para la de cocina).
+GRADLE_DIR="android"
+
+# Etapa K1: la suite `kitchen` es de la aplicación de cocina, con su ejecutor (el mismo tipo NSD de pruebas). No hay una
+# versión anterior de cocina que desinstalar.
+select_app() {
+    if [ "$1" = kitchen ]; then
+        APP_ID="com.adelpos.cocina"
+        TEST_PACKAGE="$APP_ID.test"
+        TEST_RUNNER="$TEST_PACKAGE/$APP_ID.CocinaTestRunner"
+        LEGACY_APP_ID=""
+        GRADLE_DIR="cocina"
+    else
+        APP_ID="com.adelpos.meseros"
+        TEST_PACKAGE="$APP_ID.test"
+        TEST_RUNNER="$TEST_PACKAGE/$APP_ID.AdelTestRunner"
+        LEGACY_APP_ID="local.adel.pos.android"
+        GRADLE_DIR="android"
+    fi
+}
 
 # Host y puerto de una URL «esquema://host:puerto»; solo la propia Mac y nunca los puertos del servicio real.
 check_url() {
@@ -472,13 +517,17 @@ install_app() {
     # Se desinstalan la aplicación y sus pruebas (una copia con otra firma haría fallar la instalación) y también
     # las de la 0.1.0, que para Android son otra aplicación.
     local package
-    for package in "$APP_ID" "$TEST_PACKAGE" "$LEGACY_APP_ID" "$LEGACY_APP_ID.test"; do
+    local packages=("$APP_ID" "$TEST_PACKAGE")
+    if [ -n "$LEGACY_APP_ID" ]; then
+        packages+=("$LEGACY_APP_ID" "$LEGACY_APP_ID.test")
+    fi
+    for package in "${packages[@]}"; do
         "$ADB" -s "$ANDROID_SERIAL" uninstall "$package" >/dev/null 2>&1 || true
     done
-    if [ ! -f "$PROJECT_ROOT/android/local.properties" ]; then
-        echo "sdk.dir=$ANDROID_HOME" >"$PROJECT_ROOT/android/local.properties"
+    if [ ! -f "$PROJECT_ROOT/$GRADLE_DIR/local.properties" ]; then
+        echo "sdk.dir=$ANDROID_HOME" >"$PROJECT_ROOT/$GRADLE_DIR/local.properties"
     fi
-    (cd "$PROJECT_ROOT/android" && ./gradlew --console=plain -q :app:installDebug :app:installDebugAndroidTest) \
+    (cd "$PROJECT_ROOT/$GRADLE_DIR" && ./gradlew --console=plain -q :app:installDebug :app:installDebugAndroidTest) \
         >"$SUITE_OUT/install.log" 2>&1 || {
         tail -20 "$SUITE_OUT/install.log" >&2
         fail "no se pudo instalar la aplicación ni sus pruebas"
@@ -1031,11 +1080,304 @@ connection_step() {
     esac
 }
 
+# Etapa K1: los avisos al mesero que deja marcar en la pantalla de cocina (app.ready_notices, los mismos de la A2).
+# Go no los da por su API a la principal: se cuentan en la base temporal, después de comprobar que es la de ESTE
+# servidor. Las cuentas son las que la prueba anotó en su registro (k4).
+ready_notices_of() {
+    test_sql "SELECT 1" >/dev/null
+    "$PSQL" "$ADELPOS_E2E_DATABASE_URL" -X -tAq -v ON_ERROR_STOP=1 \
+        -c "SELECT count(*) FROM app.ready_notices WHERE account_id = '$1'"
+}
+
+# k4: marcar en la pantalla deja el aviso de las dos cuentas; k5: recuperar el platillo quita el suyo.
+kitchen_notices() {
+    local step="$1" log="$SUITE_OUT/k4_marcarPlatilloCierreAutomaticoYPedido-logcat.txt"
+    local table takeaway counts="$SUITE_OUT/k4-avisos.txt" before now verdict
+    if ! database_allowed; then
+        skip_step "$step" "sin ADELPOS_E2E_DATABASE_URL: los avisos al mesero solo se ven en la base"
+        return
+    fi
+    table="$(logged_account "k4 mesa cuenta=" "$log")"
+    takeaway="$(logged_account "k4 llevar cuenta=" "$log")"
+    if [ -z "$table" ] || [ -z "$takeaway" ]; then
+        echo "$SUITE_NAME $step: FALLA (k4 no anotó sus cuentas)" | tee -a "$SUMMARY"
+        FAILED=1
+        return
+    fi
+    if [ "$step" = k4_avisosAlMesero ]; then
+        before="$(ready_notices_of "$table") $(ready_notices_of "$takeaway")"
+        echo "$before" >"$counts"
+        verdict="APROBADA"
+        case "$before" in 0\ * | *\ 0) verdict="FALLA" ;; esac
+        echo "$SUITE_NAME $step: $verdict (avisos en ready_notices: mesa ${before% *}, para llevar ${before#* })" |
+            tee -a "$SUMMARY"
+    else
+        before="$(cut -d' ' -f2 "$counts" 2>/dev/null)"
+        now="$(ready_notices_of "$takeaway")"
+        verdict="FALLA"
+        if [ -n "$before" ] && [ "$now" -lt "$before" ]; then
+            verdict="APROBADA"
+        fi
+        echo "$SUITE_NAME $step: $verdict (avisos del pedido para llevar: $before antes de recuperar, $now después)" |
+            tee -a "$SUMMARY"
+    fi
+    [ "$verdict" = APROBADA ] || FAILED=1
+}
+
+# Etapa K1, Fase D: el PID del Go temporal que se prueba, el que escucha **a la vez** en el puerto local y en el de red
+# (comprobado con lsof antes de cada pausa). Los puertos del servicio real (8181 y 8443) ya se rechazaron al empezar.
+kitchen_go_pid() {
+    local local_pid network_pid
+    local_pid="$(lsof -nP -iTCP:"$LOCAL_PORT" -sTCP:LISTEN -t 2>/dev/null | head -1)"
+    network_pid="$(lsof -nP -iTCP:"$NETWORK_PORT" -sTCP:LISTEN -t 2>/dev/null | head -1)"
+    if [ -z "$local_pid" ] || [ "$local_pid" != "$network_pid" ]; then
+        return 1
+    fi
+    echo "$local_pid"
+}
+
+# Espera la marca [1] en el registro de la prueba (AdelOnGo), como r4.
+kitchen_wait_log() {
+    local mark="$1" logcat="$2" deadline=$((SECONDS + 180))
+    while [ "$SECONDS" -lt "$deadline" ]; do
+        "$ADB" -s "$ANDROID_SERIAL" logcat -d -s AdelOnGo:V >"$logcat" 2>/dev/null || true
+        if grep -q "$mark" "$logcat"; then
+            return 0
+        fi
+        sleep 1
+    done
+    return 1
+}
+
+# Pausa el Go temporal [2] segundos (kill -STOP) y lo reanuda (kill -CONT). Quien llama deja un trap con -CONT.
+kitchen_pause_go() {
+    local pid="$1" seconds="$2" log="$3"
+    echo "$(date +%T) pausa de ${seconds} s del Go temporal (PID $pid)" >>"$log"
+    kill -STOP "$pid"
+    sleep "$seconds"
+    kill -CONT "$pid"
+    echo "$(date +%T) reanudado" >>"$log"
+}
+
+# Corta (off) o devuelve (on) la red del emulador: modo avión en Android 11+; antes, wifi y datos con root (tomado
+# antes del paso).
+kitchen_network() {
+    if [ "$SDK" -ge 30 ]; then
+        if [ "$1" = off ]; then
+            "$ADB" -s "$ANDROID_SERIAL" shell cmd connectivity airplane-mode enable
+        else
+            "$ADB" -s "$ANDROID_SERIAL" shell cmd connectivity airplane-mode disable
+        fi
+    else
+        # Al cortar, primero los datos y después la wifi (y al revés al devolverla): así Android pasa de una red a
+        # ninguna una sola vez, sin un momento con los datos del emulador.
+        if [ "$1" = off ]; then
+            "$ADB" -s "$ANDROID_SERIAL" shell svc data disable && "$ADB" -s "$ANDROID_SERIAL" shell svc wifi disable
+        else
+            "$ADB" -s "$ANDROID_SERIAL" shell svc wifi enable && "$ADB" -s "$ANDROID_SERIAL" shell svc data enable
+        fi
+    fi
+}
+
+# Espera a que Android tenga otra vez una red predeterminada (como mucho 90 s) y anota cuánto tardó.
+kitchen_wait_network() {
+    local log="$1" started=$SECONDS
+    while [ $((SECONDS - started)) -lt 90 ]; do
+        if ! "$ADB" -s "$ANDROID_SERIAL" shell dumpsys connectivity 2>/dev/null |
+            grep -m1 'Active default network' | grep -q 'none'; then
+            echo "$(date +%T) red de vuelta para Android $((SECONDS - started)) s después de devolverla" >>"$log"
+            return 0
+        fi
+        sleep 1
+    done
+    echo "$(date +%T) la red no volvió en 90 s" >>"$log"
+    return 1
+}
+
+# Los cortes de un paso, en segundo plano mientras corre la prueba; al terminar crea el archivo [2] que la prueba espera.
+kitchen_cuts() {
+    local step="$1" done_file="$2" log="$SUITE_OUT/$1-guion.txt" logcat="$SUITE_OUT/$1-logcat-vivo.txt" pid seconds
+    : >"$log"
+    if ! kitchen_wait_log "$step listo para" "$logcat"; then
+        echo "$step: la prueba no pidió los cortes" >>"$log"
+        return 1
+    fi
+    case "$step" in
+        k7 | k8 | k9)
+            if ! pid="$(kitchen_go_pid)"; then
+                echo "$step: no se encontró el Go temporal en $LOCAL_PORT y $NETWORK_PORT" >>"$log"
+                return 1
+            fi
+            # Pase lo que pase, el Go temporal sigue después de este guion.
+            trap 'kill -CONT '"$pid"' 2>/dev/null' EXIT
+            case "$step" in
+                k7)
+                    for seconds in 1 2 3 4 5; do
+                        kitchen_pause_go "$pid" "$seconds" "$log"
+                        sleep 5
+                    done
+                    ;;
+                k8)
+                    echo "$(date +%T) pausa de 18 s del Go temporal (PID $pid)" >>"$log"
+                    kill -STOP "$pid"
+                    "$ADB" -s "$ANDROID_SERIAL" shell touch /data/local/tmp/adelpos-k8-pausado
+                    sleep 18
+                    kill -CONT "$pid"
+                    echo "$(date +%T) reanudado" >>"$log"
+                    sleep 3
+                    ;;
+                k9) kitchen_pause_go "$pid" 45 "$log" ;;
+            esac
+            ;;
+        k10)
+            # Pase lo que pase, la red vuelve.
+            trap 'kitchen_network on >/dev/null 2>&1' EXIT
+            for seconds in 1 3 5; do
+                echo "$(date +%T) corte de red de ${seconds} s" >>"$log"
+                kitchen_network off >>"$log" 2>&1
+                sleep "$seconds"
+                kitchen_network on >>"$log" 2>&1
+                kitchen_wait_network "$log" || true
+                sleep 15
+            done
+            echo "$(date +%T) corte de red de 35 s" >>"$log"
+            kitchen_network off >>"$log" 2>&1
+            sleep 35
+            kitchen_network on >>"$log" 2>&1
+            kitchen_wait_network "$log" || true
+            sleep 20
+            ;;
+    esac
+    "$ADB" -s "$ANDROID_SERIAL" shell touch "$done_file"
+    echo "$(date +%T) fin de los cortes" >>"$log"
+}
+
+# Un paso con cortes: borra los archivos de la corrida anterior, corre los cortes en segundo plano y la prueba.
+kitchen_step_with_cuts() {
+    local step="$1" method="$2" done_file="$3" helper
+    "$ADB" -s "$ANDROID_SERIAL" shell rm -f "$done_file" /data/local/tmp/adelpos-k8-pausado >/dev/null 2>&1 || true
+    kitchen_cuts "$step" "$done_file" &
+    helper=$!
+    run_step "$method"
+    wait "$helper" || echo "$step: el guion no pudo hacer sus cortes ($SUITE_OUT/$step-guion.txt)" | tee -a "$SUMMARY"
+}
+
+# Etapa K1, la prueba de punta a punta (§8): las dos aplicaciones en el mismo dispositivo y el mismo Go temporal.
+# m1 (meseros, AlertsOnGoTest r1) prepara el restaurante, empareja y entra Ana con el servicio de avisos; c1 (cocina,
+# KitchenOnGoTest k1) empareja la pantalla de cocina; m2 (meseros, e1) Ana envía a cocina desde la aplicación y espera
+# el aviso mientras este guion corre, en segundo plano, la pantalla de cocina (k12) que lo marca listo.
+endtoend_use() {
+    select_app "$1"
+    TEST_CLASS="$2"
+}
+
+# k12 de la pantalla de cocina, en segundo plano mientras m2 espera el aviso: espera la cuenta que anota m2 y corre la
+# instrumentación de cocina con ella (sin limpiar el registro, que es de la otra prueba).
+endtoend_kitchen_marks() {
+    local log="$SUITE_OUT/k12_marcaListoElPedidoDelMesero.txt" logcat="$SUITE_OUT/k12-logcat-vivo.txt" account=""
+    local deadline=$((SECONDS + 300)) codes verdict
+    while [ -z "$account" ] && [ "$SECONDS" -lt "$deadline" ]; do
+        sleep 2
+        "$ADB" -s "$ANDROID_SERIAL" logcat -d -s AdelOnGo:V >"$logcat" 2>/dev/null || true
+        account="$(logged_account "e1 enviado a cocina cuenta=" "$logcat")"
+    done
+    if [ -z "$account" ]; then
+        echo "$SUITE_NAME k12_marcaListoElPedidoDelMesero: SIN RESULTADO (la aplicación de meseros no envió)" |
+            tee -a "$SUMMARY"
+        return 1
+    fi
+    "$ADB" -s "$ANDROID_SERIAL" shell am instrument -w -r \
+        -e class "com.adelpos.cocina.KitchenOnGoTest#k12_marcaListoElPedidoDelMesero" \
+        -e local "http://$DEVICE_HOST:$LOCAL_PORT" -e address "$DEVICE_HOST:$NETWORK_PORT" \
+        -e mainDevice "$MAIN_DEVICE" -e mainToken "$MAIN_TOKEN" -e account "$account" \
+        com.adelpos.cocina.test/com.adelpos.cocina.CocinaTestRunner >"$log" 2>&1 || true
+    codes="$(grep -E '^INSTRUMENTATION_STATUS_CODE: ' "$log" | awk '{print $2}' | tr -d '\r' | tr '\n' ' ' || true)"
+    case "$codes" in
+        *"-2"*) verdict="FALLA" ;;
+        *"-4"* | *"-3"*) verdict="OMITIDA" ;;
+        "1 0 ") verdict="APROBADA" ;;
+        *) verdict="SIN RESULTADO" ;;
+    esac
+    echo "$SUITE_NAME k12_marcaListoElPedidoDelMesero: $verdict (cuenta $account)" | tee -a "$SUMMARY"
+    [ "$verdict" = APROBADA ]
+}
+
+endtoend_step() {
+    local helper
+    case "$1" in
+        m1)
+            endtoend_use waiter AlertsOnGoTest
+            run_step r1_prepararEmparejarYEntrarArrancaElServicio -e readyAlerts on -e alertPermissions ask
+            ;;
+        c1)
+            endtoend_use kitchen KitchenOnGoTest
+            run_step k1_emparejarComoPantallaDeCocina -e restaurant existing
+            ;;
+        m2)
+            endtoend_use waiter AlertsOnGoTest
+            endtoend_kitchen_marks &
+            helper=$!
+            run_step e1_enviaACocinaYLlegaElAvisoDeLaPantallaDeCocina -e readyAlerts on
+            wait "$helper" || FAILED=1
+            ;;
+        *) fail "paso desconocido de la suite endtoend: $1" ;;
+    esac
+}
+
+# Etapa K1: la aplicación de cocina (KitchenOnGoTest). Las capturas de cada paso se copian a <salida>/screens.
+kitchen_step() {
+    case "$1" in
+        k1) run_step k1_emparejarComoPantallaDeCocina ;;
+        k2) run_step k2_conectarYPantallaDePedidosVacia ;;
+        k3) run_step k3_pedidosRealesAparecenSolos ;;
+        k4)
+            run_step k4_marcarPlatilloCierreAutomaticoYPedido
+            kitchen_notices k4_avisosAlMesero
+            ;;
+        k5)
+            run_step k5_recientesYRecuperar
+            kitchen_notices k5_avisosRecuperados
+            ;;
+        k6) run_step k6_letraYTemaDesdeTerminalesAlMomento ;;
+        k7) kitchen_step_with_cuts k7 k7_cortesCortosDelGoSinNingunAviso /data/local/tmp/adelpos-k7-fin ;;
+        k8)
+            kitchen_step_with_cuts k8 k8_unaMarcaDuranteUnCorteSeRepiteYGoLaRegistraUnaVez \
+                /data/local/tmp/adelpos-k8-fin
+            ;;
+        k9) kitchen_step_with_cuts k9 k9_corteLargoAvisaNoDejaMarcarYSeRecuperaSolo /data/local/tmp/adelpos-k9-fin ;;
+        k10)
+            # Android 8–10: la red se corta con root, que se toma antes de la prueba (reiniciar adbd la cortaría).
+            if [ "$SDK" -lt 30 ] && ! take_root; then
+                echo "$SUITE_NAME k10_cortesDeRedCortosSinAvisoYUnoLargoConAviso: FALLA (sin root no se corta la red)" |
+                    tee -a "$SUMMARY"
+                FAILED=1
+            else
+                kitchen_step_with_cuts k10 k10_cortesDeRedCortosSinAvisoYUnoLargoConAviso \
+                    /data/local/tmp/adelpos-k10-fin
+                kitchen_network on >/dev/null 2>&1 || true
+                kitchen_wait_network "$SUITE_OUT/k10-guion.txt" || true
+                if [ "$SDK" -lt 30 ]; then
+                    "$ADB" -s "$ANDROID_SERIAL" unroot >/dev/null 2>&1 || true
+                    "$ADB" -s "$ANDROID_SERIAL" wait-for-device
+                fi
+                grep -h 'k10 sin red' "$SUITE_OUT"/k10_*-logcat.txt 2>/dev/null | tail -1 | tee -a "$SUMMARY" || true
+            fi
+            ;;
+        k11) run_step k11_ajustesConLaContrasenaDelAdministrador ;;
+        k13) run_step k13_volverAEmparejarSueltaElCupo ;;
+        *) fail "paso desconocido de la suite kitchen: $1" ;;
+    esac
+    mkdir -p "$SUITE_OUT/screens"
+    "$ADB" -s "$ANDROID_SERIAL" pull "/sdcard/Android/data/$APP_ID/files/screens/." \
+        "$SUITE_OUT/screens" >/dev/null 2>&1 || echo "sin capturas que copiar" | tee -a "$SUMMARY"
+}
+
 # Corre los pasos [steps] de [suite] contra el servidor ya preparado.
 run_suite() {
     local suite="$1" steps="$2" install="$3"
     SUITE_NAME="$suite"
     TEST_CLASS="$(suite_class "$suite")"
+    select_app "$suite"
     SUITE_OUT="$4"
     mkdir -p "$SUITE_OUT"
     {
@@ -1045,6 +1387,12 @@ run_suite() {
     } | tee -a "$SUMMARY"
     (umask 077 && printf '%s' "$MAIN_TOKEN" >"$SUITE_OUT/main-token")
     if [ "$install" = 1 ]; then
+        if [ "$suite" = endtoend ]; then
+            # Las dos aplicaciones en el mismo dispositivo.
+            select_app kitchen
+            install_app
+            select_app "$suite"
+        fi
         install_app
     fi
     local step
@@ -1060,6 +1408,8 @@ run_suite() {
             adjustments) adjustments_step "$step" ;;
             license) license_step "$step" ;;
             connection) connection_step "$step" ;;
+            kitchen) kitchen_step "$step" ;;
+            endtoend) endtoend_step "$step" ;;
         esac
     done
 }

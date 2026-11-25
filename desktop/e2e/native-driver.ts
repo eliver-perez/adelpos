@@ -568,7 +568,17 @@ export async function installDriver(page: Page, options: DriverOptions = {}) {
     backupFolderChoices.push(choice);
   }
   async function request(method: string, route: string, body?: unknown) {
+    // Como Rust (main.rs y api.rs): 12 s de plazo, más en los reportes, el mantenimiento y la licencia; sin respuesta, la
+    // operación falla como sin conexión.
+    const seconds = route.startsWith('reports/')
+      ? 45
+      : route.startsWith('maintenance/')
+        ? 130
+        : route.startsWith('license/')
+          ? 80
+          : 12;
     const response = await fetch(`${serverURL}/api/v1/${route}`, {
+      signal: AbortSignal.timeout(seconds * 1000),
       method,
       headers: {
         ...clientHeaders,
@@ -731,6 +741,11 @@ export async function installDriver(page: Page, options: DriverOptions = {}) {
     await prepareCatalog();
   }
 
+  // Canal de eventos con las mismas reglas que Rust (src-tauri/src/realtime.rs, etapa K1, K1-D10): el fin normal de un
+  // canal que respondió 200 (Go lo renueva cada 30 s) se vuelve a abrir al momento desde el mismo cursor, sin mensajes;
+  // solo una falla real (sin respuesta en 10 s, cuerpo cortado, canal mudo 10 s, un 5xx, «interrupted» de Go o un fin en
+  // menos de 5 s) manda «reconnecting» y espera (0,5 a 15 s); «connected», al abrir por primera vez y después de cada
+  // falla; 401 y 403, «unauthorized».
   async function streamEvents(
     identifier: number,
     callbackID: number,
@@ -739,6 +754,8 @@ export async function installDriver(page: Page, options: DriverOptions = {}) {
   ) {
     let cursor = after;
     let index = 0;
+    let announced = false;
+    let delay = 500;
     const deliver = async (message: unknown) => {
       if (controller.signal.aborted || page.isClosed()) return;
       await page.evaluate(
@@ -751,43 +768,85 @@ export async function installDriver(page: Page, options: DriverOptions = {}) {
         { callbackID, index: index++, message },
       );
     };
+    const stalled = Symbol('stalled');
     try {
       while (!controller.signal.aborted && !page.isClosed()) {
-        const response = await fetch(`${serverURL}/api/v1/events?after=${cursor}`, {
-          headers: {
-            ...clientHeaders,
-            'X-Device-ID': deviceID,
-            'X-Device-Token': deviceToken,
-            Authorization: `Bearer ${sessionToken}`,
-          },
-          signal: controller.signal,
-        });
-        if (!response.ok) {
-          await deliver({ connection: 'unauthorized', status: response.status });
-          break;
-        }
-        await deliver({ connection: 'connected' });
-        const reader = response.body?.getReader();
-        if (!reader) break;
-        const decoder = new TextDecoder();
-        let buffer = '';
-        while (!controller.signal.aborted) {
-          const part = await reader.read();
-          if (part.done) break;
-          buffer += decoder.decode(part.value, { stream: true });
-          let end = buffer.indexOf('\n\n');
-          while (end >= 0) {
-            const frame = buffer.slice(0, end);
-            buffer = buffer.slice(end + 2);
-            const data = frame.split('\n').find((line) => line.startsWith('data: '));
-            if (data) {
-              const message = JSON.parse(data.slice(6)) as { cursor?: number };
-              if (message.cursor !== undefined) cursor = message.cursor;
-              await deliver(message);
+        let outcome: 'renewed' | 'failed' | 'stop' = 'failed';
+        const attempt = new AbortController();
+        const stop = () => attempt.abort();
+        controller.signal.addEventListener('abort', stop);
+        try {
+          const headTimer = setTimeout(() => attempt.abort(), 10000);
+          const response = await fetch(`${serverURL}/api/v1/events?after=${cursor}`, {
+            headers: {
+              ...clientHeaders,
+              'X-Device-ID': deviceID,
+              'X-Device-Token': deviceToken,
+              Authorization: `Bearer ${sessionToken}`,
+            },
+            signal: attempt.signal,
+          });
+          clearTimeout(headTimer);
+          if (response.status === 401 || response.status === 403) {
+            await deliver({ connection: 'unauthorized', status: response.status });
+            outcome = 'stop';
+          } else if (response.ok && response.body) {
+            if (!announced) {
+              announced = true;
+              await deliver({ connection: 'connected' });
             }
-            end = buffer.indexOf('\n\n');
+            delay = 500;
+            const started = Date.now();
+            let interrupted = false;
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            for (;;) {
+              let timer: ReturnType<typeof setTimeout> | undefined;
+              const part = await Promise.race([
+                reader.read(),
+                new Promise<typeof stalled>((resolve) => {
+                  timer = setTimeout(() => resolve(stalled), 10000);
+                }),
+              ]);
+              clearTimeout(timer);
+              if (part === stalled) {
+                attempt.abort();
+                outcome = 'failed';
+                break;
+              }
+              if (part.done) {
+                outcome = interrupted || Date.now() - started < 5000 ? 'failed' : 'renewed';
+                break;
+              }
+              buffer += decoder.decode(part.value, { stream: true });
+              let end = buffer.indexOf('\n\n');
+              while (end >= 0) {
+                const frame = buffer.slice(0, end);
+                buffer = buffer.slice(end + 2);
+                const data = frame.split('\n').find((line) => line.startsWith('data: '));
+                if (data) {
+                  const message = JSON.parse(data.slice(6)) as { cursor?: number; error?: string };
+                  if (message.cursor !== undefined) cursor = message.cursor;
+                  if (message.error !== undefined) interrupted = true;
+                  await deliver(message);
+                }
+                end = buffer.indexOf('\n\n');
+              }
+            }
           }
+        } catch {
+          // Sin respuesta, cuerpo cortado o una vista que se cierra (entonces el bucle termina abajo).
+          outcome = 'failed';
+        } finally {
+          controller.signal.removeEventListener('abort', stop);
         }
+        if (outcome === 'stop' || controller.signal.aborted || page.isClosed()) break;
+        if (outcome === 'renewed') continue;
+        announced = false;
+        await deliver({ connection: 'reconnecting' });
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        delay = Math.min(delay * 2, 15000);
       }
     } catch {
       // Cerrar una vista o terminar la prueba cancela la conexión, igual que Rust.

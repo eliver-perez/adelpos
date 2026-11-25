@@ -18,6 +18,14 @@ android/**/build/
 android/.gradle/
 android/.kotlin/
 android/core/data/schemas/
+# Etapa K1 (K1-D20): lo mismo para el código compartido y la aplicación de cocina (los esquemas de Room de su base).
+android-core/**/build/
+android-core/.gradle/
+android-core/.kotlin/
+cocina/**/build/
+cocina/.gradle/
+cocina/.kotlin/
+cocina/app/schemas/
 # Etapa L1 (licencias): copias exactas, de solo lectura, de contracts/v1/, del contrato V1.0 y de la guía de
 # integración de la etiqueta v1.0.0 del servidor de licencias. Nunca se formatean: contracts/licencias/ORIGEN.md
 # guarda su SHA-256. ORIGEN.md y los demás documentos de docs/licencias/ sí siguen con Prettier.

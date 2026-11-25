@@ -1,7 +1,7 @@
 # Paso a producción de las licencias
 
 Qué falta para que AD-EL POS salga en su versión del restaurante, con licencias reales. La etapa L1 solo trabajó con el
-entorno `test` del servidor de licencias: **la versión 0.15.0 es de desarrollo** (§1.2 de la
+entorno `test` del servidor de licencias: **la versión 0.15.0 es de desarrollo**, y también la 0.16.0 de la etapa K1 (§1.2 de la
 [especificación](../etapas/ETAPA_L1_LICENCIAS_v2.md) y L1-D18 del [avance](../ETAPA_L1_AVANCE.md)). Cómo está hecha la
 integración: [INTEGRACION.md](INTEGRACION.md).
 
@@ -84,7 +84,7 @@ Solo cuando las computadoras de producción tengan instalada la versión que con
 
 ## Qué pasa con una instalación de desarrollo
 
-Una computadora con la 0.15.0 de desarrollo (como la Mac de pruebas del propietario) que reciba una versión de
+Una computadora con una versión de desarrollo, la 0.15.0 o la 0.16.0 (como la Mac de pruebas del propietario), que reciba una versión de
 producción:
 
 - **La licencia `test` deja de valer**: su `kid` no es de confianza en producción, así que se ignora y la instalación

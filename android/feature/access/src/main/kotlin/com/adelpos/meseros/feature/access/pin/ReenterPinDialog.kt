@@ -24,20 +24,20 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.adelpos.core.ui.access.findserver.ProblemNotice
+import com.adelpos.core.ui.components.LocalUserActivity
+import com.adelpos.core.ui.components.SecondaryButton
+import com.adelpos.core.ui.components.reportsUserActivity
+import com.adelpos.core.ui.icons.AdelIcons
+import com.adelpos.core.ui.theme.AdelDimens
 import com.adelpos.meseros.core.domain.access.ActiveWaiter
 import com.adelpos.meseros.core.domain.access.DeviceAccess
 import com.adelpos.meseros.core.ui.components.AdelPinPadDefaults
-import com.adelpos.meseros.core.ui.components.LocalUserActivity
 import com.adelpos.meseros.core.ui.components.PinPad
 import com.adelpos.meseros.core.ui.components.PinPadDots
-import com.adelpos.meseros.core.ui.components.SecondaryButton
 import com.adelpos.meseros.core.ui.components.WaiterBadge
-import com.adelpos.meseros.core.ui.components.reportsUserActivity
-import com.adelpos.meseros.core.ui.icons.AdelIcons
 import com.adelpos.meseros.core.ui.layout.currentHeightCompact
-import com.adelpos.meseros.core.ui.theme.AdelDimens
 import com.adelpos.meseros.feature.access.R
-import com.adelpos.meseros.feature.access.findserver.ProblemNotice
 
 /**
  * «Vuelve a escribir tu PIN» con su ViewModel (uno por mesero), sobre la pantalla del mesero activo

@@ -1,7 +1,7 @@
 package com.adelpos.meseros.core.data.access
 
-import com.adelpos.meseros.core.data.network.ServerLinkMonitor
-import com.adelpos.meseros.core.domain.connection.LinkState
+import com.adelpos.core.model.connection.LinkState
+import com.adelpos.core.network.connection.ServerLinkMonitor
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.emptyFlow

@@ -10,7 +10,7 @@ import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
-import com.adelpos.meseros.core.domain.connection.LinkState
+import com.adelpos.core.model.connection.LinkState
 import com.adelpos.meseros.core.domain.preferences.TablesView
 import com.adelpos.meseros.core.domain.waiter.AccountSummary
 import com.adelpos.meseros.core.domain.waiter.Capture

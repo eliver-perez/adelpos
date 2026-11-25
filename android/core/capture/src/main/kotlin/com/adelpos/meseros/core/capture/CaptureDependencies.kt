@@ -1,9 +1,9 @@
 package com.adelpos.meseros.core.capture
 
+import com.adelpos.core.model.connection.LinkState
 import com.adelpos.meseros.core.domain.access.ActiveWaiter
 import com.adelpos.meseros.core.domain.catalog.CatalogImages
 import com.adelpos.meseros.core.domain.catalog.CatalogSource
-import com.adelpos.meseros.core.domain.connection.LinkState
 import com.adelpos.meseros.core.domain.waiter.CaptureService
 import com.adelpos.meseros.core.domain.waiter.OrderQueueService
 import com.adelpos.meseros.core.domain.waiter.PrecheckService

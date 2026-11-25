@@ -126,10 +126,14 @@ func many[T any](ctx context.Context, tx pgx.Tx, query string, args ...any) ([]T
 	}
 	return result, rows.Err()
 }
+
+// history registra el cambio en el historial de cocina y en la auditoría. Desde la etapa K1 (Fase A) la pantalla de
+// cocina Android escribe sin usuario ni clave de operación (sus marcas son idempotentes por estado, K1-D4): entonces
+// actor_id y operation_id quedan vacíos y el historial la identifica por su dispositivo.
 func (handler *service) history(kind string, id *string, before, after any) error {
 	_, err := handler.tx.Exec(handler.ctx, `INSERT INTO app.kitchen_history
         (id,operation_id,actor_id,device_id,entity_id,kind,before_value,after_value)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, events.NewID(), handler.operationID,
+        VALUES ($1,NULLIF($2,'')::uuid,NULLIF($3,'')::uuid,NULLIF($4,'')::uuid,$5,$6,$7,$8)`, events.NewID(), handler.operationID,
 		handler.request.Actor.UserID, handler.request.Actor.DeviceID, id, kind, encoded(before), encoded(after))
 	if err != nil {
 		return err

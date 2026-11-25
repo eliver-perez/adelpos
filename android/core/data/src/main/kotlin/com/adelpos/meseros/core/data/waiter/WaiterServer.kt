@@ -1,10 +1,10 @@
 package com.adelpos.meseros.core.data.waiter
 
+import com.adelpos.core.model.error.AppError
+import com.adelpos.core.network.session.ServerTransport
 import com.adelpos.meseros.core.data.access.AccessRepository
-import com.adelpos.meseros.core.data.session.ServerTransport
 import com.adelpos.meseros.core.domain.access.ActiveWaiter
 import com.adelpos.meseros.core.domain.access.DeviceStatus
-import com.adelpos.meseros.core.domain.error.AppError
 import kotlinx.coroutines.flow.StateFlow
 import okhttp3.Headers
 

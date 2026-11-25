@@ -1,14 +1,14 @@
 package com.adelpos.meseros.core.data.catalog
 
-import com.adelpos.meseros.core.data.session.AuthorizedServer
-import com.adelpos.meseros.core.data.session.FixedServerAccess
-import com.adelpos.meseros.core.domain.connection.LinkState
-import com.adelpos.meseros.core.domain.realtime.AccessInterruption
-import com.adelpos.meseros.core.domain.realtime.RealtimeEvent
-import com.adelpos.meseros.core.domain.realtime.RealtimeFeed
-import com.adelpos.meseros.core.domain.realtime.RealtimeSignal
-import com.adelpos.meseros.core.domain.realtime.RealtimeState
-import com.adelpos.meseros.core.domain.realtime.RebuildReason
+import com.adelpos.core.model.connection.LinkState
+import com.adelpos.core.model.realtime.AccessInterruption
+import com.adelpos.core.model.realtime.RealtimeEvent
+import com.adelpos.core.model.realtime.RealtimeFeed
+import com.adelpos.core.model.realtime.RealtimeSignal
+import com.adelpos.core.model.realtime.RealtimeState
+import com.adelpos.core.model.realtime.RebuildReason
+import com.adelpos.core.network.session.AuthorizedServer
+import com.adelpos.core.network.session.FixedServerAccess
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow

@@ -1,12 +1,12 @@
 package com.adelpos.meseros.core.data.waiter
 
-import com.adelpos.meseros.core.data.api.ApiErrors
-import com.adelpos.meseros.core.data.api.ApiJson
-import com.adelpos.meseros.core.data.api.ApiOutcome
-import com.adelpos.meseros.core.data.api.RequestSent
-import com.adelpos.meseros.core.data.api.awaitResponse
+import com.adelpos.core.network.api.ApiErrors
+import com.adelpos.core.network.api.ApiJson
+import com.adelpos.core.network.api.ApiOutcome
+import com.adelpos.core.network.api.RequestSent
+import com.adelpos.core.network.api.awaitResponse
+import com.adelpos.core.network.session.ServerTransport
 import com.adelpos.meseros.core.data.catalog.CustomizationJson
-import com.adelpos.meseros.core.data.session.ServerTransport
 import java.io.IOException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers

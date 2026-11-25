@@ -1,12 +1,12 @@
 package com.adelpos.meseros.feature.takeaway
 
+import com.adelpos.core.model.connection.LinkState
 import com.adelpos.meseros.core.capture.CaptureDependencies
 import com.adelpos.meseros.core.domain.access.ActiveWaiter
 import com.adelpos.meseros.core.domain.access.WaiterProfile
 import com.adelpos.meseros.core.domain.catalog.CatalogSource
 import com.adelpos.meseros.core.domain.catalog.Customization
 import com.adelpos.meseros.core.domain.catalog.LineSelection
-import com.adelpos.meseros.core.domain.connection.LinkState
 import com.adelpos.meseros.core.domain.money.Money
 import com.adelpos.meseros.core.domain.waiter.AccountSummary
 import com.adelpos.meseros.core.domain.waiter.Capture

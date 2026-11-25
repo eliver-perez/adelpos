@@ -1,10 +1,10 @@
 package com.adelpos.meseros.core.data.waiter
 
-import com.adelpos.meseros.core.data.api.ApiErrors
-import com.adelpos.meseros.core.data.api.ApiJson
-import com.adelpos.meseros.core.data.api.ApiOutcome
-import com.adelpos.meseros.core.data.license.LicenseStatusRepository
-import com.adelpos.meseros.core.data.license.LicenseSummaryDto
+import com.adelpos.core.network.api.ApiErrors
+import com.adelpos.core.network.api.ApiJson
+import com.adelpos.core.network.api.ApiOutcome
+import com.adelpos.core.network.license.LicenseStatusRepository
+import com.adelpos.core.network.license.LicenseSummaryDto
 import com.adelpos.meseros.core.data.waiter.db.RestaurantSnapshotEntity
 import com.adelpos.meseros.core.data.waiter.db.WaiterDao
 import com.adelpos.meseros.core.domain.waiter.DeviceHome

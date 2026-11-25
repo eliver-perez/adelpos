@@ -68,6 +68,12 @@ var capabilities = []string{
 	// solicitud sin internet (.licreq), importar un .lic y crear una identidad nueva para una instalación copiada. El
 	// escritorio muestra la pantalla de la licencia solo con ella.
 	"license-v1",
+	// Etapa K1 (Fase A, servidor 0.16.0; K1-D3): la pantalla de cocina para Android: emparejar con device_kind kitchen y
+	// X-Client-Kind kitchen, las rutas kitchen-display/* con solo la credencial del dispositivo (conectar y ocupar el cupo
+	// de cocina, tarjetas de pedido con su cursor, marcar platillos y pedidos, recientes, recuperar, acuse de recepción
+	// y la contraseña del administrador para los ajustes), su canal de eventos filtrado por estación y la configuración
+	// de la pantalla en PATCH devices/{id} y PUT kitchen/timing. El escritorio muestra lo de las pantallas solo con ella.
+	"kitchen-display-v1",
 }
 
 type ErrorBody struct {

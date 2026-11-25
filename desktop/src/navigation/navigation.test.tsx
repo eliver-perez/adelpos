@@ -3,7 +3,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PendingOperationsProvider } from '../hooks/pendingOperations';
-import { realtimeLabels } from '../hooks/useRealtime';
 import { useCashShortcut } from '../pages/cash/CashShortcut';
 import { closingShift, currentWith, registersWith, shiftOf } from '../pages/cash/cashTestData';
 import type { Shift } from '../services/payments';
@@ -449,15 +448,16 @@ describe('barra compacta (etapa 9F)', () => {
 });
 
 describe('estado del servidor', () => {
-  it('se deriva de la consulta de la sesión y del canal de eventos', () => {
-    expect(serverState('', false, realtimeLabels.periodic)).toBe('online');
-    expect(serverState('', true, realtimeLabels.connected)).toBe('online');
-    expect(serverState('', true, realtimeLabels.periodic)).toBe('online');
-    expect(serverState('', true, realtimeLabels.reconnecting)).toBe('reconnecting');
-    expect(serverState('', true, realtimeLabels.interrupted)).toBe('reconnecting');
-    expect(serverState('', true, realtimeLabels.unavailable)).toBe('reconnecting');
-    expect(serverState('No se pudo conectar.', true, realtimeLabels.connected)).toBe('offline');
-    expect(serverState('No se pudo conectar.', false, realtimeLabels.periodic)).toBe('offline');
+  // Etapa K1 (Fase E, K1-D10): del estado único de conexión (navigation/serverLink.ts).
+  it('se deriva del estado único de conexión', () => {
+    const online = { offline: false, channelDown: false };
+    expect(serverState(online, false)).toBe('online');
+    expect(serverState(online, true)).toBe('online');
+    expect(serverState({ offline: false, channelDown: true }, true)).toBe('reconnecting');
+    // Sin events.read no hay canal: nunca «Reconectando».
+    expect(serverState({ offline: false, channelDown: true }, false)).toBe('online');
+    expect(serverState({ offline: true, channelDown: false }, true)).toBe('offline');
+    expect(serverState({ offline: true, channelDown: false }, false)).toBe('offline');
   });
 
   it('en línea es un punto con descripción; si no, el aviso queda visible', () => {

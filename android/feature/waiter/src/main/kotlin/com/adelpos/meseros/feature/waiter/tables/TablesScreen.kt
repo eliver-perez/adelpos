@@ -48,10 +48,15 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.adelpos.core.model.connection.LinkState
+import com.adelpos.core.ui.components.LocalUserActivity
+import com.adelpos.core.ui.components.PrimaryButton
+import com.adelpos.core.ui.components.SecondaryButton
+import com.adelpos.core.ui.components.reportsUserActivity
+import com.adelpos.core.ui.theme.AdelDimens
 import com.adelpos.meseros.core.capture.PrecheckPrintBar
 import com.adelpos.meseros.core.capture.PrecheckSection
 import com.adelpos.meseros.core.capture.R as CaptureR
-import com.adelpos.meseros.core.domain.connection.LinkState
 import com.adelpos.meseros.core.domain.preferences.TablesView
 import com.adelpos.meseros.core.domain.table.TableState
 import com.adelpos.meseros.core.domain.waiter.AccountSummary
@@ -70,15 +75,10 @@ import com.adelpos.meseros.core.domain.waiter.RestaurantStatus
 import com.adelpos.meseros.core.domain.waiter.RestaurantView
 import com.adelpos.meseros.core.domain.waiter.WaiterAction
 import com.adelpos.meseros.core.domain.waiter.WaiterPermissions
-import com.adelpos.meseros.core.ui.components.LocalUserActivity
-import com.adelpos.meseros.core.ui.components.PrimaryButton
-import com.adelpos.meseros.core.ui.components.SecondaryButton
 import com.adelpos.meseros.core.ui.components.TableStateBadge
-import com.adelpos.meseros.core.ui.components.reportsUserActivity
 import com.adelpos.meseros.core.ui.components.tableStateColors
 import com.adelpos.meseros.core.ui.layout.AdaptivePanes
 import com.adelpos.meseros.core.ui.layout.PaneLayout
-import com.adelpos.meseros.core.ui.theme.AdelDimens
 import com.adelpos.meseros.core.ui.waiter.ElapsedLabel
 import com.adelpos.meseros.core.ui.waiter.OrderStateBadge
 import com.adelpos.meseros.core.ui.waiter.PreparationBadge

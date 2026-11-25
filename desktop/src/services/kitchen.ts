@@ -139,6 +139,10 @@ export interface KitchenSettings {
   line_spacing: number;
   quantity_style: 'prefix' | 'multiplier';
   revision: number;
+  // Etapa K1 (Fase A): límites de color generales de las pantallas de cocina Android (minutos de espera para
+  // «atención» y «retraso»). Un servidor anterior no los informa.
+  display_warning_minutes?: number;
+  display_late_minutes?: number;
 }
 
 export interface KitchenRoute {

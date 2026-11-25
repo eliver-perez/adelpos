@@ -36,6 +36,11 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
 import androidx.test.runner.lifecycle.Stage
+import com.adelpos.core.testing.MainComputer
+import com.adelpos.core.testing.SystemDialogs
+import com.adelpos.core.ui.access.findserver.TAG_ADDRESS
+import com.adelpos.core.ui.access.findserver.TAG_FIND_SERVER
+import com.adelpos.core.ui.access.findserver.TAG_PAIRING_CODE
 import com.adelpos.meseros.core.capture.TAG_DRAFT_ROW_PREFIX
 import com.adelpos.meseros.core.capture.TAG_FOLLOW_MERGED
 import com.adelpos.meseros.core.capture.TAG_ORDER_PANEL
@@ -65,9 +70,6 @@ import com.adelpos.meseros.core.ui.layout.TAG_PANE_BACK
 import com.adelpos.meseros.core.ui.layout.TAG_PANE_OPEN_SECONDARY
 import com.adelpos.meseros.core.ui.waiter.TAG_PREPARATION_PREFIX
 import com.adelpos.meseros.feature.access.TAG_SWITCH_BLOCKED_OK
-import com.adelpos.meseros.feature.access.findserver.TAG_ADDRESS
-import com.adelpos.meseros.feature.access.findserver.TAG_FIND_SERVER
-import com.adelpos.meseros.feature.access.findserver.TAG_PAIRING_CODE
 import com.adelpos.meseros.feature.access.pin.TAG_ENTRY
 import com.adelpos.meseros.feature.access.pin.TAG_ENTRY_BACK
 import com.adelpos.meseros.feature.access.pin.TAG_ENTRY_OFFLINE

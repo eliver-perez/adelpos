@@ -1,10 +1,10 @@
 package com.adelpos.meseros.core.data.waiter
 
-import com.adelpos.meseros.core.data.session.ServerTransport
+import com.adelpos.core.model.error.AppError
+import com.adelpos.core.network.session.ServerTransport
 import com.adelpos.meseros.core.domain.access.ActiveWaiter
 import com.adelpos.meseros.core.domain.catalog.Customization
 import com.adelpos.meseros.core.domain.catalog.LineSelection
-import com.adelpos.meseros.core.domain.error.AppError
 import com.adelpos.meseros.core.domain.money.Money
 import com.adelpos.meseros.core.domain.waiter.Capture
 import com.adelpos.meseros.core.domain.waiter.DraftLine

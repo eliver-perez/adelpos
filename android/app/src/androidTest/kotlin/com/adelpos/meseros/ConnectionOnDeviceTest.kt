@@ -8,7 +8,7 @@ import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import com.adelpos.meseros.core.ui.components.TAG_CONNECTION_STATE
+import com.adelpos.core.ui.components.TAG_CONNECTION_STATE
 import org.junit.After
 import org.junit.Assume.assumeTrue
 import org.junit.Rule

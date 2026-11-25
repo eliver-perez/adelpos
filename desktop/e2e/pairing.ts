@@ -96,18 +96,19 @@ export class PairingRequestError extends Error {
 }
 
 // Pide el código: solicitud con el compromiso, número del servidor y revelación del número propio. Desde la etapa A1
-// también como teléfono o tableta de meseros (kind 'android', con la versión de su aplicación).
+// también como teléfono o tableta de meseros (kind 'android', con la versión de su aplicación) y desde la K1 como
+// pantalla de cocina (kind 'kitchen', la aplicación de cocina 0.1.0).
 export async function requestPairingCode(
   name: string,
   os = 'Windows',
-  kind: 'desktop' | 'android' = 'desktop',
+  kind: 'desktop' | 'android' | 'kitchen' = 'desktop',
 ): Promise<PairingSession> {
   const nonce = randomBytes(32);
   const created = await pairingCall('POST', 'pairing/requests', undefined, {
     name,
     device_kind: kind,
     os,
-    app_version: kind === 'android' ? '0.1.0' : '0.10.0',
+    app_version: kind === 'desktop' ? '0.10.0' : '0.1.0',
     commitment: createHash('sha256').update(nonce).digest('hex'),
   });
   if (created.status !== 200) {

@@ -91,8 +91,9 @@ func TestClientVersionCheck(t *testing.T) {
 	if status != 200 || version["min_client_version"] != metadata.MinClientVersion || version["openapi_path"] != "/api/v1/openapi.json" {
 		t.Fatalf("versión: %v", version)
 	}
+	// Etapa K1 (Fase A, K1-D3): escritorio, meseros y la pantalla de cocina.
 	kinds, _ := version["client_kinds"].([]any)
-	if len(kinds) != 2 {
+	if len(kinds) != 3 || kinds[0] != "desktop" || kinds[1] != "android" || kinds[2] != "kitchen" {
 		t.Fatalf("tipos de cliente: %v", version["client_kinds"])
 	}
 }
@@ -181,6 +182,9 @@ func TestClientMinimumVersionByKind(t *testing.T) {
 			{"desktop", "0.11.0", 404, ""},
 			{"desktop", "0.9.9", 426, "0.10.0"},
 			{"desktop", "0.1.0", 426, "0.10.0"},
+			// Etapa K1 (Fase A, K1-D3): la aplicación de cocina numera aparte, como la de meseros.
+			{"kitchen", "0.1.0", 404, ""},
+			{"kitchen", "0.0.9", 426, "0.1.0"},
 			{"", "0.1.0", 426, "0.10.0"},
 			{"", metadata.Version, 404, ""},
 		} {
@@ -227,6 +231,9 @@ func TestClientMinimumVersionByKind(t *testing.T) {
 	}
 	if !found["license-v1"] {
 		t.Fatalf("capacidades de la etapa L1: %v", capabilities)
+	}
+	if !found["kitchen-display-v1"] || minimums["kitchen"] != "0.1.0" {
+		t.Fatalf("capacidades de la etapa K1: %v %v", capabilities, minimums)
 	}
 }
 

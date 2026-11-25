@@ -1,5 +1,5 @@
 // Aplicación Android de meseros de AD-EL POS (etapas A1 y A2). Estructura, comandos y reglas:
-// android/CLAUDE.md.
+// android/CLAUDE.md. Desde la etapa K1 usa el código compartido de android-core/ (build incluido).
 pluginManagement {
     repositories {
         google {
@@ -28,9 +28,16 @@ dependencyResolutionManagement {
         }
         mavenCentral()
     }
+    // Etapa K1 (K1-D2): un solo catálogo de versiones para los tres proyectos Android, el de
+    // android-core.
+    versionCatalogs { create("libs") { from(files("../android-core/gradle/libs.versions.toml")) } }
 }
 
 rootProject.name = "adel-pos-android"
+
+// Etapa K1 (K1-D2): lo compartido con la aplicación de cocina. Los módulos piden
+// «com.adelpos.core:<módulo>» y Gradle los sustituye por los proyectos de android-core.
+includeBuild("../android-core")
 
 include(":app")
 

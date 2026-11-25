@@ -7,6 +7,7 @@ import (
 	"slices"
 
 	"github.com/jackc/pgx/v5"
+	"local/ad-el-pos/server/internal/kitchen"
 	"local/ad-el-pos/server/internal/licenseseats"
 )
 
@@ -204,6 +205,19 @@ func releaseDeviceSeat(ctx context.Context, tx pgx.Tx, principal Principal, devi
 	closed, err := tx.Exec(ctx, "UPDATE app.sessions SET revoked_at=now(),revoke_reason='seat_released' WHERE device_id=$1 AND revoked_at IS NULL", deviceID)
 	if err != nil {
 		return nil, err
+	}
+	// Etapa K1 (Fase A, K1-D6): una pantalla de cocina Android no tiene sesiones que cerrar. Queda en «cupo liberado»
+	// para que no lo vuelva a ocupar sola al conectarse (solo con «Usar esta pantalla» en ella), y se le avisa al
+	// momento. La fila y el evento van antes de 7820148311: con él tomado no se publica nada.
+	display, err := tx.Exec(ctx, `UPDATE app.devices SET kitchen_display_seat_released_at=now()
+        WHERE id=$1 AND kind='kitchen'`, deviceID)
+	if err != nil {
+		return nil, err
+	}
+	if display.RowsAffected() > 0 {
+		if err := kitchen.AppendDisplayConfigurationChanged(ctx, tx, &deviceID); err != nil {
+			return nil, err
+		}
 	}
 	if err := seats.ReleaseDevice(ctx, tx, deviceID); err != nil {
 		return nil, err

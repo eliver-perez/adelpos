@@ -10,8 +10,8 @@ import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.adelpos.core.model.error.AppResult
 import com.adelpos.meseros.core.capture.CaptureDependencies
-import com.adelpos.meseros.core.domain.error.AppResult
 import com.adelpos.meseros.core.domain.waiter.Capture
 import com.adelpos.meseros.core.domain.waiter.DiscardResult
 import com.adelpos.meseros.core.domain.waiter.OthersPending

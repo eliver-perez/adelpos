@@ -1,6 +1,7 @@
 // Entrada al dispositivo (fases B y C): búsqueda del servidor y emparejamiento, entrada con PIN,
 // cambio de mesero, bloqueo por inactividad, emparejar de nuevo, versiones y dispositivo retirado.
 // Solo usa las interfaces de core:domain (DeviceAccess, PairingFlow): la app conecta core:data.
+// Las pantallas de buscar el servidor, del código y de estado son de android-core:ui (etapa K1).
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.compose)

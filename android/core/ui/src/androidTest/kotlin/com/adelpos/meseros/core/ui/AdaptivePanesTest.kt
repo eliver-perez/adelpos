@@ -11,12 +11,12 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.adelpos.core.ui.theme.AdelTheme
 import com.adelpos.meseros.core.ui.layout.AdaptivePanes
 import com.adelpos.meseros.core.ui.layout.PaneLayout
 import com.adelpos.meseros.core.ui.layout.TAG_PANES_DOUBLE
 import com.adelpos.meseros.core.ui.layout.TAG_PANE_BACK
 import com.adelpos.meseros.core.ui.layout.TAG_PANE_OPEN_SECONDARY
-import com.adelpos.meseros.core.ui.theme.AdelTheme
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith

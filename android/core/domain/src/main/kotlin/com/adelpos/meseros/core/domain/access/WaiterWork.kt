@@ -1,5 +1,7 @@
 package com.adelpos.meseros.core.domain.access
 
+import com.adelpos.core.model.access.UnsentOrder
+
 /**
  * Trabajo de un mesero en este dispositivo que importa para bloquear, cambiar de mesero o cerrar
  * sesión (§0-B, §3.2 y §7; decisión del coordinador sobre el punto 1 de las fases C y B). La
@@ -56,16 +58,6 @@ fun interface WaiterWorkGate {
 object NoWaiterWork : WaiterWorkGate {
     override suspend fun workOf(userId: String): WaiterWork = WaiterWork.NONE
 }
-
-/**
- * Un pedido que no se envió y queda en la bitácora del dispositivo al retirarlo (§3.2). Solo texto
- * para mostrar: la mesa, lo capturado y quién lo capturó (nunca credenciales).
- */
-data class UnsentOrder(
-    val waiterName: String,
-    val description: String,
-    val capturedAtEpochMillis: Long,
-)
 
 /**
  * Pedidos sin enviar del dispositivo, para avisar antes de borrar todo al retirarlo o al

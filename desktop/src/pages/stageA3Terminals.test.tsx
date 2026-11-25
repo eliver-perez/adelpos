@@ -49,10 +49,11 @@ const desk: Device = {
   keyboard_mode: 'auto',
   home_screen: 'cash',
 };
+// Desde la etapa K1 el tipo kitchen es la tableta con la aplicación de cocina: tiene su propio editor (stageK1Terminals).
 const kitchenScreen: Device = {
   ...desk,
   id: '00000000-0000-4000-8000-0000000000b3',
-  name: 'Pantalla de cocina',
+  name: 'Tableta de cocina',
   kind: 'kitchen',
   home_screen: 'kitchen',
 };
@@ -189,18 +190,23 @@ describe('Terminales: cada tipo solo ve lo que le aplica (etapa A3, §5)', () =>
     expect(sent('update_device')[0]?.body).toHaveProperty('home_screen', 'tables');
   });
 
-  it('las terminales de escritorio y de cocina conservan las cuatro pantallas, la caja y el teclado', async () => {
+  it('las terminales de escritorio conservan las cuatro pantallas, la caja y el teclado; la pantalla de cocina no tiene ninguna', async () => {
     render(<DevicesPage can={() => true} />);
-    let homes = await edit('Caja de la barra');
+    const homes = await edit('Caja de la barra');
     expect(homeOptions(homes)).toEqual(['Mesas', 'Para llevar', 'Cocina', 'Caja']);
     expect(pressedHome(homes)).toBe('Caja');
     expect(screen.getByRole('combobox', { name: 'Caja física' })).toBeTruthy();
     expect(screen.getByRole('combobox', { name: 'Teclado virtual' })).toBeTruthy();
     expect(screen.getByText(/Con «Cocina» abre en Preparación/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Cerrar editor' }));
-    homes = await edit('Pantalla de cocina');
-    expect(homeOptions(homes)).toEqual(['Mesas', 'Para llevar', 'Cocina', 'Caja']);
-    expect(pressedHome(homes)).toBe('Cocina');
+    // Etapa K1: la tableta de cocina solo muestra y marca pedidos: sin pantalla inicial, caja ni teclado.
+    fireEvent.click(within(await row('Tableta de cocina')).getByRole('button', { name: 'Editar' }));
+    expect(
+      await screen.findByRole('group', { name: 'Tamaño de letra de la pantalla' }),
+    ).toBeTruthy();
+    expect(screen.queryByRole('group', { name: 'Pantalla inicial de la terminal' })).toBeNull();
+    expect(screen.queryByRole('combobox', { name: 'Caja física' })).toBeNull();
+    expect(screen.queryByRole('combobox', { name: 'Teclado virtual' })).toBeNull();
     expect(terminalHomeOptions(kitchenScreen)).toHaveLength(4);
     expect(terminalHomeOptions(tablet).map((option) => option.value)).toEqual([
       'tables',

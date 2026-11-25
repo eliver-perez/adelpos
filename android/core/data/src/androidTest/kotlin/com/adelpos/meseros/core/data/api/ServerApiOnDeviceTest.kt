@@ -2,9 +2,13 @@ package com.adelpos.meseros.core.data.api
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import com.adelpos.meseros.core.domain.error.AppError
-import com.adelpos.meseros.core.domain.error.AppResult
-import com.adelpos.meseros.core.domain.text.Hex
+import com.adelpos.core.model.error.AppError
+import com.adelpos.core.model.error.AppResult
+import com.adelpos.core.model.text.Hex
+import com.adelpos.core.network.api.ClientIdentity
+import com.adelpos.core.network.api.ClientKinds
+import com.adelpos.core.network.api.PinnedHttpClient
+import com.adelpos.core.network.api.ServerApi
 import kotlinx.coroutines.runBlocking
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.junit.Assert.assertEquals
@@ -38,7 +42,13 @@ class ServerApiOnDeviceTest {
         val pin = Hex.decode(argumentOrSkip("pin"))
         val network = argumentOrSkip("net").toHttpUrl()
         val api =
-            ServerApi(network, PinnedHttpClient.create(pin, ClientIdentity(version = "0.1.0")))
+            ServerApi(
+                network,
+                PinnedHttpClient.create(
+                    pin,
+                    ClientIdentity(version = "0.1.0", kind = ClientKinds.ANDROID),
+                ),
+            )
         val result = api.getVersion()
         assertTrue("Se esperaba la versión: $result", result is AppResult.Success)
         val version = (result as AppResult.Success).value
@@ -54,7 +64,13 @@ class ServerApiOnDeviceTest {
         val other = pin.copyOf()
         other[0] = (other[0].toInt() xor 0xff).toByte()
         val api =
-            ServerApi(network, PinnedHttpClient.create(other, ClientIdentity(version = "0.1.0")))
+            ServerApi(
+                network,
+                PinnedHttpClient.create(
+                    other,
+                    ClientIdentity(version = "0.1.0", kind = ClientKinds.ANDROID),
+                ),
+            )
         assertEquals(AppResult.Failure(AppError.ServerIdentityChanged), api.getVersion())
     }
 }

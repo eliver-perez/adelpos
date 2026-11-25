@@ -38,15 +38,18 @@ func (handler *service) read(parts []string) (any, error) {
 	case "routes":
 		return many[Route](handler.ctx, handler.tx, routeQuery+" ORDER BY r.id")
 	case "settings":
-		return handler.settings()
+		// Etapa K1 (Fase A): con los límites de color de las pantallas de cocina Android.
+		return handler.timingView()
 	case "access":
 		// Etapa 9F: por terminal, si muestra todas las estaciones o su selección, el aviso sonoro y su
 		// pantalla de inicio (para recordar que una terminal de cocina abre en Cocina). Desde la etapa A3 (§5.1:
 		// cada tipo solo ve lo que le aplica) sin los teléfonos y tabletas de meseros, que no tienen modo cocina.
+		// Desde la etapa K1 (Fase E) tampoco las pantallas de cocina Android: sus estaciones se eligen en Terminales (solo
+		// las que reciben en pantalla) y no tienen el aviso sonoro del modo Cocina ni pantalla de inicio.
 		return many[map[string]any](handler.ctx, handler.tx, `SELECT jsonb_build_object('device_id',d.id,'device_name',d.name,
             'home_screen',d.home_screen,'all_stations',d.kitchen_all_stations,'sound_alert',d.kitchen_sound_alert,
             'station_ids',coalesce((SELECT jsonb_agg(station_id ORDER BY station_id) FROM app.kitchen_device_stations a WHERE a.device_id=d.id),'[]'))
-            FROM app.devices d WHERE revoked_at IS NULL AND kind <> 'android' ORDER BY d.name`)
+            FROM app.devices d WHERE revoked_at IS NULL AND kind NOT IN ('android','kitchen') ORDER BY d.name`)
 	case "releases":
 		if err := handler.request.Actor.Require("kitchen.stations.all"); err != nil {
 			return nil, err
@@ -421,13 +424,30 @@ func (handler *service) ackTicket(id string) (any, error) {
 	if !found {
 		return nil, invalid("La comanda no tiene entrega KDS para esa estación.")
 	}
-	_, err = handler.tx.Exec(handler.ctx, `INSERT INTO app.kitchen_kds_receipts(ticket_id,station_id,device_id,user_id)
-        VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING`, id, input.StationID, handler.request.Actor.DeviceID, handler.request.Actor.UserID)
-	if err != nil {
-		return nil, err
-	}
-	if err := events.Append(handler.ctx, handler.tx, "kitchen.kds.received", "kitchen", &id, &input.StationID); err != nil {
+	if _, err := handler.recordReceipt(id, input.StationID, true); err != nil {
 		return nil, err
 	}
 	return map[string]bool{"acknowledged": true}, handler.history("kds.acknowledged", &id, nil, map[string]string{"station_id": input.StationID})
+}
+
+// recordReceipt guarda el acuse de recepción de la comanda en la estación (una vez por comanda, estación y dispositivo)
+// y publica kitchen.kds.received. Desde la etapa K1 (K1-D12) lo usa también la pantalla de cocina Android, sin usuario:
+// user_id queda vacío y la 0029 solo lo admite para un dispositivo kitchen. Dice si el acuse es nuevo. announceRepeat
+// publica el evento también si el acuse ya existía (como siempre en POST kitchen/tickets/{id}/ack); la pantalla no lo
+// repite, para que un reintento no despierte a las demás pantallas.
+func (handler *service) recordReceipt(ticketID, stationID string, announceRepeat bool) (bool, error) {
+	inserted, err := handler.tx.Exec(handler.ctx, `INSERT INTO app.kitchen_kds_receipts(ticket_id,station_id,device_id,user_id)
+        VALUES ($1,$2,$3,NULLIF($4,'')::uuid) ON CONFLICT DO NOTHING`, ticketID, stationID, handler.request.Actor.DeviceID,
+		handler.request.Actor.UserID)
+	if err != nil {
+		return false, err
+	}
+	created := inserted.RowsAffected() > 0
+	if !created && !announceRepeat {
+		return false, nil
+	}
+	if err := events.Append(handler.ctx, handler.tx, "kitchen.kds.received", "kitchen", &ticketID, &stationID); err != nil {
+		return false, err
+	}
+	return created, nil
 }

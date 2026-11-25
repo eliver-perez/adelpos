@@ -146,6 +146,8 @@ dependencies {
     implementation(libs.compose.ui.tooling.preview)
     debugImplementation(libs.compose.ui.tooling)
 
+    // Etapa K1: los ayudantes de las pruebas contra el Go temporal, compartidos con la de cocina.
+    androidTestImplementation("com.adelpos.core:testing")
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(platform(libs.compose.bom))

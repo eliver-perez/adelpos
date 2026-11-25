@@ -20,14 +20,19 @@ import (
 //     cerrarse la última sesión de la terminal la fila se borra (ReleaseClosedSessions, ReleaseDevice). Una actividad
 //     con fecha futura (capturada con el reloj adelantado) cuenta como actividad de ahora: aquí sigue en uso, y claim,
 //     Renew y SettleFutureActivity la bajan a «ahora» y la guardan, para que venza 15 minutos reales después (R2-2);
-//   - cocina: la sesión que entró a Preparación sigue vigente, con el reloj de las sesiones (R3-2).
+//   - cocina: la sesión que entró a Preparación sigue vigente, con el reloj de las sesiones (R3-2). Desde la etapa K1
+//     (Fase A, K1-D6) la pantalla de cocina Android no tiene sesión: su fila va sin session_id y cuenta mientras el
+//     dispositivo kitchen no esté revocado. Un corte de red no la libera; se borra al revocarla o con «Liberar cupo».
 func inUseCondition(alias, cutoff, sessionNow string) string {
 	return `CASE ` + alias + `.kind
         WHEN 'cash_register' THEN EXISTS (SELECT FROM app.cash_shifts shift
             WHERE shift.id = ` + alias + `.shift_id AND shift.state IN ('open', 'closing'))
         WHEN 'order_taker' THEN ` + alias + `.last_activity_at > ` + cutoff + `::timestamptz
-        WHEN 'kitchen_display' THEN EXISTS (SELECT FROM app.sessions session WHERE session.id = ` + alias + `.session_id
-            AND session.revoked_at IS NULL AND session.expires_at > ` + sessionNow + `::timestamptz)
+        WHEN 'kitchen_display' THEN CASE WHEN ` + alias + `.session_id IS NULL
+            THEN EXISTS (SELECT FROM app.devices display_device WHERE display_device.id = ` + alias + `.device_id
+                AND display_device.kind = 'kitchen' AND display_device.revoked_at IS NULL)
+            ELSE EXISTS (SELECT FROM app.sessions session WHERE session.id = ` + alias + `.session_id
+                AND session.revoked_at IS NULL AND session.expires_at > ` + sessionNow + `::timestamptz) END
         ELSE false
     END`
 }
@@ -255,6 +260,14 @@ func (manager *Manager) SetKitchenDisplay(ctx context.Context, tx pgx.Tx, device
 	}
 	_, err := tx.Exec(ctx, "DELETE FROM app.license_seats WHERE device_id = $1 AND kind = $2", deviceID, kindKitchenDisplay)
 	return err
+}
+
+// ConnectKitchenDisplay ocupa el cupo de cocina de una pantalla de cocina Android (etapa K1, Fase A, K1-D6) o lo
+// conserva si ya lo tiene, con el mismo claim y el mismo lock 7820148311 que el modo Cocina del escritorio (asignación
+// atómica), pero ligado al dispositivo y no a una sesión: la fila queda sin session_id. Sin cupo, *UnavailableError; sin
+// licencia válida, ErrNoValidLicense. Quien llama no publica eventos después (el lock ya está tomado).
+func (manager *Manager) ConnectKitchenDisplay(ctx context.Context, tx pgx.Tx, deviceID string) error {
+	return manager.claim(ctx, tx, deviceID, KitchenDisplays, "", "")
 }
 
 // closedSessionsCondition es la condición sobre la fila seat «comandero de una terminal a la que esta transacción le

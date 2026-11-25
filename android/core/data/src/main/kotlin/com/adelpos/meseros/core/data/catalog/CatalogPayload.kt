@@ -1,6 +1,6 @@
 package com.adelpos.meseros.core.data.catalog
 
-import com.adelpos.meseros.core.data.api.ApiJson
+import com.adelpos.core.network.api.ApiJson
 import com.adelpos.meseros.core.data.catalog.db.CatalogStateEntity
 import com.adelpos.meseros.core.data.catalog.db.CategoryEntity
 import com.adelpos.meseros.core.data.catalog.db.ComplementEntity

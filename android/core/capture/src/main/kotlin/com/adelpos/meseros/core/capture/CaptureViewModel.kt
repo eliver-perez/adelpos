@@ -10,14 +10,14 @@ import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.adelpos.core.model.error.AppError
+import com.adelpos.core.model.error.AppResult
+import com.adelpos.core.model.error.shownMessage
 import com.adelpos.meseros.core.domain.catalog.Catalog
 import com.adelpos.meseros.core.domain.catalog.CatalogProduct
 import com.adelpos.meseros.core.domain.catalog.CatalogQuery
 import com.adelpos.meseros.core.domain.catalog.Customization
 import com.adelpos.meseros.core.domain.catalog.LineSelection
-import com.adelpos.meseros.core.domain.error.AppError
-import com.adelpos.meseros.core.domain.error.AppResult
-import com.adelpos.meseros.core.domain.error.shownMessage
 import com.adelpos.meseros.core.domain.money.Money
 import com.adelpos.meseros.core.domain.waiter.AccountBill
 import com.adelpos.meseros.core.domain.waiter.Capture

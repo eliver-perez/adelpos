@@ -32,6 +32,8 @@ func TestForOperation(t *testing.T) {
 		{"POST", "payments/shifts/" + someID + "/closing/confirm", CloseShift},
 		// Cocina y Terminales.
 		{"POST", "kitchen/display-mode", KitchenDisplay},
+		// Etapa K1 (Fase A): la pantalla de cocina Android ocupa su cupo al conectarse.
+		{"POST", "kitchen-display/connect", KitchenDisplay},
 		{"POST", "devices/" + someID + "/seat/release", DeviceRelease},
 		// Cierres de sesión.
 		{"POST", "auth/logout", SessionEnd},
@@ -75,6 +77,8 @@ func TestForOperation(t *testing.T) {
 		{"GET", "kitchen/board", None},
 		{"POST", "kitchen/states", None},
 		{"GET", "kitchen/display-mode", None},
+		{"GET", "kitchen-display/orders", None},
+		{"POST", "kitchen-display/items/ready", None},
 		{"POST", "auth/login", None},
 		{"POST", "auth/pin-login", None},
 		{"GET", "auth/pin-users", None},

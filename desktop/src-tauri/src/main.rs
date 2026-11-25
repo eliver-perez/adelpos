@@ -212,8 +212,12 @@ fn client(
 }
 
 fn unpinned_client(config: &ConnectionConfig) -> Result<reqwest::Client, String> {
+    // Etapa K1 (Fase E, K1-D10): las conexiones libres se descartan a los 30 s, antes de que Go las cierre (IdleTimeout de
+    // 60 s): así una petición nunca reutiliza una conexión que el servidor ya cerró (lo que en la A3 producía avisos
+    // falsos en Android, con OkHttp).
     let mut builder = reqwest::Client::builder()
         .timeout(Duration::from_secs(12))
+        .pool_idle_timeout(Duration::from_secs(30))
         .redirect(reqwest::redirect::Policy::none())
         .no_proxy();
     if let Some(filename) = &config.ca_certificate {

@@ -355,7 +355,8 @@ test('Dos terminales a la vez: mesa y cuenta compartidas, conflicto sin sobrescr
   await productButton(pageB, 'Agua 9G-C').click();
   await expect(billB.getByRole('article', { name: '2 × Agua 9G-C' })).toBeVisible();
   const layer = pageB.getByRole('alertdialog', { name: 'Sin conexión con el servidor' });
-  await expect(layer).toBeVisible({ timeout: 15000 });
+  // Etapa K1 (K1-D10): «Sin conexión» solo tras 3 fallas seguidas durante 20 s, con la tolerancia de la A3.
+  await expect(layer).toBeVisible({ timeout: 35000 });
   await expect(layer).toContainText('se conserva en esta pantalla');
   await expect(layer).toContainText(/Se vuelve a intentar sola en \d+ s\.|Intentando conectar/);
   await expect(pageB.locator('main.admin-main')).toHaveAttribute('inert', '');

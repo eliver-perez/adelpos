@@ -35,12 +35,14 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.adelpos.meseros.core.domain.license.ClockNotice
-import com.adelpos.meseros.core.domain.license.GraceNotice
+import com.adelpos.core.model.license.ClockNotice
+import com.adelpos.core.model.license.GraceNotice
+import com.adelpos.core.ui.components.LocalUserActivity
+import com.adelpos.core.ui.components.reportsUserActivity
+import com.adelpos.core.ui.icons.AdelIcons
+import com.adelpos.core.ui.theme.AdelDimens
+import com.adelpos.core.ui.theme.AdelTheme
 import com.adelpos.meseros.core.ui.R
-import com.adelpos.meseros.core.ui.icons.AdelIcons
-import com.adelpos.meseros.core.ui.theme.AdelDimens
-import com.adelpos.meseros.core.ui.theme.AdelTheme
 
 /**
  * Etapa L1 (§6.2 de la especificación): el **aviso fijo** de la hora incorrecta de la computadora

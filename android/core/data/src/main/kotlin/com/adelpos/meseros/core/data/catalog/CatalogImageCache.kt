@@ -1,10 +1,10 @@
 package com.adelpos.meseros.core.data.catalog
 
+import com.adelpos.core.model.error.AppResult
+import com.adelpos.core.network.session.ServerAccess
 import com.adelpos.meseros.core.data.catalog.db.CatalogDao
 import com.adelpos.meseros.core.data.catalog.db.ImageFileEntity
-import com.adelpos.meseros.core.data.session.ServerAccess
 import com.adelpos.meseros.core.domain.catalog.CatalogImages
-import com.adelpos.meseros.core.domain.error.AppResult
 import java.io.File
 import java.io.IOException
 import java.security.MessageDigest

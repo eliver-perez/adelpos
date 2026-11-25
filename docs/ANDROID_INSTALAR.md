@@ -1,7 +1,7 @@
 # Teléfonos y tabletas de meseros
 
 Guía corta para usar la aplicación **AD-EL POS para Android** en los teléfonos y tabletas de los meseros (etapas A1 a
-A3 y L1). Con ella cada mesero:
+A3, L1 y K1). Con ella cada mesero:
 
 - Entra con **su nombre y su PIN** en un teléfono o una tableta que comparten varios meseros.
 - Ve las mesas y sus cuentas, captura los pedidos y los manda a cocina con **«Enviar a cocina»**.
@@ -16,7 +16,11 @@ La **computadora principal** sigue mandando en todo: precios, impuestos, permiso
 cada pedido. Los precios que muestra el teléfono son de referencia. **El teléfono o la tableta no cobra**: se cobra en
 la caja, como siempre.
 
-> **Versión de prueba.** Esta es la versión **0.4.0** de la aplicación. No viene de la tienda de Google (Play Store):
+**La pantalla de la cocina es otra aplicación**, «AD-EL POS Cocina», para una tableta en horizontal que muestra los
+pedidos de su estación y los marca como listos. Tiene su propia guía: [COCINA_INSTALAR.md](COCINA_INSTALAR.md). Las dos
+aplicaciones se pueden instalar en la misma tableta sin estorbarse.
+
+> **Versión de prueba.** Esta es la versión **0.4.1** de la aplicación. No viene de la tienda de Google (Play Store):
 > se instala con un archivo y está firmada con una llave de desarrollo, por eso Android avisa al instalarla. Todavía no
 > se ha probado en un teléfono ni en una tableta reales (solo en los emuladores de la Mac de pruebas).
 
@@ -24,7 +28,7 @@ la caja, como siempre.
 
 Sirve cualquier teléfono o tableta con **Android 8.0 o posterior**.
 
-1. **Pasa el archivo `AD-EL-POS-Android-0.4.0.apk`** al teléfono o la tableta, de la forma que te sea más fácil:
+1. **Pasa el archivo `AD-EL-POS-Android-0.4.1.apk`** al teléfono o la tableta, de la forma que te sea más fácil:
    - **Carpeta compartida** (por ejemplo, Google Drive): súbelo desde la computadora y ábrelo en el dispositivo.
    - **Correo**: envíalo como archivo adjunto y ábrelo desde el correo del dispositivo. Algunos correos (Gmail, por
      ejemplo) no dejan adjuntar archivos `.apk`; si te pasa, usa una carpeta compartida.
@@ -51,6 +55,15 @@ si Android dice que no puede instalarla porque choca con la que ya está, **no l
 pedidos sin enviar) y avisa a soporte. La 0.4.0 se instala así encima de la 0.3.0 (y la 0.3.0 encima de la 0.2.0).
 **De la 0.1.0 a una versión
 posterior es distinto**: no se instala encima (ver «Pasar de la 0.1.0 a la 0.2.0», al final de esta sección).
+
+**De la 0.4.0 a la 0.4.1.** La 0.4.1 se instala **encima** de la 0.4.0 con los mismos pasos y **no hay que volver a
+emparejar**: el dispositivo sigue autorizado, los meseros entran con su PIN de siempre y los pedidos que hayan quedado
+por enviar salen solos, una sola vez. Para el mesero, la aplicación se ve y funciona igual que la 0.4.0. Si hay pedidos
+por enviar, conviene instalarla con conexión.
+
+**Qué versión tiene cada dispositivo.** En la computadora principal, en **Administración › Sistema › Terminales**, la
+fila de cada teléfono o tableta dice su versión instalada (por ejemplo, «Android 14 · versión instalada 0.4.1»). Se
+actualiza sola la próxima vez que el dispositivo se conecta, así que sirve para ver cuáles faltan por actualizar.
 
 **Si desinstalas la aplicación** (o borras sus datos en los Ajustes de Android), el dispositivo olvida el
 emparejamiento y se pierden los pedidos que no se hayan enviado. Al volver a instalarla hay que emparejarlo de nuevo
@@ -86,7 +99,7 @@ En cada teléfono o tableta que tenga la 0.1.0, en este orden:
    (sección 8, «Si los avisos no llegan»). Si no das el de notificaciones, la explicación vuelve a salir cada vez que un
    mesero entra con conexión, hasta que lo des. La 0.1.0 no tenía avisos: no hay nada que pasar de una a otra.
 
-Si instalas directamente la 0.4.0 en lugar de la 0.2.0, los pasos son los mismos: donde dice 0.2.0, usa la 0.4.0.
+Si instalas directamente la 0.4.1 en lugar de la 0.2.0, los pasos son los mismos: donde dice 0.2.0, usa la 0.4.1.
 Si en un dispositivo nunca se instaló la 0.1.0, no hace falta nada de esto: instala la versión nueva directamente. Si
 por error quedaron las dos, la 0.1.0 es la que ya estaba emparejada (en **Ajustes › Aplicaciones › AD-EL POS** se ve la
 versión de cada una): envía lo pendiente desde ella y sigue desde el paso 2.
@@ -98,7 +111,7 @@ versión de cada una): envía lo pendiente desde ella y sigue desde el paso 2.
   versión anterior, el teléfono lo dice antes de pedir el código (y también si ya estaba emparejado):
   **«Actualiza el servidor del restaurante»**, con «Volver a comprobar» y «Elegir otra computadora principal». Lo que
   hay que actualizar es la computadora principal: soporte o el administrador instala la versión más reciente (hoy, la
-  0.15.0) con su instalador (pide la contraseña de administrador de la Mac). Cómo se instala la computadora principal:
+  0.16.0) con su instalador (pide la contraseña de administrador de la Mac). Cómo se instala la computadora principal:
   [INSTALAR_EN_RED.md](INSTALAR_EN_RED.md).
 - **Activa la computadora principal antes de emparejar.** Desde la 0.15.0, la computadora principal necesita su
   **licencia activada** para emparejar teléfonos y tabletas (y para capturar pedidos). Se activa en la computadora
@@ -517,6 +530,7 @@ Lo que puede mostrar el dispositivo:
   batería de cada marca), solo en emuladores.
 - La precuenta desde el teléfono **no se ha impreso en papel real**: se probó con una impresora simulada.
 - **No cobra**, ni mesas ni Para llevar: se cobra en la caja.
+- **No es la pantalla de la cocina**: para eso está «AD-EL POS Cocina» ([COCINA_INSTALAR.md](COCINA_INSTALAR.md)).
 - No marca productos como agotados (se hace en la caja).
 - **No se ha probado en un teléfono ni en una tableta reales**, solo en emuladores.
 - Es una **versión de prueba** que no viene de la tienda de Google: se instala con el archivo y las versiones nuevas

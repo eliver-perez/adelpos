@@ -38,6 +38,10 @@
     {
       "name": "Licencia",
       "description": "Etapa L1: el estado de la licencia del servidor principal. Android y las terminales solo lo muestran; nunca hablan con el servidor de licencias."
+    },
+    {
+      "name": "Pantalla de cocina",
+      "description": "Etapa K1: la aplicación de cocina para Android, solo como pantalla de cocina, sin sesión."
     }
   ],
   "security": [
@@ -395,7 +399,7 @@
       "get": {
         "operationId": "streamEvents",
         "summary": "Eventos en tiempo real (SSE)",
-        "description": "Flujo text/event-stream de mensajes «changes» (EventBatch) cada 750 ms; dura 30 s y el cliente se vuelve a conectar con ?after=<cursor> (o Last-Event-ID). Requiere events.read. Un evento solo dice qué cambió (tipo, ámbito y agregado): el cliente vuelve a consultar. Ámbito catalog desde la 9G (catalog.changed, catalog.product.sold_out, catalog.product.available). Etapa A1: restaurant.account.preparation_changed (ámbito restaurant, o takeaway en una cuenta para llevar, con la cuenta como agregado) avisa una vez por cuenta y transacción que cambió la preparación de sus partidas, para que un mesero con accounts.read y sin permisos de cocina vea «Preparando» o «Listo» al momento.",
+        "description": "Flujo text/event-stream de mensajes «changes» (EventBatch) cada 750 ms; dura 30 s y el cliente se vuelve a conectar con ?after=<cursor> (o Last-Event-ID). Requiere events.read. Un evento solo dice qué cambió (tipo, ámbito y agregado): el cliente vuelve a consultar. Ámbito catalog desde la 9G (catalog.changed, catalog.product.sold_out, catalog.product.available). Etapa A1: restaurant.account.preparation_changed (ámbito restaurant, o takeaway en una cuenta para llevar, con la cuenta como agregado) avisa una vez por cuenta y transacción que cambió la preparación de sus partidas, para que un mesero con accounts.read y sin permisos de cocina vea «Preparando» o «Listo» al momento. Etapa K1: con la credencial de una pantalla de cocina (sin sesión) solo admite after y entrega license.changed, kitchen_display.configuration.changed (ámbito configuration, con la pantalla o sin agregado), los eventos de cocina de sus estaciones (kitchen.ticket.created, kitchen.state.changed, kitchen.change.pending, kitchen.kds.received) y los cambios de encabezado de las cuentas con tareas en sus estaciones (restaurant.account.updated, .move, .assign, .merged, .split, .cancelled y restaurant.items.transferred). Revocarla manda interrupted con DEVICE_REVOKED.",
         "parameters": [
           {
             "$ref": "#/components/parameters/ClientVersion"
@@ -437,7 +441,18 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "tags": ["Tiempo real"]
+        "tags": ["Tiempo real"],
+        "security": [
+          {
+            "deviceId": [],
+            "deviceToken": [],
+            "session": []
+          },
+          {
+            "deviceId": [],
+            "deviceToken": []
+          }
+        ]
       }
     },
     "/ready-alerts": {
@@ -2185,7 +2200,7 @@
                   },
                   "device_kind": {
                     "enum": ["desktop", "android", "kitchen"],
-                    "description": "Tipo de terminal: android para la aplicación de meseros."
+                    "description": "Tipo de terminal: desktop, android para la aplicación de meseros y, desde la etapa K1, kitchen para la aplicación de cocina. Con X-Client-Kind debe ser el de la aplicación (revisión R1, K1-D29); si no, 400 CLIENT_KIND_MISMATCH."
                   },
                   "os": {
                     "type": "string",
@@ -2681,7 +2696,7 @@
       "get": {
         "operationId": "getLicenseStatus",
         "summary": "Estado de la licencia",
-        "description": "Etapa L1 (fase B, capacidad license-v1): el estado de la licencia del servidor principal, calculado por Go (contrato de licencias §5.6 y §6). Con sesión, el estado completo (LicenseStatus): ver el estado no pide permiso (L1-D21). Con solo la credencial del dispositivo (sin Authorization), el resumen (LicenseDeviceSummary), para el teléfono o la tableta en «¿Quién eres?». state: active (vigente), grace (tolerancia), expired (vencida), revoked (revocada, con revocation_reason), not_activated (sin activar) o not_activated_with_data (sin activar con datos). copied: la instalación se copió de otra computadora. Las fechas van en UTC. Android no habla con el servidor de licencias: muestra el estado y los códigos de error de las operaciones.",
+        "description": "Etapa L1 (fase B, capacidad license-v1): el estado de la licencia del servidor principal, calculado por Go (contrato de licencias §5.6 y §6). Con sesión, el estado completo (LicenseStatus): ver el estado no pide permiso (L1-D21). Con solo la credencial del dispositivo (sin Authorization), el resumen (LicenseDeviceSummary), para el teléfono o la tableta en «¿Quién eres?». state: active (vigente), grace (tolerancia), expired (vencida), revoked (revocada, con revocation_reason), not_activated (sin activar) o not_activated_with_data (sin activar con datos). copied: la instalación se copió de otra computadora. Las fechas van en UTC. Android no habla con el servidor de licencias: muestra el estado y los códigos de error de las operaciones. Etapa K1: también la pantalla de cocina, con solo su credencial (el resumen).",
         "parameters": [
           {
             "$ref": "#/components/parameters/ClientVersion"
@@ -2719,6 +2734,740 @@
             "deviceToken": [],
             "session": []
           },
+          {
+            "deviceId": [],
+            "deviceToken": []
+          }
+        ]
+      }
+    },
+    "/kitchen-display/connect": {
+      "post": {
+        "operationId": "connectKitchenDisplay",
+        "summary": "Conectar la pantalla de cocina",
+        "description": "Etapa K1 (capacidad kitchen-display-v1): solo con la credencial de un dispositivo kitchen (emparejado con device_kind kitchen y X-Client-Kind kitchen), sin sesión. Con otro tipo de dispositivo, 403 KITCHEN_DISPLAY_REQUIRED. Ocupa el cupo kitchen_displays de la licencia, ligado al dispositivo (K1-D6; un corte de red no lo libera), y devuelve la configuración de la pantalla, el establecimiento, el resumen de la licencia y server_time. Repetirlo deja lo mismo. Después de «Liberar cupo» en Terminales responde KITCHEN_DISPLAY_SEAT_RELEASED y no lo vuelve a ocupar sola: solo con take_seat true («Usar esta pantalla»). Sin cupo, LICENSE_SEAT_UNAVAILABLE con details {seat, in_use, limit} y el mensaje «No hay cupo de pantalla de cocina libre (N de N en uso). Revoca otra pantalla en Terminales o amplía tu licencia.». Sin activar, LICENSE_NOT_ACTIVATED.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "take_seat": {
+                    "type": "boolean"
+                  }
+                },
+                "required": []
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Conectada, con su cupo de cocina.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KitchenDisplayConnection"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "LICENSE_SEAT_UNAVAILABLE (LicenseSeatUnavailable), KITCHEN_DISPLAY_SEAT_RELEASED o la licencia (LicenseRejection).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/LicenseSeatUnavailable"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LicenseRejection"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SystemClockInvalid"
+                    },
+                    {
+                      "$ref": "#/components/schemas/Error"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Pantalla de cocina"],
+        "security": [
+          {
+            "deviceId": [],
+            "deviceToken": []
+          }
+        ]
+      }
+    },
+    "/kitchen-display/orders": {
+      "get": {
+        "operationId": "getKitchenDisplayOrders",
+        "summary": "Estado completo de la pantalla de cocina",
+        "description": "Etapa K1 (capacidad kitchen-display-v1): solo con la credencial de un dispositivo kitchen (emparejado con device_kind kitchen y X-Client-Kind kitchen), sin sesión. Con otro tipo de dispositivo, 403 KITCHEN_DISPLAY_REQUIRED. Las tarjetas de pedido de las estaciones de la pantalla (K1-D5), del envío más antiguo al más nuevo, con la configuración, la licencia, server_time, las comandas por confirmar y el cursor del canal de eventos leído antes que las tarjetas: streamEvents desde ese cursor no pierde nada. Vencida y Revocada muestran; Sin activar no (LICENSE_NOT_ACTIVATED); con la hora del equipo incorrecta se lee igual.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Estado completo.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KitchenDisplayOrders"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Sin el cupo de cocina: KITCHEN_DISPLAY_SEAT_RELEASED (se liberó en Terminales) o KITCHEN_DISPLAY_NOT_CONNECTED (volver a connectKitchenDisplay); la licencia o la hora (LicenseRejection: LICENSE_NOT_ACTIVATED; SystemClockInvalid).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/LicenseSeatUnavailable"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LicenseRejection"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SystemClockInvalid"
+                    },
+                    {
+                      "$ref": "#/components/schemas/Error"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Pantalla de cocina"],
+        "security": [
+          {
+            "deviceId": [],
+            "deviceToken": []
+          }
+        ]
+      }
+    },
+    "/kitchen-display/items/ready": {
+      "post": {
+        "operationId": "markKitchenDisplayItemsReady",
+        "summary": "Marcar platillos como listos",
+        "description": "Etapa K1 (capacidad kitchen-display-v1): solo con la credencial de un dispositivo kitchen (emparejado con device_kind kitchen y X-Client-Kind kitchen), sin sesión. Con otro tipo de dispositivo, 403 KITCHEN_DISPLAY_REQUIRED. Marca listas las tareas pendientes (K1-D4: idempotente por estado y versión; lo ya listo, cancelado o cambiado va en skipped y no impide lo demás). Dispara el aviso de platillos listos al mesero, como hoy. Una tarea de una estación que la pantalla no muestra, 403 STATION_SCOPE_DENIED sin marcar nada; una de una estación «por pedido», 400 KITCHEN_VALIDATION. Con la hora del equipo incorrecta, SYSTEM_CLOCK_INVALID.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "tasks": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/KitchenDisplayTaskRef"
+                    },
+                    "minItems": 1,
+                    "maxItems": 1000
+                  }
+                },
+                "required": ["tasks"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Marcado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KitchenDisplayMarkResult"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Sin el cupo de cocina: KITCHEN_DISPLAY_SEAT_RELEASED (se liberó en Terminales) o KITCHEN_DISPLAY_NOT_CONNECTED (volver a connectKitchenDisplay); la licencia o la hora (LicenseRejection: LICENSE_NOT_ACTIVATED; SystemClockInvalid).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/LicenseSeatUnavailable"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LicenseRejection"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SystemClockInvalid"
+                    },
+                    {
+                      "$ref": "#/components/schemas/Error"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Pantalla de cocina"],
+        "security": [
+          {
+            "deviceId": [],
+            "deviceToken": []
+          }
+        ]
+      }
+    },
+    "/kitchen-display/orders/ready": {
+      "post": {
+        "operationId": "markKitchenDisplayOrderReady",
+        "summary": "Marcar el pedido completo como listo",
+        "description": "Etapa K1 (capacidad kitchen-display-v1): solo con la credencial de un dispositivo kitchen (emparejado con device_kind kitchen y X-Client-Kind kitchen), sin sesión. Con otro tipo de dispositivo, 403 KITCHEN_DISPLAY_REQUIRED. El botón de la tarjeta, con todas sus tareas tal como se ven: las pendientes se marcan listas (en una estación «por pedido», el pedido completo de esa estación) y las cancelaciones se dan por vistas (dismissed). La tarjeta desaparece. Idempotente.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "tasks": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/KitchenDisplayTaskRef"
+                    },
+                    "minItems": 1,
+                    "maxItems": 1000
+                  }
+                },
+                "required": ["tasks"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Marcado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KitchenDisplayMarkResult"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Sin el cupo de cocina: KITCHEN_DISPLAY_SEAT_RELEASED (se liberó en Terminales) o KITCHEN_DISPLAY_NOT_CONNECTED (volver a connectKitchenDisplay); la licencia o la hora (LicenseRejection: LICENSE_NOT_ACTIVATED; SystemClockInvalid).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/LicenseSeatUnavailable"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LicenseRejection"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SystemClockInvalid"
+                    },
+                    {
+                      "$ref": "#/components/schemas/Error"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Pantalla de cocina"],
+        "security": [
+          {
+            "deviceId": [],
+            "deviceToken": []
+          }
+        ]
+      }
+    },
+    "/kitchen-display/recent": {
+      "get": {
+        "operationId": "getKitchenDisplayRecent",
+        "summary": "Recientes de la pantalla de cocina",
+        "description": "Etapa K1 (capacidad kitchen-display-v1): solo con la credencial de un dispositivo kitchen (emparejado con device_kind kitchen y X-Client-Kind kitchen), sin sesión. Con otro tipo de dispositivo, 403 KITCHEN_DISPLAY_REQUIRED. Lo marcado listo en los últimos 30 minutos en las estaciones de la pantalla (y que no cambió ni se canceló después), por cuenta, de lo más reciente a lo más antiguo, para recuperarlo.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Recientes.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KitchenDisplayRecent"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Sin el cupo de cocina: KITCHEN_DISPLAY_SEAT_RELEASED (se liberó en Terminales) o KITCHEN_DISPLAY_NOT_CONNECTED (volver a connectKitchenDisplay); la licencia o la hora (LicenseRejection: LICENSE_NOT_ACTIVATED; SystemClockInvalid).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/LicenseSeatUnavailable"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LicenseRejection"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SystemClockInvalid"
+                    },
+                    {
+                      "$ref": "#/components/schemas/Error"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Pantalla de cocina"],
+        "security": [
+          {
+            "deviceId": [],
+            "deviceToken": []
+          }
+        ]
+      }
+    },
+    "/kitchen-display/recover": {
+      "post": {
+        "operationId": "recoverKitchenDisplayItems",
+        "summary": "Recuperar platillos marcados por error",
+        "description": "Etapa K1 (capacidad kitchen-display-v1): solo con la credencial de un dispositivo kitchen (emparejado con device_kind kitchen y X-Client-Kind kitchen), sin sesión. Con otro tipo de dispositivo, 403 KITCHEN_DISPLAY_REQUIRED. Regresa las tareas listas (de los últimos 30 minutos) a su estado anterior y la tarjeta vuelve a la pantalla (K1-D8). No avisa al mesero y borra el aviso de listo que todavía no le llegaba; volver a marcar sí avisa. Idempotente (not_ready). Si nada se pudo recuperar, 409 KITCHEN_NOT_RECOVERABLE.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "tasks": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/KitchenDisplayTaskRef"
+                    },
+                    "minItems": 1,
+                    "maxItems": 1000
+                  }
+                },
+                "required": ["tasks"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Recuperado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KitchenDisplayRecoverResult"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "KITCHEN_NOT_RECOVERABLE, Sin el cupo de cocina: KITCHEN_DISPLAY_SEAT_RELEASED (se liberó en Terminales) o KITCHEN_DISPLAY_NOT_CONNECTED (volver a connectKitchenDisplay); la licencia o la hora (LicenseRejection: LICENSE_NOT_ACTIVATED; SystemClockInvalid).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/LicenseSeatUnavailable"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LicenseRejection"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SystemClockInvalid"
+                    },
+                    {
+                      "$ref": "#/components/schemas/Error"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Pantalla de cocina"],
+        "security": [
+          {
+            "deviceId": [],
+            "deviceToken": []
+          }
+        ]
+      }
+    },
+    "/kitchen-display/receipts": {
+      "post": {
+        "operationId": "acknowledgeKitchenDisplayReceipts",
+        "summary": "Confirmar que la pantalla muestra unas comandas",
+        "description": "Etapa K1 (capacidad kitchen-display-v1): solo con la credencial de un dispositivo kitchen (emparejado con device_kind kitchen y X-Client-Kind kitchen), sin sesión. Con otro tipo de dispositivo, 403 KITCHEN_DISPLAY_REQUIRED. El acuse de recepción de la 9F con el dispositivo y sin usuario (K1-D12): Comandas deja de decir «Recepción en pantalla de cocina pendiente». Idempotente: acknowledged cuenta solo los nuevos.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "receipts": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/KitchenDisplayReceipt"
+                    },
+                    "minItems": 1,
+                    "maxItems": 500
+                  }
+                },
+                "required": ["receipts"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Confirmado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "acknowledged": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": ["acknowledged"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Sin el cupo de cocina: KITCHEN_DISPLAY_SEAT_RELEASED (se liberó en Terminales) o KITCHEN_DISPLAY_NOT_CONNECTED (volver a connectKitchenDisplay); la licencia o la hora (LicenseRejection: LICENSE_NOT_ACTIVATED; SystemClockInvalid).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/LicenseSeatUnavailable"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LicenseRejection"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SystemClockInvalid"
+                    },
+                    {
+                      "$ref": "#/components/schemas/Error"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Pantalla de cocina"],
+        "security": [
+          {
+            "deviceId": [],
+            "deviceToken": []
+          }
+        ]
+      }
+    },
+    "/kitchen-display/settings-access": {
+      "post": {
+        "operationId": "checkKitchenDisplaySettingsAccess",
+        "summary": "Contraseña de un administrador para los ajustes",
+        "description": "Etapa K1 (capacidad kitchen-display-v1): solo con la credencial de un dispositivo kitchen (emparejado con device_kind kitchen y X-Client-Kind kitchen), sin sesión. Con otro tipo de dispositivo, 403 KITCHEN_DISPLAY_REQUIRED. Los ajustes de la tableta (§5.4) piden la contraseña de quien puede administrar terminales (devices.manage). Valida en la misma transacción sin crear ni reemplazar sesiones y sin devolver ningún token; comparte el límite de intentos del inicio de sesión (401 AUTHORIZATION_INVALID, 429 AUTHORIZATION_THROTTLED); un usuario sin el permiso, 403 PERMISSION_DENIED. Revisión R1 (K1-D29): el usuario o la contraseña vacíos, 400 VALIDATION_ERROR; un usuario de más de 40 caracteres o una contraseña de más de 256, 401 AUTHORIZATION_INVALID sin contar un intento. Se permite en cualquier estado de la licencia.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "username": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 40
+                  },
+                  "password": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  }
+                },
+                "required": ["username", "password"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Autorizado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "authorized": {
+                      "const": true
+                    }
+                  },
+                  "required": ["authorized"]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "El usuario o la contraseña vacíos (VALIDATION_ERROR).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Usuario o contraseña incorrectos, o demasiado largos (AUTHORIZATION_INVALID); también DEVICE_REVOKED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "El usuario no puede administrar terminales (PERMISSION_DENIED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Cinco intentos fallidos en 15 minutos (AUTHORIZATION_THROTTLED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Pantalla de cocina"],
+        "security": [
+          {
+            "deviceId": [],
+            "deviceToken": []
+          }
+        ]
+      }
+    },
+    "/kitchen-display/unpair": {
+      "post": {
+        "operationId": "unpairKitchenDisplay",
+        "summary": "Volver a emparejar: revoca esta pantalla y suelta su cupo",
+        "description": "Etapa K1 (capacidad kitchen-display-v1, K1-D32): solo con la credencial de un dispositivo kitchen, sin sesión. Con otro tipo de dispositivo, 403 KITCHEN_DISPLAY_REQUIRED. «Volver a emparejar» en la tableta pide la contraseña de quien puede administrar terminales (devices.manage), con las mismas validaciones y el mismo límite de intentos que POST /kitchen-display/settings-access (compartido entre las dos rutas): vacíos, 400 VALIDATION_ERROR; un usuario de más de 40 caracteres o una contraseña de más de 256, 401 AUTHORIZATION_INVALID sin contar un intento; incorrectos, 401 AUTHORIZATION_INVALID; 429 AUTHORIZATION_THROTTLED; sin el permiso, 403 PERMISSION_DENIED. Con el administrador, revoca la propia pantalla igual que POST /devices/{id}/revoke: suelta su cupo de pantalla de cocina, el canal de eventos se corta con interrupted DEVICE_REVOKED y desde entonces toda petición de la pantalla responde 401 DEVICE_REVOKED. Auditoría kitchen_display.unpaired con el administrador como autor y la pantalla como dispositivo. Se permite en cualquier estado de la licencia y no exige cupo (también sin cupo o con el cupo liberado).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "username": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 40
+                  },
+                  "password": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  }
+                },
+                "required": ["username", "password"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Pantalla revocada y cupo libre.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "El usuario o la contraseña vacíos (VALIDATION_ERROR).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Usuario o contraseña incorrectos, o demasiado largos (AUTHORIZATION_INVALID); también DEVICE_REVOKED (la pantalla ya está revocada).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "El usuario no puede administrar terminales (PERMISSION_DENIED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Cinco intentos fallidos en 15 minutos (AUTHORIZATION_THROTTLED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Pantalla de cocina"],
+        "security": [
           {
             "deviceId": [],
             "deviceToken": []
@@ -2768,9 +3517,9 @@
         "name": "X-Client-Kind",
         "in": "header",
         "required": false,
-        "description": "Tipo de cliente. Etapa A1 (revisión R3): con la credencial de un dispositivo debe coincidir con el tipo con que se emparejó (android en un teléfono o tableta de meseros; desktop en una terminal de escritorio o de cocina); si no, 400 CLIENT_KIND_MISMATCH.",
+        "description": "Tipo de cliente. Etapa A1 (revisión R3): con la credencial de un dispositivo debe coincidir con el tipo con que se emparejó (android en un teléfono o tableta de meseros; desktop en una terminal de escritorio; desde la etapa K1, kitchen en una pantalla de cocina); si no, 400 CLIENT_KIND_MISMATCH.",
         "schema": {
-          "enum": ["desktop", "android"]
+          "enum": ["desktop", "android", "kitchen"]
         }
       },
       "PairingSecret": {
@@ -2876,7 +3625,7 @@
             "additionalProperties": {
               "type": "string"
             },
-            "description": "Etapa A1: la versión mínima que acepta el servidor de cada tipo de cliente (desktop, android). min_client_version es la del escritorio."
+            "description": "Etapa A1: la versión mínima que acepta el servidor de cada tipo de cliente (desktop, android y, desde la etapa K1, kitchen). min_client_version es la del escritorio."
           }
         },
         "required": [
@@ -6483,6 +7232,541 @@
         },
         "required": ["error"],
         "description": "Etapa L1 (Fase C, §6.2): la computadora principal tiene la fecha y hora incorrectas (antes de la última actividad registrada, con 10 minutos de margen). No es un problema de licencia, de conexión ni de permisos: no empieza con LICENSE. Se rechaza todo lo que registra con fecha, también cobrar. details es LicenseClock con las dos fechas. message: «No se puede registrar: la computadora principal tiene la fecha y hora incorrectas. Avisa al encargado.». No se guardó nada; se puede reenviar cuando el reloj se corrija."
+      },
+      "KitchenDisplayStation": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "tracking": {
+            "enum": ["item", "order"],
+            "description": "Seguimiento efectivo: item, se toca cada platillo; order, solo el pedido completo (K1-D14)."
+          }
+        },
+        "required": ["id", "name", "tracking"],
+        "description": "Etapa K1: una estación que muestra la pantalla de cocina (solo las de recepción kds o both, K1-D11), en el orden de Cocina."
+      },
+      "KitchenDisplayConfig": {
+        "type": "object",
+        "properties": {
+          "device_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "text_size": {
+            "enum": ["normal", "large"]
+          },
+          "theme": {
+            "enum": ["dark", "light"]
+          },
+          "sound_enabled": {
+            "type": "boolean"
+          },
+          "sound_volume": {
+            "enum": ["low", "medium", "high"]
+          },
+          "warning_minutes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1440,
+            "description": "Atención desde estos minutos de espera (configuración general de cocina, 10 por omisión)."
+          },
+          "late_minutes": {
+            "type": "integer",
+            "minimum": 2,
+            "maximum": 2880,
+            "description": "Retraso desde estos minutos de espera (20 por omisión)."
+          },
+          "all_stations": {
+            "type": "boolean"
+          },
+          "stations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KitchenDisplayStation"
+            }
+          }
+        },
+        "required": [
+          "device_id",
+          "name",
+          "text_size",
+          "theme",
+          "sound_enabled",
+          "sound_volume",
+          "warning_minutes",
+          "late_minutes",
+          "all_stations",
+          "stations"
+        ],
+        "description": "Etapa K1 (K1-D15, K1-D17): configuración de la pantalla de cocina elegida en Terminales (letra, tema, sonido, estaciones) y en la configuración general de cocina (límites de color)."
+      },
+      "KitchenDisplayTaskRef": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "version_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": ["id", "version_id"],
+        "description": "Etapa K1: una tarea (unidad × estación) con la versión que vio la pantalla; si la versión cambió, no se marca (K1-D4)."
+      },
+      "KitchenDisplayPart": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "integer"
+          },
+          "show_name": {
+            "type": "boolean",
+            "description": "El nombre de la parte aporta algo: componente de combo, variante o nombre distinto del platillo."
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "level": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "text": {
+                  "type": "string"
+                }
+              },
+              "required": ["level", "text"]
+            }
+          }
+        },
+        "required": ["name", "quantity", "show_name", "lines"],
+        "description": "Etapa K1: una parte del platillo con los renglones de la comanda impresa (cambios de ingredientes, complementos y nota de la parte). Nunca lleva precios."
+      },
+      "KitchenDisplayItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "station_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "station_name": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "status": {
+            "enum": ["pending", "ready", "cancelled"]
+          },
+          "preparing": {
+            "type": "boolean"
+          },
+          "is_new": {
+            "type": "boolean",
+            "description": "Llegó después del primer envío de la tarjeta («NUEVO»)."
+          },
+          "pending_change": {
+            "type": "boolean",
+            "description": "Hay una modificación que cocina todavía no recibe: no se puede marcar."
+          },
+          "tracking": {
+            "enum": ["item", "order"]
+          },
+          "notes": {
+            "type": "string"
+          },
+          "parts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KitchenDisplayPart"
+            }
+          },
+          "ready_at": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "tasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KitchenDisplayTaskRef"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "station_id",
+          "station_name",
+          "name",
+          "quantity",
+          "status",
+          "preparing",
+          "is_new",
+          "pending_change",
+          "tracking",
+          "notes",
+          "parts",
+          "ready_at",
+          "tasks"
+        ],
+        "description": "Etapa K1: un platillo de una tarjeta: las unidades iguales de una partida en una estación, del mismo envío y el mismo estado."
+      },
+      "KitchenDisplayCard": {
+        "type": "object",
+        "properties": {
+          "account_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "folio": {
+            "type": "integer"
+          },
+          "mode": {
+            "enum": ["dine_in", "takeaway"]
+          },
+          "title": {
+            "type": "string",
+            "description": "La mesa (o el nombre de la cuenta) o «Para llevar»."
+          },
+          "subtitle": {
+            "type": "string",
+            "description": "El nombre de la cuenta si es distinto del de la mesa, o el cliente de un pedido para llevar."
+          },
+          "table_name": {
+            "type": ["string", "null"]
+          },
+          "account_name": {
+            "type": "string"
+          },
+          "customer_name": {
+            "type": "string"
+          },
+          "waiter_name": {
+            "type": "string",
+            "description": "El responsable actual de la cuenta o, si no tiene nombre, quien envió."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sent_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "elapsed_seconds": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "status": {
+            "enum": ["open", "cancelled"],
+            "description": "open: algo pendiente; cancelled: se cerró por una cancelación y espera que alguien marque el pedido (30 minutos como máximo)."
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KitchenDisplayItem"
+            }
+          }
+        },
+        "required": [
+          "account_id",
+          "folio",
+          "mode",
+          "title",
+          "subtitle",
+          "table_name",
+          "account_name",
+          "customer_name",
+          "waiter_name",
+          "id",
+          "sent_at",
+          "elapsed_seconds",
+          "status",
+          "items"
+        ],
+        "description": "Etapa K1 (K1-D5): una tarjeta de pedido: una cuenta en las estaciones de la pantalla, en su ronda en curso."
+      },
+      "KitchenDisplayReceipt": {
+        "type": "object",
+        "properties": {
+          "ticket_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "station_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": ["ticket_id", "station_id"],
+        "description": "Etapa K1 (K1-D12): una comanda de una estación de la pantalla que ninguna pantalla ha confirmado."
+      },
+      "KitchenDisplayConnection": {
+        "type": "object",
+        "properties": {
+          "display": {
+            "$ref": "#/components/schemas/KitchenDisplayConfig"
+          },
+          "establishment": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "timezone": {
+                "type": "string"
+              }
+            },
+            "required": ["name", "timezone"]
+          },
+          "license": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LicenseSummary"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El mismo license de getRecoveryState (LicenseSummary): estado de la licencia y de la hora del equipo. null sin gestor de licencias (solo pruebas)."
+          },
+          "seat": {
+            "type": "object",
+            "properties": {
+              "held": {
+                "type": "boolean"
+              }
+            },
+            "required": ["held"]
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": ["display", "establishment", "license", "seat", "server_time"],
+        "description": "Etapa K1: respuesta de connectKitchenDisplay: la pantalla ocupa su cupo de cocina y recibe su configuración."
+      },
+      "KitchenDisplayOrders": {
+        "type": "object",
+        "properties": {
+          "cursor": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Cursor del canal de eventos leído antes que las tarjetas, en la misma transacción."
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "display": {
+            "$ref": "#/components/schemas/KitchenDisplayConfig"
+          },
+          "establishment": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "timezone": {
+                "type": "string"
+              }
+            },
+            "required": ["name", "timezone"]
+          },
+          "license": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LicenseSummary"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El mismo license de getRecoveryState (LicenseSummary): estado de la licencia y de la hora del equipo. null sin gestor de licencias (solo pruebas)."
+          },
+          "orders": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KitchenDisplayCard"
+            },
+            "maxItems": 200
+          },
+          "receipts_pending": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KitchenDisplayReceipt"
+            }
+          }
+        },
+        "required": [
+          "cursor",
+          "server_time",
+          "display",
+          "establishment",
+          "license",
+          "orders",
+          "receipts_pending"
+        ],
+        "description": "Etapa K1: el estado completo de la pantalla de cocina (getKitchenDisplayOrders)."
+      },
+      "KitchenDisplayRecent": {
+        "type": "object",
+        "properties": {
+          "server_time": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "window_minutes": {
+            "type": "integer"
+          },
+          "orders": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "account_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "folio": {
+                  "type": "integer"
+                },
+                "mode": {
+                  "enum": ["dine_in", "takeaway"]
+                },
+                "title": {
+                  "type": "string",
+                  "description": "La mesa (o el nombre de la cuenta) o «Para llevar»."
+                },
+                "subtitle": {
+                  "type": "string",
+                  "description": "El nombre de la cuenta si es distinto del de la mesa, o el cliente de un pedido para llevar."
+                },
+                "table_name": {
+                  "type": ["string", "null"]
+                },
+                "account_name": {
+                  "type": "string"
+                },
+                "customer_name": {
+                  "type": "string"
+                },
+                "waiter_name": {
+                  "type": "string",
+                  "description": "El responsable actual de la cuenta o, si no tiene nombre, quien envió."
+                },
+                "marked_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/KitchenDisplayItem"
+                  }
+                }
+              },
+              "required": [
+                "account_id",
+                "folio",
+                "mode",
+                "title",
+                "subtitle",
+                "table_name",
+                "account_name",
+                "customer_name",
+                "waiter_name",
+                "marked_at",
+                "items"
+              ]
+            }
+          }
+        },
+        "required": ["server_time", "window_minutes", "orders"],
+        "description": "Etapa K1: lo marcado listo en los últimos 30 minutos en las estaciones de la pantalla, por cuenta."
+      },
+      "KitchenDisplayMarkResult": {
+        "type": "object",
+        "properties": {
+          "updated": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "dismissed": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Solo en markKitchenDisplayOrderReady: cancelaciones dadas por vistas."
+          },
+          "skipped": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "reason": {
+                  "enum": ["already_ready", "cancelled", "changed"]
+                }
+              },
+              "required": ["id", "reason"]
+            }
+          }
+        },
+        "required": ["updated", "skipped"],
+        "description": "Etapa K1: resultado de marcar listo. Idempotente: repetir la marca responde updated 0 con already_ready."
+      },
+      "KitchenDisplayRecoverResult": {
+        "type": "object",
+        "properties": {
+          "recovered": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "skipped": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "reason": {
+                  "enum": ["not_ready", "cancelled", "changed", "expired"]
+                }
+              },
+              "required": ["id", "reason"]
+            }
+          }
+        },
+        "required": ["recovered", "skipped"],
+        "description": "Etapa K1 (K1-D8): resultado de recuperar."
       }
     }
   }

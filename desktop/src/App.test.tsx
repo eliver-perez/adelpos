@@ -3,6 +3,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
+import { serverLink } from './navigation/serverLink';
 import product from './generated/product.json';
 import { useLeaveGuard } from './hooks/useLeaveGuard';
 import type { Identity } from './services/models';
@@ -143,10 +144,22 @@ beforeEach(() => {
   });
 });
 
+// Avanza el reloj de segundo en segundo, cada paso en su act: así React aplica los efectos de cada reintento de la
+// sesión (su espera crece con cada falla) antes del siguiente.
+async function advanceInSteps(milliseconds: number) {
+  for (let elapsed = 0; elapsed < milliseconds; elapsed += 1000) {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(Math.min(1000, milliseconds - elapsed));
+    });
+  }
+}
+
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
   vi.clearAllMocks();
+  // El estado único de conexión es de toda la ventana: cada prueba empieza en línea.
+  serverLink.reset();
 });
 
 describe('acceso y recuperación de la interfaz', () => {
@@ -221,15 +234,41 @@ describe('acceso y recuperación de la interfaz', () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5000);
     });
+    // Etapa K1 (K1-D10): una falla aislada no cambia nada; «Sin conexión» tras 3 fallas seguidas durante 20 s.
+    expect(screen.getByRole('status', { name: 'Servidor: En línea' })).toBeTruthy();
+    await advanceInSteps(20000);
     const status = screen.getByRole('status', { name: 'Servidor: Sin conexión' });
     expect(status.textContent).toBe('Sin conexión');
     expect(screen.getByRole('button', { name: 'Personal' })).toBeTruthy();
     offline = false;
+    await advanceInSteps(10000);
+    expect(screen.getByRole('status', { name: 'Servidor: En línea' })).toBeTruthy();
+    expect(screen.queryByRole('status', { name: 'Servidor: Sin conexión' })).toBeNull();
+  });
+
+  // Etapa K1 (Fase E, K1-D10): la pantalla de inicio de sesión ya cargada tampoco cambia por una falla aislada de su
+  // consulta periódica; con «Sin conexión» (3 fallas seguidas durante 20 s) pasa a «Revisa la conexión».
+  it('en el inicio de sesión una falla aislada no cambia la pantalla y un corte largo sí', async () => {
+    vi.useFakeTimers();
+    render(<App />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.getByRole('heading', { name: 'Inicia sesión' })).toBeTruthy();
+    offline = true;
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5000);
     });
-    expect(screen.getByRole('status', { name: 'Servidor: En línea' })).toBeTruthy();
-    expect(screen.queryByRole('status', { name: 'Servidor: Sin conexión' })).toBeNull();
+    expect(screen.getByRole('heading', { name: 'Inicia sesión' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Revisa la conexión' })).toBeNull();
+    await advanceInSteps(30000);
+    expect(screen.getByRole('heading', { name: 'Revisa la conexión' })).toBeTruthy();
+    offline = false;
+    fireEvent.click(screen.getByRole('button', { name: 'Volver a comprobar' }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.getByRole('heading', { name: 'Inicia sesión' })).toBeTruthy();
   });
 
   // Etapa 9G, fase C (§4.2, D11): la capa «Sin conexión con el servidor» bloquea las operaciones sin desmontar la
@@ -252,9 +291,12 @@ describe('acceso y recuperación de la interfaz', () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5000);
     });
+    // Etapa K1 (K1-D10): con una sola falla la capa no aparece; con 3 fallas seguidas durante 20 s, sí.
+    expect(screen.queryByRole('alertdialog', { name: 'Sin conexión con el servidor' })).toBeNull();
+    await advanceInSteps(20000);
     const layer = screen.getByRole('alertdialog', { name: 'Sin conexión con el servidor' });
     expect(layer.textContent).toContain('se conserva en esta pantalla');
-    expect(layer.textContent).toMatch(/Se vuelve a intentar sola en 1 s\./);
+    expect(layer.textContent).toMatch(/Se vuelve a intentar sola en \d+ s\./);
     // El contenido queda montado, con lo escrito, pero inerte (sin clics ni teclado) debajo de la capa.
     const main = document.querySelector('main.admin-main') as HTMLElement;
     expect(main.hasAttribute('inert')).toBe(true);
@@ -263,11 +305,9 @@ describe('acceso y recuperación de la interfaz', () => {
     );
     // La barra superior sigue a la vista con «Sin conexión».
     expect(screen.getByRole('status', { name: 'Servidor: Sin conexión' })).toBeTruthy();
-    // Espera creciente: el segundo intento fallido deja la próxima espera en 2 s.
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1000);
-    });
-    expect(layer.textContent).toMatch(/Se vuelve a intentar sola en 2 s\./);
+    // Espera creciente: llega hasta 10 s entre intentos.
+    await advanceInSteps(10000);
+    expect(layer.textContent).toMatch(/Se vuelve a intentar sola en (\d|10) s\./);
     refreshed.mockClear();
     offline = false;
     fireEvent.click(within(layer).getByRole('button', { name: 'Reintentar' }));

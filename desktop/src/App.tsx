@@ -44,6 +44,7 @@ import { ServerStatus } from './navigation/ServerStatus';
 import { ConnectionLostLayer } from './navigation/ConnectionLostLayer';
 import { announceReconnection } from './services/reconnection';
 import { serverState } from './navigation/serverState';
+import { serverLink, useServerLink } from './navigation/serverLink';
 import { TileScreen } from './navigation/TileScreen';
 import { TopBar } from './navigation/TopBar';
 import { UserMenu } from './navigation/UserMenu';
@@ -199,7 +200,11 @@ function ApplicationContent({
   const identity = session.identity;
   const permissions = identity?.user.permissions ?? [];
   const realtimeEnabled = permissions.includes('events.read');
-  const realtimeStatus = useRealtime(identity?.user.id ?? '', realtimeEnabled);
+  useRealtime(identity?.user.id ?? '', realtimeEnabled);
+  // Etapa K1 (Fase E, K1-D10): un solo estado de conexión con la tolerancia de la A3 (navigation/serverLink.ts). Lo
+  // leen la barra, la capa «Sin conexión con el servidor» (con su «Reintentar», que cubre Mesas y Preparación desde la
+  // 9G), el aviso persistente y la sesión.
+  const link = useServerLink();
   const operationMode = isOperation(screen);
   const can = (permission: string) => identity?.user.permissions.includes(permission) ?? false;
   const authenticated = session.phase === 'authenticated';
@@ -291,7 +296,11 @@ function ApplicationContent({
 
   // La pérdida de conexión con una sesión abierta se avisa con un mensaje persistente que se
   // retira solo cuando el servidor vuelve a responder (la barra también indica «Sin conexión»).
-  const connectionError = session.connectionError;
+  // Etapa K1 (Fase E): solo cuando el estado único dice «Sin conexión» (varias fallas seguidas durante unos 20 s, o sin
+  // red del sistema), no con una sola consulta fallida.
+  const connectionError = link.offline
+    ? session.connectionError || 'No hay comunicación con el servidor.'
+    : '';
   useEffect(() => {
     if (!authenticated || !connectionError) {
       dismissNotice(connectionNoticeID);
@@ -305,6 +314,19 @@ function ApplicationContent({
       },
     );
   }, [authenticated, connectionError]);
+  // Una terminal por la red sigue la red del sistema; la computadora principal habla con su propio servidor aunque no
+  // haya red.
+  useEffect(() => {
+    serverLink.followSystemNetwork(!mainComputer);
+    serverLink.systemNetwork(navigator.onLine);
+    const changed = () => serverLink.systemNetwork(navigator.onLine);
+    window.addEventListener('online', changed);
+    window.addEventListener('offline', changed);
+    return () => {
+      window.removeEventListener('online', changed);
+      window.removeEventListener('offline', changed);
+    };
+  }, [mainComputer]);
 
   // Etapa 9G (fase C, §4.2 y D11): sin conexión con una sesión abierta, la capa «Sin conexión con el servidor»
   // bloquea las operaciones (el contenido queda inerte, montado y con lo capturado) y, al volver la conexión,
@@ -710,7 +732,7 @@ function ApplicationContent({
     }
   }
 
-  const server = serverState(session.connectionError, realtimeEnabled, realtimeStatus);
+  const server = serverState(link, realtimeEnabled);
   // En la operación la barra resalta la vista visible (Mesas o Para llevar).
   const highlight = operationMode
     ? operationView === 'takeaway'

@@ -3,12 +3,12 @@ package com.adelpos.meseros.core.data.waiter
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.adelpos.core.model.error.AppError
 import com.adelpos.meseros.core.data.db.AppDatabase
 import com.adelpos.meseros.core.data.waiter.WaiterTestSupport.ANA
 import com.adelpos.meseros.core.data.waiter.WaiterTestSupport.json
 import com.adelpos.meseros.core.domain.access.ActiveWaiter
 import com.adelpos.meseros.core.domain.access.WaiterProfile
-import com.adelpos.meseros.core.domain.error.AppError
 import com.adelpos.meseros.core.domain.waiter.DeviceHome
 import com.adelpos.meseros.core.domain.waiter.PrecheckFeedback
 import com.adelpos.meseros.core.domain.waiter.PrecheckName

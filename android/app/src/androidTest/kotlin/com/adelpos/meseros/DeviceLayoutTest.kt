@@ -12,8 +12,8 @@ import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.adelpos.core.ui.components.TAG_TOP_BAR_BACK
 import com.adelpos.meseros.core.capture.pending.TAG_PENDING
-import com.adelpos.meseros.core.ui.components.TAG_TOP_BAR_BACK
 import com.adelpos.meseros.core.ui.layout.PaneLayout
 import com.adelpos.meseros.core.ui.layout.TAG_PANES_DOUBLE
 import com.adelpos.meseros.core.ui.layout.TAG_PANES_SINGLE

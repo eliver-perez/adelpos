@@ -10,12 +10,12 @@ import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.adelpos.core.model.error.AppError
+import com.adelpos.core.model.error.shownMessage
 import com.adelpos.meseros.core.domain.access.DeviceAccess
 import com.adelpos.meseros.core.domain.access.EntryResult
 import com.adelpos.meseros.core.domain.access.WaiterProfile
 import com.adelpos.meseros.core.domain.access.WaiterRoster
-import com.adelpos.meseros.core.domain.error.AppError
-import com.adelpos.meseros.core.domain.error.shownMessage
 import com.adelpos.meseros.core.ui.components.AdelPinPadDefaults
 import kotlinx.coroutines.launch
 

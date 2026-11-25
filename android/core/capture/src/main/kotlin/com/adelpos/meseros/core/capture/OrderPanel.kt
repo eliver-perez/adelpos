@@ -22,6 +22,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.adelpos.core.ui.components.PrimaryButton
+import com.adelpos.core.ui.components.SecondaryButton
+import com.adelpos.core.ui.theme.AdelDimens
+import com.adelpos.core.ui.theme.AdelTheme
 import com.adelpos.meseros.core.domain.catalog.Catalog
 import com.adelpos.meseros.core.domain.catalog.LineDescription
 import com.adelpos.meseros.core.domain.money.Money
@@ -38,10 +42,6 @@ import com.adelpos.meseros.core.domain.waiter.TableAccountRef
 import com.adelpos.meseros.core.domain.waiter.WaiterAction
 import com.adelpos.meseros.core.domain.waiter.WaiterPermissions
 import com.adelpos.meseros.core.ui.catalog.Stepper
-import com.adelpos.meseros.core.ui.components.PrimaryButton
-import com.adelpos.meseros.core.ui.components.SecondaryButton
-import com.adelpos.meseros.core.ui.theme.AdelDimens
-import com.adelpos.meseros.core.ui.theme.AdelTheme
 import com.adelpos.meseros.core.ui.waiter.OrderStateBadge
 import com.adelpos.meseros.core.ui.waiter.PreparationBadge
 

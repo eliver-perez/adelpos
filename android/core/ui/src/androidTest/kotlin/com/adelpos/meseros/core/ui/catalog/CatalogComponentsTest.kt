@@ -25,6 +25,7 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.adelpos.core.ui.theme.AdelTheme
 import com.adelpos.meseros.core.domain.catalog.CatalogProduct
 import com.adelpos.meseros.core.domain.catalog.Customization
 import com.adelpos.meseros.core.domain.catalog.GroupSelection
@@ -32,7 +33,6 @@ import com.adelpos.meseros.core.domain.catalog.IngredientSelection
 import com.adelpos.meseros.core.domain.catalog.LineSelection
 import com.adelpos.meseros.core.domain.catalog.OptionQuantity
 import com.adelpos.meseros.core.domain.catalog.QuickNoteSelection
-import com.adelpos.meseros.core.ui.theme.AdelTheme
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue

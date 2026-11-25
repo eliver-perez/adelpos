@@ -1,6 +1,7 @@
 package com.adelpos.meseros.core.ui.icons
 
 import androidx.compose.ui.graphics.vector.ImageVector
+import com.adelpos.core.ui.icons.AdelIcons
 
 /**
  * Íconos del catálogo y del personalizador, con los trazos de `desktop/src/components/Icon.tsx`

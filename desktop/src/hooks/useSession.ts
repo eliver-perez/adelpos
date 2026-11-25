@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, APIError, clientUpdateEvent, localAuthentication } from '../services/api';
 import { clientUpdateRequired, serverOutdated } from '../services/compatibility';
 import type { LocalAuthentication } from '../services/api';
+import { serverLink } from '../navigation/serverLink';
 import { reconnectDelay } from '../services/reconnection';
 import { rememberServerCapabilities } from '../services/serverCapabilities';
 import type { Identity } from '../services/models';
@@ -87,7 +88,14 @@ export function useSession() {
           error instanceof APIError && error.code === 'SECURE_STORAGE_UNAVAILABLE';
         setPhase((current) => {
           if (current === 'authenticated') return current;
-          return waitingForStorage ? 'secure-storage' : 'offline';
+          if (waitingForStorage) return 'secure-storage';
+          // Etapa K1 (Fase E, K1-D10): una pantalla de acceso ya cargada (inicio de sesión o alta) no cambia por una
+          // falla aislada de la consulta periódica; pasa a «Revisa la conexión» solo con «Sin conexión» del estado
+          // único (navigation/serverLink.ts). Al arrancar sin servidor sigue siendo inmediato.
+          if ((current === 'login' || current === 'enroll') && !serverLink.snapshot().offline) {
+            return current;
+          }
+          return 'offline';
         });
       }
     } finally {

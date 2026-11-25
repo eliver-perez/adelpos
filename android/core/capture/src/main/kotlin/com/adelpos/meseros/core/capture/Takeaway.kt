@@ -20,10 +20,10 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.adelpos.core.ui.components.LocalUserActivity
+import com.adelpos.core.ui.components.reportsUserActivity
 import com.adelpos.meseros.core.domain.waiter.OrderDestination
 import com.adelpos.meseros.core.domain.waiter.TakeawayCustomer
-import com.adelpos.meseros.core.ui.components.LocalUserActivity
-import com.adelpos.meseros.core.ui.components.reportsUserActivity
 
 /*
  * Lo que comparten la captura y la lista de Para llevar (etapa A2): el diálogo «Nombre y

@@ -7,19 +7,21 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import com.adelpos.core.model.access.UnsentOrder
+import com.adelpos.core.ui.R as CoreR
+import com.adelpos.core.ui.access.findserver.FindServerRoute
+import com.adelpos.core.ui.access.status.LoadingScreen
+import com.adelpos.core.ui.access.status.LocalNetworkPermissionGate
+import com.adelpos.core.ui.access.status.RepairScreen
+import com.adelpos.core.ui.access.status.RetiredScreen
+import com.adelpos.core.ui.access.status.UpdateAppScreen
+import com.adelpos.core.ui.access.status.UpdateServerScreen
+import com.adelpos.core.ui.components.LocalUserActivity
+import com.adelpos.core.ui.components.reportsUserActivity
 import com.adelpos.meseros.core.domain.access.DeviceStatus
-import com.adelpos.meseros.core.domain.access.UnsentOrder
-import com.adelpos.meseros.core.ui.components.LocalUserActivity
-import com.adelpos.meseros.core.ui.components.reportsUserActivity
+import com.adelpos.meseros.core.domain.server.WaiterServerRequirements
 import com.adelpos.meseros.core.ui.layout.PaneLayout
-import com.adelpos.meseros.feature.access.findserver.FindServerRoute
 import com.adelpos.meseros.feature.access.pin.PinEntryRoute
-import com.adelpos.meseros.feature.access.status.LoadingScreen
-import com.adelpos.meseros.feature.access.status.LocalNetworkPermissionGate
-import com.adelpos.meseros.feature.access.status.RepairScreen
-import com.adelpos.meseros.feature.access.status.RetiredScreen
-import com.adelpos.meseros.feature.access.status.UpdateAppScreen
-import com.adelpos.meseros.feature.access.status.UpdateServerScreen
 
 /** Lo que la puerta de entrada pide hacer (lo implementa [AccessViewModel]). */
 interface AccessActions {
@@ -72,7 +74,9 @@ fun AccessContent(
         is DeviceStatus.Unpaired ->
             LocalNetworkPermissionGate {
                 FindServerRoute(
-                    dependencies = dependencies,
+                    pairing = dependencies.pairing,
+                    requiredServerVersion = WaiterServerRequirements.MIN_SERVER_VERSION.toString(),
+                    wallClock = dependencies.wallClock,
                     deviceLog = status.deviceLog,
                     onClearDeviceLog = actions::clearDeviceLog,
                 )
@@ -101,6 +105,7 @@ fun AccessContent(
             )
         is DeviceStatus.UpdateServer ->
             UpdateServerScreen(
+                requiredServerVersion = WaiterServerRequirements.MIN_SERVER_VERSION.toString(),
                 serverVersion = status.serverVersion,
                 onCheckAgain = actions::recheck,
                 modifier = modifier,
@@ -120,12 +125,12 @@ fun AccessContent(
 fun accessTitle(status: DeviceStatus): String =
     stringResource(
         when (status) {
-            DeviceStatus.Starting -> R.string.access_title_loading
-            is DeviceStatus.Unpaired -> R.string.access_title_find_server
+            DeviceStatus.Starting -> CoreR.string.access_title_loading
+            is DeviceStatus.Unpaired -> CoreR.string.access_title_find_server
             is DeviceStatus.Ready -> R.string.access_title_entry
-            is DeviceStatus.NeedsRepair -> R.string.access_title_repair
+            is DeviceStatus.NeedsRepair -> CoreR.string.access_title_repair
             is DeviceStatus.UpdateApp,
-            is DeviceStatus.UpdateServer -> R.string.access_title_update
+            is DeviceStatus.UpdateServer -> CoreR.string.access_title_update
             is DeviceStatus.Retired -> R.string.access_title_retired
         },
     )

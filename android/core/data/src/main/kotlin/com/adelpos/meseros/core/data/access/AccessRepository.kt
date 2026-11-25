@@ -1,42 +1,46 @@
 package com.adelpos.meseros.core.data.access
 
-import com.adelpos.meseros.core.data.api.ApiErrors
-import com.adelpos.meseros.core.data.api.ApiOutcome
-import com.adelpos.meseros.core.data.api.ApiProblem
-import com.adelpos.meseros.core.data.api.ClientIdentity
-import com.adelpos.meseros.core.data.api.DeviceCredentials
+import com.adelpos.core.model.access.RepairReason
+import com.adelpos.core.model.access.UnsentOrder
+import com.adelpos.core.model.connection.LinkState
+import com.adelpos.core.model.connection.ServerAnswers
+import com.adelpos.core.model.connection.ServerLink
+import com.adelpos.core.model.error.AppError
+import com.adelpos.core.model.security.SecretSealer
+import com.adelpos.core.model.security.SecretUnavailableException
+import com.adelpos.core.model.server.ServerCompatibility
+import com.adelpos.core.model.server.ServerRelocator
+import com.adelpos.core.model.text.GoTime
+import com.adelpos.core.model.text.Hex
+import com.adelpos.core.network.api.ApiErrors
+import com.adelpos.core.network.api.ApiOutcome
+import com.adelpos.core.network.api.ApiProblem
+import com.adelpos.core.network.api.ClientIdentity
+import com.adelpos.core.network.api.DeviceCredentials
+import com.adelpos.core.network.api.ServerApi
+import com.adelpos.core.network.pairing.PairedConnection
+import com.adelpos.core.network.pairing.PairedDevice
+import com.adelpos.core.network.pairing.PairingStore
+import com.adelpos.core.network.session.ServerTransport
+import com.adelpos.core.network.wipe.DeviceDataWipe
 import com.adelpos.meseros.core.data.api.PinUserDto
-import com.adelpos.meseros.core.data.api.ServerApi
 import com.adelpos.meseros.core.data.db.AccessDao
 import com.adelpos.meseros.core.data.db.DeviceLogEntry
 import com.adelpos.meseros.core.data.db.KnownWaiterEntity
 import com.adelpos.meseros.core.data.db.PairedServerEntity
-import com.adelpos.meseros.core.data.session.ServerTransport
-import com.adelpos.meseros.core.data.wipe.DeviceDataWipe
 import com.adelpos.meseros.core.domain.access.ActiveWaiter
 import com.adelpos.meseros.core.domain.access.DeviceAccess
 import com.adelpos.meseros.core.domain.access.DeviceStatus
 import com.adelpos.meseros.core.domain.access.EntryResult
+import com.adelpos.meseros.core.domain.access.IdleLock
 import com.adelpos.meseros.core.domain.access.KnownWaiterInvalidation
 import com.adelpos.meseros.core.domain.access.LocalAttempts
 import com.adelpos.meseros.core.domain.access.OfflineAttemptPolicy
 import com.adelpos.meseros.core.domain.access.PinVerifier
-import com.adelpos.meseros.core.domain.access.RepairReason
-import com.adelpos.meseros.core.domain.access.UnsentOrder
 import com.adelpos.meseros.core.domain.access.UnsentOrdersSource
 import com.adelpos.meseros.core.domain.access.WaiterProfile
 import com.adelpos.meseros.core.domain.access.WaiterRoster
-import com.adelpos.meseros.core.domain.connection.LinkState
-import com.adelpos.meseros.core.domain.connection.ServerAnswers
-import com.adelpos.meseros.core.domain.connection.ServerLink
-import com.adelpos.meseros.core.domain.error.AppError
-import com.adelpos.meseros.core.domain.security.SecretSealer
-import com.adelpos.meseros.core.domain.security.SecretUnavailableException
-import com.adelpos.meseros.core.domain.server.ServerCompatibility
-import com.adelpos.meseros.core.domain.server.ServerRelocator
-import com.adelpos.meseros.core.domain.text.Hex
-import java.time.OffsetDateTime
-import java.time.format.DateTimeParseException
+import com.adelpos.meseros.core.domain.server.WaiterServerRequirements
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -87,7 +91,7 @@ class AccessRepository(
     private val cpuDispatcher: CoroutineDispatcher = Dispatchers.Default,
     private val busyRetryMillis: Long = BUSY_RETRY_MILLIS,
     private val answers: ServerAnswers? = null,
-) : DeviceAccess {
+) : DeviceAccess, PairingStore {
     private val mutableStatus = MutableStateFlow<DeviceStatus>(DeviceStatus.Starting)
     private val mutableActive = MutableStateFlow<ActiveWaiter?>(null)
     override val status: StateFlow<DeviceStatus> = mutableStatus.asStateFlow()
@@ -303,6 +307,26 @@ class AccessRepository(
     }
 
     /** Guarda el servidor recién emparejado (la credencial ya va cifrada) y lo comprueba. */
+    /**
+     * Lo que deja el emparejamiento compartido (`PairingRepository` de android-core, etapa K1): el
+     * mismo registro de siempre en `paired_server`, con el bloqueo por inactividad de fábrica.
+     */
+    override suspend fun onPaired(device: PairedDevice) {
+        onPaired(
+            PairedServerEntity(
+                serverId = device.serverId,
+                serverName = device.serverName,
+                baseUrl = device.baseUrl,
+                fingerprintHex = device.fingerprintHex,
+                deviceId = device.deviceId,
+                deviceName = device.deviceName,
+                sealedDeviceToken = device.sealedDeviceToken,
+                idleLockSeconds = IdleLock.DEFAULT_SECONDS,
+                pairedAtMillis = device.pairedAtMillis,
+            ),
+        )
+    }
+
     internal suspend fun onPaired(entity: PairedServerEntity) {
         mutex.withLock {
             dao.savePairedServer(entity)
@@ -366,7 +390,8 @@ class AccessRepository(
                         appVersion = identity.version,
                         serverVersion = info.serverVersion,
                         capabilities = info.capabilities,
-                        minAndroidVersion = info.minClientVersions[ClientIdentity.KIND],
+                        minClientVersion = info.minClientVersions[identity.kind],
+                        requirements = WaiterServerRequirements.REQUIREMENTS,
                     )
                 when (verdict) {
                     is ServerCompatibility.Verdict.UpdateServer -> {
@@ -798,19 +823,17 @@ class AccessRepository(
         const val BUSY_ATTEMPTS = 3
         const val BUSY_RETRY_MILLIS = 2_000L
 
-        /** Propósito del cifrado de la credencial del dispositivo. */
-        const val DEVICE_PURPOSE = "device-credential"
+        /**
+         * Propósito del cifrado de la credencial del dispositivo: el del emparejamiento compartido
+         * (`PairedDevice.CREDENTIAL_PURPOSE`, etapa K1), el mismo valor de la 0.4.0.
+         */
+        const val DEVICE_PURPOSE = PairedDevice.CREDENTIAL_PURPOSE
         private val PIN_PATTERN = Regex("^[0-9]{4,6}$")
 
         /** Propósito del cifrado de la credencial de envío de [userId] (A1-D1). */
         fun offlinePurpose(userId: String): String = "offline-credential:$userId"
 
         /** Fecha RFC 3339 de Go («2026-11-16T14:35:00.123-06:00») en milisegundos, o null. */
-        fun epochMillis(text: String): Long? =
-            try {
-                OffsetDateTime.parse(text).toInstant().toEpochMilli()
-            } catch (_: DateTimeParseException) {
-                null
-            }
+        fun epochMillis(text: String): Long? = GoTime.epochMillis(text)
     }
 }

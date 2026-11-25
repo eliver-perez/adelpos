@@ -1,14 +1,14 @@
 package com.adelpos.meseros.core.data.ready
 
+import com.adelpos.core.model.error.AppError
+import com.adelpos.core.network.api.ApiErrors
+import com.adelpos.core.network.api.ApiJson
+import com.adelpos.core.network.session.AuthorizedServer
+import com.adelpos.core.network.session.apiUrl
+import com.adelpos.core.network.session.execute
+import com.adelpos.core.network.session.request
 import com.adelpos.meseros.core.data.access.AccessRepository
-import com.adelpos.meseros.core.data.api.ApiErrors
-import com.adelpos.meseros.core.data.api.ApiJson
-import com.adelpos.meseros.core.data.session.AuthorizedServer
-import com.adelpos.meseros.core.data.session.apiUrl
-import com.adelpos.meseros.core.data.session.execute
-import com.adelpos.meseros.core.data.session.request
 import com.adelpos.meseros.core.domain.access.DeviceStatus
-import com.adelpos.meseros.core.domain.error.AppError
 import com.adelpos.meseros.core.domain.ready.ReadyAlertsBatch
 import java.io.IOException
 import java.util.concurrent.TimeUnit

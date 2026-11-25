@@ -1,6 +1,6 @@
 package com.adelpos.meseros.core.data.catalog
 
-import com.adelpos.meseros.core.data.session.AuthorizedServer
+import com.adelpos.core.network.session.AuthorizedServer
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import okhttp3.OkHttpClient

@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.ContextCompat
+import com.adelpos.core.model.connection.LinkState
 import com.adelpos.meseros.core.data.access.AccessRepository
 import com.adelpos.meseros.core.data.preferences.DevicePreferencesRepository
 import com.adelpos.meseros.core.data.ready.DeviceReadyAlertsServer
@@ -21,7 +22,6 @@ import com.adelpos.meseros.core.data.ready.ReadyStopReason
 import com.adelpos.meseros.core.data.ready.RoomReadyAlertsLedger
 import com.adelpos.meseros.core.data.ready.db.ReadyAlertsDao
 import com.adelpos.meseros.core.domain.access.DeviceStatus
-import com.adelpos.meseros.core.domain.connection.LinkState
 import com.adelpos.meseros.core.domain.ready.ReadyAlertsLifecycle
 import com.adelpos.meseros.core.domain.ready.ReadyAlertsLifecycle.StartDecision
 import com.adelpos.meseros.core.domain.ready.ReadyAlertsLifecycle.Trigger

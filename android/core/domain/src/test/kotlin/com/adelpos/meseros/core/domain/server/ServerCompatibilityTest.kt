@@ -1,6 +1,8 @@
 package com.adelpos.meseros.core.domain.server
 
-import com.adelpos.meseros.core.domain.server.ServerCompatibility.Verdict
+import com.adelpos.core.model.server.SemanticVersion
+import com.adelpos.core.model.server.ServerCompatibility
+import com.adelpos.core.model.server.ServerCompatibility.Verdict
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -8,6 +10,21 @@ import org.junit.Test
 
 /** «Actualiza esta aplicación» y «Actualiza el servidor del restaurante» (§4, «Versiones»). */
 class ServerCompatibilityTest {
+    // La comprobación compartida (android-core, etapa K1) con los requisitos de meseros.
+    private fun check(
+        appVersion: String,
+        serverVersion: String,
+        capabilities: List<String>,
+        minClientVersion: String?,
+    ) =
+        ServerCompatibility.check(
+            appVersion,
+            serverVersion,
+            capabilities,
+            minClientVersion,
+            WaiterServerRequirements.REQUIREMENTS,
+        )
+
     private val withPin =
         listOf(
             "offline-orders-v1",
@@ -33,24 +50,24 @@ class ServerCompatibilityTest {
     fun servidorCompatible() {
         assertEquals(
             Verdict.Compatible,
-            ServerCompatibility.check("0.2.0", "0.13.0", withPin, "0.1.0"),
+            check("0.2.0", "0.13.0", withPin, "0.1.0"),
         )
-        assertEquals(Verdict.Compatible, ServerCompatibility.check("0.2.0", "1.0.0", withPin, null))
+        assertEquals(Verdict.Compatible, check("0.2.0", "1.0.0", withPin, null))
     }
 
     @Test
     fun servidorViejoOSinPin() {
         assertEquals(
             Verdict.UpdateServer("0.11.0"),
-            ServerCompatibility.check("0.2.0", "0.11.0", withPin, "0.1.0"),
+            check("0.2.0", "0.11.0", withPin, "0.1.0"),
         )
         assertEquals(
             Verdict.UpdateServer("0.13.0"),
-            ServerCompatibility.check("0.2.0", "0.13.0", listOf("offline-orders-v1"), "0.1.0"),
+            check("0.2.0", "0.13.0", listOf("offline-orders-v1"), "0.1.0"),
         )
         assertEquals(
             Verdict.UpdateServer("0.13.0-beta"),
-            ServerCompatibility.check("0.2.0", "0.13.0-beta", withPin, "0.1.0"),
+            check("0.2.0", "0.13.0-beta", withPin, "0.1.0"),
         )
     }
 
@@ -60,7 +77,7 @@ class ServerCompatibilityTest {
         // El servidor de la A1 (0.12.0 con el PIN) ya no basta.
         assertEquals(
             Verdict.UpdateServer("0.12.0"),
-            ServerCompatibility.check(
+            check(
                 "0.2.0",
                 "0.12.0",
                 listOf("offline-orders-v1", "waiter-pin-v1"),
@@ -70,7 +87,7 @@ class ServerCompatibilityTest {
         // Un 0.13.0 sin la capacidad (no debería existir) tampoco.
         assertEquals(
             Verdict.UpdateServer("0.13.0"),
-            ServerCompatibility.check(
+            check(
                 "0.2.0",
                 "0.13.0",
                 listOf("offline-orders-v1", "waiter-pin-v1"),
@@ -79,10 +96,10 @@ class ServerCompatibilityTest {
         )
         assertEquals(
             Verdict.UpdateServer("0.12.0"),
-            ServerCompatibility.check("0.2.0", "0.12.0", withPin, "0.1.0"),
+            check("0.2.0", "0.12.0", withPin, "0.1.0"),
         )
         assertTrue(
-            ServerCompatibility.check("0.1.0", "raro", withPin, null) is Verdict.UpdateServer,
+            check("0.1.0", "raro", withPin, null) is Verdict.UpdateServer,
         )
     }
 
@@ -94,7 +111,7 @@ class ServerCompatibilityTest {
     fun servidorSinImpresoraDePrecuentasPorDispositivo() {
         assertEquals(
             Verdict.UpdateServer("0.13.0"),
-            ServerCompatibility.check(
+            check(
                 "0.2.0",
                 "0.13.0",
                 listOf("offline-orders-v1", "waiter-pin-v1", "takeaway-v1", "ready-alerts-v1"),
@@ -102,8 +119,8 @@ class ServerCompatibilityTest {
             ),
         )
         assertTrue(
-            ServerCompatibility.CAPABILITY_PRECHECK_PRINTER in
-                ServerCompatibility.REQUIRED_CAPABILITIES,
+            WaiterServerRequirements.CAPABILITY_PRECHECK_PRINTER in
+                WaiterServerRequirements.REQUIRED_CAPABILITIES,
         )
     }
 
@@ -115,7 +132,7 @@ class ServerCompatibilityTest {
     fun servidorSinAvisoDePlatillosListos() {
         assertEquals(
             Verdict.UpdateServer("0.13.0"),
-            ServerCompatibility.check(
+            check(
                 "0.2.0",
                 "0.13.0",
                 listOf(
@@ -128,8 +145,8 @@ class ServerCompatibilityTest {
             ),
         )
         assertTrue(
-            ServerCompatibility.CAPABILITY_READY_ALERTS in
-                ServerCompatibility.REQUIRED_CAPABILITIES,
+            WaiterServerRequirements.CAPABILITY_READY_ALERTS in
+                WaiterServerRequirements.REQUIRED_CAPABILITIES,
         )
     }
 
@@ -137,11 +154,11 @@ class ServerCompatibilityTest {
     fun aplicacionVieja() {
         assertEquals(
             Verdict.UpdateApp("0.1.0", "0.13.0"),
-            ServerCompatibility.check("0.0.9", "0.13.0", withPin, "0.1.0"),
+            check("0.0.9", "0.13.0", withPin, "0.1.0"),
         )
         assertEquals(
             Verdict.UpdateApp("0.2.0", "0.13.0"),
-            ServerCompatibility.check("0.1.0", "0.13.0", withPin, "0.2.0"),
+            check("0.1.0", "0.13.0", withPin, "0.2.0"),
         )
     }
 }

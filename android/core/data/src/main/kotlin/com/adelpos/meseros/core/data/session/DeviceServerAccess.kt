@@ -1,11 +1,13 @@
 package com.adelpos.meseros.core.data.session
 
+import com.adelpos.core.model.error.AppError
+import com.adelpos.core.model.realtime.AccessInterruption
+import com.adelpos.core.model.realtime.AccessInterruptions
+import com.adelpos.core.network.session.AuthorizedServer
+import com.adelpos.core.network.session.ServerAccess
 import com.adelpos.meseros.core.data.access.AccessRepository
 import com.adelpos.meseros.core.domain.access.ActiveWaiter
 import com.adelpos.meseros.core.domain.access.DeviceStatus
-import com.adelpos.meseros.core.domain.error.AppError
-import com.adelpos.meseros.core.domain.realtime.AccessInterruption
-import com.adelpos.meseros.core.domain.realtime.AccessInterruptions
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow

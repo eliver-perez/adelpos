@@ -1,7 +1,10 @@
 package com.adelpos.meseros
 
 import android.os.SystemClock
-import com.adelpos.meseros.core.data.license.LicenseStatusRepository
+import com.adelpos.core.model.connection.LinkState
+import com.adelpos.core.model.connection.ServerLink
+import com.adelpos.core.model.realtime.RealtimeFeed
+import com.adelpos.core.network.license.LicenseStatusRepository
 import com.adelpos.meseros.core.data.waiter.CaptureRepository
 import com.adelpos.meseros.core.data.waiter.CustomerEditSender
 import com.adelpos.meseros.core.data.waiter.OrderQueueRepository
@@ -17,9 +20,6 @@ import com.adelpos.meseros.core.data.waiter.WaiterServer
 import com.adelpos.meseros.core.data.waiter.db.WaiterDao
 import com.adelpos.meseros.core.domain.catalog.CatalogSource
 import com.adelpos.meseros.core.domain.catalog.LineSelection
-import com.adelpos.meseros.core.domain.connection.LinkState
-import com.adelpos.meseros.core.domain.connection.ServerLink
-import com.adelpos.meseros.core.domain.realtime.RealtimeFeed
 import com.adelpos.meseros.core.domain.waiter.OrderFactory
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers

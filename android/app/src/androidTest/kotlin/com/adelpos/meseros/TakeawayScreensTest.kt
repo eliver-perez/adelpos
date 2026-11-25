@@ -14,6 +14,7 @@ import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.adelpos.core.ui.theme.AdelTheme
 import com.adelpos.meseros.core.capture.CustomerDialog
 import com.adelpos.meseros.core.capture.TAG_CUSTOMER_NAME
 import com.adelpos.meseros.core.capture.TAG_CUSTOMER_PHONE
@@ -35,7 +36,6 @@ import com.adelpos.meseros.core.domain.waiter.TakeawayEntry
 import com.adelpos.meseros.core.domain.waiter.TakeawayRead
 import com.adelpos.meseros.core.domain.waiter.Totals
 import com.adelpos.meseros.core.domain.waiter.WaiterPermissions
-import com.adelpos.meseros.core.ui.theme.AdelTheme
 import com.adelpos.meseros.core.ui.waiter.TAG_ORDER_STATE_PREFIX
 import com.adelpos.meseros.core.ui.waiter.TAG_TAKEAWAY_PAYMENT_PREFIX
 import com.adelpos.meseros.core.ui.waiter.TAG_TAKEAWAY_PREPARATION_PREFIX

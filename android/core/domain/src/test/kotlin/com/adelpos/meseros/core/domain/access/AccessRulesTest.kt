@@ -1,5 +1,6 @@
 package com.adelpos.meseros.core.domain.access
 
+import com.adelpos.core.model.access.NetworkPermissions
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch

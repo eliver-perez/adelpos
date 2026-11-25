@@ -8,7 +8,9 @@ modificar unidades, el evento de preparación, el motivo de una cuenta que ya no
 sin conexión y el cursor de eventos de la recuperación (ver «Modo Mesero»). La etapa A2
 ([etapas/ETAPA_A2_ANDROID.md](etapas/ETAPA_A2_ANDROID.md)) agregó **Para llevar** (servidor 0.13.0, ver «Para llevar») e
 **imprimir la precuenta** desde el dispositivo en su impresora (esquema 26, ver «Imprimir la precuenta») y los
-**avisos de platillos listos** (ver «Avisos de platillos listos»).
+**avisos de platillos listos** (ver «Avisos de platillos listos»). La etapa K1
+([etapas/ETAPA_K1_KDS_ANDROID_v3.md](etapas/ETAPA_K1_KDS_ANDROID_v3.md)) agregó la **pantalla de cocina para Android**
+(servidor 0.16.0, esquema 29, ver «Pantalla de cocina»).
 
 - **Contrato OpenAPI 3.1**: [`backend/internal/apicontract/openapi.json`](../backend/internal/apicontract/openapi.json)
   es la fuente. El servidor lo publica en `GET /api/v1/openapi.json` (sin sesión) y está incrustado en el binario.
@@ -27,9 +29,10 @@ sin conexión y el cursor de eventos de la recuperación (ver «Modo Mesero»). 
    servidor y nunca decide una regla de negocio. Los importes viajan como cadenas decimales con dos decimales
    (`"130.00"`, IVA incluido); nunca como números de punto flotante.
 2. **Identificación del cliente**: cada petición lleva `X-Client-Version` (la versión de la aplicación,
-   `MAJOR.MINOR.PATCH`) y `X-Client-Kind` (`desktop` o `android`). Si la versión es anterior a la mínima **de su
-   tipo de cliente** (`min_client_versions` de `getVersion`, desde la etapa A1: `desktop` 0.10.0 y `android` 0.1.0,
-   porque la aplicación Android numera sus versiones aparte), las rutas de la aplicación responden **426
+   `MAJOR.MINOR.PATCH`) y `X-Client-Kind` (`desktop`, `android` o, desde la etapa K1, `kitchen`). Si la versión es
+   anterior a la mínima **de su tipo de cliente** (`min_client_versions` de `getVersion`, desde la etapa A1: `desktop`
+   0.10.0 y `android` 0.1.0, porque la aplicación Android numera sus versiones aparte; desde la etapa K1, `kitchen`
+   0.1.0, la aplicación de cocina), las rutas de la aplicación responden **426
    `CLIENT_UPDATE_REQUIRED`** («Actualiza esta terminal») con `details.min_client_version` (la mínima de ese tipo).
    Sin `X-Client-Kind` se exige la general, `min_client_version`, que es la del escritorio y se conserva para los
    clientes que solo leen esa propiedad. **Por la escucha de red** (HTTPS, la única que usan las terminales y
@@ -38,8 +41,9 @@ sin conexión y el cursor de eventos de la recuperación (ver «Modo Mesero»). 
    `X-Client-Version` se acepta como «cliente sin identificar» (herramientas, pruebas automáticas y aplicaciones
    anteriores a la 9G, que solo existen en esa computadora). Con la credencial de un dispositivo, `X-Client-Kind` debe
    coincidir con el tipo con que se emparejó (`android` en un teléfono o tableta de meseros, `desktop` en una terminal
-   de escritorio o de cocina; etapa A1, revisión R3): si no, **400 `CLIENT_KIND_MISMATCH`**, para que nadie tome la
-   mínima de otro tipo de cliente. Una versión o un tipo que el servidor no reconoce es 400
+   de escritorio y, desde la etapa K1, `kitchen` en una pantalla de cocina; etapa A1, revisión R3): si no, **400
+   `CLIENT_KIND_MISMATCH`**, para que nadie tome la mínima de otro tipo de cliente. Una versión o un tipo que el
+   servidor no reconoce es 400
    (`CLIENT_VERSION_INVALID`, `CLIENT_KIND_INVALID`).
 3. **Servidor más viejo que el cliente**: el cliente lee `GET /api/v1/version` (siempre responde, sin sesión ni
    cabeceras) y compara `server_version` con la versión mínima de servidor que necesita (en el escritorio,
@@ -51,8 +55,11 @@ sin conexión y el cursor de eventos de la recuperación (ver «Modo Mesero»). 
    sección «Para llevar»), `device-precheck-printer-v1` (lo de «Imprimir la precuenta») y `ready-alerts-v1` (lo de
    «Avisos de platillos listos»); desde la etapa A3, `permission-groups-v1`, que solo usa el escritorio (permisos
    agrupados y roles de fábrica, `API_CONTRACTS.md`); desde la etapa L1, `license-v1` (lo de la sección «Licencia del
-   servidor principal»)). La aplicación Android 0.1.0 exige un servidor 0.12.0 o posterior; el escritorio 0.12.0 sigue
-   funcionando con un servidor 0.11.0 y solo muestra lo del PIN si el servidor anuncia `waiter-pin-v1`.
+   servidor principal»); desde la etapa K1, `kitchen-display-v1` (lo de la sección «Pantalla de cocina»)). La aplicación
+   Android 0.1.0 exige un servidor 0.12.0 o posterior; el escritorio 0.12.0 sigue
+   funcionando con un servidor 0.11.0 y solo muestra lo del PIN si el servidor anuncia `waiter-pin-v1`. La aplicación de
+   cocina 0.1.0 exige `kitchen-display-v1` (servidor 0.16.0); el escritorio esconde lo de las pantallas de cocina si el
+   servidor no la anuncia.
 4. **Credenciales**: la terminal (o el teléfono) emparejada envía `X-Device-ID` y `X-Device-Token`; con sesión,
    además `Authorization: Bearer <token>` (desde la etapa A1, en `submitOfflineOrder` el teléfono puede enviar en su
    lugar la credencial de envío del mesero, `X-Offline-Credential`; ver «Entrada con PIN y credencial de envío»). Los tokens se guardan en el almacén seguro del sistema. Go valida terminal,
@@ -74,50 +81,59 @@ sin conexión y el cursor de eventos de la recuperación (ver «Modo Mesero»). 
 
 ## Operaciones
 
-| `operationId`            | Método y ruta (bajo `/api/v1`)                 | Para qué                                                                       |
-| ------------------------ | ---------------------------------------------- | ------------------------------------------------------------------------------ |
-| `getVersion`             | `GET /version`                                 | Versión del servidor, `min_client_version`, tipos de cliente y funciones.      |
-| `getReadiness`           | `GET /health/ready`                            | Servidor y base de datos listos (200) o no (503).                              |
-| `getOpenAPI`             | `GET /openapi.json`                            | Este contrato.                                                                 |
-| `login`                  | `POST /auth/login`                             | Iniciar sesión en una terminal emparejada.                                     |
-| `logout`                 | `POST /auth/logout`                            | Cerrar la sesión.                                                              |
-| `getIdentity`            | `GET /auth/me`                                 | Usuario, permisos vigentes, preferencias, terminal y establecimiento.          |
-| `listPinUsers`           | `GET /auth/pin-users`                          | Meseros que pueden entrar con PIN en el dispositivo (sin sesión, etapa A1).    |
-| `pinLogin`               | `POST /auth/pin-login`                         | Entrar con PIN: sesión y credencial de envío (etapa A1).                       |
-| `streamEvents`           | `GET /events`                                  | Eventos en tiempo real (SSE).                                                  |
-| `getReadyAlerts`         | `GET /ready-alerts`                            | Avisos de platillos listos desde un cursor (credencial del dispositivo, A2).   |
-| `streamReadyAlerts`      | `GET /ready-alerts/stream`                     | Canal SSE de los avisos de platillos listos (credencial del dispositivo, A2).  |
-| `getCatalogSync`         | `GET /catalog/sync`                            | Catálogo descargable completo o «solo cambios desde la versión X».             |
-| `listCatalogProducts`    | `GET /catalog/products`                        | Productos para la captura con disponibilidad, «Agotado» y precio de una lista. |
-| `getCatalogImage`        | `GET /catalog/images/{id}`                     | Imagen en JSON base64 (la usa el escritorio).                                  |
-| `getCatalogImageContent` | `GET /catalog/images/{id}/content`             | Imagen binaria con `ETag` (304 con `If-None-Match`).                           |
-| `setProductSoldOut`      | `POST /catalog/products/{id}/sold-out`         | «Agotado» y «Disponible otra vez».                                             |
-| `getRecoveryState`       | `GET /restaurant/state`                        | Estado al reconectar: permisos, mesas, cuentas, preparación y cursor.          |
-| `getRestaurantOverview`  | `GET /restaurant/overview`                     | Áreas, mesas (lista y mapa) y umbrales de tiempo (etapa A1).                   |
-| `listAccounts`           | `GET /restaurant/accounts`                     | Cuentas con sus estados.                                                       |
-| `openAccount`            | `POST /restaurant/accounts`                    | Abrir una cuenta con su primer producto.                                       |
-| `getAccount`             | `GET /restaurant/accounts/{id}`                | Cuenta con su borrador y sus partidas confirmadas.                             |
-| `saveDraft`              | `PUT /restaurant/accounts/{id}/draft`          | Guardar el borrador.                                                           |
-| `previewDraft`           | `GET /restaurant/accounts/{id}/preview`        | Calcular el borrador y obtener su huella.                                      |
-| `confirmDraft`           | `POST /restaurant/accounts/{id}/confirm`       | Confirmar (enviar a cocina) el borrador.                                       |
-| `cancelUnits`            | `POST /restaurant/accounts/{id}/cancel`        | Cancelar unidades enviadas, con motivo (etapa A1 en el contrato).              |
-| `previewEdit`            | `POST /restaurant/accounts/{id}/edit-preview`  | Calcular la modificación de una partida enviada y su huella.                   |
-| `editUnits`              | `POST /restaurant/accounts/{id}/edit`          | Modificar una partida enviada, con motivo.                                     |
-| `updateTakeawayCustomer` | `POST /restaurant/accounts/{id}/customer`      | Nombre del cliente y teléfono de un pedido para llevar (etapa A2).             |
-| `discardAccount`         | `POST /restaurant/accounts/{id}/discard`       | Descartar sin motivo una cuenta vacía (etapa A3 en el contrato).               |
-| `submitOfflineOrder`     | `POST /restaurant/offline-orders`              | Pedido capturado sin conexión (Android; con sesión o credencial de envío).     |
-| `printPrecheck`          | `POST /payments/accounts/{id}/precheck/print`  | Imprimir la precuenta (etapa A2 en el contrato).                               |
-| `getDocumentStatus`      | `GET /payments/accounts/{id}/documents/status` | Estado de impresión de una precuenta, sin importes (etapa A2).                 |
-| `retryDocument`          | `POST /payments/accounts/{id}/documents/retry` | Reintentar sin motivo una precuenta que no salió (etapa A2 en el contrato).    |
-| `deliverTakeaway`        | `POST /payments/accounts/{id}/deliver`         | Marcar entregado un pedido para llevar ya pagado (etapa A2 en el contrato).    |
-| `createPairingRequest`   | `POST /pairing/requests`                       | Pedir un código de emparejamiento (sin credencial).                            |
-| `revealPairingNonce`     | `POST /pairing/requests/{id}/reveal`           | Revelar el número de la terminal después de recibir el del servidor.           |
-| `getPairingRequest`      | `GET /pairing/requests/{id}`                   | Consultar si la computadora principal ya aprobó el código.                     |
-| `renamePairingRequest`   | `POST /pairing/requests/{id}/name`             | Corregir el nombre propuesto mientras espera.                                  |
-| `cancelPairingRequest`   | `POST /pairing/requests/{id}/cancel`           | Dejar de esperar la aprobación.                                                |
-| `claimPairingCredential` | `POST /pairing/requests/{id}/claim`            | Recibir una sola vez la credencial de la terminal.                             |
-| `getLicenseStatus`       | `GET /license/status`                          | Estado de la licencia del servidor principal (etapa L1; también sin sesión).   |
-| `setKitchenDisplayMode`  | `POST /kitchen/display-mode`                   | Entrar o salir de Preparación: ocupa o libera el cupo de cocina (etapa L1).    |
+| `operationId`                       | Método y ruta (bajo `/api/v1`)                 | Para qué                                                                       |
+| ----------------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------ |
+| `getVersion`                        | `GET /version`                                 | Versión del servidor, `min_client_version`, tipos de cliente y funciones.      |
+| `getReadiness`                      | `GET /health/ready`                            | Servidor y base de datos listos (200) o no (503).                              |
+| `getOpenAPI`                        | `GET /openapi.json`                            | Este contrato.                                                                 |
+| `login`                             | `POST /auth/login`                             | Iniciar sesión en una terminal emparejada.                                     |
+| `logout`                            | `POST /auth/logout`                            | Cerrar la sesión.                                                              |
+| `getIdentity`                       | `GET /auth/me`                                 | Usuario, permisos vigentes, preferencias, terminal y establecimiento.          |
+| `listPinUsers`                      | `GET /auth/pin-users`                          | Meseros que pueden entrar con PIN en el dispositivo (sin sesión, etapa A1).    |
+| `pinLogin`                          | `POST /auth/pin-login`                         | Entrar con PIN: sesión y credencial de envío (etapa A1).                       |
+| `streamEvents`                      | `GET /events`                                  | Eventos en tiempo real (SSE).                                                  |
+| `getReadyAlerts`                    | `GET /ready-alerts`                            | Avisos de platillos listos desde un cursor (credencial del dispositivo, A2).   |
+| `streamReadyAlerts`                 | `GET /ready-alerts/stream`                     | Canal SSE de los avisos de platillos listos (credencial del dispositivo, A2).  |
+| `getCatalogSync`                    | `GET /catalog/sync`                            | Catálogo descargable completo o «solo cambios desde la versión X».             |
+| `listCatalogProducts`               | `GET /catalog/products`                        | Productos para la captura con disponibilidad, «Agotado» y precio de una lista. |
+| `getCatalogImage`                   | `GET /catalog/images/{id}`                     | Imagen en JSON base64 (la usa el escritorio).                                  |
+| `getCatalogImageContent`            | `GET /catalog/images/{id}/content`             | Imagen binaria con `ETag` (304 con `If-None-Match`).                           |
+| `setProductSoldOut`                 | `POST /catalog/products/{id}/sold-out`         | «Agotado» y «Disponible otra vez».                                             |
+| `getRecoveryState`                  | `GET /restaurant/state`                        | Estado al reconectar: permisos, mesas, cuentas, preparación y cursor.          |
+| `getRestaurantOverview`             | `GET /restaurant/overview`                     | Áreas, mesas (lista y mapa) y umbrales de tiempo (etapa A1).                   |
+| `listAccounts`                      | `GET /restaurant/accounts`                     | Cuentas con sus estados.                                                       |
+| `openAccount`                       | `POST /restaurant/accounts`                    | Abrir una cuenta con su primer producto.                                       |
+| `getAccount`                        | `GET /restaurant/accounts/{id}`                | Cuenta con su borrador y sus partidas confirmadas.                             |
+| `saveDraft`                         | `PUT /restaurant/accounts/{id}/draft`          | Guardar el borrador.                                                           |
+| `previewDraft`                      | `GET /restaurant/accounts/{id}/preview`        | Calcular el borrador y obtener su huella.                                      |
+| `confirmDraft`                      | `POST /restaurant/accounts/{id}/confirm`       | Confirmar (enviar a cocina) el borrador.                                       |
+| `cancelUnits`                       | `POST /restaurant/accounts/{id}/cancel`        | Cancelar unidades enviadas, con motivo (etapa A1 en el contrato).              |
+| `previewEdit`                       | `POST /restaurant/accounts/{id}/edit-preview`  | Calcular la modificación de una partida enviada y su huella.                   |
+| `editUnits`                         | `POST /restaurant/accounts/{id}/edit`          | Modificar una partida enviada, con motivo.                                     |
+| `updateTakeawayCustomer`            | `POST /restaurant/accounts/{id}/customer`      | Nombre del cliente y teléfono de un pedido para llevar (etapa A2).             |
+| `discardAccount`                    | `POST /restaurant/accounts/{id}/discard`       | Descartar sin motivo una cuenta vacía (etapa A3 en el contrato).               |
+| `submitOfflineOrder`                | `POST /restaurant/offline-orders`              | Pedido capturado sin conexión (Android; con sesión o credencial de envío).     |
+| `printPrecheck`                     | `POST /payments/accounts/{id}/precheck/print`  | Imprimir la precuenta (etapa A2 en el contrato).                               |
+| `getDocumentStatus`                 | `GET /payments/accounts/{id}/documents/status` | Estado de impresión de una precuenta, sin importes (etapa A2).                 |
+| `retryDocument`                     | `POST /payments/accounts/{id}/documents/retry` | Reintentar sin motivo una precuenta que no salió (etapa A2 en el contrato).    |
+| `deliverTakeaway`                   | `POST /payments/accounts/{id}/deliver`         | Marcar entregado un pedido para llevar ya pagado (etapa A2 en el contrato).    |
+| `createPairingRequest`              | `POST /pairing/requests`                       | Pedir un código de emparejamiento (sin credencial).                            |
+| `revealPairingNonce`                | `POST /pairing/requests/{id}/reveal`           | Revelar el número de la terminal después de recibir el del servidor.           |
+| `getPairingRequest`                 | `GET /pairing/requests/{id}`                   | Consultar si la computadora principal ya aprobó el código.                     |
+| `renamePairingRequest`              | `POST /pairing/requests/{id}/name`             | Corregir el nombre propuesto mientras espera.                                  |
+| `cancelPairingRequest`              | `POST /pairing/requests/{id}/cancel`           | Dejar de esperar la aprobación.                                                |
+| `claimPairingCredential`            | `POST /pairing/requests/{id}/claim`            | Recibir una sola vez la credencial de la terminal.                             |
+| `getLicenseStatus`                  | `GET /license/status`                          | Estado de la licencia del servidor principal (etapa L1; también sin sesión).   |
+| `setKitchenDisplayMode`             | `POST /kitchen/display-mode`                   | Entrar o salir de Preparación: ocupa o libera el cupo de cocina (etapa L1).    |
+| `connectKitchenDisplay`             | `POST /kitchen-display/connect`                | Pantalla de cocina: ocupar su cupo y leer su configuración (etapa K1).         |
+| `getKitchenDisplayOrders`           | `GET /kitchen-display/orders`                  | Pantalla de cocina: tarjetas, configuración, licencia y cursor (etapa K1).     |
+| `markKitchenDisplayItemsReady`      | `POST /kitchen-display/items/ready`            | Pantalla de cocina: marcar platillos como listos (etapa K1).                   |
+| `markKitchenDisplayOrderReady`      | `POST /kitchen-display/orders/ready`           | Pantalla de cocina: marcar el pedido completo como listo (etapa K1).           |
+| `getKitchenDisplayRecent`           | `GET /kitchen-display/recent`                  | Pantalla de cocina: lo marcado en los últimos 30 minutos (etapa K1).           |
+| `recoverKitchenDisplayItems`        | `POST /kitchen-display/recover`                | Pantalla de cocina: regresar lo marcado por error (etapa K1).                  |
+| `acknowledgeKitchenDisplayReceipts` | `POST /kitchen-display/receipts`               | Pantalla de cocina: confirmar que ya muestra unas comandas (etapa K1).         |
+| `checkKitchenDisplaySettingsAccess` | `POST /kitchen-display/settings-access`        | Pantalla de cocina: contraseña de un administrador para los ajustes (K1).      |
+| `unpairKitchenDisplay`              | `POST /kitchen-display/unpair`                 | Pantalla de cocina: «Volver a emparejar», se revoca y suelta su cupo (K1).     |
 
 ## Encontrar el servidor y emparejarse (fases B y C)
 
@@ -134,7 +150,9 @@ sin conexión y el cursor de eventos de la recuperación (ver «Modo Mesero»). 
    `SHA-256(nT)` de su número aleatorio de 32 bytes → `server_nonce` (nS), `pairing_secret` (para las demás llamadas,
    en `X-Pairing-Secret`) y vencimiento a 5 minutos. Después `revealPairingNonce` con nT. El código de 6 dígitos que
    muestra el teléfono es `SHA-256(huella ‖ nT ‖ nS ‖ id de la solicitud en 16 bytes)`, primeros 8 bytes big-endian
-   módulo 10⁶ (vector de prueba en `administration/pairing_test.go`: `166101`).
+   módulo 10⁶ (vector de prueba en `administration/pairing_test.go`: `166101`). `createPairingRequest` dice el tipo de
+   dispositivo, `device_kind` (`desktop`, `android` o, desde la etapa K1, `kitchen`), que debe coincidir con
+   `X-Client-Kind` cuando llega la cabecera (400 `CLIENT_KIND_MISMATCH`, K1-D29).
 3. Un administrador escribe ese código en la computadora principal (Sistema › Terminales; solo ahí se aprueba). El
    cliente consulta `getPairingRequest` cada 2 s; con `approved`, `claimPairingCredential` entrega una sola vez
    `device_id` y `device_token`, que se guardan en el almacén seguro junto con `server_id` y la huella.
@@ -169,7 +187,11 @@ sin conexión y el cursor de eventos de la recuperación (ver «Modo Mesero»). 
      nada; a lo más recibe un evento de algo que ya ve (y vuelve a leer de más).
 4. `streamEvents` (`GET /events`, con `events.read`): mensajes «changes» cada 750 ms con `cursor`, `reset` y
    `events` (tipo, ámbito y agregado, nunca importes). El flujo dura 30 s; el cliente se reconecta con
-   `?after=<cursor>` (o `Last-Event-ID`). Fuera de la ventana de 5000 eventos llega `reset: true` y el cliente vuelve a
+   `?after=<cursor>` (o `Last-Event-ID`). **Ese fin a los 30 s es normal y no es una falla** (etapa K1, K1-D10): Go lo
+   renueva a propósito para volver a revisar sesión, permisos y estaciones, y el cliente vuelve a abrir el canal al
+   momento desde su cursor, sin avisar nada ni esperar. Solo cuenta como falla no conectar, no recibir la respuesta, un
+   cuerpo cortado, un canal sin mensajes durante varios segundos (Go manda uno cada 750 ms), un 5xx o `interrupted`.
+   Fuera de la ventana de 5000 eventos llega `reset: true` y el cliente vuelve a
    consultar todo. Desde la 9G existe el ámbito **`catalog`**: `catalog.changed` (cualquier cambio del catálogo),
    `catalog.product.sold_out` y `catalog.product.available` (con el producto como agregado). Desde la etapa A1,
    **`restaurant.account.preparation_changed`** (ver «Estados de preparación»). Un cliente ignora los tipos que no
@@ -842,7 +864,7 @@ decide; el cliente solo muestra el mensaje o arma el suyo con `details`.
 | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `cash_registers`   | La terminal que abre un turno de caja, y la terminal que crea o modifica un pedido con un turno activo en su caja aunque lo abriera otra (dos terminales con la misma caja física ocupan dos cupos, L1-D3). Cambiar de cajero en la misma terminal no ocupa otro.                                                                                                                                                                | Al cerrar ese turno (confirmar el arqueo), también desde otra computadora: se liberan todas las terminales que lo usaban. Si la terminal se cae o se revoca, el cupo sigue hasta cerrar el turno.                                                                        |
 | `order_takers`     | La **terminal** (no el usuario) que crea o modifica un pedido sin turno activo en su caja: varios meseros con su PIN en una tableta ocupan uno, y volver a «Selecciona tu usuario» no lo libera. El pedido que entrega la cola de una tableta sin sesión (con la credencial de envío) también lo ocupa. Cuenta por actividad. Consultar no ocupa nada; las previas (`previewEdit` y la del borrador) solo renuevan su actividad. | A los **15 minutos** sin crear ni modificar pedidos (valor del servidor), cuando se cierra la última sesión de esa terminal (cerrar sesión, revocarla, vencer), al revocar la terminal, al abrir turno en su caja o desde Terminales («Liberar cupo», `devices.manage`). |
-| `kitchen_displays` | La terminal de escritorio en Cocina › Preparación: `setKitchenDisplayMode` con `active: true`, ligado a la sesión que entra.                                                                                                                                                                                                                                                                                                     | Con `active: false`, al cerrar esa sesión o desde Terminales.                                                                                                                                                                                                            |
+| `kitchen_displays` | La terminal de escritorio en Cocina › Preparación: `setKitchenDisplayMode` con `active: true`, ligado a la sesión que entra. Desde la etapa K1, la pantalla de cocina Android al conectarse (`connectKitchenDisplay`), ligado al dispositivo.                                                                                                                                                                                    | Con `active: false`, al cerrar esa sesión o desde Terminales. La de una pantalla Android, al revocarla, desde Terminales («Liberar cupo») o con «Volver a emparejar» (`unpairKitchenDisplay`); nunca por la red.                                                         |
 
 - **Qué ocupa cupo**: `openAccount`, `saveDraft`, `confirmDraft`, `editUnits` y `submitOfflineOrder` (crear o modificar
   un pedido); abrir turno; y `setKitchenDisplayMode`. **Cobrar y las operaciones de efectivo nunca piden cupo**, ni
@@ -873,6 +895,102 @@ decide; el cliente solo muestra el mensaje o arma el suyo con `details`.
 - **Terminales y `sessions-summary`** (administración, en `API_CONTRACTS.md`): `GET devices` dice en `seats` qué cupo
   ocupa cada terminal; `POST devices/{id}/seat/release` libera su comandero o su cocina y cierra sus sesiones;
   `devices/sessions-summary` conserva `by_kind` y agrega `seats` con `in_use` y `limit` por cupo (`limited: true`).
+
+## Pantalla de cocina (etapa K1)
+
+Capacidad `kitchen-display-v1` (servidor 0.16.0, esquema 29). La aplicación de cocina para Android (`cocina/`) funciona
+**solo como pantalla de cocina**: un dispositivo `kind = "kitchen"` sin usuario ni sesión, siempre abierto en modo
+cocina. Go es la única autoridad de las tarjetas, las estaciones, el cupo y la licencia; la tableta solo calcula el color
+por tiempo con `server_time`, los límites y su reloj monotónico. Decisiones K1-D3 a K1-D35 en
+[ETAPA_K1_AVANCE.md](ETAPA_K1_AVANCE.md).
+
+- **Emparejar**: el flujo de siempre (`createPairingRequest` … `claimPairingCredential`) con `device_kind: "kitchen"` y
+  `X-Client-Kind: kitchen`. Con la cabecera, `device_kind` debe ser el de la aplicación en los tres tipos (`desktop`,
+  `android`, `kitchen`; revisión R1, K1-D29); si no, 400 `CLIENT_KIND_MISMATCH`. Un servidor 0.15.0 responde
+  400 `CLIENT_KIND_INVALID` al tipo `kitchen`: la aplicación lo explica como «Actualiza el servidor del restaurante».
+- **Solo su lista cerrada**: con la credencial de un dispositivo `kitchen` Go atiende solo `connectKitchenDisplay`,
+  `getKitchenDisplayOrders`, `markKitchenDisplayItemsReady`, `markKitchenDisplayOrderReady`, `getKitchenDisplayRecent`,
+  `recoverKitchenDisplayItems`, `acknowledgeKitchenDisplayReceipts`, `checkKitchenDisplaySettingsAccess`,
+  `unpairKitchenDisplay`, el canal de eventos (`streamEvents`) y `getLicenseStatus` (el resumen). Todo lo demás —sesión,
+  PIN, pedidos, cobros, cocina del
+  escritorio, administración, mantenimiento, avisos de platillos listos, agente de impresión, licencia salvo el estado—
+  responde **403 `KITCHEN_DISPLAY_ONLY`** y queda en el Registro de movimientos, aunque la petición lleve el
+  `Authorization` de otra sesión (nunca se valida). Sus permisos son una lista cerrada en código: ver y avanzar la
+  preparación y recibir eventos. Al revés, `kitchen-display/*` con otro tipo de dispositivo: **403
+  `KITCHEN_DISPLAY_REQUIRED`**.
+- **Orden de arranque**: `getVersion` (con `kitchen-display-v1`) → `connectKitchenDisplay` → `getKitchenDisplayOrders`
+  (su `cursor`) → `streamEvents?after=<cursor>`; con **cualquier** evento o `reset: true`, volver a leer
+  `getKitchenDisplayOrders`, que reemplaza todo lo que se muestra. El canal se renueva cada 30 s en silencio. Al
+  reconectar, repetir desde `connectKitchenDisplay`: el estado completo nunca pierde ni duplica una tarjeta.
+- **`connectKitchenDisplay`** (`POST /kitchen-display/connect`, `{}` o `{take_seat: true}`): ocupa el cupo
+  `kitchen_displays` ligado al dispositivo (un corte de red no lo libera) y devuelve `display` (nombre, `text_size`
+  `normal`/`large`, `theme` `dark`/`light`, `sound_enabled`, `sound_volume` `low`/`medium`/`high`, `warning_minutes` y
+  `late_minutes` —los límites de color generales, 10 y 20 por omisión—, `all_stations` y `stations` con su `tracking`
+  efectivo, solo las de recepción «pantalla» o «impresora y pantalla»), `establishment`, `license` (`LicenseSummary`),
+  `seat` y `server_time`. Sin cupo, 409 `LICENSE_SEAT_UNAVAILABLE` con «No hay cupo de pantalla de cocina libre (N de N
+  en uso). Revoca otra pantalla en Terminales o amplía tu licencia.». Después de «Liberar cupo» en Terminales responde
+  **409 `KITCHEN_DISPLAY_SEAT_RELEASED`** («Esta pantalla dejó su cupo de cocina.») y no lo vuelve a ocupar sola; solo
+  con `take_seat: true` («Usar esta pantalla»).
+- **`getKitchenDisplayOrders`** (`GET /kitchen-display/orders`): `cursor` (leído en la misma transacción y antes que
+  las tarjetas), `server_time`, `display`, `establishment`, `license`, `orders` y `receipts_pending`. Una **tarjeta** es
+  una cuenta en las estaciones de la pantalla, en su ronda en curso (una ronda nueva empieza cuando llega algo y todo lo
+  anterior ya estaba listo o cancelado): `title` (la mesa o «Para llevar»), `subtitle` (la cuenta o el cliente),
+  `waiter_name`, `sent_at`, `elapsed_seconds`, `status` (`open`, o `cancelled` si se cerró por una cancelación y nadie
+  la ha marcado, hasta 30 minutos) e `items`: cada platillo con `quantity`, `status` (`pending`, `ready`, `cancelled`),
+  `is_new` («NUEVO»), `pending_change`, `tracking`, `notes`, `parts` (los renglones de la comanda impresa, sin precios) y
+  sus `tasks` (`{id, version_id}`). Sin el cupo: `KITCHEN_DISPLAY_SEAT_RELEASED` o **409
+  `KITCHEN_DISPLAY_NOT_CONNECTED`** (volver a conectar).
+- **`markKitchenDisplayItemsReady`** (`POST /kitchen-display/items/ready`) y **`markKitchenDisplayOrderReady`**
+  (`POST /kitchen-display/orders/ready`), con `{tasks: [{id, version_id}]}` (1 a 1000): idempotentes por estado y
+  versión (sin `operation_id`; repetir responde `updated: 0` con `skipped` `already_ready`); lo cancelado o cambiado
+  (`cancelled`, `changed`) se informa y no impide lo demás. El pedido completo marca lo pendiente (en una estación «por
+  pedido», el pedido de esa estación) y da por vistas las cancelaciones (`dismissed`); en `items/ready`, una estación
+  «por pedido» es 400 `KITCHEN_VALIDATION`. Una tarea de otra estación: 403 `STATION_SCOPE_DENIED` sin marcar nada.
+  **Marcar listo dispara el aviso de platillos listos** al mesero, como desde el escritorio.
+- **`getKitchenDisplayRecent`** (`GET /kitchen-display/recent`) y **`recoverKitchenDisplayItems`**
+  (`POST /kitchen-display/recover`): lo marcado en los últimos 30 minutos se puede regresar a su estado anterior; no
+  avisa al mesero y borra el aviso que todavía no le llegaba (volver a marcar sí avisa). Fuera de la ventana: 409
+  `KITCHEN_NOT_RECOVERABLE`. El modo Cocina del escritorio sigue sin poder retroceder un «Listo».
+- **`acknowledgeKitchenDisplayReceipts`** (`POST /kitchen-display/receipts`, `{receipts: [{ticket_id, station_id}]}`):
+  el acuse de recepción de la 9F con el dispositivo y sin usuario, para las comandas de `receipts_pending`. Idempotente.
+- **`checkKitchenDisplaySettingsAccess`** (`POST /kitchen-display/settings-access`, `{username, password}`): la
+  contraseña de quien puede administrar terminales (`devices.manage`), sin crear sesión ni devolver token:
+  `{authorized: true}`, 401 `AUTHORIZATION_INVALID`, 429 `AUTHORIZATION_THROTTLED` (comparte el límite del inicio de
+  sesión) o 403 `PERMISSION_DENIED`. El usuario o la contraseña vacíos responden 400 `VALIDATION_ERROR`; un usuario de
+  más de 40 caracteres o una contraseña de más de 256, 401 `AUTHORIZATION_INVALID` sin contar un intento (revisión R1,
+  K1-D29).
+- **`unpairKitchenDisplay`** (`POST /kitchen-display/unpair`, `{username, password}`, K1-D32): «Volver a emparejar» en
+  la tableta. Las mismas validaciones y respuestas de error que `checkKitchenDisplaySettingsAccess`, con el mismo límite
+  de intentos (compartido entre las dos rutas). Con el administrador responde 200 `{}` y revoca la propia pantalla igual
+  que «Revocar» en Terminales (`POST devices/{id}/revoke`): suelta su cupo de pantalla de cocina, el canal de eventos se
+  corta con `interrupted`
+  `DEVICE_REVOKED` y desde entonces toda petición de la pantalla responde 401 `DEVICE_REVOKED`. La auditoría
+  `kitchen_display.unpaired` lleva al administrador como autor y a la pantalla como dispositivo. No exige cupo (también
+  sin cupo o con el cupo liberado) y se permite en cualquier estado de la licencia y con la hora incorrecta. Así la
+  pantalla nueva encuentra libre el cupo de la vieja.
+- **Licencia y hora**: Vencida y Revocada muestran y marcan; Sin activar responde `LICENSE_NOT_ACTIVATED` en todo menos
+  el canal de eventos, `getLicenseStatus`, los ajustes y «Volver a emparejar»; con la hora del equipo incorrecta se lee,
+  pero marcar, recuperar y el acuse responden `SYSTEM_CLOCK_INVALID`.
+- **Eventos de la pantalla** (`streamEvents` con su credencial; solo `after`): `license.changed`,
+  `kitchen_display.configuration.changed` (ámbito `configuration`, con la pantalla o sin agregado: sus estaciones, letra,
+  tema, sonido o cupo, o la configuración general de cocina), los eventos de cocina de sus estaciones
+  (`kitchen.ticket.created`, `kitchen.state.changed`, `kitchen.change.pending`, `kitchen.kds.received`) y los cambios de
+  encabezado de las cuentas con tareas en sus estaciones (`restaurant.account.updated`, `.move`, `.assign`, `.merged`,
+  `.split`, `.cancelled` y `restaurant.items.transferred`). Ninguno lleva datos. **Revocar** la pantalla manda
+  `interrupted` con `DEVICE_REVOKED` en menos de un segundo, y una petición suya que todavía esperaba responde 401
+  `DEVICE_REVOKED` (revisión R1, K1-D29).
+- **Versión instalada** (para los tres tipos): Go guarda `X-Client-Version` de cada petición autenticada; Terminales
+  muestra la instalada aunque se haya actualizado encima.
+- **Terminales** (administración, en `API_CONTRACTS.md`): `GET devices` y `devices/{id}/configuration` traen
+  `kitchen_display` (letra, tema, sonido, volumen y `seat_released_at`), `online`, `app_version` y `seats`; la
+  configuración, además, `kitchen_display_station_options`. `PATCH devices/{id}` acepta `kitchen_display_text_size`,
+  `kitchen_display_theme`, `kitchen_display_sound` y `kitchen_display_volume` (solo en una pantalla de cocina); las
+  estaciones se eligen con `PUT kitchen/access` (solo las de recepción «pantalla» o «impresora y pantalla»); los límites
+  de color con `PUT kitchen/timing` (`display_warning_minutes`, `display_late_minutes`, con `kitchen.timing.manage`).
+  Cada cambio llega a la pantalla al momento. `GET kitchen/access` (Cocina › Estaciones › Terminales de cocina) ya no
+  lista las pantallas: sus estaciones se eligen en Terminales. «Liberar cupo» (`POST devices/{id}/seat/release`) **no
+  es definitivo** (K1-D30): la pantalla lo puede pedir otra vez con «Usar esta pantalla» (`take_seat: true`); para que
+  deje de usarse, «Revocar» (`POST devices/{id}/revoke`).
 
 ## Licencia del servidor principal (etapa L1, fase B)
 
@@ -1009,3 +1127,7 @@ en el servidor, en cada operación, antes que los cupos.
 | `LICENSE_NOT_ACTIVATED`                                  | 409    | La licencia no está activada: mostrar «La licencia del sistema no permite capturar pedidos.».                              |
 | `LICENSE_EXPIRED`, `LICENSE_REVOKED`                     | 409    | Licencia vencida o revocada: el mismo mensaje; lo abierto se sigue cobrando en la caja.                                    |
 | `SYSTEM_CLOCK_INVALID`                                   | 409    | Hora incorrecta en la computadora principal: mostrar su mensaje y el aviso fijo.                                           |
+| `KITCHEN_DISPLAY_ONLY`, `KITCHEN_DISPLAY_REQUIRED`       | 403    | La ruta no es de este tipo de dispositivo (pantalla de cocina o terminal con sesión).                                      |
+| `KITCHEN_DISPLAY_SEAT_RELEASED`                          | 409    | La pantalla dejó su cupo de cocina: mostrar «Usar esta pantalla».                                                          |
+| `KITCHEN_DISPLAY_NOT_CONNECTED`                          | 409    | La pantalla no ocupa su cupo: volver a `connectKitchenDisplay`.                                                            |
+| `KITCHEN_NOT_RECOVERABLE`                                | 409    | Lo marcado ya no se puede regresar a la pantalla (más de 30 minutos, cancelado o cambiado).                                |

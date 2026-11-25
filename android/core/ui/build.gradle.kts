@@ -1,5 +1,6 @@
-// Interfaz compartida con la etapa A2: tema AD-EL POS (claro y oscuro), íconos, botones táctiles,
-// indicador de conexión, estado de mesa y andamio de uno o dos paneles.
+// Interfaz de meseros compartida con la etapa A2: estado de mesa, teclado del PIN, distintivo del
+// mesero, catálogo y andamio de uno o dos paneles. El tema, la paleta, los íconos de la barra, los
+// botones y la barra con el indicador son de android-core:ui (etapa K1).
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.compose)
@@ -43,6 +44,8 @@ android {
 
 dependencies {
     api(project(":core:domain"))
+    // Etapa K1: el tema y las pantallas compartidas con la aplicación de cocina (android-core:ui).
+    api("com.adelpos.core:ui")
     api(platform(libs.compose.bom))
     api(libs.compose.material3)
     api(libs.compose.ui)
@@ -61,23 +64,4 @@ dependencies {
     androidTestImplementation(libs.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.test.espresso.core)
     debugImplementation(libs.compose.ui.test.manifest)
-}
-
-tasks.withType<Test>().configureEach {
-    // La prueba de colores recorre las fuentes de todos los módulos (los colores solo viven en el
-    // tema).
-    val androidRoot = rootProject.projectDir
-    inputs
-        .files(
-            fileTree(androidRoot) {
-                include("**/src/main/**/*.kt", "**/src/main/res/**/*.xml")
-                exclude("**/build/**")
-            },
-        )
-        .withPropertyName("androidSources")
-    // La prueba del distintivo de los meseros lee la paleta de colores de Go.
-    inputs
-        .file(rootProject.file("../backend/internal/catalog/palette.go"))
-        .withPropertyName("badgePalette")
-    systemProperty("adelpos.androidRoot", androidRoot.absolutePath)
 }

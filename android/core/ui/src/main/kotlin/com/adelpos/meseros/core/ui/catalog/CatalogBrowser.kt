@@ -34,6 +34,9 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.adelpos.core.ui.theme.AdelDimens
+import com.adelpos.core.ui.theme.AdelTheme
+import com.adelpos.core.ui.theme.AmountTextStyle
 import com.adelpos.meseros.core.domain.catalog.AvailabilityStatus
 import com.adelpos.meseros.core.domain.catalog.CatalogCategory
 import com.adelpos.meseros.core.domain.catalog.CatalogImages
@@ -42,9 +45,6 @@ import com.adelpos.meseros.core.domain.catalog.ProductKind
 import com.adelpos.meseros.core.ui.R
 import com.adelpos.meseros.core.ui.icons.CatalogIcons
 import com.adelpos.meseros.core.ui.layout.currentHeightCompact
-import com.adelpos.meseros.core.ui.theme.AdelDimens
-import com.adelpos.meseros.core.ui.theme.AdelTheme
-import com.adelpos.meseros.core.ui.theme.AmountTextStyle
 
 /**
  * Catálogo para capturar (modo Mesero y, en la A2, Para llevar): búsqueda arriba, categorías

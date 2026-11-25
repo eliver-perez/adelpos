@@ -1,6 +1,6 @@
 // Dominio: Kotlin/JVM puro, sin Android, para probarlo en la JVM en segundos. Modelos y reglas de
 // la aplicación (nunca de negocio: precios, impuestos, permisos y estados los decide el servidor
-// Go).
+// Go). Lo compartido con la aplicación de cocina vive en android-core:model (etapa K1).
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins { alias(libs.plugins.kotlin.jvm) }
@@ -13,6 +13,8 @@ java {
 kotlin { compilerOptions { jvmTarget = JvmTarget.JVM_17 } }
 
 dependencies {
+    // Etapa K1: el modelo compartido con la aplicación de cocina (android-core:model).
+    api("com.adelpos.core:model")
     api(libs.kotlinx.coroutines.core)
 
     testImplementation(libs.junit)

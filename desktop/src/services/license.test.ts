@@ -13,6 +13,7 @@ import {
   seatUnavailableText,
 } from './license';
 import type { LicenseSummary } from './license';
+import { kitchenDisplayCapability, rememberServerCapabilities } from './serverCapabilities';
 
 // Etapa L1 (Fase E): los textos de la licencia salen de los códigos de error y de sus details (nunca del message del
 // servidor de licencias), en un solo lugar (services/license.ts).
@@ -86,6 +87,15 @@ describe('mensajes sin cupo (§5)', () => {
     expect(seatUnavailableText({ seat: 'kitchen_displays', in_use: 1, limit: 1 })).toBe(
       'No hay cupo de pantalla de cocina libre (1 de 1 en uso). Pide que otra terminal salga de Preparación.',
     );
+    // Etapa K1: con un servidor que tiene tabletas de cocina, también la tableta emparejada ocupa el cupo.
+    rememberServerCapabilities([kitchenDisplayCapability]);
+    try {
+      expect(seatUnavailableText({ seat: 'kitchen_displays', in_use: 1, limit: 1 })).toBe(
+        'No hay cupo de pantalla de cocina libre (1 de 1 en uso). Pide que otra terminal salga de Preparación o que se libere el cupo de una tableta de cocina en Terminales.',
+      );
+    } finally {
+      rememberServerCapabilities([]);
+    }
   });
 
   it('con límite 0 (plan básico) dicen que la licencia no los incluye', () => {

@@ -13,13 +13,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.adelpos.core.ui.components.SecondaryButton
+import com.adelpos.core.ui.theme.AdelTheme
 import com.adelpos.meseros.core.domain.waiter.PrecheckFeedback
 import com.adelpos.meseros.core.domain.waiter.PrecheckName
 import com.adelpos.meseros.core.domain.waiter.PrecheckPrintState
 import com.adelpos.meseros.core.domain.waiter.PrecheckSetup
 import com.adelpos.meseros.core.domain.waiter.PrintMessage
-import com.adelpos.meseros.core.ui.components.SecondaryButton
-import com.adelpos.meseros.core.ui.theme.AdelTheme
 
 /*
  * «Imprimir precuenta» desde la cuenta de una mesa o un pedido para llevar (etapa A2, Fase C, §5):

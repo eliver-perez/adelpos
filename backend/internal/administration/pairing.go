@@ -87,8 +87,8 @@ type ServerIdentity struct {
 	Fingerprint [32]byte
 }
 
-// DeviceKinds es la lista cerrada de tipos de dispositivo (D9): escritorio y, en el futuro, comandero
-// Android y cocina. Coincide con los CHECK de la migración 0023.
+// DeviceKinds es la lista cerrada de tipos de dispositivo (D9): escritorio, comandero Android (etapa A1) y, desde la
+// etapa K1, la pantalla de cocina Android (kitchen). Coincide con los CHECK de la migración 0023.
 var DeviceKinds = []string{"desktop", "android", "kitchen"}
 
 var hexNoncePattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
@@ -229,6 +229,14 @@ func (service *Service) createPairingRequest(ctx context.Context, tx pgx.Tx, req
 	}
 	if !validKind {
 		return nil, invalid("Tipo de terminal no reconocido.")
+	}
+	// Etapa K1 (Fase A, K1-D3; revisión R1, K1-D29): cada aplicación se empareja solo con su tipo (el escritorio como
+	// desktop, la de meseros como android y la de cocina como kitchen), el mismo que después exige matchClientKind en
+	// cada petición: el tipo decide qué puede hacer el dispositivo (la pantalla, solo su lista cerrada de rutas). Sin
+	// X-Client-Kind (herramientas locales y pruebas por la escucha local) no hay nada que comparar.
+	if request.ClientKind != "" && request.ClientKind != expectedClientKind(input.DeviceKind) {
+		return nil, &Fault{Status: 400, Code: "CLIENT_KIND_MISMATCH",
+			Message: "Esta aplicación no corresponde al tipo de equipo que pide emparejar. Usa la aplicación que corresponde."}
 	}
 	source := net.ParseIP(request.SourceAddress)
 	if source == nil {

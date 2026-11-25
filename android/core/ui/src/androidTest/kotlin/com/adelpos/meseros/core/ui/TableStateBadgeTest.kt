@@ -11,11 +11,11 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.adelpos.core.ui.theme.AdelTheme
 import com.adelpos.meseros.core.domain.table.TableState
 import com.adelpos.meseros.core.ui.components.TAG_TABLE_STATE_ICON_PREFIX
 import com.adelpos.meseros.core.ui.components.TAG_TABLE_STATE_PREFIX
 import com.adelpos.meseros.core.ui.components.TableStateBadge
-import com.adelpos.meseros.core.ui.theme.AdelTheme
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith

@@ -20,6 +20,11 @@ import androidx.compose.ui.test.printToLog
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.adelpos.core.testing.MainComputer
+import com.adelpos.core.testing.SystemDialogs
+import com.adelpos.core.ui.access.findserver.TAG_ADDRESS
+import com.adelpos.core.ui.access.findserver.TAG_FIND_SERVER
+import com.adelpos.core.ui.access.findserver.TAG_PAIRING_CODE
 import com.adelpos.meseros.core.capture.TAG_CANCEL_CONFIRM
 import com.adelpos.meseros.core.capture.TAG_DISCARD_CAPTURE
 import com.adelpos.meseros.core.capture.TAG_DISCARD_CONFIRM
@@ -57,9 +62,6 @@ import com.adelpos.meseros.core.ui.components.TAG_PIN_SUBMIT
 import com.adelpos.meseros.core.ui.layout.TAG_PANE_BACK
 import com.adelpos.meseros.core.ui.layout.TAG_PANE_OPEN_SECONDARY
 import com.adelpos.meseros.core.ui.waiter.TAG_ORDER_STATE_PREFIX
-import com.adelpos.meseros.feature.access.findserver.TAG_ADDRESS
-import com.adelpos.meseros.feature.access.findserver.TAG_FIND_SERVER
-import com.adelpos.meseros.feature.access.findserver.TAG_PAIRING_CODE
 import com.adelpos.meseros.feature.access.pin.TAG_ENTRY
 import com.adelpos.meseros.feature.access.pin.TAG_WAITER_PREFIX
 import com.adelpos.meseros.feature.waiter.tables.TAG_ACCOUNT_PANE

@@ -19,25 +19,34 @@ import androidx.compose.ui.test.printToLog
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import com.adelpos.meseros.core.data.api.ApiErrors
-import com.adelpos.meseros.core.data.api.ApiOutcome
-import com.adelpos.meseros.core.data.api.ClientIdentity
+import com.adelpos.core.model.access.RepairReason
+import com.adelpos.core.model.connection.LinkState
+import com.adelpos.core.model.error.AppError
+import com.adelpos.core.model.text.Hex
+import com.adelpos.core.network.api.ApiErrors
+import com.adelpos.core.network.api.ApiOutcome
+import com.adelpos.core.network.api.ClientIdentity
+import com.adelpos.core.network.api.ClientKinds
+import com.adelpos.core.network.api.PinnedHttpClient
+import com.adelpos.core.network.api.ServerApi
+import com.adelpos.core.testing.MainComputer
+import com.adelpos.core.ui.access.findserver.TAG_ADDRESS
+import com.adelpos.core.ui.access.findserver.TAG_FIND_SERVER
+import com.adelpos.core.ui.access.findserver.TAG_PAIRING_CODE
+import com.adelpos.core.ui.access.status.TAG_CHECK_AGAIN
+import com.adelpos.core.ui.access.status.TAG_REPAIR
+import com.adelpos.core.ui.access.status.TAG_REPAIR_ACTION
+import com.adelpos.core.ui.access.status.TAG_REPAIR_CONFIRM
+import com.adelpos.core.ui.access.status.TAG_RETIRED
+import com.adelpos.core.ui.access.status.TAG_RETIRED_PAIR_AGAIN
+import com.adelpos.core.ui.access.status.TAG_UPDATE_APP
 import com.adelpos.meseros.core.data.api.PinUsersResponse
-import com.adelpos.meseros.core.data.api.PinnedHttpClient
-import com.adelpos.meseros.core.data.api.ServerApi
 import com.adelpos.meseros.core.domain.access.DeviceStatus
 import com.adelpos.meseros.core.domain.access.EntryResult
-import com.adelpos.meseros.core.domain.access.RepairReason
-import com.adelpos.meseros.core.domain.connection.LinkState
-import com.adelpos.meseros.core.domain.error.AppError
-import com.adelpos.meseros.core.domain.text.Hex
 import com.adelpos.meseros.core.ui.components.TAG_PIN_KEY_PREFIX
 import com.adelpos.meseros.core.ui.components.TAG_PIN_SUBMIT
 import com.adelpos.meseros.core.ui.components.TAG_WAITER_MENU
 import com.adelpos.meseros.core.ui.components.TAG_WAITER_SWITCH
-import com.adelpos.meseros.feature.access.findserver.TAG_ADDRESS
-import com.adelpos.meseros.feature.access.findserver.TAG_FIND_SERVER
-import com.adelpos.meseros.feature.access.findserver.TAG_PAIRING_CODE
 import com.adelpos.meseros.feature.access.pin.TAG_ENTRY
 import com.adelpos.meseros.feature.access.pin.TAG_ENTRY_BACK
 import com.adelpos.meseros.feature.access.pin.TAG_ENTRY_EMPTY
@@ -46,13 +55,6 @@ import com.adelpos.meseros.feature.access.pin.TAG_ENTRY_OFFLINE
 import com.adelpos.meseros.feature.access.pin.TAG_REENTER
 import com.adelpos.meseros.feature.access.pin.TAG_REENTER_MESSAGE
 import com.adelpos.meseros.feature.access.pin.TAG_WAITER_PREFIX
-import com.adelpos.meseros.feature.access.status.TAG_CHECK_AGAIN
-import com.adelpos.meseros.feature.access.status.TAG_REPAIR
-import com.adelpos.meseros.feature.access.status.TAG_REPAIR_ACTION
-import com.adelpos.meseros.feature.access.status.TAG_REPAIR_CONFIRM
-import com.adelpos.meseros.feature.access.status.TAG_RETIRED
-import com.adelpos.meseros.feature.access.status.TAG_RETIRED_PAIR_AGAIN
-import com.adelpos.meseros.feature.access.status.TAG_UPDATE_APP
 import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_SCREEN
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
@@ -381,7 +383,10 @@ class AccessOnGoTest {
         val api =
             ServerApi(
                 stored.baseUrl.toHttpUrl(),
-                PinnedHttpClient.create(Hex.decode(stored.fingerprintHex), ClientIdentity(version)),
+                PinnedHttpClient.create(
+                    Hex.decode(stored.fingerprintHex),
+                    ClientIdentity(version, ClientKinds.ANDROID),
+                ),
             )
         val outcome = runBlocking { api.get("auth/pin-users", PinUsersResponse.serializer()) }
         assertTrue("$outcome", outcome is ApiOutcome.Rejected)

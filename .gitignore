@@ -48,6 +48,21 @@ android/local.properties
 *.p12
 android/**/signing.properties
 android/**/keystore.properties
+# Etapa K1 (K1-D20): lo mismo para el código compartido (android-core/) y la aplicación de cocina (cocina/).
+android-core/.gradle/
+android-core/.kotlin/
+android-core/.idea/
+android-core/**/build/
+android-core/local.properties
+android-core/**/signing.properties
+android-core/**/keystore.properties
+cocina/.gradle/
+cocina/.kotlin/
+cocina/.idea/
+cocina/**/build/
+cocina/local.properties
+cocina/**/signing.properties
+cocina/**/keystore.properties
 
 # Etapa L1 (licencias, revisión R1-6): la llave de licencias de una instalación, el registro firmado de su huella y el
 # estado de su licencia nunca se versionan, en ninguna carpeta de datos (contrato §2 y §12). Red de seguridad.

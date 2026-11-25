@@ -18,13 +18,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.adelpos.core.ui.components.LocalUserActivity
+import com.adelpos.core.ui.components.reportsUserActivity
 import com.adelpos.meseros.core.domain.catalog.KitchenNotes
 import com.adelpos.meseros.core.domain.catalog.LineSelection
 import com.adelpos.meseros.core.domain.waiter.DraftQuote
 import com.adelpos.meseros.core.domain.waiter.SentLine
 import com.adelpos.meseros.core.ui.catalog.Stepper
-import com.adelpos.meseros.core.ui.components.LocalUserActivity
-import com.adelpos.meseros.core.ui.components.reportsUserActivity
 
 /**
  * Modificar o cancelar unidades enviadas (§6.3), siempre con motivo (de 5 a 500 caracteres, como

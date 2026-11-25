@@ -425,6 +425,8 @@ func contractScenario(t *testing.T, client *contractClient) {
 	contractPrecheck(t, client, phone, waiterData)
 	// Etapa A2 (parte D): los avisos de platillos listos del teléfono, con su lectura y su canal.
 	contractReadyAlerts(t, client, phone, waiterData)
+	// Etapa K1 (Fase A): la pantalla de cocina para Android, emparejada como kitchen y sin sesión.
+	contractKitchenDisplay(t, client, waiterData)
 	// Etapa L1 (Fase D): el modo Cocina y el rechazo por cupo de la licencia.
 	contractSeats(t, client, phone, waiterData)
 	client.call("POST", "/auth/logout", nil, nil, 200)
@@ -969,4 +971,115 @@ func contractReadyAlerts(t *testing.T, client *contractClient, phone *contractCl
 		!strings.Contains(message, accountID) {
 		t.Fatalf("el mensaje del canal de avisos no cumple el contrato: %v (%q)", err, message)
 	}
+}
+
+// contractKitchenDisplay recorre la pantalla de cocina (etapa K1, Fase A): se empareja como kitchen con X-Client-Kind
+// kitchen, se conecta (cupo y configuración), lee sus tarjetas con el cursor, confirma las comandas, marca, lee los
+// recientes, recupera, marca el pedido completo y comprueba la contraseña del administrador; el canal de eventos con su
+// credencial cumple EventBatch. Una terminal de escritorio recibe 403 en sus rutas. Usa la estación «Cocina contrato»
+// (recepción en pantalla) del recorrido de los avisos.
+func contractKitchenDisplay(t *testing.T, client *contractClient, data contractWaiterData) {
+	terminal := *client
+	terminal.kind, terminal.version, terminal.session = "kitchen", "0.1.0", ""
+	nonce := make([]byte, 32)
+	_, _ = rand.Read(nonce)
+	// La aplicación de cocina solo se empareja como pantalla de cocina, y una pantalla solo desde ella.
+	wrong := terminal
+	wrong.kind = "android"
+	for _, attempt := range []*contractClient{&terminal, &wrong} {
+		kind := "android"
+		if attempt == &wrong {
+			kind = "kitchen"
+		}
+		attempt.call("POST", "/pairing/requests", map[string]any{"name": "Pantalla equivocada", "device_kind": kind, "os": "Android 14",
+			"app_version": "0.1.0", "commitment": administration.PairingCommitment(nonce)}, nil, 400)
+	}
+	created := decodeContract[map[string]string](t, terminal.call("POST", "/pairing/requests", map[string]any{
+		"name": "Pantalla contrato", "device_kind": "kitchen", "os": "Android 14", "app_version": "0.1.0",
+		"commitment": administration.PairingCommitment(nonce),
+	}, nil, 200).Body.Bytes())
+	requestID := created["request_id"]
+	secret := map[string]string{"X-Pairing-Secret": created["pairing_secret"]}
+	terminal.call("POST", "/pairing/requests/"+requestID+"/reveal", map[string]string{"terminal_nonce": hex.EncodeToString(nonce)}, secret, 200)
+	serverNonce, err := hex.DecodeString(created["server_nonce"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, err := administration.PairingCode(client.fingerprint, nonce, serverNonce, requestID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.setup("POST", "/devices/pairing-requests/"+requestID+"/approve", map[string]string{"code": code}, 200)
+	claimed := decodeContract[map[string]string](t, terminal.call("POST", "/pairing/requests/"+requestID+"/claim", map[string]any{}, secret, 200).Body.Bytes())
+	display := terminal
+	display.device, display.token = claimed["device_id"], claimed["device_token"]
+	var kind string
+	if err := client.pool.QueryRow(context.Background(), "SELECT kind FROM app.devices WHERE id=$1", display.device).Scan(&kind); err != nil || kind != "kitchen" {
+		t.Fatalf("la pantalla emparejada: %q %v", kind, err)
+	}
+	connected := decodeContract[map[string]any](t, display.call("POST", "/kitchen-display/connect", map[string]any{}, nil, 200).Body.Bytes())
+	if connected["seat"].(map[string]any)["held"] != true {
+		t.Fatalf("conectar la pantalla: %v", connected)
+	}
+	before := decodeContract[map[string]any](t, display.call("GET", "/kitchen-display/orders", nil, nil, 200).Body.Bytes())
+	cursor := int64(before["cursor"].(float64))
+	// Un pedido de papas a la estación en pantalla.
+	opened := decodeContract[map[string]any](t, client.setup("POST", "/restaurant/accounts", map[string]any{
+		"operation_id": contractID(), "mode": "dine_in",
+		"items": []map[string]any{{"id": contractID(), "product_id": data.fries, "variant_id": nil, "quantity": 1,
+			"customization": data.customization}},
+	}, 200))["account"].(map[string]any)
+	accountID := fmt.Sprint(opened["id"])
+	preview := decodeContract[map[string]any](t, client.setup("GET", "/restaurant/accounts/"+accountID+"/preview", nil, 200))
+	client.setup("POST", "/restaurant/accounts/"+accountID+"/confirm", map[string]any{"operation_id": contractID(),
+		"revision": opened["revision"], "expected_fingerprint": preview["fingerprint"]}, 200)
+	view := decodeContract[map[string]any](t, display.call("GET", "/kitchen-display/orders", nil, nil, 200).Body.Bytes())
+	tasks := []any{}
+	for _, entry := range view["orders"].([]any) {
+		order := entry.(map[string]any)
+		if order["account_id"] != accountID {
+			continue
+		}
+		for _, item := range order["items"].([]any) {
+			tasks = append(tasks, item.(map[string]any)["tasks"].([]any)...)
+		}
+	}
+	receipts, _ := view["receipts_pending"].([]any)
+	if len(tasks) != 1 || len(receipts) == 0 {
+		t.Fatalf("tarjetas de la pantalla: %v", view)
+	}
+	display.call("POST", "/kitchen-display/receipts", map[string]any{"receipts": receipts}, nil, 200)
+	display.call("POST", "/kitchen-display/items/ready", map[string]any{"tasks": tasks}, nil, 200)
+	display.call("GET", "/kitchen-display/recent", nil, nil, 200)
+	display.call("POST", "/kitchen-display/recover", map[string]any{"tasks": tasks}, nil, 200)
+	display.call("POST", "/kitchen-display/orders/ready", map[string]any{"tasks": tasks}, nil, 200)
+	display.call("POST", "/kitchen-display/settings-access", map[string]string{"username": "admin", "password": "admin"}, nil, 200)
+	// La terminal de escritorio no usa las rutas de la pantalla, y la pantalla no usa las de la sesión.
+	client.call("GET", "/kitchen-display/orders", nil, nil, 403)
+	display.call("GET", "/restaurant/state", nil, nil, 403)
+	// El canal de eventos con la credencial de la pantalla: el primer mensaje cumple EventBatch.
+	streamContext, stop := context.WithTimeout(context.Background(), 400*time.Millisecond)
+	defer stop()
+	stream := httptest.NewRecorder()
+	display.handler.ServeHTTP(stream, display.request(streamContext, "GET", fmt.Sprintf("/events?after=%d", cursor), nil, nil))
+	operation, _ := client.contract.Match("GET", "/events")
+	client.check(operation, stream.Code, stream.Header().Get("Content-Type"), nil)
+	scanner := bufio.NewScanner(bytes.NewReader(stream.Body.Bytes()))
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	message := ""
+	for scanner.Scan() {
+		if data, found := strings.CutPrefix(scanner.Text(), "data: "); found {
+			message = data
+			break
+		}
+	}
+	if err := client.contract.ValidateJSON(map[string]any{"$ref": "#/components/schemas/EventBatch"}, []byte(message)); err != nil ||
+		!strings.Contains(message, "kitchen.ticket.created") {
+		t.Fatalf("el canal de la pantalla no cumple el contrato: %v (%.600s)", err, message)
+	}
+	// K1-D32: «Volver a emparejar» revoca la pantalla (al final: después ya nada le responde).
+	display.call("POST", "/kitchen-display/unpair", map[string]string{"username": "admin", "password": "otra"}, nil, 401)
+	display.call("POST", "/kitchen-display/unpair", map[string]string{"username": "admin", "password": "admin"}, nil, 200)
+	display.call("GET", "/kitchen-display/orders", nil, nil, 401)
+	client.call("POST", "/kitchen-display/unpair", map[string]string{"username": "admin", "password": "admin"}, nil, 403)
 }
