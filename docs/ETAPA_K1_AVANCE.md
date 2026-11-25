@@ -1021,3 +1021,531 @@ sin licencia válida); revocar por SSE real; y Sin activar, Vigente, Vencida, Re
 - **K1-D25. La regla de la tableta**: con cualquier evento, volver a leer `orders`, que trae la configuración y la
   licencia y cuyo error decide la pantalla. La tableta agrupa los eventos seguidos en una sola lectura (una en curso y
   como mucho una pendiente), para no leer una vez por evento en una ráfaga.
+
+## Fase B · Módulo compartido `android-core/` y proyecto `cocina/`
+
+Agente M, 24/11/2026, en `$SP/wt/k1-b` (rama `etapa-k1-b`, desde `etapa-k1` `45fa9b2`), `ISO_TAG=B`, Go temporal
+8211/8471, emuladores `Pixel_Tablet` (Android 17, consola 5580) y `ADEL_A1_Tablet_API26` (Android 8.0, 5582), en
+horizontal y de solo lectura. Guiones de la fase (fuera del repositorio) en `$SP/k1/B/`; resultados en
+`$SP/k1/base-B/` (antes del movimiento) y `$SP/k1/after-B/` (después).
+
+### Resumen
+
+- **`android-core/`** es un build de Gradle propio (K1-D2) con el **único catálogo de versiones**, incluido con
+  `includeBuild("../android-core")` desde `android/` y `cocina/`. Módulos `model` (Kotlin/JVM), `network` (biblioteca
+  Android), `ui` (Compose) y `testing` (ayudantes de las pruebas contra Go), paquetes `com.adelpos.core.*`.
+- Lo compartido se **movió con `git mv`** (84 archivos, con su historia) **sin cambiar su comportamiento**: las mismas
+  413 pruebas JVM y las mismas 168 instrumentadas en cada tableta, con el mismo resultado, antes y después; `access` y
+  `alerts` contra Go aprobadas en los dos emuladores antes y después.
+- **Meseros 0.4.1** (`versionCode` 5) se instala encima de la 0.4.0 sin emparejar de nuevo: el pedido que dejó la
+  0.4.0 en la cola sale solo, una vez, con la credencial de su mesero (prueba en `Pixel_Tablet`).
+- **`cocina/`**: proyecto propio (`com.adelpos.cocina` 0.1.0/1, «AD-EL POS Cocina», ícono propio, la misma llave),
+  solo en horizontal y a pantalla completa, base Room propia, emparejamiento como pantalla de cocina
+  (`device_kind`/`X-Client-Kind: kitchen`) con las pantallas compartidas, conexión (`kitchen-display/connect`) y la
+  pantalla de pedidos vacía («No hay pedidos»). Con la Fase A traída a la rama, la suite `kitchen` (emparejar y
+  conectar) aprueba en los dos emuladores.
+- **Infraestructura** (K1-D20): `.gitignore`, `.prettierignore`, `dev.sh android-*` sobre las tres carpetas y
+  `android-e2e.sh` con la aplicación de cocina y la suite `kitchen` (`k1` emparejar, `k2` conectar).
+
+### 1. Línea base, antes de mover nada
+
+Con el código de `etapa-k1` tal cual, en una copia `git archive 45fa9b2` (`$SP/k1/base-B-src`), para poder editar el
+árbol mientras corrían las pruebas:
+
+- JVM, Robolectric, Lint y ktfmt de `android/` (con `--rerun`): **62 XML, 413 pruebas, 0 fallas**; Lint «No issues
+  found». La lista de cada prueba con su resultado queda en `$SP/k1/base-B/jvm-casos.txt`.
+- Instrumentadas (`connectedDebugAndroidTest`, aplicación y paquetes de prueba desinstalados antes, XML contados y
+  copiados): `Pixel_Tablet` **168** (82 corridas, 86 omitidas, 0 fallas); `ADEL_A1_Tablet_API26` **168** (80
+  corridas, 88 omitidas, 0 fallas). Las mismas cifras que la regresión de la L1.
+- `scripts/android-e2e.sh --suite access` (pasos 1–5 y 7) y `--suite alerts` (r1–r10), cada una con un Go temporal
+  nuevo y su licencia de prueba: **6/6 y 11/11 en los dos emuladores**. En Android 8, con `adb install -r -t` y
+  `--no-install` (A3-D33), igual antes y después.
+
+### 2. `android-core/`: el build y el movimiento
+
+**Build** (`android-core/settings.gradle.kts`, `build.gradle.kts`, `gradle.properties`, el mismo wrapper de Gradle
+9.9.1, bloqueos y `gradle/verification-metadata.xml` propios). `group = "com.adelpos.core"`: `android/` y `cocina/`
+piden `com.adelpos.core:<módulo>` y Gradle lo sustituye por el proyecto incluido. El catálogo
+`android/gradle/libs.versions.toml` pasó con `git mv` a `android-core/gradle/libs.versions.toml`; `android/` y
+`cocina/` lo importan con `versionCatalogs { create("libs") { from(files(...)) } }`.
+
+**Qué se movió** (con `git mv` y el guion `$SP/k1/B/move.py`, que cambia el paquete y corrige las importaciones de todo
+`android/`; lista en `$SP/k1/B/moves.txt`):
+
+| Módulo                                 | Desde                        | Qué                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| -------------------------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `model` (`com.adelpos.core.model`)     | `core:domain`                | `connection/` (`ServerLink`, `ServerAnswers`, `ServerLinkTracker`, `LinkState`, `ConnectionSummary`, `DefaultNetworkTracker`), `error/` (`AppError`, `LicenseRefusal`, `LicenseMessages`), `license/`, `pairing/`, `server/` (dirección, anuncio NSD, cambio de IP, `ServerCompatibility`), `realtime/`, `security/SecretSealer`, `text/Hex`, y 7 clases de prueba                                                                                                                                                                        |
+| `network` (`com.adelpos.core.network`) | `core:data`                  | `api/` (cliente con la huella fijada y su punto único de respuestas, `ClientIdentity`, `ServerApi`, `ApiErrors`, `CallAwait`, `ApiJson`, `VersionInfo`, DTO del emparejamiento), `security/` (huella fijada, primer certificado, `KeystoreSecretSealer`), `discovery/`, `pairing/` (`PairingRepository`, `PairedConnection`), `realtime/` (`RealtimeClient`), `session/`, `connection/` (`ServerLinkMonitor`, `ConnectionMonitor`), `wipe/`, `license/`, el manifiesto con los permisos de red, 5 clases de prueba JVM y 2 instrumentadas |
+| `ui` (`com.adelpos.core.ui`)           | `core:ui` y `feature:access` | el tema, la paleta, la tipografía y las medidas; `AdelIcons`; los botones; `AdelTopBar` con `ConnectionIndicator`; `UserActivity`; el logotipo; `AccessTexts`, «Buscar el servidor» y el código (`findserver/`), las pantallas de estado y el permiso de red local (`status/`); sus 96 textos; `PaletteContrastTest`, `ColorsOnlyInPaletteTest`, `PlainLanguageTest` y 3 instrumentadas                                                                                                                                                   |
+| `testing` (`com.adelpos.core.testing`) | pruebas de `app`             | `MainComputer`, `GoTestServer` y `SystemDialogs` (ayudantes de las pruebas contra el Go temporal), para las dos aplicaciones                                                                                                                                                                                                                                                                                                                                                                                                              |
+
+**Lo que se separó a mano** para que el núcleo no dependa de meseros (cada cambio deja el comportamiento igual):
+
+- `ClientIdentity(version, kind)`: el tipo de cliente es un parámetro, con las constantes `ClientKinds.ANDROID` y
+  `KITCHEN`; sin valor por omisión, para que la de cocina nunca se presente como `android` por descuido.
+- `ServerCompatibility.check(…, requirements)` con `ServerRequirements` (versión mínima y capacidades): las de meseros
+  en `WaiterServerRequirements` (`android/core:domain`, las mismas 0.13.0 y 4 capacidades; `ServerCompatibilityTest`
+  se quedó en meseros con ellas), las de cocina en `KitchenServerRequirements`.
+- `PairingRepository` entrega el emparejamiento a un `PairingStore` (`PairedDevice`); `AccessRepository` lo implementa
+  con el mismo registro de `paired_server` (y el bloqueo por inactividad de fábrica, que antes ponía el
+  emparejamiento). `PairedDevice.CREDENTIAL_PURPOSE = "device-credential"` es el único lugar del propósito; el
+  `AccessRepository.DEVICE_PURPOSE` de meseros lo toma de ahí. La fecha de Go, en `GoTime`.
+- La entrada con PIN se quedó en meseros: sus DTO (`PinDtos.kt`, separados de `AccessDtos.kt`) y sus llamadas
+  (`PinCalls.kt`, extensiones sobre `PairedConnection.call`, que se hizo público).
+- `RepairReason`, `NetworkPermissions` y `UnsentOrder` (los usan las pantallas de estado) pasaron a
+  `model/access/AccessStates.kt`; `AppForeground` (lo usa el estado de conexión) a `network/connection`.
+- `FindServerRoute(pairing, …, wallClock, defaultDeviceName)` recibe el emparejamiento en lugar de las dependencias de
+  meseros; con `defaultDeviceName` la de cocina propone «Cocina 1» (sin él, «Tableta 1» o «Teléfono 1», como antes).
+- Visibilidad: `RequestSent`, `Call.awaitResponse`, `ProblemNotice` y `AdelIcons.icon`/`circle` pasaron de `internal` a
+  públicos, porque los usa código de meseros desde otro build.
+- Textos: los 92 de las pantallas compartidas y los 4 títulos comunes de la barra pasaron a
+  `android-core/ui/src/main/res/values/strings.xml`; los dos archivos de meseros que usan uno de ellos lo piden con
+  `com.adelpos.core.ui.R as CoreR` (`AccessGate`, `PinEntryScreen`).
+- `PlainLanguageTest` y `ColorsOnlyInPaletteTest` viven en `android-core:ui` y recorren **las tres carpetas**
+  (`adelpos.repositoryRoot`): la regla de textos y la paleta única valen para las dos aplicaciones.
+
+**Lo que se guarda en el dispositivo no cambió** (K1-D2): el alias del Keystore `adel-pos-secrets-v1` y el formato del
+sobre, los propósitos `device-credential`, `pin-verifier:<id>` y `offline-credential:<id>`, `adel-pos.db` y
+`catalog.db` con `AppDatabase` y `CatalogDatabase` (se quedaron en meseros, con sus esquemas), `OrderSendWorker` y sus
+nombres únicos, los componentes del manifiesto, los canales de notificación, los tipos NSD (ahora también
+`ServerAnnouncements.TEST_SERVICE_TYPE`) y `X-Client-Kind: android`. Ninguno se deriva del paquete.
+
+**Dependencias**: ninguna biblioteca ni versión nueva. `network` usa `lifecycle-process` (para `AppForeground`) y
+`testing` OkHttp, kotlinx-serialization, JUnit y el ejecutor de AndroidX, todas del catálogo. Los bloqueos de las
+bibliotecas de meseros cambiaron porque ahora les llega `android-core` (por ejemplo, `core:data` ve `lifecycle-process`
+2.11.0 en su classpath de ejecución), pero el de la aplicación no: `:app:assembleRelease` pasó con el mismo
+`app/gradle.lockfile` de la 0.4.0, así que el APK lleva las mismas versiones. La verificación de `android/` sumó solo
+los POM y módulos que Gradle consulta al resolver (`collection-jvm` 1.4.2, `animation` 1.10.5, `window-core` 1.5.0,
+`kotlinx-coroutines-android` 1.6.4); `android-core` y `cocina` tienen la suya.
+
+### 3. Meseros 0.4.1
+
+`android/gradle.properties`: `adelpos.versionName=0.4.1`, `adelpos.versionCode=5` (`config/product.json` no cambia).
+Es la única diferencia de la aplicación de meseros además del movimiento: misma `applicationId`, la misma llave de
+desarrollo (huella `fb6a4bac…7c86`, comprobada con `apksigner` en el APK 0.4.0 entregado y en la 0.4.1 release) y el
+mismo bloqueo de dependencias de la aplicación.
+
+### 4. `cocina/`
+
+Proyecto Gradle propio en la raíz (`cocina/settings.gradle.kts` con `includeBuild("../android-core")` y el catálogo
+único; un módulo `app`), sin nada de la aplicación de meseros:
+
+- `com.adelpos.cocina`, `minSdk` 26, `targetSdk` 36, `compileSdk` 37, versión 0.1.0 (`versionCode` 1) en
+  `cocina/gradle.properties`. Nombre «AD-EL POS Cocina» y **ícono propio** (`mipmap-*/ic_launcher.png`): el del
+  escritorio con fondo oscuro, la parte negra del logotipo en claro y el azul en naranja (el de meseros es blanco y
+  azul). Se generó con un guion sin bibliotecas (`$SP/k1/B/icon-cocina.py`) y se redujo con `sips`, como el de meseros;
+  es PNG y no un ícono adaptable porque `ColorsOnlyInPaletteTest` no permite colores en los recursos XML.
+- **Firma**: la misma llave de desarrollo y la misma comprobación de «fuera del repositorio» que `android/` (la función
+  de `app/build.gradle.kts`, 30 líneas, repetida: Gradle no deja compartirla sin un complemento propio). El APK release
+  de cocina lleva la huella `fb6a4bac…7c86`.
+- **Horizontal y pantalla completa**: `sensorLandscape` con `PROPERTY_COMPAT_ALLOW_RESTRICTED_RESIZABILITY` (Android 16
+  ignora la orientación fija en pantallas grandes con `targetSdk` 36) y `tools:ignore="DiscouragedApi"` con su porqué;
+  `MainActivity` esconde las barras del sistema (vuelven un momento al deslizar). Tema oscuro por omisión.
+- **Base Room propia** `cocina.db` (`KitchenDatabase` versión 1, `paired_server` de una fila, la credencial cifrada con
+  el Keystore), esquema exportado en `cocina/app/schemas/`.
+- **`KitchenAccess`** (implementa `PairingStore`): lo guardado, la conexión emparejada con la huella fijada
+  (`PairedConnection`), la comprobación de versiones con `KitchenServerRequirements` (capacidad `kitchen-display-v1`),
+  la sonda del estado único de conexión y lo que hace cada error de Go: `DEVICE_REVOKED` borra todo y vuelve a «Buscar
+  el servidor» (§2), `DEVICE_*`, otra huella y `CLIENT_KIND_MISMATCH` piden emparejar de nuevo, 426 pide actualizar la
+  aplicación y `CLIENT_KIND_INVALID` (servidor sin el tipo `kitchen`) pide actualizar el servidor, como dice el
+  contrato de la Fase A (`$SP/k1/api-k1.md`, sección 15).
+- **Conexión** (paso 2 del orden de arranque del contrato): con el servidor compatible, `POST kitchen-display/connect`
+  con `{}`; el resultado (`DisplayConnection`: conectando, conectada o rechazada por la licencia, el cupo o la hora con
+  el texto de `LicenseMessages`) lo muestra la pantalla de pedidos.
+- **Pantallas**: la barra común con el indicador de conexión y, según el estado, las compartidas de `android-core`
+  (cargando, «Buscar el servidor» con el código, emparejar de nuevo, actualizar la aplicación o el servidor) o la
+  **pantalla de pedidos**: «No hay pedidos» (conectada), «Conectando con la computadora principal…» o el texto de la
+  licencia. Sin textos provisionales (`PlainLanguageTest` la recorre).
+- **Pruebas**: `CocinaTestRunner` (el tipo NSD de pruebas y `clientVersion`), `KitchenScreensTest`,
+  `KitchenAppStartTest` y `KitchenOnGoTest` (`k1` emparejar, `k2` conectar); en la JVM, `KitchenAccessTest`.
+- `cocina/CLAUDE.md` con sus reglas, estructura, comandos, firma y pruebas.
+
+### 5. Infraestructura (K1-D20)
+
+- `.gitignore` y `.prettierignore`: compilaciones, cachés, `local.properties` y propiedades de firma de `android-core/` y
+  `cocina/`, y los esquemas de Room de cocina.
+- `scripts/dev.sh`: `android-format`, `android-format-check`, `android-build` (las dos aplicaciones), `android-test` y
+  `android-connected` recorren `android-core`, `android` y `cocina`; `android_gradle` recibe la carpeta.
+- `scripts/android-e2e.sh`: `select_app` elige la aplicación por suite (meseros o, en `kitchen`, `com.adelpos.cocina`
+  con `com.adelpos.cocina.test`, `CocinaTestRunner` y el proyecto `cocina/`); la suite `kitchen` con `k1` (emparejar
+  como pantalla de cocina) y `k2` (conectar y la pantalla de pedidos vacía) y sus capturas. Fuera de `all`.
+- ktfmt y Lint de los tres builds (cada uno en su carpeta: las tareas de `android-core` no corren desde las
+  aplicaciones).
+- `iso.sh` ya admitía `ISO_GRADLE_DIR`; `sync-check` no cambia.
+
+### Decisiones propuestas
+
+1. **Alcance del movimiento** (K1-D2): además de lo que enumera la §1, se movieron las piezas que esas necesitan para no
+   dejar dos copias: `UnsentOrder`, `RepairReason` y `NetworkPermissions` (las pantallas de estado), `AppForeground`
+   (el estado de conexión), los textos de las pantallas compartidas y los 4 títulos comunes de la barra, y los
+   ayudantes de las pruebas contra Go (`android-core:testing`). Lo que mezclaba meseros con lo compartido se separó: la
+   entrada con PIN (`PinDtos.kt`, `PinCalls.kt`) y lo que meseros exige al servidor (`WaiterServerRequirements`) se
+   quedaron en `android/`.
+2. **Lo que cambia por aplicación entra como parámetro**, nunca como valor por omisión del núcleo: el tipo de cliente
+   (`ClientIdentity(version, kind)`, `ClientKinds`), los requisitos del servidor (`ServerRequirements`), dónde se
+   guarda el emparejamiento (`PairingStore`/`PairedDevice`) y el nombre que se propone al emparejar.
+3. **Requisitos del servidor de la aplicación de cocina**: la capacidad `kitchen-display-v1` y la versión **0.15.0**
+   como mínima (no 0.16.0): `config/product.json` sigue en 0.15.0 hasta la Fase F y con 0.16.0 la tableta diría
+   «Actualiza el servidor» contra el Go de las fases B a E. La capacidad es la que decide; la Fase F puede subir la
+   mínima a 0.16.0 si el coordinador lo prefiere.
+4. **`PlainLanguageTest` y `ColorsOnlyInPaletteTest` en `android-core:ui`**, recorriendo `android/`, `android-core/` y
+   `cocina/` (`adelpos.repositoryRoot`): una sola guardia de la regla de textos y de la paleta para las dos
+   aplicaciones.
+5. **La función de la firma se repite** en `cocina/app/build.gradle.kts` (las mismas 30 líneas y la misma regla de
+   «fuera del repositorio»): compartirla exigiría un complemento de Gradle propio. Es la opción que dejó abierta la
+   Fase 0.
+6. **Visibilidad**: cuatro declaraciones `internal` pasaron a públicas porque las usa código de meseros desde otro
+   build (`RequestSent`, `Call.awaitResponse`, `ProblemNotice`, `AdelIcons.icon`/`circle`).
+7. **Cocina, al revocarla** (`DEVICE_REVOKED`): borra todo y vuelve directo a «Buscar el servidor» (§2), sin la
+   pantalla de «dispositivo retirado» de meseros (no hay pedidos sin enviar que mostrar). `CLIENT_KIND_MISMATCH` pide
+   emparejar de nuevo y `CLIENT_KIND_INVALID` pide actualizar el servidor, como la tabla de la sección 15 del contrato
+   de la Fase A.
+8. **Horizontal en Android 16+**: `sensorLandscape` con `PROPERTY_COMPAT_ALLOW_RESTRICTED_RESIZABILITY` (funciona con
+   `targetSdk` 36; al subir a 37 Android ya no la respeta en pantallas grandes) y `tools:ignore="DiscouragedApi"`.
+   Pantalla completa escondiendo las barras del sistema.
+9. **Ícono de cocina en PNG** (no adaptable): `ColorsOnlyInPaletteTest` no permite colores escritos en recursos XML,
+   que un ícono adaptable necesita para su fondo.
+10. **Prueba de actualizar encima en dos partes** (ver «Pruebas»): los datos con las compilaciones debug y el ejecutor de
+    pruebas, y la firma con el APK 0.4.0 entregado y la 0.4.1 release **sin abrirla**: abrir la aplicación normal sin
+    emparejar empieza la búsqueda automática en la red real, que las reglas de la etapa prohíben.
+
+### Pruebas ejecutadas en la Fase B
+
+«Antes» es la copia de `etapa-k1` (`45fa9b2`); «después», el árbol de la fase. Las listas de cada prueba con su resultado
+están en `$SP/k1/base-B/*casos.txt` y `$SP/k1/after-B/*casos.txt` y se compararon con `diff`.
+
+| Prueba                                                                                                                   | Antes                                       | Después                                                                                                                                                                                                                                                                                                                                                                                        |
+| ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| JVM + Robolectric (`--rerun` antes) de meseros y, después, también de `android-core`                                     | `android/`: 62 XML, **413**, 0 fallas       | `android/` 47 XML (327) + `android-core` 15 XML (86) = 62 XML, **413**, 0 fallas; **los mismos 413 casos** (`diff` vacío)                                                                                                                                                                                                                                                                      |
+| Lint                                                                                                                     | `android/`: sin problemas                   | `android/`, `android-core/` y `cocina/`: sin problemas (en cocina, `DiscouragedApi` de la orientación, ignorado con su porqué)                                                                                                                                                                                                                                                                 |
+| ktfmt                                                                                                                    | correcto                                    | correcto en los tres builds                                                                                                                                                                                                                                                                                                                                                                    |
+| Instrumentadas, `Pixel_Tablet` (5580)                                                                                    | **168**: 82 corridas, 86 omitidas, 0 fallas | `android/` 158 + `android-core` 10 = **168**: 82/86, 0 fallas; **los mismos casos**                                                                                                                                                                                                                                                                                                            |
+| Instrumentadas, `ADEL_A1_Tablet_API26` (5582)                                                                            | **168**: 80 corridas, 88 omitidas, 0 fallas | 158 + 10 = **168**: 80/88, 0 fallas; **los mismos casos**                                                                                                                                                                                                                                                                                                                                      |
+| e2e `access` (1–5 y 7), 5580 / 5582                                                                                      | 6/6 · 6/6                                   | 6/6 · 6/6                                                                                                                                                                                                                                                                                                                                                                                      |
+| e2e `alerts` (r1–r10), 5580 / 5582                                                                                       | 11/11 · 11/11                               | 11/11 · 11/11                                                                                                                                                                                                                                                                                                                                                                                  |
+| `fmt-check` del repositorio y `md5` de `docs/etapas/*.md`                                                                | —                                           | correcto; especificaciones sin cambios                                                                                                                                                                                                                                                                                                                                                         |
+| Prueba de actualizar encima, parte 1 (datos), `Pixel_Tablet`                                                             | —                                           | 0.4.0 debug: `waiter` w1 y w3 **aprobadas** (emparejada, Ana entró, un pedido «Por enviar»); 0.4.1 instalada **encima** (`adb install -r`, el mismo `firstInstallTime`); w4 **aprobada**: sin volver a entrar, WorkManager envía el pedido de la 0.4.0 con la credencial de envío de Ana y entra una sola vez (`$SP/k1/after-B/upgrade-5580/`)                                                 |
+| Prueba de actualizar encima, parte 2 (firma), `Pixel_Tablet`                                                             | —                                           | APK 0.4.0 entregado y 0.4.1 release con la misma huella `fb6a4bac…7c86`; `adb install -r` de la 0.4.1 sobre la entregada: **Success**, `versionCode` 4 → 5 con el mismo `firstInstallTime` (sin abrir la aplicación)                                                                                                                                                                           |
+| `android-core` solo: JVM, Lint, ktfmt e instrumentadas, con bloqueos y verificación regenerados                          | —                                           | 15 XML (86) JVM; instrumentadas 10/10 en 5580 y en 5582                                                                                                                                                                                                                                                                                                                                        |
+| `android/` regenerado (bloqueos y verificación con `resolveAllDependencies`, `assembleRelease` e instrumentadas en 5580) | —                                           | sin cambios en bloqueos ni verificación; instrumentadas 158 (72 corridas, 86 omitidas, 0 fallas)                                                                                                                                                                                                                                                                                               |
+| `cocina`: JVM (`KitchenAccessTest`), Lint, ktfmt                                                                         | —                                           | 7/7, sin problemas                                                                                                                                                                                                                                                                                                                                                                             |
+| `cocina`: instrumentadas en 5580 y 5582 (sin argumentos de Go)                                                           | —                                           | 5 en cada una: 3 aprobadas (`KitchenScreensTest` ×2, `KitchenAppStartTest`) y 2 omitidas (`KitchenOnGoTest` sin Go); la primera corrida falló por dos errores de las pruebas (dos `setContent` en una regla y `k2` sin omitirse sin argumentos) y la comprobación de pantalla completa por insets en Android 8 (ahí se comprueba la marca `SYSTEM_UI_FLAG_FULLSCREEN`); corregidas y repetidas |
+| `android-e2e.sh --suite kitchen` contra el Go de la Fase A (`88b4d8d` traído a la rama)                                  | —                                           | **2/2 en 5580 y 2/2 en 5582**: `k1` empareja como pantalla de cocina (Go la registra con `kind: kitchen`, `app_version` 0.1.0) y `k2` se conecta (`kitchen-display/connect`) y muestra «No hay pedidos»                                                                                                                                                                                        |
+| APK release de cocina                                                                                                    | —                                           | `com.adelpos.cocina` 0.1.0 (1), `minSdk` 26, `targetSdk` 36, «AD-EL POS Cocina», huella `fb6a4bac…7c86`                                                                                                                                                                                                                                                                                        |
+
+Capturas (en horizontal, tema oscuro) en `$SP/k1/capturas-B/`: `pixel-tablet/` y `tablet-api26/` (b0 la aplicación real
+al abrirla sin emparejar: horizontal, pantalla completa, «Cocina 1»; b1 pedidos vacía y «Conectando…»; b2 buscar el
+servidor; b3 emparejar de nuevo; b4 actualizar el servidor) y `e2e-5580-kitchen/`, `e2e-5582-kitchen/` (k1 el código,
+k2 la pantalla de pedidos conectada). Revisadas: sin textos provisionales ni identificadores; en Android 17, la primera
+vez que la aplicación esconde las barras, Android muestra su aviso «Viewing full screen» (del sistema, una sola vez).
+
+### No verificado
+
+- Las suites `access` y `alerts` después del movimiento corrieron **antes** de traer la Fase A (con el Go de
+  `45fa9b2`, como la línea base); la prueba de actualizar encima y la suite `kitchen`, con el Go de la Fase A. La
+  regresión completa (`--suite all`) es de la Fase F.
+- La prueba de actualizar encima se hizo en `Pixel_Tablet`; en Android 8 no.
+- La parte 2 no abre la aplicación release (regla de la etapa): que la release 0.4.1 abra con lo emparejado por la
+  0.4.0 release se infiere de la parte 1 (mismo código y mismos datos con la compilación debug) y de la firma.
+- Sin conexión, la pantalla de cocina sigue «Conectando…» hasta que Go responde; el canal de eventos, las tarjetas, los
+  textos propios de cupo y licencia de la §6 («No hay cupo de pantalla de cocina libre (N de N en uso)…», «Esta
+  pantalla dejó su cupo…» y «Usar esta pantalla») y la pantalla siempre encendida son de las fases C, D y E.
+
+### Archivos principales
+
+- `android-core/` (`settings.gradle.kts`, `build.gradle.kts`, `gradle/libs.versions.toml`, `CLAUDE.md`, módulos
+  `model`, `network`, `ui`, `testing`); nuevos: `model/…/access/AccessStates.kt`, `model/…/text/GoTime.kt`,
+  `network/…/api/ClientIdentity.kt` (con `ClientKinds`), `network/…/pairing/PairingStore.kt`,
+  `network/…/connection/AppForeground.kt`, `ui/src/main/res/values/strings.xml`.
+- `android/`: `settings.gradle.kts` (`includeBuild` y catálogo), `gradle.properties` (0.4.1/5), `CLAUDE.md`,
+  `core/domain/…/server/WaiterServerRequirements.kt`, `core/data/…/api/PinDtos.kt`, `core/data/…/access/PinCalls.kt`,
+  `core/data/…/access/AccessRepository.kt` (`PairingStore`), `feature/access/…/AccessGate.kt`.
+- `cocina/` completo: `app/src/main/kotlin/com/adelpos/cocina/` (`CocinaContainer`, `access/KitchenAccess.kt`,
+  `access/KitchenStatus.kt`, `db/KitchenDatabase.kt`, `ui/CocinaApp.kt`, `ui/OrdersScreen.kt`), `AndroidManifest.xml`,
+  `CLAUDE.md`, pruebas en `app/src/test` y `app/src/androidTest`.
+- `scripts/dev.sh`, `scripts/android-e2e.sh`, `.gitignore`, `.prettierignore`.
+
+### Commits (rama `etapa-k1-b`)
+
+| Commit    | Qué                                                                                   |
+| --------- | ------------------------------------------------------------------------------------- |
+| `b5ef209` | `android-core` como build propio y lo compartido movido sin cambiar el comportamiento |
+| `a74e32d` | `android-core:testing` con los ayudantes de las pruebas contra Go                     |
+| `1eadd72` | Fusión de `etapa-k1` (Fase A)                                                         |
+| `b4c642e` | Meseros 0.4.1 y `android-core/CLAUDE.md` y `android/CLAUDE.md`                        |
+| `0504ba7` | Infraestructura de los tres proyectos (K1-D20)                                        |
+| `68840a9` | Verificación y bloqueo de settings de `android-core` solo                             |
+| `9828104` | Aplicación de cocina (`cocina/`)                                                      |
+| `fa3c7b7` | `android/CLAUDE.md`: la prueba de actualizar encima                                   |
+
+## Revisión independiente R1 · Seguridad de la pantalla de cocina
+
+Revisor R1, 24/11/2026, en `$SP/wt/k1-r1` (rama `etapa-k1-r1`, desde `etapa-k1` `88b4d8d`), `ISO_TAG=R`. No toqué el
+código del producto: solo agregué la prueba de reproducción
+`backend/internal/operations/stagek1_r1_test.go` (`TestStageK1R1KitchenDisplaySecurity`). No hizo falta el Go temporal
+(8221/8481) ni `go-int ./cmd/ad-el-pos-server`: todo se probó contra PostgreSQL con el servicio real y, delante, el
+enrutador completo (`httpapi.NewWithOptions`, con la versión mínima por tipo de cliente), por la escucha local y por la
+de red (contexto `lanlistener.WithNetwork` y estado TLS).
+
+Revisé `git diff 45fa9b2..88b4d8d -- backend/`, sobre todo: `administration/service.go` (`dispatch`,
+`authenticateDevice`, `touchDevice`, `matchClientKind`), `administration/kitchen_display.go`, `pairing.go`,
+`devices.go`, `license_seats.go`, `supervisor.go`, `events.go`, `http.go`, `licenseseats/store.go`,
+`licensing/operations.go`, `kitchen/display.go`, `kitchen/states.go`, `kitchen/reads.go`, `kitchen/stations.go`,
+`events/store.go`, `stationscope/scope.go`, `httpapi/router.go` y `clientversion.go`, y la `0029`.
+
+**Resultado:** no encontré ningún defecto de gravedad alta ni media. El punto único de `dispatch` es sólido (852
+combinaciones de ruta y método rechazadas a la pantalla, también con el `Authorization` del administrador y por la red),
+el alcance por estación se aplica en todas las lecturas, marcas, recuperaciones, acuses y eventos, y el cupo es atómico.
+Hay dos hallazgos de gravedad baja.
+
+### Hallazgos
+
+#### R1-1 (baja). `settings-access` responde códigos que el contrato no tiene, uno con el texto de otra función
+
+- **Dónde:** `backend/internal/administration/kitchen_display.go:300` y `:303`, que llama a
+  `backend/internal/administration/supervisor.go:19-22`.
+- **Qué pasa:**
+  - un usuario de más de 40 caracteres o una contraseña de más de 256 responde **403 `AUTHORIZATION_REQUIRED`** con
+    «Indica el usuario y la contraseña del supervisor que autoriza.» (el texto de las autorizaciones de cobros);
+  - el usuario o la contraseña vacíos responden **400 `VALIDATION_ERROR`**.
+- **El contrato:** `docs/API_V1.md:944-947` y `$SP/k1/api-k1.md` §13 solo dicen 200, 401 `AUTHORIZATION_INVALID`, 429
+  `AUTHORIZATION_THROTTLED` y 403 `PERMISSION_DENIED`. `openapi.json` (`checkKitchenDisplaySettingsAccess`) solo trae
+  `200` y `default`.
+- **Riesgo:** no es de seguridad. Esos intentos no se validan contra nadie y no cuentan en el límite. Pero la tableta
+  recibe un 403 con un código que no conoce. Si decide por estado y no por código, puede decir «Ese usuario no puede
+  abrir los ajustes» a quien solo escribió de más.
+- **Cómo se reproduce:** `testR1SettingsAccess` (`stagek1_r1_test.go:697`; el registro de la línea 768 muestra
+  `403 {"code":"AUTHORIZATION_REQUIRED","message":"Indica el usuario y la contraseña del supervisor que autoriza."}`).
+- **Corrección sugerida:**
+  - en `kitchenDisplaySettingsAccess`, validar antes la longitud (como `login`: 40 y 256) y responder 401
+    `AUTHORIZATION_INVALID` sin llamar a `supervisorAuthorizer`, o un 400 con un texto de la pantalla;
+  - documentar el 400 de los campos vacíos en `API_V1.md`, en `api-k1.md` y en las respuestas de `openapi.json`, para
+    que M lo trate.
+
+#### R1-2 (baja). Una petición que ya pasó `authenticateDevice` sigue aunque la pantalla se revoque mientras espera
+
+- **Dónde:**
+  - `backend/internal/administration/service.go:467-487`: `authenticateDevice` lee `revoked_at` sin bloquear la fila;
+  - `backend/internal/administration/kitchen_display.go:81`: `touchDevice` (`service.go:494`) actualiza la fila sin
+    condición `revoked_at IS NULL`, y nada más vuelve a mirar la revocación.
+- **Qué pasa:** si la revocación se confirma entre `authenticateDevice` y el trabajo (la petición espera la fila del
+  dispositivo o el lock 7820148305), la petición termina como si la pantalla siguiera autorizada:
+  - **`settings-access`** responde `200 {"authorized": true}` a una pantalla ya revocada y audita
+    `kitchen_display.settings_opened`;
+  - **`connect`** responde 200 con la configuración (nombre, estaciones, establecimiento y licencia) e inserta una fila
+    de cupo del dispositivo revocado. Esa fila no cuenta (`inUseCondition` exige `revoked_at IS NULL`) y la borra el
+    siguiente `claim`;
+  - **el canal de eventos** entrega un lote más antes de `interrupted`;
+  - **las marcas, recuperar, el acuse, `orders` y `recent` no pasan**, pero solo de rebote: revocar borra el cupo y
+    `requireKitchenDisplaySeat` (`kitchen_display.go:94`) responde **409 `KITCHEN_DISPLAY_NOT_CONNECTED`**, no 401
+    `DEVICE_REVOKED`. La tableta vuelve a `connect` y ahí recibe el 401.
+- **Riesgo:** bajo. Nada de esto da un token, una sesión, pedidos ni marcas. Pero la seguridad de las escrituras depende
+  hoy de la comprobación del cupo, no de la revocación, y la §2 pide que revocar desconecte «de inmediato».
+- **Cómo se reproduce:**
+  - `testR1RevokedSettingsInFlight` (`stagek1_r1_test.go:961`): otra transacción bloquea la fila de la pantalla,
+    Terminales revoca (queda primero en la cola) y después llega `settings-access`. El registro muestra
+    `settings-access en curso de una pantalla revocada (R1-2): 200 {"authorized":true}`;
+  - `testR1RevokedInFlight` (`:906`): una marca que espera 7820148305 mientras se revoca la pantalla no se aplica, pero
+    responde `409 KITCHEN_DISPLAY_NOT_CONNECTED`;
+  - las dos aceptan también la respuesta corregida (401 `DEVICE_REVOKED`), así que siguen en verde después de corregir.
+- **Corrección sugerida:**
+  - en `kitchenDisplay`, para la pantalla, usar `UPDATE app.devices SET … WHERE id=$1 AND revoked_at IS NULL` y, con 0
+    filas, responder `unauthorized("DEVICE_REVOKED", …)`. El `UPDATE` espera la fila y, en READ COMMITTED, vuelve a
+    evaluar la condición sobre la versión confirmada;
+  - como `touchDevice` ya va antes de toda ruta de la lista y, en las escrituras, después de 7820148305, eso cierra la
+    ventana en todas sin otro lock;
+  - el patrón es el mismo en los demás tipos de dispositivo y en las sesiones (anterior a la K1). Lo dejo fuera del
+    alcance.
+
+### Lo que se comprobó y está bien
+
+**Emparejamiento como `kitchen`** (`testR1Pairing`, y la subprueba de emparejamiento de la Fase A):
+
+- **Cómo nace un `kitchen`:** solo `claimPairing` (`pairing.go:554`) inserta un dispositivo con otro tipo que no sea el
+  de omisión. `enroll` y `setup` crean siempre `desktop`. El tipo sale de la fila de la solicitud que aprobó un
+  administrador con el código de 6 dígitos en la computadora principal (la aprobación no acepta otro tipo,
+  `approvePairing`).
+- **El tipo no cambia:**
+  - ningún código del servidor hace `UPDATE … kind`;
+  - `PATCH devices/{id}` con `kind` responde 400 (`DisallowUnknownFields`);
+  - reclamar una solicitud de escritorio con `X-Client-Kind: kitchen` sigue creando un escritorio.
+- **Un solo reclamo:** el segundo reclamo, con cualquier `X-Client-Kind`, responde 409 `PAIRING_ALREADY_CLAIMED` y no
+  crea otra terminal. Antes de aprobar, 409 `PAIRING_NOT_APPROVED`.
+- **`X-Client-Kind`:**
+  - la credencial de un `kitchen` con `X-Client-Kind` `desktop` o `android` responde 400 `CLIENT_KIND_MISMATCH`;
+  - la de un escritorio o un teléfono con `kitchen`, igual;
+  - sin la cabecera, el tipo del dispositivo decide igual: un `kitchen` sigue en su lista cerrada.
+- **Versión mínima por tipo** (`testR1ClientVersion`), por la red:
+  - `kitchen` 0.0.9 o sin versión: 426 `CLIENT_UPDATE_REQUIRED`;
+  - `KITCHEN`: 400 `CLIENT_KIND_INVALID`;
+  - `0.1`: 400 `CLIENT_VERSION_INVALID`;
+  - 0.1.0: 200;
+  - un escritorio que dice ser `kitchen` para usar la mínima 0.1.0: 400 `CLIENT_KIND_MISMATCH`.
+
+**Punto único de `dispatch`** (`testR1ClosedList`, `testR1OtherKinds`):
+
+- **Orden en `service.go`:**
+  - el desvío de la pantalla (`:390`) va justo después de `authenticateDevice` y `matchClientKind`, antes de la puerta
+    de la licencia, la entrada con contraseña o PIN, la credencial de envío, el agente, los avisos y
+    `authenticateSession`;
+  - lo único anterior son las rutas públicas (`setup/status`, `setup`, `devices/enroll` solo local, `pairing/*`), que
+    no dan nada que no tenga cualquiera sin credencial.
+- **Lo que se probó con la pantalla:** 71 rutas de todas las familias × GET, POST, PUT, PATCH, DELETE y HEAD, por la
+  escucha local y por la de red, con el `Authorization` del administrador. Todas responden 403 `KITCHEN_DISPLAY_ONLY`
+  (852 combinaciones). Las familias:
+  - sesión, `auth/*` y PIN;
+  - `restaurant/*`, `takeaway/*`, `payments/*`, `inventory/*`, `reports/*` y `maintenance/*`;
+  - `devices/*` (revocar, liberar cupo, configuración), el emparejamiento administrado y `license/*` (salvo `GET
+license/status`);
+  - `settings/*`, `print-agent/*`, `ready-alerts` y su canal, y `kitchen/*` del escritorio;
+  - catálogo, usuarios, roles y auditoría;
+  - variantes de la propia lista: mayúsculas, barra final, otro método y prefijos parecidos.
+- **Sin efectos:** la sesión del administrador no se tocó (`last_seen_at` igual: `authenticateSession` nunca corrió) y
+  no se abrió ninguna cuenta ni sesión.
+- **Rutas raras:**
+  - `%2F`, `%61uth`, barras dobles, `.` y `..`: el enrutador limpia (301) o decodifica a la misma ruta antes de
+    comparar. `kitchen-display%2Forders` es la misma ruta de la lista y no abre nada más;
+  - OPTIONS lo responde el enrutador sin llegar a la aplicación;
+  - la credencial de envío del mesero en `restaurant/offline-orders` responde 403 `KITCHEN_DISPLAY_ONLY`.
+- **Al revés:** las 8 rutas `kitchen-display/*` (y barra final, HEAD, DELETE), por las dos escuchas, responden 403
+  `KITCHEN_DISPLAY_REQUIRED` a un escritorio (con sesión, sin sesión y sin `X-Client-Kind`) y a un teléfono de meseros
+  (sin sesión y con el `Authorization` de otra sesión). Sin credencial, 401 `DEVICE_REQUIRED`. Ninguna llegó a la lógica
+  de la pantalla (ninguna auditoría `kitchen_display.*`). `kitchen.HandleDisplay` solo se llama desde
+  `runKitchenDisplay`, y `kitchen/` (`routes.go:25`) no atrapa `kitchen-display/`.
+
+**Alcance por estación** (`testR1StationScope`):
+
+- **Qué muestra:** `loadDisplayScope` usa `stationscope.Load` con la pantalla como terminal y `Within` las estaciones
+  `kds`/`both`, recalculado en cada petición: una estación que pasa a «Solo impresora» desaparece al momento (la
+  pantalla queda sin estaciones y `recover` responde 403). Las tarjetas, los recientes y los acuses pendientes solo traen
+  sus estaciones, y una cuenta sin nada de sus estaciones no aparece.
+- **Marcar, recuperar y confirmar:**
+  - una tarea de otra estación (o de Postres, solo impresora) en el lote responde 403 `STATION_SCOPE_DENIED` sin marcar
+    ni la propia;
+  - recuperar una tarea de Barra marcada por la otra pantalla, igual;
+  - una versión distinta va en `skipped: changed`;
+  - un identificador en mayúsculas no es otra tarea;
+  - ningún acuse de comandas de otras estaciones se guardó.
+- **Eventos:** solo los tipos de la lista; ninguno de otra estación; nada de la cuenta sin Cocina (aunque cambie su
+  mesero) ni de la configuración de la otra pantalla. Sí llega el cambio de mesero de su cuenta.
+- **Datos:** los eventos no llevan datos (`events.Change`). `DisplayItem` no expone `Instructions.Price` y
+  `KitchenPartDetails` no imprime precios.
+
+**La contraseña del administrador** (`testR1SettingsAccess`):
+
+- **Respuesta:** exactamente `{"authorized":true}`. No crea, cierra ni reemplaza sesiones y no devuelve token ni
+  permisos.
+- **No vale el `Authorization`:** con el de la sesión del administrador y una contraseña equivocada, 401.
+- **`devices.manage`:** un usuario válido sin el permiso recibe 403 `PERMISSION_DENIED`; uno desactivado, 401.
+- **Mismo límite que la entrada:**
+  - `app.login_attempts` por terminal y usuario: cinco fallos y después ni la contraseña correcta pasa (429
+    `AUTHORIZATION_THROTTLED`);
+  - el bloqueo queda en la misma fila que leería `login`;
+  - la otra pantalla conserva su propio contador.
+- **No se registra:** la contraseña no está en `audit_events`, `kitchen_history` ni `login_attempts`, y el registro HTTP
+  solo anota método, estado y duración.
+- **Observación** (no es un hallazgo): un 403 `PERMISSION_DENIED` dice que la contraseña de ese usuario es correcta y
+  reinicia su contador. Es lo mismo que ya revela `auth/login` desde cualquier terminal con el mismo límite.
+
+**El cupo `kitchen_displays`** (`testR1Seats` y la subprueba de cupos de la Fase A):
+
+- **Asignación atómica:**
+  - con un solo cupo, 8 pantallas que conectan a la vez (5 rondas): exactamente una lo ocupa y las demás reciben 409;
+  - una pantalla y el modo Cocina del escritorio a la vez (5 rondas): uno solo;
+  - `claim` cuenta y ocupa en la misma transacción después de `pg_advisory_xact_lock(7820148311)`.
+- **Orden de los locks:**
+  - en `connect`, 7820148311 es el último lock y después solo hay lecturas (`kitchenDisplayView`);
+  - «Liberar cupo» publica `kitchen_display.configuration.changed` antes de `ReleaseDevice`;
+  - revocar no publica nada;
+  - las escrituras de la pantalla toman 7820148305 antes de la fila del dispositivo, como `PUT kitchen/access`;
+  - no encontré ningún ciclo con «Liberar cupo» (fila → 7820148306 → 7820148311) ni con `PATCH devices/{id}`.
+- **Una desconexión no lo libera:** la fila sin sesión cuenta mientras el dispositivo no esté revocado, sin hora. Tres
+  días simulados sin comunicarse: la otra pantalla sigue sin cupo y la primera sigue leyendo.
+- **«Liberar cupo» frente a `connect` de la misma pantalla a la vez (15 rondas):** nunca queda «cupo liberado» con el
+  cupo ocupado. La fila del dispositivo (que `touchDevice` bloquea antes de leer `kitchen_display_seat_released_at`)
+  ordena las dos. Después, ni `connect {}`, ni `take_seat: false`, ni `orders` lo vuelven a ocupar.
+- **Revocar sí lo libera:** la otra pantalla lo toma.
+- **Licencia y hora:**
+  - sin licencia válida no se ocupa nada;
+  - Vencida y Revocada muestran y marcan; Sin activar no muestra pedidos;
+  - con la hora incorrecta se lee pero no se marca, recupera ni confirma (clasificación en
+    `licensing/operations.go`, F5 con escrituras «con fecha»; probado en la Fase A, que volví a correr).
+- **Nota de diseño** (K1-D6, no es un defecto): el servidor no distingue si «Usar esta pantalla» (`take_seat: true`) lo
+  tocó una persona. Una aplicación modificada podría volver a pedir el cupo sola. Nunca pasa del límite, pero «Liberar
+  cupo» solo sirve si otra pantalla lo toma antes. Lo definitivo es «Revocar». Conviene decirlo así en
+  `docs/COCINA_INSTALAR.md` o en Terminales.
+
+**Revocar corta el canal:** la subprueba de la Fase A (SSE real) da `interrupted` con `DEVICE_REVOKED` en menos de un
+segundo, y la volví a correr. El canal revalida dispositivo y tipo cada 750 ms (`events.go:133`).
+
+### Observaciones fuera del alcance (anteriores a la K1)
+
+- **Emparejar sin coincidencia entre escritorio y meseros:** al emparejar solo se exige la coincidencia de `kitchen`
+  (`pairing.go:236`). `device_kind: android` con `X-Client-Kind: desktop` (o al revés) se acepta y después falla en cada
+  petición con `CLIENT_KIND_MISMATCH`. No da más permisos (el administrador aprueba el tipo que ve).
+- **Pantalla sin `X-Client-Kind` por la red:** toma la versión mínima general (0.10.0), así que la aplicación de cocina
+  0.1.0 sin la cabecera recibiría 426. La aplicación siempre la manda (`api-k1.md`).
+
+### Lo que no se pudo verificar
+
+- **El certificado fijado y el filtro de pares de la red:** la escucha de red se simuló con su marca de contexto y un
+  estado TLS, sin un apretón TLS real ni `lanlistener.Listen`. El Go temporal y la tableta los prueba M en las fases
+  B a D.
+- **La aplicación de cocina** (que trate cada código como dice el contrato, incluidos los de R1-1 y R1-2): no es de esta
+  revisión.
+- **Interbloqueos bajo carga real:** solo hay análisis del código y las pruebas de concurrencia del cupo.
+- **Lo demás del servidor:** no corrí `go-unit` completo ni la `go-int` completa de los paquetes. No toqué el código
+  del producto.
+
+### Pruebas ejecutadas
+
+| Qué                                                                                                                                                               | Resultado                                                                                |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `ISO_TAG=R ISO_RUN='TestStageK1R1KitchenDisplaySecurity\|TestStageK1KitchenDisplay$' iso.sh go-int ./internal/operations` en `9316ea2` (la mía y la de la Fase A) | Aprobado (45 s).                                                                         |
+| `$SP/k1/r1tools/govtest.sh` (lo mismo con `-v` en una base `adel_pos_test_r_*` propia, para ver los registros)                                                    | Aprobado. 852 combinaciones rechazadas; R1-1 y R1-2 registrados como se describe arriba. |
+| `go test -run 'KitchenDisplay\|MatchClientKind\|InstalledVersion\|ForOperation\|Classify\|Within'` en administration, licenseseats, licensing y stationscope      | Aprobado.                                                                                |
+| `go vet -tags=integration ./internal/operations`, `gofmt -l` y `iso.sh fmt-check`                                                                                 | Correcto.                                                                                |
+| `md5` de `docs/etapas/*.md` antes y después                                                                                                                       | Sin cambios.                                                                             |
+
+Los primeros intentos fallaron por errores de la propia prueba, que corregí:
+
+- por la red, el escritorio sin `X-Client-Version` recibe 426 antes de llegar a la aplicación;
+- el mesero quedó desactivado para la subprueba siguiente.
+
+### Commits en `etapa-k1-r1`
+
+- `559621c` etapa K1 revisión R1: TestStageK1R1KitchenDisplaySecurity con el enrutador completo.
+- `f71b7cb` una marca que esperaba el lock de cocina no se aplica si la pantalla se revoca mientras.
+- `2da5983` OPTIONS lo responde el enrutador sin llegar a la aplicación.
+- `9316ea2` reproducción de R1-2 (settings-access en curso de una pantalla revocada).
+
+Solo agregan `backend/internal/operations/stagek1_r1_test.go`, que siempre pasa (acepta también la respuesta corregida
+de R1-2). El coordinador decide si se queda.
+
+### Para el coordinador
+
+- **R1-1 y R1-2:** las dos son de gravedad baja y las corrige S en la Fase E, si se aceptan. Ninguna obliga a cambiar
+  una decisión.
+- **Nota de diseño de K1-D6** (que «Liberar cupo» no es definitivo): es para el texto de la documentación o de
+  Terminales. No hace falta código.
+
+### Decisiones del coordinador al cerrar la Fase B y la revisión R1
+
+- **K1-D26. Se aceptan las decisiones propuestas 1 a 10 de la Fase B.**
+- **K1-D27. Versión mínima del servidor para la aplicación de cocina:** queda en 0.15.0 con la capacidad
+  `kitchen-display-v1` mientras `config/product.json` siga en 0.15.0. En la Fase F, junto con la 0.16.0 del producto,
+  `KitchenServerRequirements` sube a **0.16.0** (la capacidad sigue).
+- **K1-D28. La prueba de actualizar encima en dos partes se acepta**: los datos con las compilaciones debug y la firma
+  con la release sin abrirla, porque abrir la release sin emparejar empieza la búsqueda automática en la red real. En la
+  Fase C se repiten las dos partes en `ADEL_A1_Tablet_API26` (Android 8), el sistema de las tabletas baratas.
+- **K1-D29. Hallazgos de la R1:** se aceptan los dos, y S los corrige al empezar la Fase E.
+  - **R1-1:** `settings-access` valida la longitud antes de `supervisorAuthorizer`, como `login`, y responde 401
+    `AUTHORIZATION_INVALID`. Los campos vacíos (400 `VALIDATION_ERROR`) se documentan en `API_V1.md`, en `openapi.json` y
+    en el contrato para la tableta.
+  - **R1-2:** para la pantalla, `touchDevice` actualiza solo con `revoked_at IS NULL` y, si no cambia ninguna fila,
+    responde 401 `DEVICE_REVOKED`.
+  - La prueba de la R1 (`stagek1_r1_test.go`) se queda, y la de R1-2 exige solo la respuesta corregida.
+  - Lo que la R1 dejó fuera del alcance también se corrige: al emparejar, la coincidencia entre `device_kind` y
+    `X-Client-Kind` vale para los tres tipos cuando llega la cabecera.
+- **K1-D30. «Liberar cupo» no es definitivo:** la tableta puede pedir el cupo otra vez con «Usar esta pantalla», y lo
+  definitivo es «Revocar». Lo dicen Terminales, junto a «Liberar cupo» (Fase E), y `docs/COCINA_INSTALAR.md` (Fase D).
