@@ -22,6 +22,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.adelpos.cocina.BuildConfig
 import com.adelpos.cocina.CocinaContainer
 import com.adelpos.cocina.R
+import com.adelpos.cocina.access.KitchenServerRequirements
 import com.adelpos.cocina.access.KitchenStatus
 import com.adelpos.cocina.board.BoardActions
 import com.adelpos.cocina.board.BoardScreen
@@ -146,6 +147,8 @@ fun CocinaScreen(
                         LocalNetworkPermissionGate {
                             FindServerRoute(
                                 pairing = pairing,
+                                requiredServerVersion =
+                                    KitchenServerRequirements.MIN_SERVER_VERSION.toString(),
                                 deviceLog = emptyList(),
                                 onClearDeviceLog = {},
                                 defaultDeviceName = stringResource(R.string.device_default_name),
@@ -167,6 +170,8 @@ fun CocinaScreen(
                         )
                     is KitchenStatus.UpdateServer ->
                         UpdateServerScreen(
+                            requiredServerVersion =
+                                KitchenServerRequirements.MIN_SERVER_VERSION.toString(),
                             serverVersion = status.serverVersion,
                             onCheckAgain = onCheckAgain,
                         )

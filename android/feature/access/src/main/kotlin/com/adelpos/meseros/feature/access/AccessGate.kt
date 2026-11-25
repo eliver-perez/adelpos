@@ -19,6 +19,7 @@ import com.adelpos.core.ui.access.status.UpdateServerScreen
 import com.adelpos.core.ui.components.LocalUserActivity
 import com.adelpos.core.ui.components.reportsUserActivity
 import com.adelpos.meseros.core.domain.access.DeviceStatus
+import com.adelpos.meseros.core.domain.server.WaiterServerRequirements
 import com.adelpos.meseros.core.ui.layout.PaneLayout
 import com.adelpos.meseros.feature.access.pin.PinEntryRoute
 
@@ -74,6 +75,7 @@ fun AccessContent(
             LocalNetworkPermissionGate {
                 FindServerRoute(
                     pairing = dependencies.pairing,
+                    requiredServerVersion = WaiterServerRequirements.MIN_SERVER_VERSION.toString(),
                     wallClock = dependencies.wallClock,
                     deviceLog = status.deviceLog,
                     onClearDeviceLog = actions::clearDeviceLog,
@@ -103,6 +105,7 @@ fun AccessContent(
             )
         is DeviceStatus.UpdateServer ->
             UpdateServerScreen(
+                requiredServerVersion = WaiterServerRequirements.MIN_SERVER_VERSION.toString(),
                 serverVersion = status.serverVersion,
                 onCheckAgain = actions::recheck,
                 modifier = modifier,

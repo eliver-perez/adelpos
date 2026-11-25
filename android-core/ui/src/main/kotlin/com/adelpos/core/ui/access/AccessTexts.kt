@@ -45,9 +45,10 @@ fun clockTime(epochMillis: Long, zone: ZoneId = ZoneId.systemDefault()): String 
 /**
  * Texto de un problema del emparejamiento. Un rechazo de Go con su mensaje en español se muestra
  * tal cual (Go lo escribe para mostrarse); lo demás, con los textos de la aplicación.
+ * [requiredServerVersion] es la versión mínima del servidor que pide la aplicación.
  */
 @Composable
-fun pairingProblemText(problem: PairingProblem): String {
+fun pairingProblemText(problem: PairingProblem, requiredServerVersion: String): String {
     val device = deviceWords()
     return when (problem) {
         is PairingProblem.InvalidAddress ->
@@ -65,7 +66,8 @@ fun pairingProblemText(problem: PairingProblem): String {
         PairingProblem.InvalidCredential -> stringResource(R.string.pairing_problem_credential)
         PairingProblem.StorageFailed ->
             stringResource(R.string.pairing_problem_storage, device.thisDevice)
-        is PairingProblem.UpdateServer -> stringResource(R.string.update_server_text)
+        is PairingProblem.UpdateServer ->
+            stringResource(R.string.update_server_text, requiredServerVersion)
         is PairingProblem.Server -> serverErrorText(problem.error)
     }
 }

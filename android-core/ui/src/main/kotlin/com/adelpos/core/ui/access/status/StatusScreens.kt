@@ -210,11 +210,14 @@ fun UpdateAppScreen(
 }
 
 /**
- * «Actualiza el servidor del restaurante» (anterior a 0.13.0 o sin la entrada con PIN o Para
- * llevar).
+ * «Actualiza el servidor del restaurante»: anterior a la versión que pide la aplicación o sin sus
+ * capacidades. [requiredServerVersion] es la mínima de cada aplicación (meseros, 0.13.0; cocina,
+ * 0.16.0): el texto es compartido y no nombra ninguna (Fase F de la etapa K1: decía «la aplicación
+ * de meseros» y «0.13.0» también en la de cocina).
  */
 @Composable
 fun UpdateServerScreen(
+    requiredServerVersion: String,
     serverVersion: String?,
     onCheckAgain: () -> Unit,
     modifier: Modifier = Modifier,
@@ -226,7 +229,7 @@ fun UpdateServerScreen(
             style = MaterialTheme.typography.headlineSmall,
         )
         Text(
-            text = stringResource(R.string.update_server_text),
+            text = stringResource(R.string.update_server_text, requiredServerVersion),
             style = MaterialTheme.typography.bodyLarge,
         )
         PrimaryButton(

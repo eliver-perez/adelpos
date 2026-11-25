@@ -76,11 +76,13 @@ import kotlinx.coroutines.delay
  * Etapa K1: compartida por las dos aplicaciones. Recibe solo lo que usa de la entrada de cada una:
  * el emparejamiento ([pairing]) y el reloj ([wallClock]) del tiempo que le queda al código.
  * [defaultDeviceName] es el nombre que se propone (la de cocina, «Cocina 1»); sin él, «Tableta 1» o
- * «Teléfono 1», como siempre en la de meseros.
+ * «Teléfono 1», como siempre en la de meseros. [requiredServerVersion] es la versión mínima del
+ * servidor que pide la aplicación, para «Actualiza el servidor del restaurante».
  */
 @Composable
 fun FindServerRoute(
     pairing: PairingFlow,
+    requiredServerVersion: String,
     deviceLog: List<UnsentOrder>,
     onClearDeviceLog: () -> Unit,
     wallClock: () -> Long = System::currentTimeMillis,
@@ -101,6 +103,7 @@ fun FindServerRoute(
         // La computadora principal es anterior a la que pide esta aplicación: el mismo aviso que
         // ya emparejado, con «Volver a comprobar» y la opción de elegir otra.
         UpdateServerScreen(
+            requiredServerVersion = requiredServerVersion,
             serverVersion = problem.serverVersion,
             onCheckAgain = viewModel::checkAgain,
             onChooseAnother = viewModel::startOver,
@@ -108,7 +111,7 @@ fun FindServerRoute(
     } else if (code != null) {
         PairingCodePanel(
             view = code,
-            problem = viewModel.problem?.let { pairingProblemText(it) },
+            problem = viewModel.problem?.let { pairingProblemText(it, requiredServerVersion) },
             wallClock = wallClock,
             onRename = viewModel::rename,
             onCancel = viewModel::cancel,
@@ -122,7 +125,7 @@ fun FindServerRoute(
             onAddressChange = viewModel::onAddressChange,
             search = viewModel.search,
             busy = viewModel.busy,
-            problem = viewModel.problem?.let { pairingProblemText(it) },
+            problem = viewModel.problem?.let { pairingProblemText(it, requiredServerVersion) },
             onSearchAgain = viewModel::searchAgain,
             onRequestFound = viewModel::requestFound,
             onRequestAddress = viewModel::requestAddress,

@@ -4,10 +4,12 @@ import android.content.res.Configuration
 import android.os.Build
 import android.view.View
 import android.view.WindowManager
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -101,6 +103,12 @@ class KitchenScreensTest {
         )
         compose.onNodeWithTag(TAG_UPDATE_SERVER).assertIsDisplayed()
         compose.onNodeWithText("Sin conexión", useUnmergedTree = true).assertIsDisplayed()
+        // La versión que pide esta aplicación (K1-D27), no la de meseros (Fase F: el texto
+        // compartido decía «la aplicación de meseros» y «0.13.0»).
+        compose
+            .onNodeWithText("necesita la versión 0.16.0 o posterior", substring = true)
+            .assertIsDisplayed()
+        compose.onAllNodesWithText("meseros", substring = true).assertCountEquals(0)
         screenshot("b4-actualizar-el-servidor")
     }
 }
