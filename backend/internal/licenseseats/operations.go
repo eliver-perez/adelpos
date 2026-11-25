@@ -26,7 +26,9 @@ const (
 	// también desde otra computadora. No escribe: el cupo cuenta solo mientras su turno está activo.
 	CloseShift Effect = "close_shift"
 	// KitchenDisplay: POST kitchen/display-mode {active}. Ocupa el cupo de cocina al entrar a Preparación y lo libera al
-	// salir. Lo hace la propia ruta (administration/license_seats.go).
+	// salir. Lo hace la propia ruta (administration/license_seats.go). Desde la etapa K1 (Fase A, K1-D6), también POST
+	// kitchen-display/connect de la pantalla de cocina Android, que lo ocupa ligado al dispositivo
+	// (administration/kitchen_display.go).
 	KitchenDisplay Effect = "kitchen_display"
 	// SessionEnd: las operaciones que cierran sesiones (cerrar sesión, revocar una sesión o la terminal, cambiar la
 	// contraseña o el PIN, desactivar al usuario, crear una identidad nueva). Después de la operación se borra el
@@ -92,7 +94,7 @@ func ForOperation(method, route string) Effect {
 	case method == "POST" && len(parts) == 5 && parts[0] == "payments" && parts[1] == "shifts" &&
 		parts[3] == "closing" && parts[4] == "confirm":
 		return CloseShift
-	case method == "POST" && route == "kitchen/display-mode":
+	case method == "POST" && (route == "kitchen/display-mode" || route == "kitchen-display/connect"):
 		return KitchenDisplay
 	case method == "POST" && (route == "auth/logout" || route == "auth/password" || route == "license/identity/regenerate"):
 		return SessionEnd

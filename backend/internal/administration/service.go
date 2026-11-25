@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"local/ad-el-pos/server/internal/backupschedule"
 	"local/ad-el-pos/server/internal/documents"
+	"local/ad-el-pos/server/internal/httpapi"
 	"local/ad-el-pos/server/internal/kitchen"
 	"local/ad-el-pos/server/internal/legacyimport"
 	"local/ad-el-pos/server/internal/licenseseats"
@@ -124,6 +125,10 @@ type Request struct {
 	// ClientKind es X-Client-Kind (etapa A1, revisión R3, B2): con la credencial de un dispositivo debe coincidir con el
 	// tipo con que se registró (matchClientKind), para que nadie tome la versión mínima de otro tipo de cliente.
 	ClientKind string
+	// ClientVersion es X-Client-Version (etapa K1, Fase A, K1-D9): la versión instalada de la aplicación, que Go guarda en
+	// el dispositivo en cada petición autenticada (touchDevice) para que Terminales muestre la instalada y no la de
+	// cuando se emparejó.
+	ClientVersion string
 }
 
 type Fault struct {
@@ -370,11 +375,25 @@ func (service *Service) dispatch(ctx context.Context, tx pgx.Tx, request Request
 			return nil, err
 		}
 	}
-	if err := authenticateDevice(ctx, tx, request); err != nil {
+	kind, err := authenticateDevice(ctx, tx, request)
+	if err != nil {
 		return nil, err
 	}
-	if err := matchClientKind(ctx, tx, request); err != nil {
+	if err := matchClientKind(kind, request); err != nil {
 		return nil, err
+	}
+	// Etapa K1 (Fase A, K1-D4): el punto único de la pantalla de cocina Android. Un dispositivo kitchen solo llega a su
+	// lista cerrada de rutas (kitchen_display.go), sin usuario ni sesión: nunca a la entrada con contraseña o PIN, la
+	// credencial de envío, el agente de impresión, los avisos de platillos listos ni authenticateSession, aunque mande el
+	// Authorization de otra sesión. Lo demás responde 403 KITCHEN_DISPLAY_ONLY. Va antes de la puerta de la licencia: la
+	// puerta se aplica dentro, solo a las rutas de la lista.
+	if kind == kitchenDisplayKind {
+		return service.kitchenDisplay(ctx, tx, request, route)
+	}
+	// Al revés: las rutas de la pantalla de cocina con la credencial de otro tipo de dispositivo.
+	if strings.HasPrefix(route, kitchenDisplayPrefix) {
+		return nil, kitchenDisplayDenied(ctx, tx, Principal{DeviceID: request.DeviceID}, request, route,
+			"KITCHEN_DISPLAY_REQUIRED", "Esta operación es solo de las pantallas de cocina.")
 	}
 	// Etapa L1, Fase C (license_gate.go): la puerta, para todo lo que sigue (entrada con contraseña o PIN, credencial de
 	// envío, agente de impresión, avisos de platillos listos y toda operación con sesión).
@@ -441,53 +460,87 @@ func (service *Service) dispatch(ctx context.Context, tx pgx.Tx, request Request
 	return result, err
 }
 
-func authenticateDevice(ctx context.Context, tx pgx.Tx, request Request) error {
+// authenticateDevice comprueba la credencial del dispositivo y devuelve su tipo (desktop, android o kitchen). Anota su
+// última conexión y su versión instalada (touchDevice), salvo en una pantalla de cocina (etapa K1, Fase A): su
+// manejador lo anota después de tomar el lock de la operación cuando escribe (kitchen_display.go), para que la fila del
+// dispositivo siempre se bloquee después de 7820148305, en el mismo orden que PUT kitchen/access.
+func authenticateDevice(ctx context.Context, tx pgx.Tx, request Request) (string, error) {
 	if !identifierPattern.MatchString(request.DeviceID) || len(request.DeviceToken) != 43 {
-		return unauthorized("DEVICE_REQUIRED", "Esta terminal necesita autorización.")
+		return "", unauthorized("DEVICE_REQUIRED", "Esta terminal necesita autorización.")
 	}
 	var revoked bool
-	err := tx.QueryRow(ctx, "SELECT revoked_at IS NOT NULL FROM app.devices WHERE id=$1 AND secret_hash=$2", request.DeviceID, TokenHash(request.DeviceToken)).Scan(&revoked)
+	var kind string
+	err := tx.QueryRow(ctx, "SELECT revoked_at IS NOT NULL,kind FROM app.devices WHERE id=$1 AND secret_hash=$2",
+		request.DeviceID, TokenHash(request.DeviceToken)).Scan(&revoked, &kind)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return unauthorized("DEVICE_REQUIRED", "Esta terminal necesita autorización.")
+		return "", unauthorized("DEVICE_REQUIRED", "Esta terminal necesita autorización.")
 	}
 	if err != nil {
-		return err
+		return "", err
 	}
 	if revoked {
-		return unauthorized("DEVICE_REVOKED", "La autorización de esta terminal fue revocada.")
+		return "", unauthorized("DEVICE_REVOKED", "La autorización de esta terminal fue revocada.")
 	}
-	touch := "UPDATE app.devices SET last_seen_at=now() WHERE id=$1"
+	if kind == kitchenDisplayKind {
+		return kind, nil
+	}
+	return kind, touchDevice(ctx, tx, request)
+}
+
+// touchDevice anota la última conexión del dispositivo y, desde la etapa K1 (Fase A, K1-D9), la versión instalada que
+// informa X-Client-Version, para los tres tipos (escritorio, meseros y cocina): así Terminales muestra la versión nueva
+// al actualizar una aplicación encima, sin emparejar otra vez. Solo se guarda una versión válida de 40 caracteres o
+// menos (el CHECK de devices.app_version); sin cabecera se conserva la anterior.
+func touchDevice(ctx context.Context, tx pgx.Tx, request Request) error {
+	version := installedVersion(request.ClientVersion)
+	touch := "UPDATE app.devices SET last_seen_at=now(),app_version=coalesce(NULLIF($2,''),app_version) WHERE id=$1"
 	// La lectura de avisos de platillos listos llega cada 750 ms desde el canal de cada teléfono (etapa A2, revisión
 	// R4): «última conexión» se anota como mucho una vez por minuto (Terminales considera en línea lo de los últimos 2),
-	// para no escribir en la base en cada lectura.
+	// para no escribir en la base en cada lectura. Una versión nueva se anota enseguida.
 	if request.Method == "GET" && request.Path == "/api/v1/ready-alerts" {
-		touch += " AND last_seen_at < now() - interval '1 minute'"
+		touch += " AND (last_seen_at < now() - interval '1 minute' OR app_version IS DISTINCT FROM coalesce(NULLIF($2,''),app_version))"
 	}
-	_, err = tx.Exec(ctx, touch, request.DeviceID)
+	_, err := tx.Exec(ctx, touch, request.DeviceID, version)
 	return err
+}
+
+// installedVersion es la versión de X-Client-Version si es una versión del producto válida (la misma regla de
+// httpapi.CompareVersions) de 40 caracteres o menos, o vacía.
+func installedVersion(text string) string {
+	if text == "" || len(text) > 40 {
+		return ""
+	}
+	if _, valid := httpapi.CompareVersions(text, "0.0.0"); !valid {
+		return ""
+	}
+	return text
 }
 
 // matchClientKind compara X-Client-Kind con el tipo con que se registró el dispositivo (revisión R3, B2): la versión
 // mínima se elige por el tipo que declara el cliente (httpapi.checkClient), y un escritorio que dijera «android»
-// tomaría la mínima de Android. La aplicación Android solo corre en dispositivos android y la de escritorio en los de
-// escritorio o cocina. Sin la cabecera (herramientas locales y pruebas por la escucha local) no hay nada que comparar.
-func matchClientKind(ctx context.Context, tx pgx.Tx, request Request) error {
+// tomaría la mínima de Android. La aplicación Android solo corre en dispositivos android, la de cocina (etapa K1,
+// K1-D3) solo en los kitchen y la de escritorio en los de escritorio. Sin la cabecera (herramientas locales y pruebas
+// por la escucha local) no hay nada que comparar: el tipo del dispositivo decide igual qué puede hacer.
+func matchClientKind(kind string, request Request) error {
 	if request.ClientKind == "" {
 		return nil
 	}
-	var kind string
-	if err := tx.QueryRow(ctx, "SELECT kind FROM app.devices WHERE id=$1", request.DeviceID).Scan(&kind); err != nil {
-		return err
-	}
-	expected := "desktop"
-	if kind == "android" {
-		expected = "android"
-	}
-	if request.ClientKind != expected {
+	if request.ClientKind != expectedClientKind(kind) {
 		return &Fault{Status: 400, Code: "CLIENT_KIND_MISMATCH",
 			Message: "Esta aplicación no corresponde al tipo de equipo con que se emparejó esta terminal. Empareja de nuevo esta terminal."}
 	}
 	return nil
+}
+
+// expectedClientKind es el X-Client-Kind que corresponde a un tipo de dispositivo.
+func expectedClientKind(kind string) string {
+	switch kind {
+	case "android":
+		return "android"
+	case kitchenDisplayKind:
+		return kitchenDisplayKind
+	}
+	return "desktop"
 }
 
 func authenticateSession(ctx context.Context, tx pgx.Tx, request Request) (Principal, error) {

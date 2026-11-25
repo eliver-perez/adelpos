@@ -4249,3 +4249,42 @@ comercial.
   que pida `Retry-After`. Solo con una activación que no sea un cierre; nunca bloquea nada.
 - **Configuración**: `license_server_url` opcional en `server.json` (https). Con `test_mode`, el cliente solo habla con
   loopback, salvo `ADEL_LICENSE_ALLOW_REMOTE=1` (L1-D18, solo la Fase G).
+
+## Etapa K1 · pantalla de cocina para Android (Fase A, esquema 29; servidor 0.16.0)
+
+Dispositivo de tipo `kitchen` (el reservado desde la 0023) sin usuario ni sesión (decisiones K1-D3 a K1-D17 en
+`docs/ETAPA_K1_AVANCE.md`). Las rutas de la pantalla (`kitchen-display/*`), su canal de eventos y su orden de arranque
+están en `docs/API_V1.md`, «Pantalla de cocina». Archivos: `administration/kitchen_display.go` (punto único en
+`dispatch`, lista cerrada, cupo, contraseña de los ajustes) y `kitchen/display.go` (tarjetas, marcas, recientes,
+recuperar, acuse y eventos, con la lógica de la 9F). Migración `0029_pantalla_de_cocina.sql`, sección «Fase A». Sin
+locks nuevos: las escrituras de la pantalla toman 7820148305 exclusivo y el cupo 7820148311 al final (K1-D19).
+
+- **`GET devices`** y el `device` de **`GET devices/{id}/configuration`** (`devices.read`): agregan `kitchen_display`
+  (`{text_size, theme, sound_enabled, sound_volume, seat_released_at}` en una pantalla de cocina; `null` en las demás).
+  `app_version` es la versión instalada: desde la K1 Go la anota con `X-Client-Version` en cada petición autenticada de
+  los tres tipos de aplicación (K1-D9), no solo al emparejar. `online` y `seats` (con `kitchen_displays`) dicen la
+  conexión y el cupo. La configuración agrega `kitchen_display_station_options` (las estaciones de recepción `kds` o
+  `both`, con `id`, `name`, `active` y `reception`; vacía en las demás terminales).
+- **`PATCH devices/{id}`** (`devices.manage`): campos opcionales `kitchen_display_text_size` (`normal`/`large`),
+  `kitchen_display_theme` (`dark`/`light`), `kitchen_display_sound` y `kitchen_display_volume` (`low`/`medium`/`high`);
+  solo en un dispositivo `kitchen` (400 en los demás). Cualquier cambio de una pantalla publica
+  `kitchen_display.configuration.changed` con la pantalla como agregado.
+- **`PUT kitchen/access`** (`kitchen.stations.manage`, sin cambio de forma): en un dispositivo `kitchen` solo admite
+  estaciones de recepción `kds` o `both` (400 con una «Solo impresora»).
+- **`PUT kitchen/timing`** (`kitchen.timing.manage`): campos opcionales `display_warning_minutes` (1 a 1440) y
+  `display_late_minutes` (mayor que el anterior, hasta 2880), los límites de color generales de las pantallas (10 y 20
+  por omisión). `GET kitchen/settings` y las respuestas de `PUT kitchen/settings` y `PUT kitchen/timing` los traen;
+  `PUT kitchen/settings` los acepta (el escritorio guarda lo que leyó) y, si cambian, exige `kitchen.timing.manage`.
+  Las escrituras de estaciones, formatos, tiempos y acceso publican `kitchen_display.configuration.changed` sin agregado.
+- **`POST devices/{id}/seat/release`** («Liberar cupo»): en una pantalla de cocina, además, la deja en «cupo liberado»
+  (`kitchen_display_seat_released_at`) y le avisa con `kitchen_display.configuration.changed`: la pantalla no vuelve a
+  ocupar el cupo sola, solo con «Usar esta pantalla» (`connectKitchenDisplay` con `take_seat`), auditado como
+  `kitchen_display.seat_taken`.
+- **`POST devices/{id}/revoke`**: la pantalla recibe `interrupted` con `DEVICE_REVOKED` en su canal y su cupo se libera.
+- **Auditoría**: los rechazos `KITCHEN_DISPLAY_ONLY` y `KITCHEN_DISPLAY_REQUIRED` quedan como `access.denied` con el
+  dispositivo como autor (`actor_kind` `device`, sin usuario) y `details.code`; `kitchen_display.settings_opened` y
+  `kitchen_display.settings_denied` (con el usuario que escribió su contraseña); las marcas de la pantalla, como las del
+  escritorio (`kitchen.states.changed`, `kitchen.states.recovered`, `kitchen.cancellations.dismissed`,
+  `kitchen.kds.acknowledged`), sin usuario y con el dispositivo.
+- **Escritorio**: Terminales y la configuración de cocina son de la Fase E, escondidas por la capacidad
+  `kitchen-display-v1`. El modo Cocina del escritorio no cambia.

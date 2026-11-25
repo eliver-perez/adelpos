@@ -189,6 +189,8 @@ func ClassifyOperation(method, route string) Operation {
 		return classifyPayments(method, parts)
 	case "kitchen":
 		return classifyKitchen(method, parts)
+	case "kitchen-display":
+		return classifyKitchenDisplay(method, parts)
 	case "catalog":
 		// El catálogo es administración, también «Agotado». La vista previa del producto solo calcula.
 		if read || (method == "POST" && len(parts) == 2 && parts[1] == "preview") {
@@ -435,6 +437,28 @@ func classifyKitchen(method string, parts []string) Operation {
 		// Configuración de cocina: estaciones, impresoras (también la prueba de ancho), rutas, formatos, tiempos y
 		// acceso.
 		return known(RowAdministration, true)
+	}
+	return unknownOperation(method)
+}
+
+// classifyKitchenDisplay: kitchen-display/* de la pantalla de cocina Android (etapa K1, Fase A; K1-D6 y K1-D16). Es la
+// fila F5 («KDS: mostrar pedidos ya enviados»): en Vencida y Revocada muestra y marca; «Sin activar» no muestra pedidos.
+// Por eso, a diferencia de las lecturas de cocina del escritorio (F6), también sus lecturas son F5. Marcar, recuperar y
+// el acuse de recepción registran con fecha: con «Hora del equipo incorrecta» se bloquean y la pantalla sigue leyendo.
+// Conectarse solo ocupa el cupo de cocina, como entrar a Preparación. La contraseña del administrador para los ajustes
+// de la tableta no registra nada de la operación y se permite siempre, como la sesión.
+func classifyKitchenDisplay(method string, parts []string) Operation {
+	if len(parts) < 2 {
+		return unknownOperation(method)
+	}
+	action := strings.Join(parts[1:], "/")
+	switch method + " " + action {
+	case "POST connect", "GET orders", "GET recent":
+		return known(RowKitchen, false)
+	case "POST items/ready", "POST orders/ready", "POST recover", "POST receipts":
+		return known(RowKitchen, true)
+	case "POST settings-access":
+		return known(RowAlways, false)
 	}
 	return unknownOperation(method)
 }

@@ -103,54 +103,87 @@ func renderKitchenItems(options *KitchenItemsOptions, data *KitchenData, w *writ
 
 // renderKitchenParts imprime cada parte con sus cambios de ingredientes y complementos. itemNotes
 // es la nota de la partida, que la comanda imprime para la parte raíz; las de componentes van en
-// su parte.
+// su parte. Las reglas de qué se muestra están en KitchenPartDetails (etapa K1: las usa también la
+// pantalla de cocina para Android, para que la pantalla y el papel digan lo mismo).
 func renderKitchenParts(parts []KitchenPart, itemNotes string, showNotes bool, w *writer) {
 	for _, part := range parts {
-		name := part.Name
-		if part.Variant != "" {
-			name += " · " + part.Variant
-		}
-		w.text(fmt.Sprintf("  %d x %s", part.Quantity, name))
-		printedNotes := part.Notes
-		if part.Path == "root" {
-			printedNotes = itemNotes
-		}
-		covered := quickNoteCoverage(part.QuickNotes, printedNotes, showNotes)
-		for _, ingredient := range part.Ingredients {
-			requested, _ := decimal.NewFromString(ingredient.Requested)
-			included, _ := decimal.NewFromString(ingredient.Included)
-			if requested.Equal(included) {
-				continue
+		w.text(fmt.Sprintf("  %d x %s", part.Quantity, KitchenPartName(part)))
+		for _, detail := range KitchenPartDetails(part, itemNotes, showNotes) {
+			indent := "    "
+			if detail.Level > 0 {
+				indent = "      "
 			}
-			// La indicación con efecto («Sin cebolla») ya se imprime en la nota: no se repite la
-			// línea estructurada («SIN Cebolla») del mismo ingrediente.
-			if covered[ingredient.IngredientID] {
-				continue
-			}
-			if requested.IsZero() {
-				w.text("    SIN " + ingredient.Name)
-			} else {
-				w.text("    " + ingredient.Name + ": " + ingredient.Requested + " (incluido " + ingredient.Included + ")")
-			}
-		}
-		for _, group := range part.Groups {
-			w.text("    " + group.Name + ":")
-			anyOption := false
-			for _, option := range group.Options {
-				quantity, _ := decimal.NewFromString(option.Requested)
-				if quantity.IsPositive() {
-					anyOption = true
-					w.text("      " + option.Requested + " x " + option.Name)
-				}
-			}
-			if !anyOption {
-				w.text("      Sin complementos")
-			}
-		}
-		if showNotes && part.Notes != "" {
-			w.text("    NOTA: " + part.Notes)
+			w.text(indent + detail.Text)
 		}
 	}
+}
+
+// KitchenPartName es el nombre de la parte con su variante («Tacos · Orden de 3»).
+func KitchenPartName(part KitchenPart) string {
+	name := part.Name
+	if part.Variant != "" {
+		name += " · " + part.Variant
+	}
+	return name
+}
+
+// KitchenDetail es un renglón de los cambios de una parte: nivel 0 para un ingrediente, el nombre de un grupo o la nota
+// de la parte, y nivel 1 para las opciones de un grupo.
+type KitchenDetail struct {
+	Level int    `json:"level"`
+	Text  string `json:"text"`
+}
+
+// KitchenPartDetails son los renglones que la comanda imprime debajo de una parte (etapa K1, extraído de
+// renderKitchenParts sin cambiar ninguna regla):
+//   - un ingrediente solo si lo solicitado difiere de lo incluido: «SIN …» si se quitó o «…: 2 (incluido 1)»;
+//   - el ingrediente que ya representa una indicación rápida impresa en la nota no se repite (quickNoteCoverage);
+//   - cada grupo de complementos con sus opciones solicitadas, o «Sin complementos»;
+//   - la nota de la parte («NOTA: …») si se muestran notas.
+//
+// itemNotes es la nota de la partida, que cuenta para la parte raíz.
+func KitchenPartDetails(part KitchenPart, itemNotes string, showNotes bool) []KitchenDetail {
+	details := []KitchenDetail{}
+	printedNotes := part.Notes
+	if part.Path == "root" {
+		printedNotes = itemNotes
+	}
+	covered := quickNoteCoverage(part.QuickNotes, printedNotes, showNotes)
+	for _, ingredient := range part.Ingredients {
+		requested, _ := decimal.NewFromString(ingredient.Requested)
+		included, _ := decimal.NewFromString(ingredient.Included)
+		if requested.Equal(included) {
+			continue
+		}
+		// La indicación con efecto («Sin cebolla») ya se imprime en la nota: no se repite la
+		// línea estructurada («SIN Cebolla») del mismo ingrediente.
+		if covered[ingredient.IngredientID] {
+			continue
+		}
+		if requested.IsZero() {
+			details = append(details, KitchenDetail{Text: "SIN " + ingredient.Name})
+		} else {
+			details = append(details, KitchenDetail{Text: ingredient.Name + ": " + ingredient.Requested + " (incluido " + ingredient.Included + ")"})
+		}
+	}
+	for _, group := range part.Groups {
+		details = append(details, KitchenDetail{Text: group.Name + ":"})
+		anyOption := false
+		for _, option := range group.Options {
+			quantity, _ := decimal.NewFromString(option.Requested)
+			if quantity.IsPositive() {
+				anyOption = true
+				details = append(details, KitchenDetail{Level: 1, Text: option.Requested + " x " + option.Name})
+			}
+		}
+		if !anyOption {
+			details = append(details, KitchenDetail{Level: 1, Text: "Sin complementos"})
+		}
+	}
+	if showNotes && part.Notes != "" {
+		details = append(details, KitchenDetail{Text: "NOTA: " + part.Notes})
+	}
+	return details
 }
 
 // quickNoteCoverage devuelve los ingredientes cuya línea estructurada ya representa una indicación

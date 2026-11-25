@@ -285,7 +285,8 @@ func (service *Service) serveReadyAlerts(writer http.ResponseWriter, request *ht
 	arguments := Request{Method: "GET", Path: "/api/v1/ready-alerts", Query: request.URL.Query(),
 		DeviceID: request.Header.Get("X-Device-ID"), DeviceToken: request.Header.Get("X-Device-Token"), Local: local,
 		OfflineCredential: request.Header.Get(OfflineCredentialHeader),
-		ClientKind:        request.Header.Get(httpapi.ClientKindHeader)}
+		ClientKind:        request.Header.Get(httpapi.ClientKindHeader),
+		ClientVersion:     request.Header.Get(httpapi.ClientVersionHeader)}
 	if arguments.Query.Get("after") == "" && request.Header.Get("Last-Event-ID") != "" {
 		arguments.Query.Set("after", request.Header.Get("Last-Event-ID"))
 	}

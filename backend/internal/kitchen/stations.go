@@ -232,8 +232,9 @@ func (handler *service) saveAccess() (any, error) {
 	}
 	// La fila de la terminal se bloquea para que dos ediciones simultáneas no se mezclen.
 	var before deviceStations
-	err := handler.tx.QueryRow(handler.ctx, `SELECT id::text,kitchen_all_stations,kitchen_sound_alert FROM app.devices
-        WHERE id=$1 AND revoked_at IS NULL FOR UPDATE`, input.DeviceID).Scan(&before.DeviceID, &before.AllStations, &before.SoundAlert)
+	var kind string
+	err := handler.tx.QueryRow(handler.ctx, `SELECT id::text,kitchen_all_stations,kitchen_sound_alert,kind FROM app.devices
+        WHERE id=$1 AND revoked_at IS NULL FOR UPDATE`, input.DeviceID).Scan(&before.DeviceID, &before.AllStations, &before.SoundAlert, &kind)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, invalid("La terminal debe existir y estar autorizada.")
 	}
@@ -257,6 +258,18 @@ func (handler *service) saveAccess() (any, error) {
 	}
 	if existing != len(input.StationIDs) {
 		return nil, invalid("Elige estaciones existentes.")
+	}
+	// Etapa K1 (Fase A, K1-D11): una pantalla de cocina Android solo muestra estaciones que reciben sus comandas en
+	// pantalla («Solo pantalla de cocina» o «Impresora y pantalla de cocina»).
+	if kind == "kitchen" {
+		var printerOnly int
+		if err := handler.tx.QueryRow(handler.ctx, `SELECT count(*) FROM app.kitchen_stations
+            WHERE id::text = ANY($1::text[]) AND reception = 'printer'`, input.StationIDs).Scan(&printerOnly); err != nil {
+			return nil, err
+		}
+		if printerOnly > 0 {
+			return nil, invalid("Una pantalla de cocina solo muestra estaciones que reciben sus comandas en pantalla.")
+		}
 	}
 	after := deviceStations{DeviceID: input.DeviceID, AllStations: allStations, StationIDs: append([]string{}, input.StationIDs...), SoundAlert: before.SoundAlert}
 	slices.Sort(after.StationIDs)

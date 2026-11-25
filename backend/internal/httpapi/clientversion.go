@@ -49,8 +49,10 @@ func offlineCredentialMisplaced(request *http.Request) bool {
 	return request.Method != http.MethodPost || request.URL.Path != offlineOrdersPath
 }
 
-// ClientKinds son los tipos de cliente que conoce la API v1.
-var ClientKinds = []string{"desktop", "android"}
+// ClientKinds son los tipos de cliente que conoce la API v1. Etapa K1 (Fase A, K1-D3): «kitchen» es la aplicación de
+// cocina para Android, que solo funciona como pantalla de cocina (administration/kitchen_display.go). Un servidor
+// anterior responde CLIENT_KIND_INVALID a ese tipo, y la aplicación lo explica como «Actualiza el servidor».
+var ClientKinds = []string{"desktop", "android", "kitchen"}
 
 // unversionedRoutes responden a cualquier cliente: con ellas un cliente viejo averigua qué versión necesita.
 var unversionedRoutes = []string{
