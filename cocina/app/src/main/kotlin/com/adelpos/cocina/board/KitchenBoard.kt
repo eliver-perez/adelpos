@@ -1,6 +1,7 @@
 package com.adelpos.cocina.board
 
 import com.adelpos.cocina.access.KitchenStatus
+import com.adelpos.core.model.connection.LinkState
 import com.adelpos.core.model.error.AppError
 import com.adelpos.core.model.realtime.RealtimeSignal
 import com.adelpos.core.network.api.ApiErrors
@@ -9,6 +10,7 @@ import com.adelpos.core.network.session.AuthorizedServer
 import com.adelpos.core.network.session.FixedServerAccess
 import com.adelpos.core.network.session.ServerAccess
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -21,6 +23,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -34,6 +37,14 @@ interface BoardAccess {
 
     /** La conexión para el canal de eventos (la credencial del dispositivo); null sin emparejar. */
     fun channelServer(): AuthorizedServer?
+}
+
+/**
+ * Quien hace sonar las alertas (§5.2): en la aplicación, `ToneAlertPlayer`; las pruebas lo anotan.
+ */
+fun interface BoardAlertSink {
+    /** [volume]: «Volumen» de Terminales, `low`, `medium` o `high`. */
+    fun play(sounds: Set<AlertSound>, volume: String)
 }
 
 /** Lo que se puede hacer desde la pantalla de pedidos (las pruebas de pantallas lo sustituyen). */
@@ -69,10 +80,24 @@ data class BoardState(
     val clockInvalid: Boolean = false,
     /** Un aviso pasajero con el mensaje de Go (por ejemplo, un platillo que ya no se recupera). */
     val notice: String? = null,
+    /**
+     * «Sin conexión» del estado único de conexión (§5.1): el aviso grande arriba y no se puede
+     * marcar. Dentro de la tolerancia (y del margen sin red de la cocina, K1-D33) sigue en false.
+     */
+    val offline: Boolean = false,
+    /**
+     * Las tarjetas con algo nuevo o cambiado y desde cuándo (reloj monotónico de la tableta): la
+     * animación breve de la tarjeta nueva (§5.2), una vez por cada valor.
+     */
+    val freshCards: Map<String, Long> = emptyMap(),
 ) {
-    /** Si se puede marcar ahora: con la hora del servidor correcta (K1-D16). */
+    /** La hora del servidor está mal (K1-D16): no se puede marcar hasta corregirla. */
+    val clockBlocked: Boolean
+        get() = clockInvalid || !BoardRules.markingAllowed(board?.license)
+
+    /** Si se puede marcar ahora: con conexión y con la hora del servidor correcta. */
     val markingAllowed: Boolean
-        get() = !clockInvalid && BoardRules.markingAllowed(board?.license)
+        get() = !offline && !clockBlocked
 }
 
 /** «Recientes»: lo marcado listo en los últimos 30 minutos, para regresarlo a la pantalla. */
@@ -97,8 +122,18 @@ sealed interface RecentState {
  *    lectura aunque lleguen varios (una en curso y como mucho una pendiente);
  * 4. después de cada lectura, el acuse de recepción de las comandas que ya se muestran (K1-D12).
  *
- * Las marcas, «Recientes» y «Recuperar» vuelven a leer al terminar. Sin respuesta se vuelve a
- * intentar en silencio ([retryMillis]); la tolerancia y el aviso «Sin conexión…» son de la Fase D.
+ * Las marcas, «Recientes» y «Recuperar» vuelven a leer al terminar. Sin respuesta, una lectura se
+ * vuelve a intentar en silencio ([retryMillis]).
+ *
+ * **Conexión tolerante** (§5.1, la Fase D): manda el estado único de conexión ([link], el de la
+ * barra). Mientras dice «En línea» (también dentro de la tolerancia) no se ve ningún aviso y una
+ * marca sin respuesta se repite sola cada [markRetryMillis], con su palomita a la vista (es
+ * idempotente por versión: lo que Go ya tenía vuelve en `skipped`). Con «Sin conexión»: aviso
+ * grande, no se puede marcar, las marcas pendientes esperan y, al volver, se repiten y se lee todo
+ * de nuevo.
+ *
+ * **Alertas** (§5.2): cada lectura se compara con la anterior ([BoardAlerts]); lo nuevo suena por
+ * [alerts] (si «Sonido» está activado en Terminales) y su tarjeta se anima.
  *
  * @param monotonic el reloj monotónico de la tableta (milisegundos): la espera avanza con él desde
  *   el `server_time` de cada lectura.
@@ -108,8 +143,11 @@ class KitchenBoard(
     private val service: KitchenDisplayService,
     private val signals: Flow<RealtimeSignal>,
     private val monotonic: () -> Long,
+    private val link: StateFlow<LinkState> = MutableStateFlow(LinkState.ONLINE),
+    private val alerts: BoardAlertSink = BoardAlertSink { _, _ -> },
     private val retryMillis: Long = RETRY_MILLIS,
     private val noSeatRetryMillis: Long = NO_SEAT_RETRY_MILLIS,
+    private val markRetryMillis: Long = MARK_RETRY_MILLIS,
 ) : BoardActions {
     private val mutableState = MutableStateFlow(BoardState())
     private val mutableRecent = MutableStateFlow<RecentState>(RecentState.Hidden)
@@ -140,9 +178,25 @@ class KitchenBoard(
     private val dishesConfirmed = ConcurrentHashMap<String, Long>()
     private val cardsConfirmed = ConcurrentHashMap<String, Long>()
 
+    /** Una marca de listo: lo que se manda y lo que se ve marcado mientras va en camino. */
+    private class PendingMark(
+        val tasks: List<TaskRef>,
+        val wholeOrder: Boolean,
+        val dishIds: Set<String>,
+        val cardIds: Set<String>,
+    )
+
+    // Marcas sin respuesta que se repiten solas (§5.1) y el aviso para repetirlas.
+    private val retrying = ConcurrentLinkedQueue<PendingMark>()
+    @Volatile private var markRetries: Channel<Unit>? = null
+
+    // Tareas que esta pantalla acaba de recuperar y cuándo: regresarlas no suena como pedido nuevo.
+    private val recoveredTasks = ConcurrentHashMap<String, Long>()
+
     /** Empieza a seguir el estado de la entrada en [scope] (una sola vez por proceso). */
     fun start(scope: CoroutineScope): Job {
         this.scope = scope
+        scope.launch { link.collect(::onLink) }
         return scope.launch {
             access.status
                 .map { it is KitchenStatus.Ready }
@@ -153,12 +207,30 @@ class KitchenBoard(
                     } else {
                         channel.set(null)
                         reads = null
+                        markRetries = null
+                        retrying.clear()
+                        dishesInFlight.clear()
+                        cardsInFlight.clear()
                         dishesConfirmed.clear()
                         cardsConfirmed.clear()
-                        mutableState.value = BoardState()
+                        recoveredTasks.clear()
+                        mutableState.value = BoardState(offline = link.value == LinkState.OFFLINE)
                         mutableRecent.value = RecentState.Hidden
                     }
                 }
+        }
+    }
+
+    // El estado único de conexión cambió. Al volver de «Sin conexión»: lectura completa y las
+    // marcas
+    // que esperaban se repiten.
+    private fun onLink(state: LinkState) {
+        val offline = state == LinkState.OFFLINE
+        val wasOffline = mutableState.value.offline
+        mutableState.update { it.copy(offline = offline) }
+        if (wasOffline && !offline) {
+            requestRead()
+            markRetries?.trySend(Unit)
         }
     }
 
@@ -170,6 +242,9 @@ class KitchenBoard(
         // El canal se abre desde ya (sin cupo también: trae license.changed y los cambios de
         // configuración); su primer mensaje pide volver a leer.
         channel.set(access.channelServer())
+        val retries = Channel<Unit>(Channel.CONFLATED)
+        markRetries = retries
+        launch { retryMarks(retries) }
         launch {
             signals.collect { signal ->
                 val reread =
@@ -217,14 +292,26 @@ class KitchenBoard(
         val number = readsStarted.incrementAndGet()
         when (val outcome = service.orders()) {
             is ApiOutcome.Success -> {
-                val board = BoardMapper.board(outcome.value, monotonic())
+                val now = monotonic()
+                val board = BoardMapper.board(outcome.value, now)
                 dishesConfirmed.values.removeIf { it <= number }
                 cardsConfirmed.values.removeIf { it <= number }
+                // Solo este ciclo de lecturas cambia el tablero: la lectura anterior es la que se
+                // ve.
+                val previous = mutableState.value.board
+                recoveredTasks.values.removeIf { now - it > RECOVERED_MEMORY_MILLIS }
+                val news = BoardAlerts.between(previous, board, recoveredTasks.keys.toSet())
+                val present = board.cards.mapTo(HashSet()) { it.id }
                 mutableState.update { current ->
+                    val fresh =
+                        current.freshCards.filter { (cardId, since) ->
+                            cardId in present && now - since < FRESH_MILLIS
+                        } + news.freshCards.associateWith { now }
                     current.copy(
                         screen = BoardScreen.Orders,
                         board = board,
                         settings = board.settings,
+                        freshCards = fresh,
                         // Lo que Go ya respondió está en esta lectura (manda Go); lo que todavía
                         // va en camino se sigue viendo marcado.
                         markingDishes =
@@ -237,6 +324,9 @@ class KitchenBoard(
                             },
                         clockInvalid = false,
                     )
+                }
+                if (news.sounds.isNotEmpty() && board.settings.soundEnabled) {
+                    alerts.play(news.sounds, board.settings.soundVolume)
                 }
                 acknowledge(board.receiptsPending)
             }
@@ -307,10 +397,14 @@ class KitchenBoard(
         }
         dishesInFlight.add(dishId)
         mutableState.update { it.copy(markingDishes = it.markingDishes + dishId) }
-        scope?.launch {
-            val outcome = service.markItems(dish.tasks)
-            finishMark(outcome, dishIds = setOf(dishId), cardIds = emptySet())
-        }
+        val mark =
+            PendingMark(
+                dish.tasks,
+                wholeOrder = false,
+                dishIds = setOf(dishId),
+                cardIds = emptySet(),
+            )
+        scope?.launch { send(mark) }
     }
 
     /** El botón grande de la tarjeta: marca el pedido completo, que desaparece (§4). */
@@ -325,50 +419,83 @@ class KitchenBoard(
         }
         cardsInFlight.add(cardId)
         mutableState.update { it.copy(markingCards = it.markingCards + cardId) }
-        scope?.launch {
-            val outcome = service.markOrder(BoardRules.orderTasks(card))
-            finishMark(outcome, dishIds = emptySet(), cardIds = setOf(cardId))
+        val mark =
+            PendingMark(
+                BoardRules.orderTasks(card),
+                wholeOrder = true,
+                dishIds = emptySet(),
+                cardIds = setOf(cardId),
+            )
+        scope?.launch { send(mark) }
+    }
+
+    private suspend fun send(mark: PendingMark) {
+        val outcome =
+            if (mark.wholeOrder) {
+                service.markOrder(mark.tasks)
+            } else {
+                service.markItems(mark.tasks)
+            }
+        finishMark(outcome, mark)
+    }
+
+    // Las marcas sin respuesta se repiten cada [markRetryMillis] mientras haya «En línea» (dentro
+    // de la tolerancia); con «Sin conexión» esperan a que vuelva.
+    private suspend fun retryMarks(wakeups: Channel<Unit>) {
+        while (true) {
+            wakeups.receive()
+            while (retrying.isNotEmpty()) {
+                delay(markRetryMillis)
+                link.first { it == LinkState.ONLINE }
+                val batch = generateSequence { retrying.poll() }.toList()
+                for (mark in batch) {
+                    send(mark)
+                }
+            }
         }
     }
 
-    private fun finishMark(
-        outcome: ApiOutcome<MarkResultDto>,
-        dishIds: Set<String>,
-        cardIds: Set<String>,
-    ) {
-        if (outcome is ApiOutcome.Success) {
-            // Antes de dejar de estar «en camino», para que ninguna lectura la vea sin las dos.
-            val confirmingRead = readsStarted.get() + 1
-            dishIds.forEach { dishesConfirmed[it] = confirmingRead }
-            cardIds.forEach { cardsConfirmed[it] = confirmingRead }
-        }
-        dishesInFlight.removeAll(dishIds)
-        cardsInFlight.removeAll(cardIds)
+    private fun finishMark(outcome: ApiOutcome<MarkResultDto>, mark: PendingMark) {
         when (outcome) {
             // Idempotente por versión: lo que ya estaba listo vuelve en `skipped` y es un éxito.
             // Se sigue viendo marcado hasta la lectura empezada después, que trae lo que dice Go.
-            is ApiOutcome.Success -> requestRead()
+            // Una respuesta que no se entiende también: Go respondió y la lectura dice cómo quedó.
+            is ApiOutcome.Success,
+            is ApiOutcome.Malformed -> {
+                // Antes de dejar de estar «en camino», para que ninguna lectura la vea sin las dos.
+                val confirmingRead = readsStarted.get() + 1
+                mark.dishIds.forEach { dishesConfirmed[it] = confirmingRead }
+                mark.cardIds.forEach { cardsConfirmed[it] = confirmingRead }
+                dishesInFlight.removeAll(mark.dishIds)
+                cardsInFlight.removeAll(mark.cardIds)
+                requestRead()
+            }
+            // Go dijo otra cosa (ya no se puede marcar, otra estación, la hora…): se quita.
             is ApiOutcome.Rejected -> {
-                mutableState.update {
-                    it.copy(
-                        markingDishes = it.markingDishes - dishIds,
-                        markingCards = it.markingCards - cardIds,
-                    )
-                }
+                drop(mark)
                 react(ApiErrors.toAppError(outcome.problem))
             }
-            // Sin respuesta: se vuelve a leer (lo que Go diga manda). El reintento silencioso de la
-            // marca es de la Fase D, con la conexión tolerante.
-            is ApiOutcome.NoAnswer,
-            is ApiOutcome.Malformed -> {
-                mutableState.update {
-                    it.copy(
-                        markingDishes = it.markingDishes - dishIds,
-                        markingCards = it.markingCards - cardIds,
-                    )
+            // Sin respuesta: se repite sola, en silencio, con la palomita a la vista (§5.1).
+            is ApiOutcome.NoAnswer -> {
+                val retries = markRetries
+                if (retries == null) {
+                    drop(mark)
+                } else {
+                    retrying.add(mark)
+                    retries.trySend(Unit)
                 }
-                retryLater(retryMillis)
             }
+        }
+    }
+
+    private fun drop(mark: PendingMark) {
+        dishesInFlight.removeAll(mark.dishIds)
+        cardsInFlight.removeAll(mark.cardIds)
+        mutableState.update {
+            it.copy(
+                markingDishes = it.markingDishes - mark.dishIds,
+                markingCards = it.markingCards - mark.cardIds,
+            )
         }
     }
 
@@ -405,6 +532,8 @@ class KitchenBoard(
         scope?.launch {
             when (val outcome = service.recover(tasks)) {
                 is ApiOutcome.Success -> {
+                    val now = monotonic()
+                    tasks.forEach { recoveredTasks[it.id] = now }
                     requestRead()
                     loadRecent(message = null)
                 }
@@ -441,8 +570,17 @@ class KitchenBoard(
     }
 
     private companion object {
-        // Sin respuesta de Go se vuelve a intentar en silencio (la tolerancia es de la Fase D).
+        // Una lectura sin respuesta de Go se vuelve a intentar en silencio.
         const val RETRY_MILLIS = 5_000L
+
+        // Una marca sin respuesta se repite en silencio (§5.1).
+        const val MARK_RETRY_MILLIS = 2_000L
+
+        // La animación de la tarjeta nueva dura menos que esto; después ya no es «nueva».
+        const val FRESH_MILLIS = 5_000L
+
+        // Lo recuperado aquí no suena como pedido nuevo si vuelve en este lapso.
+        const val RECOVERED_MEMORY_MILLIS = 60_000L
 
         // Sin cupo, la tableta vuelve a pedirlo sola cada 30 s (contrato, sección 10).
         const val NO_SEAT_RETRY_MILLIS = 30_000L

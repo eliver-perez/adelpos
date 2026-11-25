@@ -10,6 +10,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -18,6 +19,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.adelpos.cocina.BuildConfig
 import com.adelpos.cocina.CocinaContainer
 import com.adelpos.cocina.R
 import com.adelpos.cocina.access.KitchenStatus
@@ -26,6 +28,9 @@ import com.adelpos.cocina.board.BoardScreen
 import com.adelpos.cocina.board.BoardState
 import com.adelpos.cocina.board.DisplayTheme
 import com.adelpos.cocina.board.RecentState
+import com.adelpos.cocina.settings.NoSettings
+import com.adelpos.cocina.settings.SettingsActions
+import com.adelpos.cocina.settings.SettingsScreen
 import com.adelpos.core.model.connection.ConnectionSummary
 import com.adelpos.core.model.connection.LinkState
 import com.adelpos.core.model.pairing.PairingFlow
@@ -57,6 +62,7 @@ fun CocinaApp(
     val link by viewModel.link.collectAsStateWithLifecycle()
     val board by viewModel.board.collectAsStateWithLifecycle()
     val recent by viewModel.recent.collectAsStateWithLifecycle()
+    val settings by viewModel.settings.collectAsStateWithLifecycle()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     LaunchedEffect(lifecycle) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -75,6 +81,14 @@ fun CocinaApp(
         actions = viewModel.boardActions,
         onCheckAgain = viewModel::checkAgain,
         onRepair = viewModel::repair,
+        settings = settings,
+        settingsActions = viewModel.settingsActions,
+        settingsInfo =
+            SettingsInfo(
+                serverAddress = remember(settings, status) { viewModel.serverAddress() },
+                link = link,
+                appVersion = BuildConfig.VERSION_NAME,
+            ),
     )
 }
 
@@ -95,6 +109,9 @@ fun CocinaScreen(
     onRepair: () -> Unit,
     modifier: Modifier = Modifier,
     clock: () -> Long = SystemClock::elapsedRealtime,
+    settings: SettingsScreen = SettingsScreen.Closed,
+    settingsActions: SettingsActions = NoSettings,
+    settingsInfo: SettingsInfo = SettingsInfo("", link, ""),
 ) {
     AdelTheme(darkTheme = board.settings.theme == DisplayTheme.DARK) {
         val showsOrders = status is KitchenStatus.Ready && board.screen == BoardScreen.Orders
@@ -104,7 +121,11 @@ fun CocinaScreen(
                 AdelTopBar(
                     title = title(status),
                     connection = ConnectionSummary(link, pendingOrders = 0),
-                    logo = status !is KitchenStatus.Ready,
+                    // El logotipo siempre; con la pantalla lista, su pulsación larga abre los
+                    // ajustes de la tableta (§5.4).
+                    logo = true,
+                    onLogoLongPress =
+                        if (status is KitchenStatus.Ready) settingsActions::open else null,
                     actions = {
                         if (showsOrders) {
                             SecondaryButton(
@@ -159,6 +180,7 @@ fun CocinaScreen(
                 actions = actions,
             )
         }
+        SettingsDialog(screen = settings, info = settingsInfo, actions = settingsActions)
     }
 }
 

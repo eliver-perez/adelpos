@@ -31,10 +31,23 @@ interface KitchenDisplayService {
 }
 
 /**
+ * Los ajustes en la tableta (§5.4, K1-D13 y K1-D32): validar la contraseña de un administrador y
+ * «Volver a emparejar». La contraseña viaja solo en estas peticiones; Go no devuelve ningún token.
+ */
+interface DisplaySettingsService {
+    /** `POST kitchen-display/settings-access`: 200 `{authorized: true}` si puede administrar. */
+    suspend fun settingsAccess(username: String, password: String): ApiOutcome<SettingsAccessDto>
+
+    /** `POST kitchen-display/unpair`: suelta el cupo y revoca esta pantalla (K1-D32). */
+    suspend fun unpair(username: String, password: String): ApiOutcome<IgnoredBody>
+}
+
+/**
  * Las rutas de la pantalla de cocina por la conexión del servidor emparejado ([access]), con la
  * credencial del dispositivo y sin sesión (K1-D4).
  */
-class HttpKitchenDisplayService(private val access: KitchenAccess) : KitchenDisplayService {
+class HttpKitchenDisplayService(private val access: KitchenAccess) :
+    KitchenDisplayService, DisplaySettingsService {
     override suspend fun connect(takeSeat: Boolean): ApiOutcome<ConnectResponseDto> =
         post(
             "kitchen-display/connect",
@@ -79,6 +92,25 @@ class HttpKitchenDisplayService(private val access: KitchenAccess) : KitchenDisp
             "kitchen-display/receipts",
             ReceiptsRequest(receipts),
             ReceiptsRequest.serializer(),
+            IgnoredBody.serializer(),
+        )
+
+    override suspend fun settingsAccess(
+        username: String,
+        password: String,
+    ): ApiOutcome<SettingsAccessDto> =
+        post(
+            "kitchen-display/settings-access",
+            AdministratorRequest(username, password),
+            AdministratorRequest.serializer(),
+            SettingsAccessDto.serializer(),
+        )
+
+    override suspend fun unpair(username: String, password: String): ApiOutcome<IgnoredBody> =
+        post(
+            "kitchen-display/unpair",
+            AdministratorRequest(username, password),
+            AdministratorRequest.serializer(),
             IgnoredBody.serializer(),
         )
 

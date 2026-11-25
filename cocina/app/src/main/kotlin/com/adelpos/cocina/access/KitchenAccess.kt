@@ -147,6 +147,15 @@ class KitchenAccess(
      */
     fun serverApi(): ServerApi? = connection?.api()
 
+    /**
+     * La dirección vigente de la computadora principal (`192.168.1.20:8443`) para los ajustes de la
+     * tableta, o null sin servidor emparejado.
+     */
+    fun serverAddress(): String? {
+        val base = connection?.transport()?.baseUrl ?: return null
+        return "${base.host}:${base.port}"
+    }
+
     /** Credencial del dispositivo emparejado (`X-Device-ID` y `X-Device-Token`). */
     fun deviceCredentials(): DeviceCredentials? = connection?.credentials
 
