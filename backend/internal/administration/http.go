@@ -117,6 +117,7 @@ func (service *Service) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		PairingSecret:     request.Header.Get("X-Pairing-Secret"),
 		OfflineCredential: request.Header.Get(OfflineCredentialHeader),
 		ClientKind:        request.Header.Get(httpapi.ClientKindHeader),
+		ClientVersion:     request.Header.Get(httpapi.ClientVersionHeader),
 	})
 	if err == nil {
 		result, err = service.completeDeferred(ctx, result)

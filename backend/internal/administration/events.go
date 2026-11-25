@@ -60,7 +60,8 @@ func (service *Service) serveEvents(writer http.ResponseWriter, request *http.Re
 		DeviceID: request.Header.Get("X-Device-ID"), DeviceToken: request.Header.Get("X-Device-Token"),
 		SessionToken: strings.TrimPrefix(request.Header.Get("Authorization"), "Bearer "), Local: local,
 		OfflineCredential: request.Header.Get(OfflineCredentialHeader),
-		ClientKind:        request.Header.Get(httpapi.ClientKindHeader)}
+		ClientKind:        request.Header.Get(httpapi.ClientKindHeader),
+		ClientVersion:     request.Header.Get(httpapi.ClientVersionHeader)}
 	if arguments.Query.Get("after") == "" && request.Header.Get("Last-Event-ID") != "" {
 		arguments.Query.Set("after", request.Header.Get("Last-Event-ID"))
 	}

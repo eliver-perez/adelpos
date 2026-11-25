@@ -16,8 +16,16 @@ import (
 // (fase B), el bloqueo por inactividad (lo usan los teléfonos y tabletas de meseros); desde la etapa A2 (parte C), la
 // impresora de precuentas de un dispositivo android con su nombre y el de su terminal si es la USB de una terminal.
 const devicesQuery = `SELECT d.id,d.name,d.register_id,r.name AS register_name,d.keyboard_mode,d.home_screen,d.created_at,d.last_seen_at,d.revoked_at,
-    d.kind,d.os,d.app_version,d.paired_at,d.idle_lock_seconds,` + waiterDeviceColumns + `
+    d.kind,d.os,d.app_version,d.paired_at,d.idle_lock_seconds,` + waiterDeviceColumns + `,` + kitchenDisplayColumn + `
     FROM app.devices d LEFT JOIN app.registers r ON r.id=d.register_id` + waiterDeviceJoins
+
+// kitchenDisplayColumn son los ajustes de una pantalla de cocina Android (etapa K1, Fase A, K1-D15), elegidos en
+// Terminales: tamaño de letra, tema, sonido y su volumen, y desde cuándo está en «cupo liberado» (K1-D6; null si ocupa
+// o puede ocupar su cupo). null en las demás terminales. app_version es la versión instalada (K1-D9: Go la anota en
+// cada petición) y online y seats dicen su conexión y su cupo de cocina.
+const kitchenDisplayColumn = `CASE WHEN d.kind='kitchen' THEN jsonb_build_object('text_size',d.kitchen_display_text_size,
+        'theme',d.kitchen_display_theme,'sound_enabled',d.kitchen_display_sound,'sound_volume',d.kitchen_display_volume,
+        'seat_released_at',d.kitchen_display_seat_released_at) END AS kitchen_display`
 
 // waiterDeviceColumns y waiterDeviceJoins son lo que se configura de un teléfono o tableta de meseros en la terminal d
 // (etapa A2): su impresora de precuentas (parte C) con su identificador, su nombre y el de la terminal que la tiene
@@ -47,7 +55,7 @@ var deviceListQuery = `SELECT d.id,d.name,d.register_id,r.name AS register_name,
     (SELECT u.display_name FROM app.sessions s JOIN app.users u ON u.id=s.user_id
         WHERE s.device_id=d.id AND s.revoked_at IS NULL AND s.expires_at > now() AND NOT u.support
         ORDER BY s.last_seen_at DESC LIMIT 1) AS "current_user",
-    ` + licenseseats.DeviceSeatsColumn("d", "$1", "$2") + ` AS seats
+    ` + licenseseats.DeviceSeatsColumn("d", "$1", "$2") + ` AS seats,` + kitchenDisplayColumn + `
     FROM app.devices d LEFT JOIN app.registers r ON r.id=d.register_id` + waiterDeviceJoins
 
 // terminalIdentityQuery es la terminal de quien pide, tal como la informan auth/me y restaurant/state: pantalla de
@@ -173,8 +181,18 @@ func devices(ctx context.Context, tx pgx.Tx, request Request, principal Principa
 		ReadyAlertsEnabled   *bool `json:"ready_alerts_enabled"`
 		ReadyAlertsSound     *bool `json:"ready_alerts_sound"`
 		ReadyAlertsVibration *bool `json:"ready_alerts_vibration"`
+		// Ajustes de una pantalla de cocina Android (etapa K1, Fase A, K1-D15): tamaño de letra, tema, sonido y volumen.
+		// Opcionales: sin ellos se conserva lo guardado. Solo en dispositivos kitchen.
+		KitchenDisplayTextSize *string `json:"kitchen_display_text_size"`
+		KitchenDisplayTheme    *string `json:"kitchen_display_theme"`
+		KitchenDisplaySound    *bool   `json:"kitchen_display_sound"`
+		KitchenDisplayVolume   *string `json:"kitchen_display_volume"`
 	}
 	if err := decode(request.Body, &input); err != nil {
+		return nil, err
+	}
+	if err := validateKitchenDisplaySettings(ctx, tx, deviceID, input.KitchenDisplayTextSize, input.KitchenDisplayTheme,
+		input.KitchenDisplaySound, input.KitchenDisplayVolume); err != nil {
 		return nil, err
 	}
 	input.Name = strings.TrimSpace(input.Name)
@@ -237,17 +255,61 @@ func devices(ctx context.Context, tx pgx.Tx, request Request, principal Principa
         idle_lock_seconds=coalesce($5,idle_lock_seconds),
         precheck_printer_id=CASE WHEN $7 THEN $8::uuid ELSE precheck_printer_id END,
         ready_alerts_enabled=coalesce($9,ready_alerts_enabled),ready_alerts_sound=coalesce($10,ready_alerts_sound),
-        ready_alerts_vibration=coalesce($11,ready_alerts_vibration) WHERE id=$6`,
+        ready_alerts_vibration=coalesce($11,ready_alerts_vibration),
+        kitchen_display_text_size=coalesce($12,kitchen_display_text_size),kitchen_display_theme=coalesce($13,kitchen_display_theme),
+        kitchen_display_sound=coalesce($14,kitchen_display_sound),kitchen_display_volume=coalesce($15,kitchen_display_volume)
+        WHERE id=$6`,
 		input.Name, input.RegisterID, input.KeyboardMode, input.HomeScreen, input.IdleLockSeconds, deviceID,
 		input.PrecheckPrinterID.Set, input.PrecheckPrinterID.Value,
-		input.ReadyAlertsEnabled, input.ReadyAlertsSound, input.ReadyAlertsVibration); err != nil {
+		input.ReadyAlertsEnabled, input.ReadyAlertsSound, input.ReadyAlertsVibration,
+		input.KitchenDisplayTextSize, input.KitchenDisplayTheme, input.KitchenDisplaySound, input.KitchenDisplayVolume); err != nil {
 		return nil, err
 	}
 	next, err := object(ctx, tx, devicesQuery+" WHERE d.id=$1", deviceID)
 	if err != nil {
 		return nil, err
 	}
+	// Etapa K1 (Fase A, K1-D7): los cambios de una pantalla de cocina le llegan al momento, sin reiniciarla.
+	var kind string
+	if err := tx.QueryRow(ctx, "SELECT kind FROM app.devices WHERE id=$1", deviceID).Scan(&kind); err != nil {
+		return nil, err
+	}
+	if kind == kitchenDisplayKind {
+		if err := kitchen.AppendDisplayConfigurationChanged(ctx, tx, &deviceID); err != nil {
+			return nil, err
+		}
+	}
 	return next, audit(ctx, tx, principal, "device.updated", "device", &deviceID, previous, next, true)
+}
+
+// kitchenDisplayTextSizes, kitchenDisplayThemes y kitchenDisplayVolumes son las listas cerradas de los ajustes de una
+// pantalla de cocina (los mismos CHECK de la 0029).
+var (
+	kitchenDisplayTextSizes = []string{"normal", "large"}
+	kitchenDisplayThemes    = []string{"dark", "light"}
+	kitchenDisplayVolumes   = []string{"low", "medium", "high"}
+)
+
+// validateKitchenDisplaySettings comprueba los ajustes de una pantalla de cocina que trae PATCH devices/{id}: solo en
+// un dispositivo kitchen y con valores de las listas cerradas.
+func validateKitchenDisplaySettings(ctx context.Context, tx pgx.Tx, deviceID string, textSize, theme *string, sound *bool,
+	volume *string) error {
+	if textSize == nil && theme == nil && sound == nil && volume == nil {
+		return nil
+	}
+	var kind string
+	if err := tx.QueryRow(ctx, "SELECT kind FROM app.devices WHERE id=$1", deviceID).Scan(&kind); err != nil {
+		return err
+	}
+	if kind != kitchenDisplayKind {
+		return invalid("La letra, el tema y el sonido de la pantalla solo se configuran en pantallas de cocina.")
+	}
+	if (textSize != nil && !slices.Contains(kitchenDisplayTextSizes, *textSize)) ||
+		(theme != nil && !slices.Contains(kitchenDisplayThemes, *theme)) ||
+		(volume != nil && !slices.Contains(kitchenDisplayVolumes, *volume)) {
+		return invalid("Elige el tamaño de letra (normal o grande), el tema (oscuro o claro) y el volumen (bajo, medio o alto).")
+	}
+	return nil
 }
 
 // deviceConfiguration reúne lo que se configura de una terminal: pantalla de inicio, caja, teclado, las
@@ -288,13 +350,22 @@ func deviceConfiguration(ctx context.Context, tx pgx.Tx, deviceID string, seats 
 	if err != nil {
 		return nil, err
 	}
+	// Etapa K1 (Fase A, K1-D11): las estaciones que se le pueden elegir a una pantalla de cocina, solo las que reciben
+	// comandas en pantalla («Solo pantalla de cocina» o «Impresora y pantalla de cocina»); vacía en las demás terminales.
+	displayStations, err := list(ctx, tx, `SELECT s.id,s.name,s.active,s.reception FROM app.kitchen_stations s
+        WHERE s.reception IN ('kds','both') AND EXISTS (SELECT FROM app.devices d WHERE d.id=$1 AND d.kind='kitchen')
+        ORDER BY s.sort_order,s.name`, deviceID)
+	if err != nil {
+		return nil, err
+	}
 	return map[string]any{
-		"device":               device,
-		"kitchen_all_stations": allStations,
-		"kitchen_sound_alert":  soundAlert,
-		"kitchen_stations":     stations,
-		"printers":             printers,
-		"local_printers":       localPrinters,
+		"kitchen_display_station_options": displayStations,
+		"device":                          device,
+		"kitchen_all_stations":            allStations,
+		"kitchen_sound_alert":             soundAlert,
+		"kitchen_stations":                stations,
+		"printers":                        printers,
+		"local_printers":                  localPrinters,
 		// Etapa A2 (parte C): la impresora de precuentas de un dispositivo android con su problema, y las impresoras
 		// que se le pueden elegir (vacía en las demás terminales).
 		"precheck_printer":         precheck,
