@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import type { ReactNode } from 'react';
 import { useConfirmDialog } from '../components/ConfirmDialog';
 import { dateTime, Field, Form, Notice, PageTitle } from '../components/Forms';
 import { SegmentedControl } from '../components/SegmentedControl';
@@ -14,16 +15,19 @@ import type {
   Device,
   DeviceConfiguration,
   DeviceKind,
+  KitchenDisplaySettings,
   PairingRequest,
   PairingRequests,
   PrecheckPrinterOption,
   Register,
   SessionsSummary,
 } from '../services/models';
-import { Select } from '../components/Select';
+import { MultiSelect, Select } from '../components/Select';
 import type { SelectOption } from '../components/Select';
+import { Check } from '../components/catalog/EditorFields';
 import {
   devicePrecheckPrinterCapability,
+  kitchenDisplayCapability,
   readyAlertsCapability,
   serverHas,
   waiterPINCapability,
@@ -48,11 +52,78 @@ export const pairingRefreshMilliseconds = 3000;
 export const devicesRefreshMilliseconds = 5000;
 
 // Etapa A1 (fase B): el tipo android se dice en lenguaje sencillo, «Teléfono o tableta» (antes «Comandero Android»).
+// Etapa K1 (K1-D3): kitchen es la tableta con la aplicación de cocina, que solo funciona como pantalla de cocina.
 export const deviceKindLabels: Record<DeviceKind, string> = {
   desktop: 'Escritorio',
   android: 'Teléfono o tableta',
-  kitchen: 'Cocina',
+  kitchen: 'Pantalla de cocina',
 };
+
+// Versión de la aplicación de la terminal. Desde la etapa K1 (K1-D9) Go anota la que trae cada petición, así que es la
+// instalada; con un servidor anterior es la que informó al emparejarse.
+export function installedVersionText(device: Device): string {
+  if (!device.app_version) {
+    return '';
+  }
+  return serverHas(kitchenDisplayCapability)
+    ? `versión instalada ${device.app_version}`
+    : `versión ${device.app_version}`;
+}
+
+// Etapa K1 (Fase E, §6 y K1-D15): textos de los ajustes de una pantalla de cocina.
+export const kitchenTextSizeLabels: Record<KitchenDisplaySettings['text_size'], string> = {
+  normal: 'Normal',
+  large: 'Grande',
+};
+export const kitchenThemeLabels: Record<KitchenDisplaySettings['theme'], string> = {
+  dark: 'Oscuro',
+  light: 'Claro',
+};
+export const kitchenVolumeLabels: Record<KitchenDisplaySettings['sound_volume'], string> = {
+  low: 'Bajo',
+  medium: 'Medio',
+  high: 'Alto',
+};
+
+export function kitchenSoundText(settings: KitchenDisplaySettings): string {
+  if (!settings.sound_enabled) {
+    return 'Desactivado';
+  }
+  return `Activado · volumen ${kitchenVolumeLabels[settings.sound_volume].toLowerCase()}`;
+}
+
+// El cupo de cocina que ocupa la pantalla (K1-D6 y K1-D30): «Liberar cupo» no es definitivo, la tableta lo puede pedir
+// otra vez con «Usar esta pantalla».
+export function kitchenSeatText(device: Device): string {
+  if (device.revoked_at) {
+    return 'Sin cupo: la pantalla está revocada';
+  }
+  if (device.seats?.includes('kitchen_displays')) {
+    return 'Ocupa un cupo de pantalla de cocina';
+  }
+  if (device.kitchen_display?.seat_released_at) {
+    return `Dejó su cupo el ${dateTime(device.kitchen_display.seat_released_at)}. En la tableta se puede pedir otra vez con «Usar esta pantalla».`;
+  }
+  return 'Sin cupo: lo ocupa al conectarse';
+}
+
+// Las estaciones que muestra una pantalla de cocina: todas las que reciben comandas en pantalla o su selección (solo
+// las de recepción en pantalla cuentan, K1-D11).
+export function kitchenStationsText(configuration: DeviceConfiguration): string {
+  const options = configuration.kitchen_display_station_options ?? [];
+  if (options.length === 0) {
+    return 'Ninguna: no hay estaciones que reciban comandas en pantalla';
+  }
+  if (configuration.kitchen_all_stations || configuration.kitchen_stations.length === 0) {
+    return `Todas las que reciben comandas en pantalla (${options.map((station) => station.name).join(', ')})`;
+  }
+  const shown = configuration.kitchen_stations.filter((station) =>
+    options.some((option) => option.id === station.id),
+  );
+  return shown.length > 0
+    ? shown.map((station) => station.name).join(', ')
+    : 'Ninguna de las elegidas recibe comandas en pantalla';
+}
 
 // Bloqueo por inactividad de un teléfono o tableta de meseros (etapa A1, fase B): tras ese tiempo sin uso vuelve a
 // la pantalla de entrada con PIN (salvo con una captura en curso o pedidos sin enviar; lo decide el dispositivo). Go
@@ -159,6 +230,11 @@ export function readyAlertsText(device: Device): string {
 // escritorio y de cocina conservan todo.
 function isWaiterDevice(device: Device) {
   return device.kind === 'android';
+}
+
+// Etapa K1: una pantalla de cocina Android (solo muestra y marca pedidos; se configura aquí).
+function isKitchenDisplay(device: Device) {
+  return device.kind === 'kitchen';
 }
 
 // terminalHomeOptions son las pantallas iniciales que se ofrecen para la terminal según su tipo.
@@ -460,6 +536,13 @@ function DeviceConfigurationPanel({ device, onClose }: { device: Device; onClose
   const value = configuration.data;
   const shown = value?.device ?? device;
   const waiterDevice = isWaiterDevice(shown);
+  if (isKitchenDisplay(shown)) {
+    return (
+      <KitchenDisplayConfiguration shown={shown} configuration={value} onClose={onClose}>
+        <Notice>{configuration.error}</Notice>
+      </KitchenDisplayConfiguration>
+    );
+  }
   return (
     <section
       className="surface panel device-configuration"
@@ -476,9 +559,9 @@ function DeviceConfigurationPanel({ device, onClose }: { device: Device; onClose
           <div>
             <dt>Sistema</dt>
             <dd>
-              {shown.os
-                ? `${shown.os}${shown.app_version ? ` · versión ${shown.app_version}` : ''}`
-                : 'Esta computadora'}
+              {[shown.os || 'Esta computadora', installedVersionText(shown)]
+                .filter(Boolean)
+                .join(' · ')}
             </dd>
           </div>
           <div>
@@ -574,6 +657,260 @@ function DeviceConfigurationPanel({ device, onClose }: { device: Device; onClose
       <button className="secondary-button mt-4" onClick={onClose}>
         Cerrar configuración
       </button>
+    </section>
+  );
+}
+
+// Etapa K1 (Fase E, §6): lo que se ve de una pantalla de cocina Android: sus estaciones, letra, tema y sonido, su
+// conexión, la versión instalada y el cupo de cocina que ocupa. No tiene caja, teclado, pantalla inicial ni impresoras.
+function KitchenDisplayConfiguration({
+  shown,
+  configuration,
+  onClose,
+  children,
+}: {
+  shown: Device;
+  configuration: DeviceConfiguration | null;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  const settings = shown.kitchen_display;
+  return (
+    <section
+      className="surface panel device-configuration"
+      aria-labelledby="device-configuration-title"
+    >
+      <h2 id="device-configuration-title">Configuración de {shown.name}</h2>
+      {children}
+      {configuration && (
+        <dl className="device-configuration-list">
+          <div>
+            <dt>Tipo</dt>
+            <dd>{deviceKindLabels.kitchen}</dd>
+          </div>
+          <div>
+            <dt>Sistema</dt>
+            <dd>{[shown.os, installedVersionText(shown)].filter(Boolean).join(' · ') || '—'}</dd>
+          </div>
+          <div>
+            <dt>Conexión</dt>
+            <dd>
+              {connectionState(shown).label}
+              {shown.last_seen_at ? ` · última conexión ${dateTime(shown.last_seen_at)}` : ''}
+            </dd>
+          </div>
+          <div>
+            <dt>Cupo de cocina</dt>
+            <dd>{kitchenSeatText(shown)}</dd>
+          </div>
+          <div>
+            <dt>Estaciones que muestra</dt>
+            <dd>{kitchenStationsText(configuration)}</dd>
+          </div>
+          {settings && (
+            <>
+              <div>
+                <dt>Tamaño de letra</dt>
+                <dd>{kitchenTextSizeLabels[settings.text_size]}</dd>
+              </div>
+              <div>
+                <dt>Tema</dt>
+                <dd>{kitchenThemeLabels[settings.theme]}</dd>
+              </div>
+              <div>
+                <dt>Sonido</dt>
+                <dd>{kitchenSoundText(settings)}</dd>
+              </div>
+            </>
+          )}
+          <div>
+            <dt>Emparejada</dt>
+            <dd>{shown.paired_at ? dateTime(shown.paired_at) : '—'}</dd>
+          </div>
+          <div>
+            <dt>Identificador</dt>
+            <dd className="font-mono">{shown.id}</dd>
+          </div>
+        </dl>
+      )}
+      <p className="muted pairing-help">
+        Los colores por tiempo de espera de todas las pantallas se eligen en Cocina › Comandas y
+        tiempos.
+      </p>
+      <button className="secondary-button mt-4" onClick={onClose}>
+        Cerrar configuración
+      </button>
+    </section>
+  );
+}
+
+// Etapa K1 (Fase E, §6): editar una pantalla de cocina: nombre, estaciones (solo las que reciben comandas en pantalla,
+// con PUT kitchen/access y su permiso), letra, tema, sonido y volumen (PATCH devices/{id}). Los cambios le llegan a la
+// tableta al momento: Go le avisa con su evento de configuración.
+function KitchenDisplayEditor({
+  device,
+  can,
+  reload,
+}: {
+  device: Device;
+  can: (key: string) => boolean;
+  reload: () => Promise<void>;
+}) {
+  const configuration = useResource<DeviceConfiguration>('device_configuration', {
+    id: device.id,
+  });
+  const settings: KitchenDisplaySettings = device.kitchen_display ?? {
+    text_size: 'normal',
+    theme: 'dark',
+    sound_enabled: true,
+    sound_volume: 'medium',
+    seat_released_at: null,
+  };
+  const [name, setName] = useState(device.name);
+  const [textSize, setTextSize] = useState(settings.text_size);
+  const [theme, setTheme] = useState(settings.theme);
+  const [sound, setSound] = useState(settings.sound_enabled);
+  const [volume, setVolume] = useState(settings.sound_volume);
+  const loaded = configuration.data;
+  const options = loaded?.kitchen_display_station_options ?? [];
+  const loadedAll = !loaded || loaded.kitchen_all_stations || loaded.kitchen_stations.length === 0;
+  const loadedIDs = loaded?.kitchen_stations.map((station) => station.id) ?? [];
+  const [allStations, setAllStations] = useState<boolean | null>(null);
+  const [stationIDs, setStationIDs] = useState<string[] | null>(null);
+  const chosenAll = allStations ?? loadedAll;
+  // Solo cuentan las elegidas que reciben comandas en pantalla (una que pasó a «Solo impresora» ya no se muestra).
+  const shownIDs = loadedIDs.filter((id) => options.some((option) => option.id === id));
+  const chosenIDs = stationIDs ?? shownIDs;
+  const manageStations = can('kitchen.stations.manage');
+  const stationsChanged =
+    loaded !== null &&
+    (chosenAll !== loadedAll ||
+      (!chosenAll && [...chosenIDs].sort().join(',') !== [...shownIDs].sort().join(',')));
+  return (
+    <section className="surface panel">
+      <h2 className="mb-5">Editar {device.name}</h2>
+      <Notice>{configuration.error}</Notice>
+      <Form
+        successMessage="Pantalla de cocina actualizada."
+        disabled={!loaded}
+        onSave={async () => {
+          if (manageStations && stationsChanged) {
+            await api('kitchen_save_access', {
+              body: {
+                operation_id: crypto.randomUUID(),
+                device_id: device.id,
+                all_stations: chosenAll,
+                station_ids: chosenAll ? [] : chosenIDs,
+                expected_all_stations: loaded?.kitchen_all_stations ?? true,
+                expected_station_ids: loadedIDs,
+              },
+            });
+          }
+          await api('update_device', {
+            id: device.id,
+            body: {
+              name,
+              register_id: device.register_id,
+              keyboard_mode: device.keyboard_mode,
+              kitchen_display_text_size: textSize,
+              kitchen_display_theme: theme,
+              kitchen_display_sound: sound,
+              kitchen_display_volume: volume,
+            },
+          });
+          setAllStations(null);
+          setStationIDs(null);
+          await configuration.reload();
+          await reload();
+        }}
+      >
+        <div className="form-grid">
+          <Field label="Nombre">
+            <input
+              required
+              maxLength={80}
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+            />
+          </Field>
+        </div>
+        <fieldset disabled={!manageStations} className="form-stack">
+          <Check
+            label="Mostrar todas las estaciones que reciben comandas en pantalla"
+            value={chosenAll}
+            onChange={setAllStations}
+          />
+          {!chosenAll && (
+            <Field
+              label="Estaciones que muestra esta pantalla"
+              hint="Solo las estaciones con recepción «Solo pantalla de cocina» o «Impresora y pantalla de cocina»."
+            >
+              <MultiSelect
+                required
+                value={chosenIDs}
+                placeholder="Elige las estaciones"
+                options={options.map((station) => ({
+                  value: station.id,
+                  label: station.active ? station.name : `${station.name} (inactiva)`,
+                }))}
+                onChange={setStationIDs}
+              />
+            </Field>
+          )}
+          {!manageStations && (
+            <small className="muted">
+              Para cambiar las estaciones hace falta el permiso de administrar estaciones de cocina.
+            </small>
+          )}
+        </fieldset>
+        <div className="field">
+          <span>Tamaño de letra</span>
+          <SegmentedControl<KitchenDisplaySettings['text_size']>
+            label="Tamaño de letra de la pantalla"
+            value={textSize}
+            options={[
+              { value: 'normal', label: kitchenTextSizeLabels.normal },
+              { value: 'large', label: kitchenTextSizeLabels.large },
+            ]}
+            onChange={setTextSize}
+          />
+        </div>
+        <div className="field">
+          <span>Tema</span>
+          <SegmentedControl<KitchenDisplaySettings['theme']>
+            label="Tema de la pantalla"
+            value={theme}
+            options={[
+              { value: 'dark', label: kitchenThemeLabels.dark },
+              { value: 'light', label: kitchenThemeLabels.light },
+            ]}
+            onChange={setTheme}
+          />
+        </div>
+        <div className="form-grid">
+          <div className="field">
+            <span>Sonido</span>
+            <div className="button-row">
+              <ToggleButton label="Sonido de pedidos" pressed={sound} onChange={setSound} />
+            </div>
+            <small className="muted">
+              Suena al llegar un pedido nuevo y, con otro sonido, con cancelaciones y cambios.
+            </small>
+          </div>
+          <Field label="Volumen">
+            <Select<KitchenDisplaySettings['sound_volume']>
+              value={volume}
+              disabled={!sound}
+              options={[
+                { value: 'low', label: kitchenVolumeLabels.low },
+                { value: 'medium', label: kitchenVolumeLabels.medium },
+                { value: 'high', label: kitchenVolumeLabels.high },
+              ]}
+              onChange={setVolume}
+            />
+          </Field>
+        </div>
+      </Form>
     </section>
   );
 }
@@ -869,8 +1206,9 @@ export function DevicesPage({
   async function revoke(device: Device) {
     const confirmed = await confirm({
       title: `Revocar ${device.name}`,
-      message:
-        'La terminal perderá acceso inmediatamente, incluidas sus sesiones. Para volver a usarla habrá que emparejarla de nuevo.',
+      message: isKitchenDisplay(device)
+        ? 'La pantalla deja de mostrar pedidos al momento y libera su cupo de cocina. Para volver a usarla habrá que emparejarla de nuevo.'
+        : 'La terminal perderá acceso inmediatamente, incluidas sus sesiones. Para volver a usarla habrá que emparejarla de nuevo.',
       confirmLabel: 'Confirmar revocación',
       cancelLabel: 'Cancelar',
       tone: 'danger',
@@ -894,17 +1232,30 @@ export function DevicesPage({
   async function releaseSeat(device: Device) {
     const seats = releasableSeats(device.seats);
     const what = seats.map((seat) => seatNames[seat].toLowerCase()).join(' y de ');
+    // Etapa K1 (K1-D30): la pantalla de cocina no tiene sesiones; deja de mostrar pedidos y puede pedir el cupo otra vez.
+    const message = isKitchenDisplay(device) ? (
+      <>
+        <p>
+          La pantalla deja de mostrar pedidos y su cupo de pantalla de cocina queda libre para otra
+          pantalla.
+        </p>
+        <p>
+          No es definitivo: en la tableta se puede pedir el cupo otra vez con «Usar esta pantalla».
+          Para que deje de usarse, revócala.
+        </p>
+      </>
+    ) : (
+      <>
+        <p>
+          Se cierra la sesión de quien esté usando esta terminal y su cupo de {what} queda libre
+          para otra terminal.
+        </p>
+        <p>Para volver a usarla, alguien inicia sesión otra vez.</p>
+      </>
+    );
     const confirmed = await confirm({
       title: `Liberar el cupo de ${device.name}`,
-      message: (
-        <>
-          <p>
-            Se cierra la sesión de quien esté usando esta terminal y su cupo de {what} queda libre
-            para otra terminal.
-          </p>
-          <p>Para volver a usarla, alguien inicia sesión otra vez.</p>
-        </>
-      ),
+      message,
       confirmLabel: 'Liberar cupo',
       cancelLabel: 'Cancelar',
     });
@@ -954,13 +1305,22 @@ export function DevicesPage({
       )}
       {editing && (
         <>
-          <DeviceEditor
-            key={editing.id}
-            device={editing}
-            registers={registers.data ?? []}
-            reload={devices.reload}
-            onSaved={onSaved}
-          />
+          {isKitchenDisplay(editing) ? (
+            <KitchenDisplayEditor
+              key={editing.id}
+              device={editing}
+              can={can}
+              reload={devices.reload}
+            />
+          ) : (
+            <DeviceEditor
+              key={editing.id}
+              device={editing}
+              registers={registers.data ?? []}
+              reload={devices.reload}
+              onSaved={onSaved}
+            />
+          )}
           <button className="secondary-button mb-5" onClick={() => setEditing(null)}>
             Cerrar editor
           </button>
@@ -998,13 +1358,20 @@ export function DevicesPage({
                   </td>
                   <td>
                     {deviceKindLabels[device.kind ?? 'desktop']}
-                    <small className="muted block">{device.os || 'Esta computadora'}</small>
+                    <small className="muted block">
+                      {[device.os || 'Esta computadora', installedVersionText(device)]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </small>
                   </td>
-                  {/* Etapa A3 (§5.2): un teléfono o tableta no cobra; un guion en lugar de «Sin asociación». */}
+                  {/* Etapa A3 (§5.2): un teléfono o tableta no cobra; un guion en lugar de «Sin asociación». Etapa K1:
+                      una pantalla de cocina tampoco, ni tiene pantalla inicial. */}
                   <td>
-                    {isWaiterDevice(device) ? '—' : (device.register_name ?? 'Sin asociación')}
+                    {isWaiterDevice(device) || isKitchenDisplay(device)
+                      ? '—'
+                      : (device.register_name ?? 'Sin asociación')}
                   </td>
-                  <td>{homeLabel(device)}</td>
+                  <td>{isKitchenDisplay(device) ? '—' : homeLabel(device)}</td>
                   <td>{device.last_seen_at ? dateTime(device.last_seen_at) : '—'}</td>
                   <td>{device.revoked_at ? '—' : (device.current_user ?? 'Nadie')}</td>
                   {showSeats && <td>{seatsHeldText(device.seats)}</td>}

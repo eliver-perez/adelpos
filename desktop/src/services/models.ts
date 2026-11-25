@@ -100,6 +100,18 @@ export interface Device {
   ready_alerts_vibration?: boolean;
   // Etapa L1 (Fase D): cupos de la licencia que ocupa la terminal en este momento (vacío si ninguno).
   seats?: LicenseSeat[];
+  // Etapa K1 (Fase A): los ajustes de una pantalla de cocina Android (null en las demás terminales). seat_released_at:
+  // desde cuándo dejó su cupo con «Liberar cupo» (null si lo ocupa o puede ocuparlo).
+  kitchen_display?: KitchenDisplaySettings | null;
+}
+
+// Ajustes de una pantalla de cocina (etapa K1, K1-D15): se eligen en Terminales.
+export interface KitchenDisplaySettings {
+  text_size: 'normal' | 'large';
+  theme: 'dark' | 'light';
+  sound_enabled: boolean;
+  sound_volume: 'low' | 'medium' | 'high';
+  seat_released_at: string | null;
 }
 
 // Impresora que se puede elegir para precuentas (etapa A2, parte C): Go dice por qué no sirve (problem: inactive o
@@ -184,6 +196,14 @@ export interface DeviceConfiguration {
   // las demás terminales). Un servidor anterior no las informa.
   precheck_printer?: PrecheckPrinterOption | null;
   precheck_printer_options?: PrecheckPrinterOption[];
+  // Etapa K1 (Fase A): las estaciones que se le pueden elegir a una pantalla de cocina (solo las que reciben comandas
+  // en pantalla); vacía en las demás terminales. Un servidor anterior no la informa.
+  kitchen_display_station_options?: {
+    id: string;
+    name: string;
+    active: boolean;
+    reception: 'kds' | 'both';
+  }[];
 }
 
 export interface Session {

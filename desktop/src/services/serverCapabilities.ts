@@ -19,6 +19,11 @@ export const readyAlertsCapability = 'ready-alerts-v1';
 // Roles y permisos muestra la lista de siempre.
 export const permissionGroupsCapability = 'permission-groups-v1';
 
+// Etapa K1 (Fase A y E, servidor 0.16.0): la pantalla de cocina para Android. Terminales muestra y configura las
+// pantallas de cocina (estaciones, letra, tema, sonido, cupo y versión instalada) y Cocina › Comandas y tiempos los
+// límites de color de las pantallas. Con un servidor anterior no se muestra nada de eso.
+export const kitchenDisplayCapability = 'kitchen-display-v1';
+
 let announced: ReadonlySet<string> = new Set();
 
 // rememberServerCapabilities guarda lo que informó el servidor al conectar (useSession lo llama con la respuesta de
