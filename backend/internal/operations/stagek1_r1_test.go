@@ -248,6 +248,9 @@ func TestStageK1R1KitchenDisplaySecurity(t *testing.T) {
 	t.Run("cupo de cocina: varias pantallas a la vez, desconexión, Liberar cupo y revocar", func(t *testing.T) {
 		testR1Seats(t, fixture)
 	})
+	t.Run("una marca que esperaba el lock de cocina no se aplica si la pantalla se revoca mientras", func(t *testing.T) {
+		testR1RevokedInFlight(t, fixture)
+	})
 }
 
 func testR1Pairing(t *testing.T, fixture *r1Fixture) {
@@ -749,6 +752,9 @@ func testR1SettingsAccess(t *testing.T, fixture *r1Fixture) {
 	if code, response := access(fixture.display, "mesero_r1", "Clave temporal de mesero_r1"); code != 401 {
 		t.Fatalf("usuario desactivado: %d %s", code, response)
 	}
+	if _, err := fixture.pool.Exec(fixture.ctx, "UPDATE app.users SET active=true WHERE id=$1", fixture.waiterID); err != nil {
+		t.Fatal(err)
+	}
 	// Un nombre de más de 40 caracteres: no se valida contra nadie ni cuenta un intento.
 	long := strings.Repeat("a", 41)
 	code, response = access(fixture.display, long, "x")
@@ -887,5 +893,53 @@ func testR1Seats(t *testing.T, fixture *r1Fixture) {
 	fixture.displayCall(t, other, "POST", "kitchen-display/connect", map[string]any{}, 200)
 	if inUse() != 1 {
 		t.Fatalf("en uso después de revocar: %d", inUse())
+	}
+}
+
+func testR1RevokedInFlight(t *testing.T, fixture *r1Fixture) {
+	display := fixture.kitchenDevice(t, "Pantalla R1 revocada en curso")
+	fixture.displayCall(t, display, "POST", "kitchen-display/connect", map[string]any{}, 200)
+	accountID := fixture.order(t, 2, draftLine(fixture.product, 1))
+	tasks := fixture.tasksAt(t, accountID, fixture.cocina.ID)
+	// Otra escritura de cocina tiene 7820148305: la marca de la pantalla ya se autenticó y espera el lock.
+	holder, err := fixture.pool.Begin(fixture.ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Rollback(context.Background())
+	if _, err := holder.Exec(fixture.ctx, "SELECT pg_advisory_xact_lock(7820148305)"); err != nil {
+		t.Fatal(err)
+	}
+	type outcome struct {
+		code int
+		body []byte
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		code, body := fixture.send(display, "POST", "kitchen-display/items/ready", map[string]any{"tasks": tasks}, kitchenHeaders)
+		done <- outcome{code, body}
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for fixture.count(t, `SELECT count(*)::int FROM pg_locks WHERE locktype='advisory' AND NOT granted
+        AND ((classid::bigint << 32) | objid::bigint) = 7820148305`) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("la marca no llegó a esperar el lock de cocina")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	// Terminales la revoca mientras espera; después se suelta el lock.
+	fixture.adminCall(t, "POST", "devices/"+display.deviceID+"/revoke", map[string]any{}, 200)
+	if err := holder.Rollback(fixture.ctx); err != nil {
+		t.Fatal(err)
+	}
+	result := <-done
+	t.Logf("marca en curso de una pantalla revocada: %d %s", result.code, result.body)
+	if result.code < 400 {
+		t.Fatalf("la marca de una pantalla revocada se aplicó: %d %s", result.code, result.body)
+	}
+	for _, task := range tasks {
+		if state := fixture.taskState(t, task.ID); state != "released" {
+			t.Fatalf("la tarea cambió después de revocar la pantalla: %s", state)
+		}
 	}
 }
