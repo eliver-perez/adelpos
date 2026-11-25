@@ -30,8 +30,8 @@ captura pedidos ni cobra.**
 
 Los pasos son los mismos que los de la aplicación de meseros (sección 1 de [ANDROID_INSTALAR.md](ANDROID_INSTALAR.md)):
 
-1. **Pasa el archivo de la aplicación de cocina** (por ejemplo `AD-EL-POS-Cocina-0.1.0.apk`) a la tableta, por una
-   carpeta compartida, por correo o con un cable USB.
+1. **Pasa el archivo `AD-EL-POS-Cocina-0.1.0.apk`** (el de la aplicación de cocina, no el de meseros) a la tableta,
+   por una carpeta compartida, por correo o con un cable USB.
 2. En la tableta, abre el archivo desde la app **Archivos** o **Descargas**.
 3. **Permite instalar apps de origen desconocido** a la app con la que abriste el archivo: en el aviso de Android toca
    **«Configuración»** (o **«Ajustes»**), activa **«Permitir desde esta fuente»** y vuelve atrás.

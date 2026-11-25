@@ -104,7 +104,8 @@ paquetes que se desinstalan antes de las instrumentadas, en «Pruebas») y en es
     respuesta HTTP es un éxito, una cancelación propia no cuenta). Lo leen la barra, «Selecciona tu usuario» y la
     entrada con PIN, Mesas, Para llevar, la precuenta, «Entregado» y la notificación del canal de avisos; **nadie más
     decide «sin conexión» por su cuenta** (una lectura que falló no es «Sin conexión»: se repite sola). Tolerancia: «Sin
-    conexión» al instante sin red de Android, o con **3 fallas seguidas y 20 s sin ningún éxito**; «En línea» con el
+    conexión» al instante sin red de Android (en meseros el margen sin red del tracker es 0; la aplicación de cocina usa
+    10 s, K1-D33), o con **3 fallas seguidas y 20 s sin ningún éxito**; «En línea» con el
     primer éxito. Revisión según el uso: sonda `GET health/live` cada 5 s mientras duda y cada 10 s con «Sin conexión»;
     ninguna con el canal de eventos abierto; cada 60 s sin él (se salta si hubo otro éxito, como la lista de «Selecciona
     tu usuario», que también es cada 60 s); nada en segundo plano; versiones y lista cada 5 minutos. Al tocar algo que
@@ -776,7 +777,10 @@ arma la aplicación (A2-D10) con las plantillas de `app/src/main/res/values/stri
   **`scripts/android-e2e.sh --suite alerts`** (`r1`–`r10`, `r10` antes de `r9`: en «Selecciona tu usuario» no se usa la sesión del último mesero; el guion corta la red en `r4`, mata el proceso en `r8b` y
   marca «Listo» desde la Mac). En las pruebas instrumentadas el aviso va **apagado** salvo con `readyAlerts=on`
   (`AdelTestRunner`): su servicio y sus notificaciones no deben cambiar las pruebas de la A1; sus permisos se piden
-  solo con `alertPermissions=ask`.
+  solo con `alertPermissions=ask`. Desde la K1, `e1` de `AlertsOnGoTest` es el lado del mesero de
+  **`scripts/android-e2e.sh --suite endtoend`** (§8 de la K1, fuera de `all`): con las dos aplicaciones en la misma
+  tableta, Ana envía a cocina y espera el aviso mientras la aplicación de cocina marca listo el pedido (`k12`,
+  [cocina/CLAUDE.md](../cocina/CLAUDE.md), «Pruebas»).
 
 ## Dependencias
 

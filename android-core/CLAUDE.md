@@ -22,6 +22,9 @@ comportamiento. Las reglas permanentes de [android/CLAUDE.md](../android/CLAUDE.
   `com.adelpos.cocina…`. Lo que cambia por aplicación entra como parámetro: el tipo de cliente
   (`ClientIdentity(version, kind)`, `ClientKinds.ANDROID` o `KITCHEN`), lo que exige al servidor
   (`ServerRequirements`), dónde guarda el emparejamiento (`PairingStore`) y el nombre que se propone al emparejar.
+  Los textos compartidos no nombran ninguna aplicación: «Actualiza el servidor del restaurante» recibe la versión
+  mínima de cada una (`requiredServerVersion` de `UpdateServerScreen`, `FindServerRoute` y `pairingProblemText`;
+  meseros 0.13.0, cocina 0.16.0). Hasta la Fase F decía «la aplicación de meseros» y «0.13.0» también en la de cocina.
 - **No quedan dos copias del mismo código**: si una aplicación necesita algo que ya existe en la otra y sirve a las
   dos, se mueve aquí (con `git mv` cuando se pueda), no se copia.
 
@@ -53,6 +56,18 @@ paquete. Por eso son **valores fijos**, escritos como texto, y no se cambian:
 
 Lo demás (clases de OkHttp, del canal o del estado de conexión) no se guarda y puede cambiar de paquete.
 
+## El estado de conexión y la barra, con lo que cambia por aplicación
+
+- **Margen sin red** (K1-D33 y K1-D36): `ServerLinkTracker` recibe `networkLossGraceMillis`, contado desde el aviso de
+  Android de que no hay red, y `ServerLinkMonitor` lo pasa. Con **0** (meseros, por omisión) la falta de red es «Sin
+  conexión» al instante, como en la A3. Con un margen (cocina, **10 s**) es «Sin conexión» solo si dura más; si lo
+  pasa, al volver la red sigue «Sin conexión» hasta el primer éxito. `nextDecisionIn` dice cuándo vence el margen para
+  que el monitor vuelva a publicar. La tolerancia de las fallas (3 seguidas y 20 s sin éxito) es la misma para las
+  dos. Por qué 10 s: al quitar el modo avión la wifi tarda unos segundos en volver; un corte de 5 s se vio en Android
+  como 6 s sin red como mucho.
+- **Pulsación larga en el logotipo** (`AdelTopBar(onLogoLongPress = …)`, §5.4): la usa cocina para sus ajustes, con su
+  acción para lectores de pantalla («Abrir los ajustes»); sin el parámetro (meseros) el logotipo no hace nada.
+
 ## Comandos
 
 Desde la raíz del repositorio (`./scripts/dev.sh android-*` recorre los tres proyectos; ver
@@ -70,7 +85,8 @@ Cada build corre sus propias tareas en su carpeta: las pruebas y el Lint de `and
 
 ## Pruebas
 
-- **JVM** (`model` y `network`): las que se movieron con su código: `ServerLinkTrackerTest`,
+- **JVM** (`model` y `network`): las que se movieron con su código: `ServerLinkTrackerTest` (desde la Fase D, también
+  el margen sin red),
   `DefaultNetworkTrackerTest`, `LicenseMessagesTest`, `PairingProtocolTest`, `RealtimeTest`, `ServerAddressTest`,
   `ServerAnnouncementsTest`; `PinnedHttpClientTest`, `CallAwaitTest`, `ServerApiTest`, `AccessErrorCodesTest`,
   `LicenseErrorCodesTest` (MockWebServer con TLS y HTTP/1.1, como Go).
