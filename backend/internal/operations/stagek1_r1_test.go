@@ -949,4 +949,70 @@ func testR1RevokedInFlight(t *testing.T, fixture *r1Fixture) {
 			t.Fatalf("la tarea cambió después de revocar la pantalla: %s", state)
 		}
 	}
+	testR1RevokedSettingsInFlight(t, fixture)
+}
+
+// testR1RevokedSettingsInFlight es el hallazgo R1-2: settings-access no exige el cupo, así que nada vuelve a mirar la
+// revocación después de authenticateDevice. Con la fila del dispositivo bloqueada por otra transacción, Terminales revoca
+// la pantalla (queda primero en la cola de la fila) y después llega settings-access: su authenticateDevice ya leyó «no
+// revocada» y su touchDevice espera detrás de la revocación. Hoy responde 200 {"authorized": true} a una pantalla ya
+// revocada (sin sesión ni token: no abre nada más); con la corrección sugerida responde 401 DEVICE_REVOKED. La prueba
+// acepta las dos respuestas y exige que no se cree ninguna sesión.
+func testR1RevokedSettingsInFlight(t *testing.T, fixture *r1Fixture) {
+	display := fixture.kitchenDevice(t, "Pantalla R1 ajustes en curso")
+	holder, err := fixture.pool.Begin(fixture.ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Rollback(context.Background())
+	if _, err := holder.Exec(fixture.ctx, "SELECT id FROM app.devices WHERE id=$1 FOR UPDATE", display.deviceID); err != nil {
+		t.Fatal(err)
+	}
+	waiting := func(prefix string) {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for fixture.count(t, `SELECT count(*)::int FROM pg_stat_activity WHERE wait_event_type='Lock' AND query LIKE $1||'%'`, prefix) == 0 {
+			if time.Now().After(deadline) {
+				t.Fatalf("no llegó a esperar: %s", prefix)
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+	revoked := make(chan int, 1)
+	go func() {
+		code, _ := fixture.send(fixture.admin, "POST", "devices/"+display.deviceID+"/revoke", map[string]any{}, nil)
+		revoked <- code
+	}()
+	waiting("UPDATE app.devices SET revoked_at")
+	sessionsBefore := fixture.count(t, "SELECT count(*)::int FROM app.sessions")
+	type outcome struct {
+		code int
+		body []byte
+	}
+	opened := make(chan outcome, 1)
+	go func() {
+		code, body := fixture.send(display, "POST", "kitchen-display/settings-access", map[string]string{"username": "admin", "password": "admin"}, kitchenHeaders)
+		opened <- outcome{code, body}
+	}()
+	waiting("UPDATE app.devices SET last_seen_at")
+	if err := holder.Rollback(fixture.ctx); err != nil {
+		t.Fatal(err)
+	}
+	if code := <-revoked; code != 200 {
+		t.Fatalf("revocar: %d", code)
+	}
+	result := <-opened
+	t.Logf("settings-access en curso de una pantalla revocada (R1-2): %d %s", result.code, result.body)
+	current := result.code == 200 && strings.TrimSpace(string(result.body)) == `{"authorized":true}`
+	fixed := result.code == 401 && errorCode(t, result.body) == "DEVICE_REVOKED"
+	if !current && !fixed {
+		t.Fatalf("settings-access en curso de una pantalla revocada: %d %s", result.code, result.body)
+	}
+	if fixture.count(t, "SELECT count(*)::int FROM app.sessions") != sessionsBefore {
+		t.Fatal("settings-access creó una sesión")
+	}
+	if code, response := fixture.send(display, "POST", "kitchen-display/settings-access", map[string]string{"username": "admin", "password": "admin"},
+		kitchenHeaders); code != 401 || errorCode(t, response) != "DEVICE_REVOKED" {
+		t.Fatalf("settings-access después de revocar: %d %s", code, response)
+	}
 }
