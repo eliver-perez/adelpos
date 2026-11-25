@@ -1,41 +1,63 @@
 package com.adelpos.cocina
 
+import android.os.SystemClock
 import android.util.Log
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.v2.createEmptyComposeRule
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.printToLog
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.adelpos.cocina.board.BoardScreen
 import com.adelpos.cocina.board.Dish
 import com.adelpos.cocina.board.DisplayTheme
 import com.adelpos.cocina.board.OrderCard
 import com.adelpos.cocina.board.RecentState
 import com.adelpos.cocina.board.TextSize
+import com.adelpos.cocina.settings.SettingsScreen
 import com.adelpos.cocina.ui.TAG_CARD_READY_PREFIX
 import com.adelpos.cocina.ui.TAG_DISH_PREFIX
 import com.adelpos.cocina.ui.TAG_DISH_READY_PREFIX
+import com.adelpos.cocina.ui.TAG_OFFLINE
 import com.adelpos.cocina.ui.TAG_ORDERS
 import com.adelpos.cocina.ui.TAG_ORDERS_EMPTY
 import com.adelpos.cocina.ui.TAG_RECENT
 import com.adelpos.cocina.ui.TAG_RECENT_CLOSE
 import com.adelpos.cocina.ui.TAG_RECENT_OPEN
 import com.adelpos.cocina.ui.TAG_RECENT_RECOVER_PREFIX
+import com.adelpos.cocina.ui.TAG_SETTINGS
+import com.adelpos.cocina.ui.TAG_SETTINGS_CLOSE
+import com.adelpos.cocina.ui.TAG_SETTINGS_CONNECTION
+import com.adelpos.cocina.ui.TAG_SETTINGS_PASSWORD
+import com.adelpos.cocina.ui.TAG_SETTINGS_SERVER
+import com.adelpos.cocina.ui.TAG_SETTINGS_SUBMIT
+import com.adelpos.cocina.ui.TAG_SETTINGS_UNPAIR
+import com.adelpos.cocina.ui.TAG_SETTINGS_UNPAIR_CONFIRM
+import com.adelpos.cocina.ui.TAG_SETTINGS_UNPAIR_QUESTION
+import com.adelpos.cocina.ui.TAG_SETTINGS_USERNAME
+import com.adelpos.cocina.ui.TAG_SETTINGS_VERSION
+import com.adelpos.core.model.connection.LinkState
 import com.adelpos.core.testing.MainComputer
 import com.adelpos.core.ui.access.findserver.TAG_ADDRESS
 import com.adelpos.core.ui.access.findserver.TAG_FIND_SERVER
 import com.adelpos.core.ui.access.findserver.TAG_PAIRING_CODE
+import com.adelpos.core.ui.components.TAG_TOP_BAR_LOGO
 import java.io.File
 import java.util.UUID
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.int
@@ -44,6 +66,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Rule
@@ -80,6 +103,9 @@ class KitchenOnGoTest {
     private val application
         get() = ApplicationProvider.getApplicationContext<CocinaApplication>()
 
+    private val container
+        get() = application.container
+
     private fun argument(name: String): String {
         val value = arguments.getString(name)
         assumeTrue("Sin el argumento $name (Go temporal)", !value.isNullOrBlank())
@@ -98,7 +124,12 @@ class KitchenOnGoTest {
     @Test
     fun k1_emparejarComoPantallaDeCocina() {
         argument("address")
-        saveIds(createRestaurant())
+        // En la prueba de punta a punta (suite `endtoend`) el restaurante ya lo armó la aplicación
+        // de
+        // meseros: aquí solo se empareja (un salón más cambiaría las mesas que ve el mesero).
+        if (arguments.getString("restaurant") != "existing") {
+            saveIds(createRestaurant())
+        }
         launch()
         waitFor(TAG_FIND_SERVER)
         compose.onNodeWithTag(TAG_ADDRESS).performTextReplacement(argument("address"))
@@ -271,6 +302,237 @@ class KitchenOnGoTest {
             "k6 letra grande y tema claro al momento: alto del platillo $normalHeight → " +
                 "${textHeight("2 × $HAMBURGUESA")}",
         )
+    }
+
+    // --- Fase D: conexión tolerante, ajustes y «Volver a emparejar» (§5) ---
+
+    @Test
+    fun k7_cortesCortosDelGoSinNingunAviso() {
+        loadIds()
+        launch()
+        waitFor(TAG_ORDERS)
+        waitUntil("la pantalla de pedidos conectada") {
+            container.board.state.value.screen == BoardScreen.Orders
+        }
+        // El guion pausa el Go temporal 1, 2, 3, 4 y 5 s (`kill -STOP`), con 5 s entre cortes.
+        log("k7 listo para los cortes")
+        val watch = watchOffline(File(K7_DONE_FILE), timeout = 120_000)
+        assertTrue("el guion terminó los cortes", watch.finished)
+        assertEquals("ningún aviso en los cortes cortos", emptyList<Long>(), watch.offlineAt)
+        log(
+            "k7 sin avisos; respuestas de Go ${container.serverLink.answers}, sin respuesta " +
+                "${container.serverLink.noAnswers}",
+        )
+    }
+
+    @Test
+    fun k8_unaMarcaDuranteUnCorteSeRepiteYGoLaRegistraUnaVez() {
+        val ids = loadIds()
+        val takeaway = ids.getValue("llevar")
+        launch()
+        waitForText("2 × $HAMBURGUESA")
+        val dish = dish(takeaway, HAMBURGUESA)
+        val tasks = dish.tasks.map { it.id }
+        val device = kitchenDevices().single().text("id")
+        // El guion pausa el Go 18 s: la marca se queda sin respuesta (el cliente espera 15 s) y se
+        // repite sola; todo dentro de la tolerancia, sin aviso.
+        log("k8 listo para el corte")
+        waitUntil("el Go pausado", timeout = 60_000) { File(K8_PAUSED_FILE).exists() }
+        tap(TAG_DISH_PREFIX + dish.id)
+        waitFor(TAG_DISH_READY_PREFIX + dish.id)
+        screenshot("k8-marcado-durante-el-corte")
+        val watch = watchOffline(File(K8_DONE_FILE), timeout = 90_000)
+        assertTrue("el guion terminó el corte", watch.finished)
+        assertEquals("sin aviso durante el corte", emptyList<Long>(), watch.offlineAt)
+        waitUntil("la hamburguesa lista en Go") {
+            taskStates(takeaway, HAMBURGUESA).all { it == READY }
+        }
+        waitUntil("la tarjeta se cerró sola") { card(takeaway) == null }
+        // Una sola marca en el historial de cocina de Go para esas tareas desde que se recuperaron
+        // en k5 (el historial va del más nuevo al más viejo; la de k4 es anterior).
+        val history =
+            main
+                .call("GET", "kitchen/history")
+                .body
+                .jsonArray
+                .map { it.jsonObject }
+                .filter { entry ->
+                    tasks.any { task -> entry["before_value"].toString().contains(task) }
+                }
+                .takeWhile { it.text("kind") != "states.recovered" }
+        val marks = history.filter {
+            it.text("kind") == "states.changed" &&
+                (it["device_id"] as? JsonPrimitive)?.content == device
+        }
+        assertEquals("Go la registró una sola vez: $marks", 1, marks.size)
+        log("k8 una sola marca en Go; sin respuesta ${container.serverLink.noAnswers}")
+    }
+
+    @Test
+    fun k9_corteLargoAvisaNoDejaMarcarYSeRecuperaSolo() {
+        val ids = loadIds()
+        val order =
+            openAccount(
+                destination =
+                    """"mode":"takeaway","table_id":null,"origin":"Para llevar",""" +
+                        """"customer_name":"Pedro Ruiz"""",
+                waiter = ids.getValue("waiter"),
+                items = listOf(item(ids.getValue("flan"), 1)),
+            )
+        saveIds(ids + ("largo" to order))
+        launch()
+        waitUntil("la tarjeta de Pedro") { card(order) != null }
+        log("k9 listo para el corte")
+        // El guion pausa el Go 45 s: el aviso grande aparece (tres fallas en más de 20 s).
+        waitFor(TAG_OFFLINE, timeout = 60_000)
+        val offlineAt = System.currentTimeMillis()
+        assertFalse(container.board.state.value.markingAllowed)
+        compose
+            .onNodeWithTag(TAG_CARD_READY_PREFIX + requireNotNull(card(order)).id)
+            .assertIsNotEnabled()
+        compose.onNodeWithTag(TAG_DISH_PREFIX + dish(order, FLAN).id).performClick()
+        compose.waitForIdle()
+        assertTrue("no se marca nada", container.board.state.value.markingDishes.isEmpty())
+        screenshot("k9-sin-conexion")
+        // Se recupera sola, sin tocar la tableta.
+        waitUntil("el aviso se quita solo", timeout = 90_000) {
+            !container.board.state.value.offline && !present(TAG_OFFLINE)
+        }
+        val recoveredAt = System.currentTimeMillis()
+        assertTrue(File(K9_DONE_FILE).exists())
+        waitUntil("los pedidos al día") { card(order) != null }
+        assertTrue("Go no marcó nada", taskStates(order, FLAN).none { it == READY })
+        log("k9 aviso durante ${(recoveredAt - offlineAt) / 1000} s y recuperada sola")
+    }
+
+    /**
+     * Cortes de red del emulador (modo avión en Android 11+; wifi y datos en Android 8) de 1, 3 y 5
+     * s y uno de 35 s, con el margen de 10 s sin red de la cocina (K1-D33). Mide cuánto dura la
+     * falta de red **para Android** en cada corte (después de quitar el modo avión la wifi tarda en
+     * volver) y comprueba que el aviso sigue la regla: nada mientras Android vuelve a tener red
+     * antes del margen; el aviso cuando la falta de red pasa del margen, y se quita solo.
+     */
+    @Test
+    fun k10_cortesDeRedCortosSinAvisoYUnoLargoConAviso() {
+        loadIds()
+        launch()
+        waitFor(TAG_ORDERS)
+        val episodes = NetworkEpisodes(application)
+        try {
+            log("k10 listo para los cortes")
+            val watch = watchOffline(File(K10_DONE_FILE), timeout = 300_000)
+            assertTrue("el guion terminó los cortes", watch.finished)
+            val starts = episodes.starts()
+            val lost = episodes.durations()
+            log(
+                "k10 sin red para Android (ms): $lost; aviso a los ${watch.offlineAt}; cortes ${starts}",
+            )
+            assertEquals("tres cortes cortos y uno largo: $lost", 4, lost.size)
+            for (index in 0 until 4) {
+                val from = starts[index]
+                val until = from + lost[index] + SETTLE_AFTER_NETWORK_MILLIS
+                val warned = watch.offlineAt.any { it in from..until }
+                when {
+                    lost[index] < NETWORK_GRACE_MILLIS - GRACE_SLACK_MILLIS ->
+                        assertFalse(
+                            "corte ${index + 1}: ${lost[index]} ms sin red, sin aviso",
+                            warned,
+                        )
+                    lost[index] > NETWORK_GRACE_MILLIS + GRACE_SLACK_MILLIS ->
+                        assertTrue(
+                            "corte ${index + 1}: ${lost[index]} ms sin red, con aviso",
+                            warned,
+                        )
+                }
+            }
+            assertTrue("el largo pasa del margen", lost[3] > NETWORK_GRACE_MILLIS)
+            waitUntil("sin aviso al final", timeout = 60_000) {
+                !container.board.state.value.offline
+            }
+        } finally {
+            episodes.close()
+        }
+    }
+
+    @Test
+    fun k11_ajustesConLaContrasenaDelAdministrador() {
+        loadIds()
+        launch()
+        waitFor(TAG_ORDERS)
+        compose.onNodeWithTag(TAG_TOP_BAR_LOGO).performTouchInput { longClick() }
+        waitFor(TAG_SETTINGS)
+        // Una contraseña equivocada: el mensaje de Go en palabras claras.
+        compose.onNodeWithTag(TAG_SETTINGS_USERNAME).performTextReplacement(ADMIN)
+        compose.onNodeWithTag(TAG_SETTINGS_PASSWORD).performTextReplacement("equivocada")
+        compose.onNodeWithTag(TAG_SETTINGS_SUBMIT).performClick()
+        waitForText("El usuario o la contraseña no son correctos.")
+        assertFalse(container.kitchenSettings.holdsPassword)
+        screenshot("k11-contrasena-equivocada")
+        compose.onNodeWithTag(TAG_SETTINGS_PASSWORD).performTextReplacement(ADMIN_PASSWORD)
+        compose.onNodeWithTag(TAG_SETTINGS_SUBMIT).performClick()
+        waitFor(TAG_SETTINGS_SERVER)
+        compose.onNodeWithTag(TAG_SETTINGS_SERVER).assertTextEquals(argument("address"))
+        compose.onNodeWithTag(TAG_SETTINGS_CONNECTION).assertTextEquals("En línea")
+        compose.onNodeWithTag(TAG_SETTINGS_VERSION).assertTextEquals(BuildConfig.VERSION_NAME)
+        assertTrue("la contraseña, solo en memoria", container.kitchenSettings.holdsPassword)
+        screenshot("k11-ajustes")
+        compose.onNodeWithTag(TAG_SETTINGS_CLOSE).performClick()
+        waitUntil("cerrados") { container.kitchenSettings.screen.value == SettingsScreen.Closed }
+        assertFalse("al cerrar se borra", container.kitchenSettings.holdsPassword)
+        log("k11 ajustes abiertos con la contraseña del administrador")
+    }
+
+    /**
+     * La prueba de punta a punta (§8, suite `endtoend`): mientras la aplicación de meseros espera
+     * el aviso, la pantalla de cocina marca listo el pedido que Ana acaba de enviar (`account`, lo
+     * pasa el guion). Sin capturas: la otra instrumentación tiene la automatización de la pantalla.
+     */
+    @Test
+    fun k12_marcaListoElPedidoDelMesero() {
+        val account = argument("account")
+        launch()
+        waitFor(TAG_ORDERS)
+        waitUntil("el pedido de Ana en la pantalla de cocina", timeout = 90_000) {
+            card(account) != null
+        }
+        val sent = requireNotNull(card(account))
+        log("k12 tarjeta ${sent.title}: ${sent.dishes.map { "${it.quantity} × ${it.name}" }}")
+        tap(TAG_CARD_READY_PREFIX + sent.id)
+        waitUntil("la tarjeta se va") { card(account) == null }
+        log("k12 marcado listo cuenta=$account")
+    }
+
+    @Test
+    fun k13_volverAEmparejarSueltaElCupo() {
+        loadIds()
+        launch()
+        waitFor(TAG_ORDERS)
+        val device = kitchenDevices().single().text("id")
+        assertEquals("la pantalla ocupa su cupo", 1, kitchenSeatsInUse())
+        compose.onNodeWithTag(TAG_TOP_BAR_LOGO).performTouchInput { longClick() }
+        waitFor(TAG_SETTINGS)
+        compose.onNodeWithTag(TAG_SETTINGS_USERNAME).performTextReplacement(ADMIN)
+        compose.onNodeWithTag(TAG_SETTINGS_PASSWORD).performTextReplacement(ADMIN_PASSWORD)
+        compose.onNodeWithTag(TAG_SETTINGS_SUBMIT).performClick()
+        waitFor(TAG_SETTINGS_UNPAIR)
+        compose.onNodeWithTag(TAG_SETTINGS_UNPAIR).performClick()
+        waitFor(TAG_SETTINGS_UNPAIR_QUESTION)
+        screenshot("k13-volver-a-emparejar")
+        compose.onNodeWithTag(TAG_SETTINGS_UNPAIR_CONFIRM).performClick()
+        // Vuelve a «Buscar el servidor», sin nada de lo anterior.
+        waitFor(TAG_FIND_SERVER)
+        assertFalse(container.kitchenSettings.holdsPassword)
+        val revoked =
+            main
+                .call("GET", "devices")
+                .body
+                .jsonArray
+                .map { it.jsonObject }
+                .single { it.text("id") == device }
+        assertTrue("revocada en Go: $revoked", revoked["revoked_at"] !is JsonNull)
+        assertEquals("el cupo quedó libre", 0, kitchenSeatsInUse())
+        screenshot("k13-buscar-el-servidor")
+        log("k13 revocada ${revoked.text("revoked_at")} y cupo libre")
     }
 
     // --- La computadora principal (escucha local) ---
@@ -451,6 +713,17 @@ class KitchenOnGoTest {
             .map { it.jsonObject }
             .filter { it.text("kind") == "kitchen" }
 
+    /** Las pantallas de cocina que ocupan su cupo, según `devices/sessions-summary`. */
+    private fun kitchenSeatsInUse(): Int =
+        ok("GET", "devices/sessions-summary")
+            .getValue("seats")
+            .jsonObject
+            .getValue("kitchen_displays")
+            .jsonObject
+            .getValue("in_use")
+            .jsonPrimitive
+            .int
+
     // --- La tableta ---
 
     private fun cards(): List<OrderCard> =
@@ -501,6 +774,37 @@ class KitchenOnGoTest {
         waitForNode(TIMEOUT_MILLIS) { compose.onAllNodes(hasTestTag(tag)).fetchSemanticsNodes() }
         compose.onNodeWithTag(tag).performClick()
     }
+
+    /** Lo que se vio de «Sin conexión» mientras el guion hacía sus cortes. */
+    private class OfflineWatch(val finished: Boolean, val offlineAt: List<Long>)
+
+    /**
+     * Mira cada 100 ms, hasta que el guion crea [done], si la pantalla muestra «Sin conexión» (en
+     * el estado o en la pantalla) y anota cuándo (reloj monotónico), una vez por aparición.
+     */
+    private fun watchOffline(done: File, timeout: Long): OfflineWatch {
+        val deadline = System.currentTimeMillis() + timeout
+        val seen = mutableListOf<Long>()
+        var showing = false
+        while (!done.exists() && System.currentTimeMillis() < deadline) {
+            val offline =
+                container.board.state.value.offline ||
+                    container.serverLink.state.value == LinkState.OFFLINE ||
+                    present(TAG_OFFLINE)
+            if (offline && !showing) {
+                seen += SystemClock.elapsedRealtime()
+            }
+            showing = offline
+            Thread.sleep(WATCH_MILLIS)
+        }
+        return OfflineWatch(done.exists(), seen)
+    }
+
+    private fun present(tag: String): Boolean =
+        compose
+            .onAllNodes(hasTestTag(tag), useUnmergedTree = true)
+            .fetchSemanticsNodes()
+            .isNotEmpty()
 
     private fun launch() {
         scenario = ActivityScenario.launch(MainActivity::class.java)
@@ -574,5 +878,23 @@ class KitchenOnGoTest {
         // La letra grande es ×1.25 (OrdersScreen); el alto del texto crece al menos ×1.15.
         const val LARGE_TEXT_MIN_RATIO = 1.15
         const val LIGHT_LUMINANCE = 160
+
+        // Fase D: los archivos con los que el guion dice que terminó sus cortes.
+        const val K7_DONE_FILE = "/data/local/tmp/adelpos-k7-fin"
+        const val K8_PAUSED_FILE = "/data/local/tmp/adelpos-k8-pausado"
+        const val K8_DONE_FILE = "/data/local/tmp/adelpos-k8-fin"
+        const val K9_DONE_FILE = "/data/local/tmp/adelpos-k9-fin"
+        const val K10_DONE_FILE = "/data/local/tmp/adelpos-k10-fin"
+        const val WATCH_MILLIS = 100L
+
+        // El margen sin red de la cocina (K1-D33) y la holgura para comparar con lo que mide
+        // Android.
+        const val NETWORK_GRACE_MILLIS = 10_000L
+        const val GRACE_SLACK_MILLIS = 1_000L
+        const val SETTLE_AFTER_NETWORK_MILLIS = 3_000L
+
+        // El administrador de prueba del arnés (el mismo de MainComputer).
+        const val ADMIN = "admin"
+        const val ADMIN_PASSWORD = "admin"
     }
 }
