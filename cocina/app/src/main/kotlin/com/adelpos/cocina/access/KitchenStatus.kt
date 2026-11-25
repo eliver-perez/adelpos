@@ -36,7 +36,7 @@ sealed interface KitchenStatus {
  */
 object KitchenServerRequirements {
     const val CAPABILITY_KITCHEN_DISPLAY = "kitchen-display-v1"
-    val MIN_SERVER_VERSION = SemanticVersion(0, 15, 0)
+    val MIN_SERVER_VERSION = SemanticVersion(0, 16, 0)
 
     val REQUIREMENTS = ServerRequirements(MIN_SERVER_VERSION, listOf(CAPABILITY_KITCHEN_DISPLAY))
 }

@@ -225,6 +225,11 @@ class KitchenAccessTest {
                 requirements,
             ),
         )
+        // Con la capacidad pero anterior a la 0.16.0 (K1-D27): también pide actualizar el servidor.
+        assertEquals(
+            ServerCompatibility.Verdict.UpdateServer("0.15.0"),
+            ServerCompatibility.check("0.1.0", "0.15.0", kitchen, "0.1.0", requirements),
+        )
         assertEquals(
             ServerCompatibility.Verdict.Compatible,
             ServerCompatibility.check("0.1.0", "0.16.0", kitchen, "0.1.0", requirements),
