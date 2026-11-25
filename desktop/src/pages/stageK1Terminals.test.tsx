@@ -88,7 +88,18 @@ beforeEach(() => {
       case 'devices_pairing_requests':
         return { status: 200, body: { requests: [], approve_here: true, pairing_available: true } };
       case 'devices_sessions_summary':
-        return { status: 200, body: { by_kind: { desktop: 1, android: 0, kitchen: 0 }, total: 1 } };
+        return {
+          status: 200,
+          body: {
+            by_kind: { desktop: 1, android: 0, kitchen: 0 },
+            total: 1,
+            seats: {
+              cash_registers: { in_use: 0, limit: 2 },
+              order_takers: { in_use: 0, limit: 2 },
+              kitchen_displays: { in_use: 1, limit: 2 },
+            },
+          },
+        };
       case 'device_configuration':
         return { status: 200, body: { ...configuration, device: display } };
       case 'update_device':
@@ -176,7 +187,20 @@ describe('pantalla de cocina en Terminales', () => {
         name: 'Claro',
       }),
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Sonido de pedidos' }));
+    // El sonido es un control de dos opciones como la letra y el tema: se ve cuál está elegida, y con «Desactivado»
+    // el volumen no se puede cambiar.
+    const sound = screen.getByRole('group', { name: 'Sonido de la pantalla' });
+    expect(
+      within(sound).getByRole('button', { name: 'Activado' }).getAttribute('aria-pressed'),
+    ).toBe('true');
+    expect(
+      within(sound).getByRole('button', { name: 'Desactivado' }).getAttribute('aria-pressed'),
+    ).toBe('false');
+    fireEvent.click(within(sound).getByRole('button', { name: 'Desactivado' }));
+    expect(
+      within(sound).getByRole('button', { name: 'Desactivado' }).getAttribute('aria-pressed'),
+    ).toBe('true');
+    expect(screen.getByRole('combobox', { name: 'Volumen' }).hasAttribute('disabled')).toBe(true);
     await waitFor(() =>
       expect(
         (screen.getByRole('button', { name: 'Guardar cambios' }) as HTMLButtonElement).disabled,
@@ -206,6 +230,15 @@ describe('pantalla de cocina en Terminales', () => {
     const dialog = await screen.findByRole('alertdialog');
     expect(dialog.textContent).toContain('«Usar esta pantalla»');
     expect(dialog.textContent).toContain('revócala');
+  });
+
+  it('«Cupos de la licencia» dice que una tableta de cocina ocupa el cupo mientras está emparejada', async () => {
+    render(<DevicesPage can={() => true} />);
+    const panel = await screen.findByRole('region', { name: 'Cupos de la licencia' });
+    expect(panel.textContent).toContain(
+      'una pantalla de cocina: una computadora en Cocina › Preparación, o una tableta de cocina mientras esté emparejada (se libera con «Liberar cupo» o «Revocar»). Las cajas se liberan al cerrar el turno.',
+    );
+    expect(panel.textContent).not.toContain('pantalla de cocina en Preparación');
   });
 
   it('sin la capacidad no se ofrece el editor de la pantalla ni la versión instalada', async () => {

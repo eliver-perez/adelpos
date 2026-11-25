@@ -160,7 +160,11 @@ test('una pantalla de cocina en Terminales: ajustes, versión instalada, colores
     .getByRole('group', { name: 'Tema de la pantalla' })
     .getByRole('button', { name: 'Claro' })
     .click();
-  await editor.getByRole('button', { name: 'Sonido de pedidos', exact: true }).click();
+  await editor
+    .getByRole('group', { name: 'Sonido de la pantalla' })
+    .getByRole('button', { name: 'Desactivado' })
+    .click();
+  await expect(editor.getByRole('combobox', { name: 'Volumen' })).toBeDisabled();
   await tallShot(page, testInfo, 'k1-terminales-editar');
   await editor.getByRole('button', { name: 'Guardar cambios', exact: true }).click();
   await expect(page.getByText('Pantalla de cocina actualizada.')).toBeVisible();

@@ -504,9 +504,9 @@ function SessionsSummaryPanel({ reloadKey }: { reloadKey: number }) {
           ))}
         </dl>
         <p className="muted text-sm">
-          Cada terminal ocupa un cupo según lo que hace: una caja con su turno abierto, un comandero
-          al capturar pedidos sin turno o una pantalla de cocina en Preparación. Las cajas se
-          liberan al cerrar el turno.
+          {serverHas(kitchenDisplayCapability)
+            ? 'Cada terminal ocupa un cupo según lo que hace: una caja con su turno abierto, un comandero al capturar pedidos sin turno o una pantalla de cocina: una computadora en Cocina › Preparación, o una tableta de cocina mientras esté emparejada (se libera con «Liberar cupo» o «Revocar»). Las cajas se liberan al cerrar el turno.'
+            : 'Cada terminal ocupa un cupo según lo que hace: una caja con su turno abierto, un comandero al capturar pedidos sin turno o una pantalla de cocina en Preparación. Las cajas se liberan al cerrar el turno.'}
         </p>
       </section>
     );
@@ -887,16 +887,23 @@ function KitchenDisplayEditor({
             onChange={setTheme}
           />
         </div>
+        {/* El mismo control de dos opciones que la letra y el tema: se ve cuál está elegida. */}
+        <div className="field">
+          <span>Sonido</span>
+          <SegmentedControl<'on' | 'off'>
+            label="Sonido de la pantalla"
+            value={sound ? 'on' : 'off'}
+            options={[
+              { value: 'on', label: 'Activado' },
+              { value: 'off', label: 'Desactivado' },
+            ]}
+            onChange={(value) => setSound(value === 'on')}
+          />
+          <small className="muted">
+            Suena al llegar un pedido nuevo y, con otro sonido, con cancelaciones y cambios.
+          </small>
+        </div>
         <div className="form-grid">
-          <div className="field">
-            <span>Sonido</span>
-            <div className="button-row">
-              <ToggleButton label="Sonido de pedidos" pressed={sound} onChange={setSound} />
-            </div>
-            <small className="muted">
-              Suena al llegar un pedido nuevo y, con otro sonido, con cancelaciones y cambios.
-            </small>
-          </div>
           <Field label="Volumen">
             <Select<KitchenDisplaySettings['sound_volume']>
               value={volume}
