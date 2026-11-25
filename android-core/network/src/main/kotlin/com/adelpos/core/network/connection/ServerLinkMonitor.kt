@@ -47,6 +47,8 @@ fun interface ServerProbing {
  *   estado duda y se ve «En línea» hasta saberlo ([ServerLinkTracker]).
  * @param log una línea por cambio de estado y por falla (el registro `AdelLink` de la aplicación;
  *   lo lee la prueba de una hora sin uso).
+ * @param networkLossGraceMillis el margen con Android sin red antes de «Sin conexión»
+ *   ([ServerLinkTracker], K1-D33): 0 en meseros (al instante), 10 s en la pantalla de cocina.
  */
 class ServerLinkMonitor(
     private val network: Flow<LinkState>,
@@ -57,8 +59,9 @@ class ServerLinkMonitor(
     private val scope: CoroutineScope,
     clock: () -> Long,
     private val log: (String) -> Unit = {},
+    networkLossGraceMillis: Long = 0,
 ) : ServerLink, ServerAnswers {
-    private val tracker = ServerLinkTracker(initialNetwork, clock)
+    private val tracker = ServerLinkTracker(initialNetwork, networkLossGraceMillis, clock)
     private val mutableState = MutableStateFlow(tracker.state)
     private val wakeups = Channel<Unit>(Channel.CONFLATED)
     private val probeLock = Mutex()

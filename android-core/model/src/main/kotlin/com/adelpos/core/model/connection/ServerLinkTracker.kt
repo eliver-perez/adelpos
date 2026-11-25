@@ -28,15 +28,33 @@ package com.adelpos.core.model.connection
  * primer aviso de Android de que no hay red («Sin conexión» al instante) o el plazo de la
  * tolerancia sin ninguna de las dos ([MIN_OFFLINE_MILLIS]: «Sin conexión»). Un estado que todavía
  * no se conoce nunca se muestra como «Sin conexión».
+ *
+ * **Margen sin red** ([networkLossGraceMillis], etapa K1, K1-D33): con 0 (la aplicación de meseros)
+ * la falta de red de Android es «Sin conexión» al instante. Con un margen (la pantalla de cocina,
+ * 10 s), solo si la falta de red dura más que el margen, contado desde el aviso de Android: un
+ * corte de la wifi de unos segundos no muestra nada. Si pasó el margen, al volver la red sigue «Sin
+ * conexión» hasta el primer éxito, como siempre. La tolerancia de las fallas no cambia.
  */
-class ServerLinkTracker(initialNetwork: LinkState?, private val clock: () -> Long) {
+class ServerLinkTracker(
+    initialNetwork: LinkState?,
+    private val networkLossGraceMillis: Long = 0,
+    private val clock: () -> Long,
+) {
     // La red de Android: null mientras Android no la informa (al arrancar).
     private var network: LinkState? = initialNetwork
     private val startedAt = clock()
 
+    // Desde cuándo Android dice que no hay red (para el margen); null con red.
+    private var networkLostAt: Long? =
+        if (initialNetwork == LinkState.OFFLINE) {
+            startedAt
+        } else {
+            null
+        }
+
     // «Sin conexión» declarado por la tolerancia o por la red de Android; solo un éxito con red lo
     // quita.
-    private var declaredOffline = initialNetwork == LinkState.OFFLINE
+    private var declaredOffline = initialNetwork == LinkState.OFFLINE && networkLossGraceMillis <= 0
     private var failures = 0
     private var streakStartedAt: Long? = null
     private var lastFailureAt: Long? = null
@@ -47,11 +65,24 @@ class ServerLinkTracker(initialNetwork: LinkState?, private val clock: () -> Lon
     val state: LinkState
         @Synchronized
         get() =
-            if (network == LinkState.OFFLINE || declaredOffline || startupExpired()) {
+            if (networkLossDeclared() || declaredOffline || startupExpired()) {
                 LinkState.OFFLINE
             } else {
                 LinkState.ONLINE
             }
+
+    // Android dice que no hay red desde hace más del margen (sin margen, al instante).
+    private fun networkLossDeclared(): Boolean {
+        if (network != LinkState.OFFLINE) {
+            return false
+        }
+        val lostAt = networkLostAt ?: return true
+        return clock() - lostAt >= networkLossGraceMillis
+    }
+
+    // Sin red de Android, pero todavía dentro del margen: se sigue viendo «En línea».
+    private fun inNetworkLossGrace(): Boolean =
+        network == LinkState.OFFLINE && !declaredOffline && !networkLossDeclared()
 
     /** Puede haber red de Android (la hay, o al arrancar todavía no se sabe). */
     val hasNetwork: Boolean
@@ -62,7 +93,8 @@ class ServerLinkTracker(initialNetwork: LinkState?, private val clock: () -> Lon
      * todavía no responde Go ni informa Android.
      */
     val doubting: Boolean
-        @Synchronized get() = state == LinkState.ONLINE && (failures > 0 || startingUp())
+        @Synchronized
+        get() = state == LinkState.ONLINE && (failures > 0 || startingUp() || inNetworkLossGrace())
 
     // Al arrancar: sin aviso de Android ni respuesta de Go todavía.
     private fun startingUp(): Boolean = network == null && lastSuccessAt == null
@@ -74,17 +106,25 @@ class ServerLinkTracker(initialNetwork: LinkState?, private val clock: () -> Lon
     /** La red de Android cambió. Al volver, el estado sigue igual hasta el primer éxito. */
     @Synchronized
     fun onNetwork(link: LinkState): LinkState {
-        // Ya se mostraba «Sin conexión» por el plazo al arrancar: se queda hasta el primer éxito.
-        if (startupExpired()) {
+        // Ya se mostraba «Sin conexión» por el plazo al arrancar o porque la falta de red pasó del
+        // margen: se queda hasta el primer éxito.
+        if (startupExpired() || networkLossDeclared()) {
             declaredOffline = true
         }
+        val wasOffline = network == LinkState.OFFLINE
         network = link
         if (link == LinkState.OFFLINE) {
-            declaredOffline = true
+            if (!wasOffline) {
+                networkLostAt = clock()
+            }
+            if (networkLossGraceMillis <= 0) {
+                declaredOffline = true
+            }
             failures = 0
             streakStartedAt = null
             lastFailureAt = null
         } else {
+            networkLostAt = null
             // Red de vuelta: se sondea enseguida (sin esperar el intervalo de la última sonda).
             lastProbeAt = null
         }
@@ -149,15 +189,29 @@ class ServerLinkTracker(initialNetwork: LinkState?, private val clock: () -> Lon
 
     /**
      * Cuánto falta para que el estado cambie solo con el tiempo (el plazo de la tolerancia al
-     * arrancar), o null si nada cambia solo. Quien publica el estado lo vuelve a leer entonces.
+     * arrancar o el margen sin red), o null si nada cambia solo. Quien publica el estado lo vuelve
+     * a leer entonces.
      */
     @Synchronized
     fun nextDecisionIn(): Long? {
-        if (!startingUp() || declaredOffline) {
+        if (declaredOffline) {
             return null
         }
-        val remaining = startedAt + MIN_OFFLINE_MILLIS - clock()
-        return if (remaining > 0) remaining else null
+        val now = clock()
+        val startup =
+            if (startingUp()) {
+                (startedAt + MIN_OFFLINE_MILLIS - now).takeIf { it > 0 }
+            } else {
+                null
+            }
+        val lostAt = networkLostAt
+        val grace =
+            if (network == LinkState.OFFLINE && lostAt != null) {
+                (lostAt + networkLossGraceMillis - now).takeIf { it > 0 }
+            } else {
+                null
+            }
+        return listOfNotNull(startup, grace).minOrNull()
     }
 
     /**

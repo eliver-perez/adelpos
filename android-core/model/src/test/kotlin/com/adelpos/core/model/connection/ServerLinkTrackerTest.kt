@@ -17,6 +17,10 @@ import org.junit.Test
  * ninguna con el canal abierto o en segundo plano).
  */
 class ServerLinkTrackerTest {
+    private companion object {
+        const val GRACE = 10_000L
+    }
+
     private var now = 1_000_000L
     private val tracker = ServerLinkTracker(LinkState.ONLINE) { now }
 
@@ -240,6 +244,80 @@ class ServerLinkTrackerTest {
         assertEquals(LinkState.ONLINE, starting.onNothingToProbe())
         assertEquals(LinkState.ONLINE, starting.onNetwork(LinkState.ONLINE))
         assertEquals(LinkState.ONLINE, starting.onNothingToProbe())
+    }
+
+    // --- El margen sin red (etapa K1, K1-D33): 0 en meseros, 10 s en la pantalla de cocina ---
+
+    @Test
+    fun sinMargenLaFaltaDeRedEsSinConexionAlInstante() {
+        assertEquals(LinkState.OFFLINE, tracker.onNetwork(LinkState.OFFLINE))
+        assertNull("nada cambia solo", tracker.nextDecisionIn())
+        advance(1_000)
+        assertEquals(LinkState.OFFLINE, tracker.onNetwork(LinkState.ONLINE))
+        assertEquals(LinkState.ONLINE, tracker.onAnswer())
+    }
+
+    @Test
+    fun conMargenUnCorteQueVuelveJustoAntesNoSeVe() {
+        val kitchen = ServerLinkTracker(LinkState.ONLINE, networkLossGraceMillis = GRACE) { now }
+        assertEquals(LinkState.ONLINE, kitchen.onNetwork(LinkState.OFFLINE))
+        assertTrue("duda mientras corre el margen", kitchen.doubting)
+        assertFalse("sin red de Android no se sondea", kitchen.hasNetwork)
+        assertEquals(GRACE, kitchen.nextDecisionIn())
+        // Las peticiones sin red no cuentan como fallas de la tolerancia.
+        assertEquals(LinkState.ONLINE, kitchen.onNoAnswer())
+        advance(GRACE - 1)
+        assertEquals(LinkState.ONLINE, kitchen.state)
+        assertEquals(1L, kitchen.nextDecisionIn())
+        // La red vuelve 1 ms antes del margen: nunca se vio «Sin conexión», ni hace falta un éxito.
+        assertEquals(LinkState.ONLINE, kitchen.onNetwork(LinkState.ONLINE))
+        assertNull(kitchen.nextDecisionIn())
+        advance(10 * GRACE)
+        assertEquals(LinkState.ONLINE, kitchen.state)
+    }
+
+    @Test
+    fun conMargenUnCorteQueVuelveJustoDespuesSiSeVeHastaElPrimerExito() {
+        val kitchen = ServerLinkTracker(LinkState.ONLINE, networkLossGraceMillis = GRACE) { now }
+        kitchen.onNetwork(LinkState.OFFLINE)
+        advance(GRACE)
+        assertEquals("al cumplirse el margen", LinkState.OFFLINE, kitchen.state)
+        assertNull("el cambio ya ocurrió", kitchen.nextDecisionIn())
+        assertFalse(kitchen.doubting)
+        advance(1)
+        // Volvió la red: sigue «Sin conexión» hasta que Go responda (como sin margen).
+        assertEquals(LinkState.OFFLINE, kitchen.onNetwork(LinkState.ONLINE))
+        assertEquals(LinkState.ONLINE, kitchen.onAnswer())
+    }
+
+    @Test
+    fun conMargenElMargenSeCuentaDesdeElAvisoYNoSeReiniciaConAvisosRepetidos() {
+        val kitchen = ServerLinkTracker(LinkState.ONLINE, networkLossGraceMillis = GRACE) { now }
+        kitchen.onNetwork(LinkState.OFFLINE)
+        advance(GRACE / 2)
+        kitchen.onNetwork(LinkState.OFFLINE)
+        advance(GRACE / 2)
+        assertEquals(LinkState.OFFLINE, kitchen.state)
+    }
+
+    @Test
+    fun conMargenLaToleranciaDeLasFallasNoCambia() {
+        val kitchen = ServerLinkTracker(LinkState.ONLINE, networkLossGraceMillis = GRACE) { now }
+        kitchen.onNoAnswer()
+        repeat(3) {
+            advance(DOUBT_PROBE_MILLIS)
+            assertEquals(LinkState.ONLINE, kitchen.onNoAnswer())
+        }
+        advance(DOUBT_PROBE_MILLIS)
+        assertEquals(LinkState.OFFLINE, kitchen.onNoAnswer())
+    }
+
+    @Test
+    fun conMargenEmpezarSinRedTambienEsperaElMargen() {
+        val kitchen = ServerLinkTracker(LinkState.OFFLINE, networkLossGraceMillis = GRACE) { now }
+        assertEquals(LinkState.ONLINE, kitchen.state)
+        advance(GRACE)
+        assertEquals(LinkState.OFFLINE, kitchen.state)
     }
 
     private fun goOffline() {
