@@ -895,7 +895,8 @@ por tiempo con `server_time`, los límites y su reloj monotónico. Decisiones K1
 [ETAPA_K1_AVANCE.md](ETAPA_K1_AVANCE.md).
 
 - **Emparejar**: el flujo de siempre (`createPairingRequest` … `claimPairingCredential`) con `device_kind: "kitchen"` y
-  `X-Client-Kind: kitchen`; si uno es `kitchen` y el otro no, 400 `CLIENT_KIND_MISMATCH`. Un servidor 0.15.0 responde
+  `X-Client-Kind: kitchen`. Con la cabecera, `device_kind` debe ser el de la aplicación en los tres tipos (`desktop`,
+  `android`, `kitchen`; revisión R1, K1-D29); si no, 400 `CLIENT_KIND_MISMATCH`. Un servidor 0.15.0 responde
   400 `CLIENT_KIND_INVALID` al tipo `kitchen`: la aplicación lo explica como «Actualiza el servidor del restaurante».
 - **Solo su lista cerrada**: con la credencial de un dispositivo `kitchen` Go atiende solo `connectKitchenDisplay`,
   `getKitchenDisplayOrders`, `markKitchenDisplayItemsReady`, `markKitchenDisplayOrderReady`, `getKitchenDisplayRecent`,
@@ -942,9 +943,11 @@ por tiempo con `server_time`, los límites y su reloj monotónico. Decisiones K1
 - **`acknowledgeKitchenDisplayReceipts`** (`POST /kitchen-display/receipts`, `{receipts: [{ticket_id, station_id}]}`):
   el acuse de recepción de la 9F con el dispositivo y sin usuario, para las comandas de `receipts_pending`. Idempotente.
 - **`checkKitchenDisplaySettingsAccess`** (`POST /kitchen-display/settings-access`, `{username, password}`): la
-  contraseña de quien puede administrar terminales (`devices.manage`), sin crear sesión ni devolver token: `{authorized:
-true}`, 401 `AUTHORIZATION_INVALID`, 429 `AUTHORIZATION_THROTTLED` (comparte el límite del inicio de sesión) o 403
-  `PERMISSION_DENIED`.
+  contraseña de quien puede administrar terminales (`devices.manage`), sin crear sesión ni devolver token:
+  `{authorized: true}`, 401 `AUTHORIZATION_INVALID`, 429 `AUTHORIZATION_THROTTLED` (comparte el límite del inicio de
+  sesión) o 403 `PERMISSION_DENIED`. El usuario o la contraseña vacíos responden 400 `VALIDATION_ERROR`; un usuario de
+  más de 40 caracteres o una contraseña de más de 256, 401 `AUTHORIZATION_INVALID` sin contar un intento (revisión R1,
+  K1-D29).
 - **Licencia y hora**: Vencida y Revocada muestran y marcan; Sin activar responde `LICENSE_NOT_ACTIVATED` en todo menos
   el canal de eventos, `getLicenseStatus` y los ajustes; con la hora del equipo incorrecta se lee, pero marcar, recuperar
   y el acuse responden `SYSTEM_CLOCK_INVALID`.
@@ -954,7 +957,8 @@ true}`, 401 `AUTHORIZATION_INVALID`, 429 `AUTHORIZATION_THROTTLED` (comparte el 
   (`kitchen.ticket.created`, `kitchen.state.changed`, `kitchen.change.pending`, `kitchen.kds.received`) y los cambios de
   encabezado de las cuentas con tareas en sus estaciones (`restaurant.account.updated`, `.move`, `.assign`, `.merged`,
   `.split`, `.cancelled` y `restaurant.items.transferred`). Ninguno lleva datos. **Revocar** la pantalla manda
-  `interrupted` con `DEVICE_REVOKED` en menos de un segundo.
+  `interrupted` con `DEVICE_REVOKED` en menos de un segundo, y una petición suya que todavía esperaba responde 401
+  `DEVICE_REVOKED` (revisión R1, K1-D29).
 - **Versión instalada** (para los tres tipos): Go guarda `X-Client-Version` de cada petición autenticada; Terminales
   muestra la instalada aunque se haya actualizado encima.
 - **Terminales** (administración, en `API_CONTRACTS.md`): `GET devices` y `devices/{id}/configuration` traen

@@ -2200,7 +2200,7 @@
                   },
                   "device_kind": {
                     "enum": ["desktop", "android", "kitchen"],
-                    "description": "Tipo de terminal: android para la aplicación de meseros; desde la etapa K1, kitchen para la aplicación de cocina (con X-Client-Kind kitchen; si uno es kitchen y el otro no, 400 CLIENT_KIND_MISMATCH)."
+                    "description": "Tipo de terminal: desktop, android para la aplicación de meseros y, desde la etapa K1, kitchen para la aplicación de cocina. Con X-Client-Kind debe ser el de la aplicación (revisión R1, K1-D29); si no, 400 CLIENT_KIND_MISMATCH."
                   },
                   "os": {
                     "type": "string",
@@ -3272,7 +3272,7 @@
       "post": {
         "operationId": "checkKitchenDisplaySettingsAccess",
         "summary": "Contraseña de un administrador para los ajustes",
-        "description": "Etapa K1 (capacidad kitchen-display-v1): solo con la credencial de un dispositivo kitchen (emparejado con device_kind kitchen y X-Client-Kind kitchen), sin sesión. Con otro tipo de dispositivo, 403 KITCHEN_DISPLAY_REQUIRED. Los ajustes de la tableta (§5.4) piden la contraseña de quien puede administrar terminales (devices.manage). Valida en la misma transacción sin crear ni reemplazar sesiones y sin devolver ningún token; comparte el límite de intentos del inicio de sesión (401 AUTHORIZATION_INVALID, 429 AUTHORIZATION_THROTTLED); un usuario sin el permiso, 403 PERMISSION_DENIED. Se permite en cualquier estado de la licencia.",
+        "description": "Etapa K1 (capacidad kitchen-display-v1): solo con la credencial de un dispositivo kitchen (emparejado con device_kind kitchen y X-Client-Kind kitchen), sin sesión. Con otro tipo de dispositivo, 403 KITCHEN_DISPLAY_REQUIRED. Los ajustes de la tableta (§5.4) piden la contraseña de quien puede administrar terminales (devices.manage). Valida en la misma transacción sin crear ni reemplazar sesiones y sin devolver ningún token; comparte el límite de intentos del inicio de sesión (401 AUTHORIZATION_INVALID, 429 AUTHORIZATION_THROTTLED); un usuario sin el permiso, 403 PERMISSION_DENIED. Revisión R1 (K1-D29): el usuario o la contraseña vacíos, 400 VALIDATION_ERROR; un usuario de más de 40 caracteres o una contraseña de más de 256, 401 AUTHORIZATION_INVALID sin contar un intento. Se permite en cualquier estado de la licencia.",
         "parameters": [
           {
             "$ref": "#/components/parameters/ClientVersion"
@@ -3317,6 +3317,46 @@
                     }
                   },
                   "required": ["authorized"]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "El usuario o la contraseña vacíos (VALIDATION_ERROR).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Usuario o contraseña incorrectos, o demasiado largos (AUTHORIZATION_INVALID); también DEVICE_REVOKED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "El usuario no puede administrar terminales (PERMISSION_DENIED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Cinco intentos fallidos en 15 minutos (AUTHORIZATION_THROTTLED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }

@@ -78,7 +78,7 @@ func (service *Service) kitchenDisplay(ctx context.Context, tx pgx.Tx, request R
 			return nil, err
 		}
 	}
-	if err := touchDevice(ctx, tx, request); err != nil {
+	if err := touchKitchenDisplay(ctx, tx, request); err != nil {
 		return nil, err
 	}
 	switch route {
@@ -102,6 +102,24 @@ func (service *Service) kitchenDisplay(ctx context.Context, tx pgx.Tx, request R
 	return runProtected(ctx, tx, principal, request, route, func(work pgx.Tx) (any, error) {
 		return runKitchenDisplay(ctx, work, request, route, principal)
 	})
+}
+
+// touchKitchenDisplay anota la última conexión y la versión instalada de la pantalla (como touchDevice) y vuelve a
+// comprobar la revocación (revisión R1, hallazgo R1-2, K1-D29): authenticateDevice lee revoked_at sin bloquear la fila,
+// así que una revocación que se confirma mientras la petición espera la fila o el lock de cocina no se veía. El UPDATE
+// espera la fila del dispositivo y, en READ COMMITTED, vuelve a evaluar la condición sobre la versión confirmada: si la
+// pantalla ya está revocada no cambia ninguna fila y la petición responde 401 DEVICE_REVOKED, antes de cualquier ruta de
+// la lista (en las escrituras, después de 7820148305).
+func touchKitchenDisplay(ctx context.Context, tx pgx.Tx, request Request) error {
+	touched, err := tx.Exec(ctx, `UPDATE app.devices SET last_seen_at=now(),app_version=coalesce(NULLIF($2,''),app_version)
+        WHERE id=$1 AND revoked_at IS NULL`, request.DeviceID, installedVersion(request.ClientVersion))
+	if err != nil {
+		return err
+	}
+	if touched.RowsAffected() == 0 {
+		return unauthorized("DEVICE_REVOKED", "La autorización de esta terminal fue revocada.")
+	}
+	return nil
 }
 
 // runKitchenDisplay llama a la lógica de cocina de la pantalla con la auditoría firmada por el dispositivo.
@@ -297,10 +315,23 @@ func kitchenDisplaySettingsAccess(ctx context.Context, tx pgx.Tx, request Reques
 	if err := decode(request.Body, &input); err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(input.Username) == "" || input.Password == "" {
+	username := strings.ToLower(strings.TrimSpace(input.Username))
+	if username == "" || input.Password == "" {
 		return nil, invalid("Escribe el usuario y la contraseña de un administrador.")
 	}
-	supervisor, err := supervisorAuthorizer(principal)(ctx, tx, input.Username, input.Password)
+	// Revisión R1 (hallazgo R1-1, K1-D29): las mismas longitudes que el inicio de sesión (40 y 256). Un usuario o una
+	// contraseña más largos no son de nadie: se responde como credenciales incorrectas, sin validarlos ni contar un
+	// intento (no los recibe supervisorAuthorizer, que respondería con el código y el texto de las autorizaciones de
+	// cobros).
+	if len(username) > 40 || len(input.Password) > 256 {
+		return nil, settingsAccessInvalid()
+	}
+	supervisor, err := supervisorAuthorizer(principal)(ctx, tx, username, input.Password)
+	var fault *Fault
+	if errors.As(err, &fault) && fault.Code == "AUTHORIZATION_INVALID" {
+		// El mismo rechazo (y su intento contado) con el texto de la pantalla, no el del supervisor de cobros.
+		fault.Message = settingsAccessInvalid().(*Fault).Message
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -317,4 +348,9 @@ func kitchenDisplaySettingsAccess(ctx context.Context, tx pgx.Tx, request Reques
 		return nil, err
 	}
 	return map[string]bool{"authorized": true}, nil
+}
+
+// settingsAccessInvalid es el rechazo de un usuario o una contraseña incorrectos en los ajustes de la pantalla.
+func settingsAccessInvalid() error {
+	return &Fault{Status: 401, Code: "AUTHORIZATION_INVALID", Message: "El usuario o la contraseña no son correctos."}
 }

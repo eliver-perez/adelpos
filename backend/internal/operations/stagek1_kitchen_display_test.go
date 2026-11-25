@@ -338,8 +338,10 @@ func testStageK1KitchenDisplayPairing(t *testing.T, fixture *kitchenDisplayFixtu
 			"device_kind": kind, "os": "Android 14", "app_version": "0.1.0", "commitment": administration.PairingCommitment(nonce)},
 			map[string]string{"X-Client-Kind": clientKind, "X-Client-Version": "0.1.0"})
 	}
-	// La aplicación de cocina solo se empareja como pantalla, y una pantalla solo desde ella.
-	for _, wrong := range [][2]string{{"android", "kitchen"}, {"desktop", "kitchen"}, {"kitchen", "android"}, {"kitchen", "desktop"}} {
+	// Cada aplicación se empareja solo con su tipo (K1-D29): la de cocina solo como pantalla, una pantalla solo desde ella,
+	// y lo mismo el escritorio y la de meseros.
+	for _, wrong := range [][2]string{{"android", "kitchen"}, {"desktop", "kitchen"}, {"kitchen", "android"}, {"kitchen", "desktop"},
+		{"android", "desktop"}, {"desktop", "android"}} {
 		if code, response := request(wrong[0], wrong[1]); code != 400 || errorCode(t, response) != "CLIENT_KIND_MISMATCH" {
 			t.Fatalf("emparejar %s con X-Client-Kind %s: %d %s", wrong[0], wrong[1], code, response)
 		}

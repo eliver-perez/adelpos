@@ -762,12 +762,24 @@ func testR1SettingsAccess(t *testing.T, fixture *r1Fixture) {
 	if _, err := fixture.pool.Exec(fixture.ctx, "UPDATE app.users SET active=true WHERE id=$1", fixture.waiterID); err != nil {
 		t.Fatal(err)
 	}
-	// Un nombre de más de 40 caracteres: no se valida contra nadie ni cuenta un intento.
-	long := strings.Repeat("a", 41)
-	code, response = access(fixture.display, long, "x")
-	t.Logf("settings-access con un usuario de 41 caracteres: %d %s", code, response)
-	if code == 200 {
-		t.Fatalf("usuario de 41 caracteres: %d %s", code, response)
+	// R1-1 (corregido, K1-D29): un usuario de más de 40 caracteres o una contraseña de más de 256 son credenciales
+	// incorrectas (401), sin validarse contra nadie ni contar un intento; los campos vacíos, 400.
+	attemptsBefore := fixture.count(t, "SELECT count(*)::int FROM app.login_attempts")
+	for name, credentials := range map[string][2]string{
+		"usuario de 41 caracteres":     {strings.Repeat("a", 41), "x"},
+		"contraseña de 257 caracteres": {"admin", strings.Repeat("x", 257)},
+	} {
+		if code, response := access(fixture.display, credentials[0], credentials[1]); code != 401 || errorCode(t, response) != "AUTHORIZATION_INVALID" {
+			t.Fatalf("%s: %d %s", name, code, response)
+		}
+	}
+	if fixture.count(t, "SELECT count(*)::int FROM app.login_attempts") != attemptsBefore {
+		t.Fatal("un usuario o una contraseña demasiado largos contaron un intento")
+	}
+	for name, credentials := range map[string][2]string{"usuario vacío": {"  ", "admin"}, "contraseña vacía": {"admin", ""}} {
+		if code, response := access(fixture.display, credentials[0], credentials[1]); code != 400 || errorCode(t, response) != "VALIDATION_ERROR" {
+			t.Fatalf("%s: %d %s", name, code, response)
+		}
 	}
 }
 
@@ -940,9 +952,9 @@ func testR1RevokedInFlight(t *testing.T, fixture *r1Fixture) {
 		t.Fatal(err)
 	}
 	result := <-done
-	t.Logf("marca en curso de una pantalla revocada: %d %s", result.code, result.body)
-	if result.code < 400 {
-		t.Fatalf("la marca de una pantalla revocada se aplicó: %d %s", result.code, result.body)
+	// R1-2 (corregido, K1-D29): la marca ve la revocación al tocar la fila del dispositivo, después del lock.
+	if result.code != 401 || errorCode(t, result.body) != "DEVICE_REVOKED" {
+		t.Fatalf("la marca en curso de una pantalla revocada: %d %s", result.code, result.body)
 	}
 	for _, task := range tasks {
 		if state := fixture.taskState(t, task.ID); state != "released" {
@@ -952,12 +964,12 @@ func testR1RevokedInFlight(t *testing.T, fixture *r1Fixture) {
 	testR1RevokedSettingsInFlight(t, fixture)
 }
 
-// testR1RevokedSettingsInFlight es el hallazgo R1-2: settings-access no exige el cupo, así que nada vuelve a mirar la
+// testR1RevokedSettingsInFlight es el hallazgo R1-2: settings-access no exige el cupo, así que nada volvía a mirar la
 // revocación después de authenticateDevice. Con la fila del dispositivo bloqueada por otra transacción, Terminales revoca
 // la pantalla (queda primero en la cola de la fila) y después llega settings-access: su authenticateDevice ya leyó «no
-// revocada» y su touchDevice espera detrás de la revocación. Hoy responde 200 {"authorized": true} a una pantalla ya
-// revocada (sin sesión ni token: no abre nada más); con la corrección sugerida responde 401 DEVICE_REVOKED. La prueba
-// acepta las dos respuestas y exige que no se cree ninguna sesión.
+// revocada» y su touchDevice espera detrás de la revocación. Antes respondía 200 {"authorized": true} a una pantalla ya
+// revocada; con la corrección (K1-D29) responde 401 DEVICE_REVOKED, lo único que acepta la prueba, y no crea ninguna
+// sesión.
 func testR1RevokedSettingsInFlight(t *testing.T, fixture *r1Fixture) {
 	display := fixture.kitchenDevice(t, "Pantalla R1 ajustes en curso")
 	holder, err := fixture.pool.Begin(fixture.ctx)
@@ -1002,11 +1014,12 @@ func testR1RevokedSettingsInFlight(t *testing.T, fixture *r1Fixture) {
 		t.Fatalf("revocar: %d", code)
 	}
 	result := <-opened
-	t.Logf("settings-access en curso de una pantalla revocada (R1-2): %d %s", result.code, result.body)
-	current := result.code == 200 && strings.TrimSpace(string(result.body)) == `{"authorized":true}`
-	fixed := result.code == 401 && errorCode(t, result.body) == "DEVICE_REVOKED"
-	if !current && !fixed {
-		t.Fatalf("settings-access en curso de una pantalla revocada: %d %s", result.code, result.body)
+	if result.code != 401 || errorCode(t, result.body) != "DEVICE_REVOKED" {
+		t.Fatalf("settings-access en curso de una pantalla revocada (R1-2): %d %s", result.code, result.body)
+	}
+	if fixture.count(t, `SELECT count(*)::int FROM app.audit_events WHERE device_id=$1 AND action='kitchen_display.settings_opened'`,
+		display.deviceID) != 0 {
+		t.Fatal("la pantalla revocada abrió los ajustes")
 	}
 	if fixture.count(t, "SELECT count(*)::int FROM app.sessions") != sessionsBefore {
 		t.Fatal("settings-access creó una sesión")
