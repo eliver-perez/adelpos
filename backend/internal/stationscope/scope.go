@@ -124,6 +124,25 @@ func Compute(terminalAll, userAll, allByPermission bool, stations []Station) *Sc
 	return scope
 }
 
+// Within es el alcance restringido a las estaciones dadas: las de ids que este alcance permite, nunca más (etapa K1,
+// Fase A). La pantalla de cocina Android muestra las de su selección (o todas) que reciben comandas en pantalla
+// (recepción «kds» o «both», K1-D11): el resultado nunca es «todas», para que una estación nueva o una que cambie a
+// «Solo impresora» no aparezca hasta que se vuelva a calcular.
+func (scope *Scope) Within(ids []string) *Scope {
+	restricted := &Scope{
+		visible: map[string]bool{},
+		summary: scope.summary,
+	}
+	for _, id := range ids {
+		if scope.Allows(id) {
+			restricted.visible[id] = true
+		}
+	}
+	restricted.summary.All = false
+	restricted.summary.Common = len(restricted.visible) > 0
+	return restricted
+}
+
 // Allows indica si la estación es visible.
 func (scope *Scope) Allows(stationID string) bool {
 	return scope.All || scope.visible[stationID]

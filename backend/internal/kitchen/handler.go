@@ -132,7 +132,20 @@ func Handle(ctx context.Context, tx pgx.Tx, request Request, audit Audit) (any, 
 	if err := events.Append(ctx, tx, "kitchen."+parts[0]+".changed", scope, nil, nil); err != nil {
 		return nil, err
 	}
+	// Etapa K1 (Fase A, K1-D7): las estaciones, el seguimiento, los límites de color y las estaciones de cada terminal
+	// cambian lo que muestran las pantallas de cocina Android, que no reciben los eventos de configuración de cocina
+	// (piden kitchen.stations.read): se les avisa con el suyo, sin contenido y sin pantalla (todas vuelven a leer).
+	if displayConfigurationRoute(parts[0]) {
+		if err := AppendDisplayConfigurationChanged(ctx, tx, nil); err != nil {
+			return nil, err
+		}
+	}
 	return result, nil
+}
+
+// displayConfigurationRoute son las escrituras de cocina que cambian la configuración de las pantallas de cocina.
+func displayConfigurationRoute(resource string) bool {
+	return resource == "stations" || resource == "settings" || resource == "timing" || resource == "access"
 }
 
 // isWidthTestRoute identifica kitchen/printers/{id}/width-test (etapa 9C).

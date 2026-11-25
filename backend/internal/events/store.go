@@ -75,6 +75,41 @@ func Head(ctx context.Context, tx pgx.Tx) (int64, error) {
 // de cocina que puede ver (etapa 9F: en la terminal, intersectadas con las que atiende el usuario; con
 // kitchen.stations.all, todas): un evento de una estación fuera de ellas no se entrega.
 func Read(ctx context.Context, tx pgx.Tx, after int64, permissions []string, stations *stationscope.Scope, stationFilter string) (*Batch, error) {
+	allStations := slices.Contains(permissions, "kitchen.stations.all")
+	return ReadWith(ctx, tx, after, func(candidates []Change) ([]Change, error) {
+		accepted := []Change{}
+		for _, event := range candidates {
+			// Etapa L1 (Fase C): el cambio de la licencia o de la hora llega a todas las terminales (ver LicenseChangedKind).
+			if IsLicenseChanged(event) {
+				accepted = append(accepted, event)
+				continue
+			}
+			if stationFilter != "" && (event.StationID == nil || *event.StationID != stationFilter) {
+				continue
+			}
+			if !allStations && event.StationID == nil && (event.Scope == "kitchen" || event.Scope == "printing") {
+				continue
+			}
+			stationAllowed := event.StationID == nil || stations.Allows(*event.StationID)
+			if !stationAllowed || !allowed(event.Scope, permissions) {
+				continue
+			}
+			accepted = append(accepted, event)
+		}
+		return accepted, nil
+	})
+}
+
+// IsLicenseChanged dice si el evento es license.changed, que reciben todas las terminales.
+func IsLicenseChanged(event Change) bool {
+	return event.Kind == LicenseChangedKind && event.Scope == licenseChangedScope
+}
+
+// ReadWith entrega los eventos posteriores al cursor que acepta filter, con la misma ventana de replay y el mismo
+// cursor que Read: el cursor avanza también sobre los eventos que filter descarta. filter recibe el lote completo (hasta
+// 200 eventos, en orden) para decidir con una sola consulta si hace falta. Etapa K1 (Fase A): lo usa la pantalla de
+// cocina Android, que no tiene permisos de rol sino su propio filtro (kitchen.DisplayEvents).
+func ReadWith(ctx context.Context, tx pgx.Tx, after int64, filter func([]Change) ([]Change, error)) (*Batch, error) {
 	var head, oldest int64
 	if err := tx.QueryRow(ctx, "SELECT coalesce(max(sequence),0),coalesce(min(sequence),0) FROM app.realtime_events").Scan(&head, &oldest); err != nil {
 		return nil, err
@@ -85,12 +120,12 @@ func Read(ctx context.Context, tx pgx.Tx, after int64, permissions []string, sta
 		batch.Cursor, batch.Reset = head, true
 		return batch, nil
 	}
-	allStations := slices.Contains(permissions, "kitchen.stations.all")
 	rows, err := tx.Query(ctx, `SELECT to_jsonb(e) FROM app.realtime_events e WHERE sequence>$1 ORDER BY sequence LIMIT 200`, after)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
+	candidates := []Change{}
 	for rows.Next() {
 		var encoded []byte
 		if err := rows.Scan(&encoded); err != nil {
@@ -101,24 +136,21 @@ func Read(ctx context.Context, tx pgx.Tx, after int64, permissions []string, sta
 			return nil, err
 		}
 		batch.Cursor = event.Sequence
-		// Etapa L1 (Fase C): el cambio de la licencia o de la hora llega a todas las terminales (ver LicenseChangedKind).
-		if event.Kind == LicenseChangedKind && event.Scope == licenseChangedScope {
-			batch.Events = append(batch.Events, event)
-			continue
-		}
-		if stationFilter != "" && (event.StationID == nil || *event.StationID != stationFilter) {
-			continue
-		}
-		if !allStations && event.StationID == nil && (event.Scope == "kitchen" || event.Scope == "printing") {
-			continue
-		}
-		stationAllowed := event.StationID == nil || stations.Allows(*event.StationID)
-		if !stationAllowed || !allowed(event.Scope, permissions) {
-			continue
-		}
-		batch.Events = append(batch.Events, event)
+		candidates = append(candidates, event)
 	}
-	return batch, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	if len(candidates) == 0 {
+		return batch, nil
+	}
+	accepted, err := filter(candidates)
+	if err != nil {
+		return nil, err
+	}
+	batch.Events = accepted
+	return batch, nil
 }
 
 func allowed(scope string, permissions []string) bool {
