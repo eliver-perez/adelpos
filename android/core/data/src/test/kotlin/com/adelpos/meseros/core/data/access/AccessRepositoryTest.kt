@@ -4,22 +4,23 @@ import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import com.adelpos.meseros.core.data.api.ClientIdentity
+import com.adelpos.core.model.access.RepairReason
+import com.adelpos.core.model.access.UnsentOrder
+import com.adelpos.core.model.connection.LinkState
+import com.adelpos.core.model.error.AppError
+import com.adelpos.core.model.server.FoundServer
+import com.adelpos.core.model.server.ServerAnnouncements
+import com.adelpos.core.model.server.ServerRelocator
+import com.adelpos.core.model.text.Hex
+import com.adelpos.core.network.api.ClientIdentity
+import com.adelpos.core.network.api.ClientKinds
+import com.adelpos.core.network.discovery.HttpsServerProbe
+import com.adelpos.core.network.wipe.DeviceDataWipe
 import com.adelpos.meseros.core.data.db.AppDatabase
 import com.adelpos.meseros.core.data.db.PairedServerEntity
-import com.adelpos.meseros.core.data.discovery.HttpsServerProbe
-import com.adelpos.meseros.core.data.wipe.DeviceDataWipe
 import com.adelpos.meseros.core.domain.access.DeviceStatus
 import com.adelpos.meseros.core.domain.access.EntryResult
 import com.adelpos.meseros.core.domain.access.OfflineAttemptPolicy
-import com.adelpos.meseros.core.domain.access.RepairReason
-import com.adelpos.meseros.core.domain.access.UnsentOrder
-import com.adelpos.meseros.core.domain.connection.LinkState
-import com.adelpos.meseros.core.domain.error.AppError
-import com.adelpos.meseros.core.domain.server.FoundServer
-import com.adelpos.meseros.core.domain.server.ServerAnnouncements
-import com.adelpos.meseros.core.domain.server.ServerRelocator
-import com.adelpos.meseros.core.domain.text.Hex
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -66,7 +67,7 @@ class AccessRepositoryTest {
             link.online = value
         }
 
-    private val identity = ClientIdentity("0.1.0")
+    private val identity = ClientIdentity("0.1.0", ClientKinds.ANDROID)
     private val ana = "aaaaaaaa-0000-4000-8000-000000000001"
     private val beto = "bbbbbbbb-0000-4000-8000-000000000002"
 

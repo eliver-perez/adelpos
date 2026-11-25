@@ -1,14 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Textos compartidos de la interfaz (también para la etapa A2). En español del restaurante, sin tecnicismos. -->
 <resources xmlns:tools="http://schemas.android.com/tools" tools:locale="es">
-    <string name="connection_online">En línea</string>
-    <string name="connection_offline">Sin conexión</string>
-    <plurals name="connection_pending_orders">
-        <item quantity="one">%d pedido por enviar</item>
-        <item quantity="many">%d pedidos por enviar</item>
-        <item quantity="other">%d pedidos por enviar</item>
-    </plurals>
-
     <string name="table_state_free">Libre</string>
     <string name="table_state_occupied">Ocupada</string>
     <string name="table_state_awaiting_payment">Esperando pago</string>
@@ -16,8 +8,6 @@
     <string name="table_state_out_of_service">Fuera de servicio</string>
 
     <string name="panes_back">Volver a %1$s</string>
-    <string name="top_bar_back">Volver</string>
-    <string name="top_bar_logo">AD-EL POS</string>
     <!-- Etapa L1: el aviso discreto de la licencia en tolerancia (el texto con los días sale de LicenseMessages). -->
     <string name="license_grace_title">La licencia venció</string>
     <string name="license_grace_ok">Entendido</string>
@@ -34,6 +24,7 @@
     <string name="waiter_menu_switch">Cambiar de mesero</string>
     <string name="waiter_menu_offline">Entraste sin conexión</string>
     <string name="waiter_menu_alerts">Avisos de platillos listos</string>
+
     <!-- Para llevar (etapa A2, §3.3): preparación y pago como los dice Go. -->
     <string name="takeaway_preparation_not_sent">Sin enviar a cocina</string>
     <string name="takeaway_preparation_pending">Pendiente</string>

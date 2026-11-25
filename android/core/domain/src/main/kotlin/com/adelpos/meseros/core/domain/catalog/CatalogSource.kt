@@ -1,6 +1,6 @@
 package com.adelpos.meseros.core.domain.catalog
 
-import com.adelpos.meseros.core.domain.error.AppError
+import com.adelpos.core.model.error.AppError
 import java.io.File
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow

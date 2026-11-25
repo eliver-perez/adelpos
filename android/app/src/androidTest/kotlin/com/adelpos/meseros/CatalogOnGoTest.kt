@@ -14,8 +14,17 @@ import androidx.compose.ui.test.performClick
 import androidx.room.Room
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import com.adelpos.meseros.core.data.api.ClientIdentity
-import com.adelpos.meseros.core.data.api.PinnedHttpClient
+import com.adelpos.core.model.realtime.RealtimeKinds
+import com.adelpos.core.model.realtime.RealtimeScopes
+import com.adelpos.core.model.realtime.RealtimeSignal
+import com.adelpos.core.model.realtime.RebuildReason
+import com.adelpos.core.network.api.ClientIdentity
+import com.adelpos.core.network.api.ClientKinds
+import com.adelpos.core.network.api.PinnedHttpClient
+import com.adelpos.core.network.realtime.RealtimeClient
+import com.adelpos.core.network.session.AuthorizedServer
+import com.adelpos.core.network.session.FixedServerAccess
+import com.adelpos.core.ui.theme.AdelTheme
 import com.adelpos.meseros.core.data.catalog.CatalogApi
 import com.adelpos.meseros.core.data.catalog.CatalogImageCache
 import com.adelpos.meseros.core.data.catalog.CatalogRepository
@@ -23,20 +32,12 @@ import com.adelpos.meseros.core.data.catalog.CatalogStore
 import com.adelpos.meseros.core.data.catalog.CatalogSyncOutcome
 import com.adelpos.meseros.core.data.catalog.CatalogSynchronizer
 import com.adelpos.meseros.core.data.catalog.db.CatalogDatabase
-import com.adelpos.meseros.core.data.realtime.RealtimeClient
 import com.adelpos.meseros.core.data.realtime.RecoveryStateCursorSeed
-import com.adelpos.meseros.core.data.session.AuthorizedServer
-import com.adelpos.meseros.core.data.session.FixedServerAccess
 import com.adelpos.meseros.core.domain.catalog.AvailabilityStatus
 import com.adelpos.meseros.core.domain.catalog.CatalogProduct
 import com.adelpos.meseros.core.domain.catalog.CatalogQuery
-import com.adelpos.meseros.core.domain.realtime.RealtimeKinds
-import com.adelpos.meseros.core.domain.realtime.RealtimeScopes
-import com.adelpos.meseros.core.domain.realtime.RealtimeSignal
-import com.adelpos.meseros.core.domain.realtime.RebuildReason
 import com.adelpos.meseros.core.ui.catalog.CatalogBrowser
 import com.adelpos.meseros.core.ui.catalog.productTag
-import com.adelpos.meseros.core.ui.theme.AdelTheme
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
@@ -117,7 +118,10 @@ class CatalogOnGoTest {
     }
 
     private fun deviceClient(server: GoTestServer): OkHttpClient =
-        PinnedHttpClient.create(server.pin, ClientIdentity(version = "0.1.0"))
+        PinnedHttpClient.create(
+                server.pin,
+                ClientIdentity(version = "0.1.0", kind = ClientKinds.ANDROID),
+            )
             .newBuilder()
             // Registra el estado de cada petición de imagen (200 o 304) para comprobar la caché.
             .addNetworkInterceptor { chain ->

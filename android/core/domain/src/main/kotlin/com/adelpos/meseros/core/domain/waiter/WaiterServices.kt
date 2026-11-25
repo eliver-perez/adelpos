@@ -1,8 +1,8 @@
 package com.adelpos.meseros.core.domain.waiter
 
+import com.adelpos.core.model.error.AppError
+import com.adelpos.core.model.error.AppResult
 import com.adelpos.meseros.core.domain.catalog.LineSelection
-import com.adelpos.meseros.core.domain.error.AppError
-import com.adelpos.meseros.core.domain.error.AppResult
 import com.adelpos.meseros.core.domain.money.Money
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow

@@ -16,6 +16,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.adelpos.core.ui.components.LocalUserActivity
+import com.adelpos.core.ui.components.reportsUserActivity
 import com.adelpos.meseros.core.domain.catalog.Catalog
 import com.adelpos.meseros.core.domain.catalog.CatalogImages
 import com.adelpos.meseros.core.domain.catalog.CatalogProduct
@@ -25,9 +27,7 @@ import com.adelpos.meseros.core.domain.waiter.OfflineOrderPlan
 import com.adelpos.meseros.core.domain.waiter.WaiterAction
 import com.adelpos.meseros.core.ui.catalog.CatalogBrowser
 import com.adelpos.meseros.core.ui.catalog.ProductCustomizer
-import com.adelpos.meseros.core.ui.components.LocalUserActivity
 import com.adelpos.meseros.core.ui.components.SystemBackHandler
-import com.adelpos.meseros.core.ui.components.reportsUserActivity
 import com.adelpos.meseros.core.ui.layout.AdaptivePanes
 import com.adelpos.meseros.core.ui.layout.PaneLayout
 

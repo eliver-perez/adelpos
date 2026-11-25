@@ -38,24 +38,25 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.adelpos.core.model.connection.LinkState
+import com.adelpos.core.ui.R as CoreR
+import com.adelpos.core.ui.access.clockTime
+import com.adelpos.core.ui.access.deviceWords
+import com.adelpos.core.ui.access.findserver.ProblemNotice
+import com.adelpos.core.ui.components.SecondaryButton
+import com.adelpos.core.ui.icons.AdelIcons
+import com.adelpos.core.ui.theme.AdelDimens
+import com.adelpos.core.ui.theme.AdelTheme
 import com.adelpos.meseros.core.domain.access.WaiterProfile
 import com.adelpos.meseros.core.domain.access.WaiterRoster
-import com.adelpos.meseros.core.domain.connection.LinkState
 import com.adelpos.meseros.core.ui.components.AdelPinPadDefaults
 import com.adelpos.meseros.core.ui.components.PinPad
 import com.adelpos.meseros.core.ui.components.PinPadDots
-import com.adelpos.meseros.core.ui.components.SecondaryButton
 import com.adelpos.meseros.core.ui.components.WaiterBadge
-import com.adelpos.meseros.core.ui.icons.AdelIcons
 import com.adelpos.meseros.core.ui.layout.PaneLayout
 import com.adelpos.meseros.core.ui.layout.currentHeightCompact
-import com.adelpos.meseros.core.ui.theme.AdelDimens
-import com.adelpos.meseros.core.ui.theme.AdelTheme
 import com.adelpos.meseros.feature.access.AccessDependencies
 import com.adelpos.meseros.feature.access.R
-import com.adelpos.meseros.feature.access.clockTime
-import com.adelpos.meseros.feature.access.deviceWords
-import com.adelpos.meseros.feature.access.findserver.ProblemNotice
 import kotlinx.coroutines.delay
 
 /**
@@ -476,7 +477,7 @@ internal fun entryMessageText(message: EntryMessage): String {
         EntryMessage.NotAllowed -> stringResource(R.string.entry_not_allowed)
         EntryMessage.UnknownOffline ->
             stringResource(R.string.entry_unknown_offline, words.thisDevice)
-        EntryMessage.UpdateRequired -> stringResource(R.string.entry_update_required)
+        EntryMessage.UpdateRequired -> stringResource(CoreR.string.entry_update_required)
         EntryMessage.Unreachable -> stringResource(R.string.entry_unreachable)
         is EntryMessage.Failed -> message.serverMessage ?: stringResource(R.string.entry_failed)
     }

@@ -1,7 +1,8 @@
 package com.adelpos.meseros.core.data.ready
 
-import com.adelpos.meseros.core.data.session.AuthorizedServer
-import com.adelpos.meseros.core.domain.error.AppError
+import com.adelpos.core.model.error.AppError
+import com.adelpos.core.model.realtime.ReconnectBackoff
+import com.adelpos.core.network.session.AuthorizedServer
 import com.adelpos.meseros.core.domain.ready.ReadyAlert
 import com.adelpos.meseros.core.domain.ready.ReadyAlertPresenter
 import com.adelpos.meseros.core.domain.ready.ReadyAlertSettings
@@ -10,7 +11,6 @@ import com.adelpos.meseros.core.domain.ready.ReadyAlertsLedger
 import com.adelpos.meseros.core.domain.ready.ReadyAlertsLifecycle
 import com.adelpos.meseros.core.domain.ready.ReadyAlertsProcessor
 import com.adelpos.meseros.core.domain.ready.ReadyAlertsStatus
-import com.adelpos.meseros.core.domain.realtime.ReconnectBackoff
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull

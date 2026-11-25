@@ -1,11 +1,11 @@
 package com.adelpos.meseros.core.data.waiter
 
-import com.adelpos.meseros.core.data.api.ApiErrors
-import com.adelpos.meseros.core.data.api.ApiOutcome
+import com.adelpos.core.model.error.AppError
+import com.adelpos.core.model.error.AppResult
+import com.adelpos.core.network.api.ApiErrors
+import com.adelpos.core.network.api.ApiOutcome
 import com.adelpos.meseros.core.data.catalog.toLineRequest
 import com.adelpos.meseros.core.domain.catalog.LineSelection
-import com.adelpos.meseros.core.domain.error.AppError
-import com.adelpos.meseros.core.domain.error.AppResult
 import com.adelpos.meseros.core.domain.waiter.DraftQuote
 import com.adelpos.meseros.core.domain.waiter.SentChangeResult
 import com.adelpos.meseros.core.domain.waiter.SentLineService

@@ -1,9 +1,9 @@
 package com.adelpos.meseros.core.data.waiter
 
+import com.adelpos.core.network.license.LicenseSummaryDto
 import com.adelpos.meseros.core.data.api.MoneySerializer
 import com.adelpos.meseros.core.data.catalog.CustomizationDto
 import com.adelpos.meseros.core.data.catalog.LineRequestDto
-import com.adelpos.meseros.core.data.license.LicenseSummaryDto
 import com.adelpos.meseros.core.domain.money.Money
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable

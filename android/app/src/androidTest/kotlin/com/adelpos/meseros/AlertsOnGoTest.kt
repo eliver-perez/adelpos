@@ -26,11 +26,16 @@ import androidx.compose.ui.test.printToLog
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.adelpos.core.network.api.ClientIdentity
+import com.adelpos.core.network.api.ClientKinds
+import com.adelpos.core.network.api.PinnedHttpClient
+import com.adelpos.core.ui.access.findserver.TAG_ADDRESS
+import com.adelpos.core.ui.access.findserver.TAG_FIND_SERVER
+import com.adelpos.core.ui.access.findserver.TAG_PAIRING_CODE
+import com.adelpos.core.ui.access.status.TAG_RETIRED
 import com.adelpos.meseros.core.capture.TAG_ORDER_PANEL
 import com.adelpos.meseros.core.capture.TAG_SEND_TO_KITCHEN
 import com.adelpos.meseros.core.capture.TAG_SYNC_PREFIX
-import com.adelpos.meseros.core.data.api.ClientIdentity
-import com.adelpos.meseros.core.data.api.PinnedHttpClient
 import com.adelpos.meseros.core.data.ready.ReadyChannelState
 import com.adelpos.meseros.core.data.waiter.db.WaiterStorage
 import com.adelpos.meseros.core.domain.ready.ReadyChannels
@@ -46,12 +51,8 @@ import com.adelpos.meseros.core.ui.components.TAG_WAITER_MENU
 import com.adelpos.meseros.core.ui.components.TAG_WAITER_SWITCH
 import com.adelpos.meseros.core.ui.layout.TAG_PANE_BACK
 import com.adelpos.meseros.core.ui.layout.TAG_PANE_OPEN_SECONDARY
-import com.adelpos.meseros.feature.access.findserver.TAG_ADDRESS
-import com.adelpos.meseros.feature.access.findserver.TAG_FIND_SERVER
-import com.adelpos.meseros.feature.access.findserver.TAG_PAIRING_CODE
 import com.adelpos.meseros.feature.access.pin.TAG_ENTRY
 import com.adelpos.meseros.feature.access.pin.TAG_WAITER_PREFIX
-import com.adelpos.meseros.feature.access.status.TAG_RETIRED
 import com.adelpos.meseros.feature.waiter.tables.TAG_ACCOUNT_PANE
 import com.adelpos.meseros.feature.waiter.tables.TAG_NEW_ACCOUNT
 import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_LIST
@@ -268,7 +269,10 @@ class AlertsOnGoTest {
         // El segundo dispositivo: emparejado por la API, con Beto que entra con su PIN.
         val server = GoTestServer()
         val client =
-            PinnedHttpClient.create(server.pin, ClientIdentity(version = BuildConfig.VERSION_NAME))
+            PinnedHttpClient.create(
+                server.pin,
+                ClientIdentity(version = BuildConfig.VERSION_NAME, kind = ClientKinds.ANDROID),
+            )
         val other = server.pairAndroid(client, server.mainComputer())
         pinLogin(client, server.network, other, ids.getValue("beto"), BETO_PIN)
 

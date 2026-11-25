@@ -31,8 +31,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.adelpos.core.ui.theme.AdelDimens
 import com.adelpos.meseros.core.ui.R
-import com.adelpos.meseros.core.ui.theme.AdelDimens
 
 /**
  * Teclado numérico grande para el PIN (§3.2), compartido con la etapa A2: puntos que dicen cuántos

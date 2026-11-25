@@ -1,6 +1,6 @@
 package com.adelpos.meseros.core.domain.ready
 
-import com.adelpos.meseros.core.domain.error.AppError
+import com.adelpos.core.model.error.AppError
 import com.adelpos.meseros.core.domain.ready.ReadyAlertsLifecycle.ErrorAction
 import com.adelpos.meseros.core.domain.ready.ReadyAlertsLifecycle.StartDecision
 import com.adelpos.meseros.core.domain.ready.ReadyAlertsLifecycle.Trigger

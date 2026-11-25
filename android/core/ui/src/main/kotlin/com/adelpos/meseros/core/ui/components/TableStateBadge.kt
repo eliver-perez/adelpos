@@ -19,11 +19,11 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.adelpos.core.ui.icons.AdelIcons
+import com.adelpos.core.ui.theme.AdelTheme
+import com.adelpos.core.ui.theme.TableStateColors
 import com.adelpos.meseros.core.domain.table.TableState
 import com.adelpos.meseros.core.ui.R
-import com.adelpos.meseros.core.ui.icons.AdelIcons
-import com.adelpos.meseros.core.ui.theme.AdelTheme
-import com.adelpos.meseros.core.ui.theme.TableStateColors
 
 /**
  * Estado de una mesa, que se reconoce por su color, su texto y su ícono, como en el escritorio

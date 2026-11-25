@@ -8,8 +8,8 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.adelpos.core.model.connection.LinkState
 import com.adelpos.meseros.core.capture.CaptureDependencies
-import com.adelpos.meseros.core.domain.connection.LinkState
 import com.adelpos.meseros.core.domain.waiter.Capture
 import com.adelpos.meseros.core.domain.waiter.CustomerTarget
 import com.adelpos.meseros.core.domain.waiter.DeliveryResult

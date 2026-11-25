@@ -15,10 +15,10 @@ import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.adelpos.core.ui.components.TAG_TOP_BAR
 import com.adelpos.meseros.core.capture.TAG_CAPTURE
 import com.adelpos.meseros.core.data.waiter.db.WaiterPermissionsEntity
 import com.adelpos.meseros.core.data.waiter.db.WaiterStorage
-import com.adelpos.meseros.core.ui.components.TAG_TOP_BAR
 import com.adelpos.meseros.core.ui.layout.NavigationPlacement
 import com.adelpos.meseros.core.ui.layout.navigationPlacementFor
 import com.adelpos.meseros.feature.takeaway.TAG_TAKEAWAY_NEW

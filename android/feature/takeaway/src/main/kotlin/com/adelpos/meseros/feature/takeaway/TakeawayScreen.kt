@@ -30,9 +30,12 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.adelpos.core.model.connection.LinkState
+import com.adelpos.core.ui.components.PrimaryButton
+import com.adelpos.core.ui.components.SecondaryButton
+import com.adelpos.core.ui.theme.AdelDimens
 import com.adelpos.meseros.core.capture.CustomerDialog
 import com.adelpos.meseros.core.capture.customerSummary
-import com.adelpos.meseros.core.domain.connection.LinkState
 import com.adelpos.meseros.core.domain.waiter.DeliveryOffer
 import com.adelpos.meseros.core.domain.waiter.ElapsedTime
 import com.adelpos.meseros.core.domain.waiter.OrderState
@@ -43,9 +46,6 @@ import com.adelpos.meseros.core.domain.waiter.TakeawayRead
 import com.adelpos.meseros.core.domain.waiter.TakeawayStates
 import com.adelpos.meseros.core.domain.waiter.WaiterAction
 import com.adelpos.meseros.core.domain.waiter.WaiterPermissions
-import com.adelpos.meseros.core.ui.components.PrimaryButton
-import com.adelpos.meseros.core.ui.components.SecondaryButton
-import com.adelpos.meseros.core.ui.theme.AdelDimens
 import com.adelpos.meseros.core.ui.waiter.ElapsedLabel
 import com.adelpos.meseros.core.ui.waiter.OrderStateBadge
 import com.adelpos.meseros.core.ui.waiter.TakeawayPaymentBadge

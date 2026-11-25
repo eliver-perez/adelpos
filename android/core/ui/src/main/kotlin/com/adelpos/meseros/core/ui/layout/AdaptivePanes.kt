@@ -24,11 +24,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.adelpos.core.ui.components.SecondaryButton
+import com.adelpos.core.ui.icons.AdelIcons
+import com.adelpos.core.ui.theme.AdelDimens
 import com.adelpos.meseros.core.ui.R
 import com.adelpos.meseros.core.ui.components.LocalTopBarBack
-import com.adelpos.meseros.core.ui.components.SecondaryButton
-import com.adelpos.meseros.core.ui.icons.AdelIcons
-import com.adelpos.meseros.core.ui.theme.AdelDimens
 
 /**
  * Andamio de uno o dos paneles, compartido por el modo Mesero y el modo Para llevar de la A2.

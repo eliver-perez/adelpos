@@ -31,6 +31,11 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.adelpos.core.ui.components.LocalUserActivity
+import com.adelpos.core.ui.components.PrimaryButton
+import com.adelpos.core.ui.components.SecondaryButton
+import com.adelpos.core.ui.components.reportsUserActivity
+import com.adelpos.core.ui.theme.AdelDimens
 import com.adelpos.meseros.core.capture.CaptureDependencies
 import com.adelpos.meseros.core.capture.R
 import com.adelpos.meseros.core.capture.destinationLabel
@@ -45,11 +50,6 @@ import com.adelpos.meseros.core.domain.waiter.OrderState
 import com.adelpos.meseros.core.domain.waiter.OthersPending
 import com.adelpos.meseros.core.domain.waiter.PendingOrder
 import com.adelpos.meseros.core.domain.waiter.ReviewReason
-import com.adelpos.meseros.core.ui.components.LocalUserActivity
-import com.adelpos.meseros.core.ui.components.PrimaryButton
-import com.adelpos.meseros.core.ui.components.SecondaryButton
-import com.adelpos.meseros.core.ui.components.reportsUserActivity
-import com.adelpos.meseros.core.ui.theme.AdelDimens
 import com.adelpos.meseros.core.ui.waiter.OrderStateBadge
 import java.time.Instant
 import java.time.ZoneId

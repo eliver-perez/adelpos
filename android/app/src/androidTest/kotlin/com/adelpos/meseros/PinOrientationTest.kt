@@ -9,7 +9,7 @@ import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import com.adelpos.meseros.core.domain.error.AppError
+import com.adelpos.core.model.error.AppError
 import com.adelpos.meseros.core.ui.components.TAG_PIN_KEY_PREFIX
 import com.adelpos.meseros.core.ui.components.TAG_PIN_SUBMIT
 import com.adelpos.meseros.feature.access.pin.TAG_PIN_PANEL

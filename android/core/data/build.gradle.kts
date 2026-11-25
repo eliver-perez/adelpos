@@ -1,5 +1,7 @@
-// Datos: cliente HTTP con huella fijada, JSON de la API v1, Room, monitor de conexión y cifrado con
-// el Android Keystore. Biblioteca Android sin pantallas.
+// Datos de meseros: Room (AppDatabase y catalog.db), la entrada con PIN, el catálogo, la cola, el
+// modo Mesero y los avisos de listo. Biblioteca Android sin pantallas. El cliente HTTP con huella
+// fijada, el emparejamiento, el canal de eventos, el estado de conexión y el Keystore son de
+// android-core:network (etapa K1).
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.serialization)
@@ -56,6 +58,8 @@ room {
 
 dependencies {
     api(project(":core:domain"))
+    // Etapa K1: la red compartida con la aplicación de cocina (android-core:network).
+    api("com.adelpos.core:network")
     api(libs.okhttp)
     // Canal de tiempo real (SSE) de Go: un solo flujo por proceso (RealtimeClient).
     implementation(libs.okhttp.sse)

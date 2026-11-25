@@ -1,0 +1,96 @@
+package com.adelpos.core.ui.theme
+
+import java.io.File
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+/**
+ * Los colores solo se escriben en AdelPalette.kt (como los tokens de styles.css en el escritorio):
+ * ningún otro archivo de la aplicación usa `Color(0x…)`, colores con nombre de Compose
+ * (`Color.Red`…), `Color.parse`/`toColorInt` ni colores hexadecimales en los recursos XML.
+ * `Color.Transparent` y `Color.Unspecified` se permiten. Única excepción: los íconos de
+ * notificación (`res/drawable/ic_stat_*.xml`, etapa A2) pueden usar `@android:color/white`, porque
+ * Android solo toma su transparencia y los pinta él mismo; no son un color de la interfaz.
+ */
+class ColorsOnlyInPaletteTest {
+    // Etapa K1: los tres proyectos Android (android/, android-core/ y cocina/) siguen la misma
+    // regla.
+    private val repositoryRoot =
+        File(System.getProperty("adelpos.repositoryRoot") ?: error("Falta adelpos.repositoryRoot"))
+
+    private val androidRoots =
+        listOf("android", "android-core", "cocina")
+            .map(repositoryRoot::resolve)
+            .filter(File::isDirectory)
+
+    private val kotlinColor =
+        Regex(
+            "Color\\(\\s*0x|Color\\(\\s*(red|green|blue)\\s*=|Color\\.(Black|White|Red|Green|Blue|Yellow|Cyan|Magenta|" +
+                "Gray|LightGray|DarkGray)\\b|parseColor|toColorInt|Color\\.rgb\\(|Color\\.argb\\(",
+        )
+    private val xmlColor = Regex("#[0-9a-fA-F]{3,8}\\b|@android:color/(?!transparent)")
+
+    private fun sources(extension: String): List<File> = androidRoots.flatMap { root ->
+        root
+            .walkTopDown()
+            .onEnter { it.name != "build" && !it.name.startsWith(".") }
+            .filter {
+                it.isFile &&
+                    it.extension == extension &&
+                    it.path.contains(
+                        "${File.separator}src${File.separator}main${File.separator}",
+                    )
+            }
+            .toList()
+    }
+
+    @Test
+    fun soloLaPaletaEscribeColoresEnKotlin() {
+        val kotlinFiles = sources("kt")
+        assertTrue("No se encontraron fuentes en $androidRoots", kotlinFiles.size > 10)
+        val offenders =
+            kotlinFiles
+                .filter { it.name != "AdelPalette.kt" }
+                .flatMap { file ->
+                    file.readLines().mapIndexedNotNull { index, line ->
+                        if (kotlinColor.containsMatchIn(line))
+                            "${file.relativeTo(repositoryRoot)}:${index + 1}: $line"
+                        else null
+                    }
+                }
+        assertEquals(
+            "Colores fuera de AdelPalette.kt:\n" + offenders.joinToString("\n"),
+            emptyList<String>(),
+            offenders,
+        )
+    }
+
+    private val notificationIconWhite = Regex("@android:color/white\\b")
+
+    private fun isNotificationIcon(file: File): Boolean =
+        file.parentFile?.name == "drawable" && file.name.startsWith("ic_stat_")
+
+    @Test
+    fun losRecursosNoEscribenColores() {
+        val offenders =
+            sources("xml").flatMap { file ->
+                file.readLines().mapIndexedNotNull { index, line ->
+                    val checked =
+                        if (isNotificationIcon(file)) {
+                            line.replace(notificationIconWhite, "")
+                        } else {
+                            line
+                        }
+                    if (xmlColor.containsMatchIn(checked))
+                        "${file.relativeTo(repositoryRoot)}:${index + 1}: $line"
+                    else null
+                }
+            }
+        assertEquals(
+            "Colores en recursos XML:\n" + offenders.joinToString("\n"),
+            emptyList<String>(),
+            offenders,
+        )
+    }
+}

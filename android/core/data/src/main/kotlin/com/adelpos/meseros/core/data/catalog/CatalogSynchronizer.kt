@@ -1,11 +1,11 @@
 package com.adelpos.meseros.core.data.catalog
 
 import android.database.SQLException
-import com.adelpos.meseros.core.data.realtime.AccessInterruptionMapping
-import com.adelpos.meseros.core.data.session.ServerAccess
-import com.adelpos.meseros.core.domain.error.AppError
-import com.adelpos.meseros.core.domain.error.AppResult
-import com.adelpos.meseros.core.domain.realtime.AccessInterruptions
+import com.adelpos.core.model.error.AppError
+import com.adelpos.core.model.error.AppResult
+import com.adelpos.core.model.realtime.AccessInterruptions
+import com.adelpos.core.network.realtime.AccessInterruptionMapping
+import com.adelpos.core.network.session.ServerAccess
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex

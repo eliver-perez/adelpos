@@ -3,6 +3,7 @@ package com.adelpos.meseros
 import android.app.Application
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.runner.AndroidJUnitRunner
+import com.adelpos.core.model.server.ServerAnnouncements
 import com.adelpos.meseros.core.data.waiter.LostResponses
 import com.adelpos.meseros.core.data.waiter.WaiterApi
 import java.util.concurrent.atomic.AtomicInteger
@@ -67,7 +68,7 @@ class AdelTestRunner : AndroidJUnitRunner() {
     }
 
     companion object {
-        const val TEST_SERVICE_TYPE = "_adelpostest._tcp"
+        const val TEST_SERVICE_TYPE = ServerAnnouncements.TEST_SERVICE_TYPE
 
         private val DRAFT_PATH = Regex("restaurant/accounts/[^/]+/draft")
         private val CONFIRM_PATH = Regex("restaurant/accounts/[^/]+/confirm")

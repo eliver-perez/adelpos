@@ -1,8 +1,8 @@
 package com.adelpos.meseros.feature.waiter
 
+import com.adelpos.core.model.connection.LinkState
 import com.adelpos.meseros.core.capture.CaptureDependencies
 import com.adelpos.meseros.core.domain.access.ActiveWaiter
-import com.adelpos.meseros.core.domain.connection.LinkState
 import com.adelpos.meseros.core.domain.preferences.TablesViewPreference
 import com.adelpos.meseros.core.domain.waiter.CaptureService
 import com.adelpos.meseros.core.domain.waiter.OrderQueueService

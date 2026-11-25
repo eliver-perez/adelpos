@@ -20,15 +20,15 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.adelpos.core.ui.icons.AdelIcons
+import com.adelpos.core.ui.theme.AdelTheme
 import com.adelpos.meseros.core.domain.waiter.ElapsedTime
 import com.adelpos.meseros.core.domain.waiter.OrderState
 import com.adelpos.meseros.core.domain.waiter.PreparationState
 import com.adelpos.meseros.core.domain.waiter.TakeawayPayment
 import com.adelpos.meseros.core.domain.waiter.TakeawayPreparation
 import com.adelpos.meseros.core.ui.R
-import com.adelpos.meseros.core.ui.icons.AdelIcons
 import com.adelpos.meseros.core.ui.icons.CatalogIcons
-import com.adelpos.meseros.core.ui.theme.AdelTheme
 
 /** Colores de una etiqueta de estado: fondo suave, borde y el tono del ícono. */
 private data class BadgeTone(val background: Color, val border: Color, val accent: Color)

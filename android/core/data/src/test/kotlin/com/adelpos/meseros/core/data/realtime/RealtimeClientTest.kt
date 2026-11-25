@@ -1,12 +1,14 @@
 package com.adelpos.meseros.core.data.realtime
 
+import com.adelpos.core.model.realtime.AccessInterruption
+import com.adelpos.core.model.realtime.RealtimeSignal
+import com.adelpos.core.model.realtime.RealtimeState
+import com.adelpos.core.model.realtime.RebuildReason
+import com.adelpos.core.model.realtime.ReconnectBackoff
+import com.adelpos.core.network.realtime.RealtimeClient
+import com.adelpos.core.network.realtime.RealtimeCursorSeed
+import com.adelpos.core.network.session.FixedServerAccess
 import com.adelpos.meseros.core.data.catalog.CatalogTestSupport
-import com.adelpos.meseros.core.data.session.FixedServerAccess
-import com.adelpos.meseros.core.domain.realtime.AccessInterruption
-import com.adelpos.meseros.core.domain.realtime.RealtimeSignal
-import com.adelpos.meseros.core.domain.realtime.RealtimeState
-import com.adelpos.meseros.core.domain.realtime.RebuildReason
-import com.adelpos.meseros.core.domain.realtime.ReconnectBackoff
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope

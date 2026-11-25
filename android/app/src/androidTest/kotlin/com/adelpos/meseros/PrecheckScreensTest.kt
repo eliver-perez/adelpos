@@ -12,6 +12,7 @@ import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.adelpos.core.ui.theme.AdelTheme
 import com.adelpos.meseros.core.capture.PrecheckPrintBar
 import com.adelpos.meseros.core.capture.PrecheckSection
 import com.adelpos.meseros.core.capture.TAG_PRECHECK_DESTINATION
@@ -26,7 +27,6 @@ import com.adelpos.meseros.core.domain.waiter.PrecheckPrintState
 import com.adelpos.meseros.core.domain.waiter.PrecheckPrinter
 import com.adelpos.meseros.core.domain.waiter.PrecheckSetup
 import com.adelpos.meseros.core.domain.waiter.PrintMessage
-import com.adelpos.meseros.core.ui.theme.AdelTheme
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule

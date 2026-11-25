@@ -1,5 +1,6 @@
 package com.adelpos.meseros.core.data.api
 
+import com.adelpos.core.network.api.ApiJson
 import com.adelpos.meseros.core.domain.money.Money
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException

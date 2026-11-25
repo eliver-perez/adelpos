@@ -4,24 +4,27 @@ import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import com.adelpos.meseros.core.data.api.ClientIdentity
+import com.adelpos.core.model.connection.FixedServerLink
+import com.adelpos.core.model.error.AppError
+import com.adelpos.core.model.pairing.FoundServerChoice
+import com.adelpos.core.model.pairing.PairingProblem
+import com.adelpos.core.model.pairing.PairingState
+import com.adelpos.core.model.pairing.PairingStep
+import com.adelpos.core.model.pairing.PairingTarget
+import com.adelpos.core.model.pairing.ServerSearch
+import com.adelpos.core.model.server.FoundServer
+import com.adelpos.core.model.server.ServerAddress
+import com.adelpos.core.model.server.ServerAnnouncements
+import com.adelpos.core.model.server.ServerRelocator
+import com.adelpos.core.model.text.Hex
+import com.adelpos.core.network.api.ClientIdentity
+import com.adelpos.core.network.api.ClientKinds
+import com.adelpos.core.network.discovery.NsdServerBrowser
+import com.adelpos.core.network.pairing.PairingRepository
 import com.adelpos.meseros.core.data.db.AppDatabase
-import com.adelpos.meseros.core.data.discovery.NsdServerBrowser
 import com.adelpos.meseros.core.domain.access.DeviceStatus
 import com.adelpos.meseros.core.domain.access.NoUnsentOrders
-import com.adelpos.meseros.core.domain.connection.FixedServerLink
-import com.adelpos.meseros.core.domain.error.AppError
-import com.adelpos.meseros.core.domain.pairing.FoundServerChoice
-import com.adelpos.meseros.core.domain.pairing.PairingProblem
-import com.adelpos.meseros.core.domain.pairing.PairingState
-import com.adelpos.meseros.core.domain.pairing.PairingStep
-import com.adelpos.meseros.core.domain.pairing.PairingTarget
-import com.adelpos.meseros.core.domain.pairing.ServerSearch
-import com.adelpos.meseros.core.domain.server.FoundServer
-import com.adelpos.meseros.core.domain.server.ServerAddress
-import com.adelpos.meseros.core.domain.server.ServerAnnouncements
-import com.adelpos.meseros.core.domain.server.ServerRelocator
-import com.adelpos.meseros.core.domain.text.Hex
+import com.adelpos.meseros.core.domain.server.WaiterServerRequirements
 import java.security.MessageDigest
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -48,7 +51,7 @@ class PairingRepositoryTest {
     private lateinit var database: AppDatabase
     private val sealer = FakeSecretSealer()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val identity = ClientIdentity("0.1.0")
+    private val identity = ClientIdentity("0.1.0", ClientKinds.ANDROID)
     private lateinit var access: AccessRepository
     private var found: List<FoundServer> = emptyList()
 
@@ -87,7 +90,8 @@ class PairingRepositoryTest {
             identity = identity,
             osLabel = "Android 13",
             sealer = sealer,
-            access = access,
+            store = access,
+            requirements = WaiterServerRequirements.REQUIREMENTS,
             normalizeAddress = normalize,
         )
 

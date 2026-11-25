@@ -4,18 +4,26 @@ import android.content.Context
 import android.os.Build
 import android.os.SystemClock
 import android.util.Log
+import com.adelpos.core.model.connection.LinkState
+import com.adelpos.core.model.realtime.RealtimeState
+import com.adelpos.core.model.security.SecretSealer
+import com.adelpos.core.model.server.ServerAnnouncements
+import com.adelpos.core.model.server.ServerRelocator
+import com.adelpos.core.network.api.ClientIdentity
+import com.adelpos.core.network.api.ClientKinds
+import com.adelpos.core.network.connection.AppForeground
+import com.adelpos.core.network.connection.ConnectionMonitor
+import com.adelpos.core.network.connection.ServerLinkMonitor
+import com.adelpos.core.network.discovery.HttpsServerProbe
+import com.adelpos.core.network.discovery.NsdServerBrowser
+import com.adelpos.core.network.license.LicenseStatusRepository
+import com.adelpos.core.network.pairing.PairingRepository
+import com.adelpos.core.network.security.KeystoreSecretSealer
+import com.adelpos.core.network.wipe.DeviceDataWipe
 import com.adelpos.meseros.core.capture.CaptureDependencies
 import com.adelpos.meseros.core.data.access.AccessRepository
-import com.adelpos.meseros.core.data.access.PairingRepository
-import com.adelpos.meseros.core.data.api.ClientIdentity
 import com.adelpos.meseros.core.data.db.AppDatabase
-import com.adelpos.meseros.core.data.discovery.HttpsServerProbe
-import com.adelpos.meseros.core.data.discovery.NsdServerBrowser
-import com.adelpos.meseros.core.data.license.LicenseStatusRepository
-import com.adelpos.meseros.core.data.network.ConnectionMonitor
-import com.adelpos.meseros.core.data.network.ServerLinkMonitor
 import com.adelpos.meseros.core.data.preferences.DevicePreferencesRepository
-import com.adelpos.meseros.core.data.security.KeystoreSecretSealer
 import com.adelpos.meseros.core.data.session.DeviceServerAccess
 import com.adelpos.meseros.core.data.waiter.CaptureDiscards
 import com.adelpos.meseros.core.data.waiter.DeviceWaiterServer
@@ -27,17 +35,12 @@ import com.adelpos.meseros.core.data.waiter.OrdersInFlight
 import com.adelpos.meseros.core.data.waiter.ServerClock
 import com.adelpos.meseros.core.data.waiter.WaiterApi
 import com.adelpos.meseros.core.data.waiter.WorkManagerOrderScheduler
-import com.adelpos.meseros.core.data.wipe.DeviceDataWipe
 import com.adelpos.meseros.core.domain.access.DeviceStatus
 import com.adelpos.meseros.core.domain.access.IdleLock
 import com.adelpos.meseros.core.domain.access.UnsentOrdersSource
 import com.adelpos.meseros.core.domain.access.WaiterWorkGate
-import com.adelpos.meseros.core.domain.connection.LinkState
 import com.adelpos.meseros.core.domain.connection.PendingOrdersSource
-import com.adelpos.meseros.core.domain.realtime.RealtimeState
-import com.adelpos.meseros.core.domain.security.SecretSealer
-import com.adelpos.meseros.core.domain.server.ServerAnnouncements
-import com.adelpos.meseros.core.domain.server.ServerRelocator
+import com.adelpos.meseros.core.domain.server.WaiterServerRequirements
 import com.adelpos.meseros.feature.access.AccessDependencies
 import com.adelpos.meseros.feature.takeaway.TakeawayDependencies
 import com.adelpos.meseros.feature.waiter.WaiterDependencies
@@ -88,7 +91,8 @@ class AppContainer(context: Context, private val settings: Settings = Settings()
     /**
      * Identificación ante el servidor: la versión sale de versionName (android/gradle.properties).
      */
-    val clientIdentity: ClientIdentity = ClientIdentity(version = settings.clientVersion)
+    val clientIdentity: ClientIdentity =
+        ClientIdentity(version = settings.clientVersion, kind = ClientKinds.ANDROID)
 
     /** La red de Android (solo alimenta a [serverLink] y a los disparadores de «volvió la red»). */
     val connectionMonitor: ConnectionMonitor by lazy { ConnectionMonitor(appContext) }
@@ -261,7 +265,8 @@ class AppContainer(context: Context, private val settings: Settings = Settings()
             identity = clientIdentity,
             osLabel = "Android ${Build.VERSION.RELEASE}",
             sealer = keystoreSealer,
-            access = deviceAccess,
+            store = deviceAccess,
+            requirements = WaiterServerRequirements.REQUIREMENTS,
         )
     }
 

@@ -1,7 +1,7 @@
 package com.adelpos.meseros.core.ui.components
 
 import androidx.compose.ui.unit.dp
-import com.adelpos.meseros.core.ui.theme.AdelDimens
+import com.adelpos.core.ui.theme.AdelDimens
 import org.junit.Assert.assertEquals
 import org.junit.Test
 

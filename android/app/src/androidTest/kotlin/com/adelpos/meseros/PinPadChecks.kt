@@ -9,10 +9,10 @@ import androidx.compose.ui.test.junit4.ComposeTestRule
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.dp
+import com.adelpos.core.ui.theme.AdelDimens
 import com.adelpos.meseros.core.ui.components.TAG_PIN_DELETE
 import com.adelpos.meseros.core.ui.components.TAG_PIN_KEY_PREFIX
 import com.adelpos.meseros.core.ui.components.TAG_PIN_SUBMIT
-import com.adelpos.meseros.core.ui.theme.AdelDimens
 import org.junit.Assert.assertTrue
 
 /**

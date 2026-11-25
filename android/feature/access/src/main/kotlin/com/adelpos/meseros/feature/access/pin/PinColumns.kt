@@ -13,8 +13,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
+import com.adelpos.core.ui.theme.AdelDimens
 import com.adelpos.meseros.core.ui.components.AdelPinPadDefaults
-import com.adelpos.meseros.core.ui.theme.AdelDimens
 
 /**
  * El PIN con poca altura (etapa A3, §4: el teléfono en horizontal, ≈ 411 dp de alto): en una sola

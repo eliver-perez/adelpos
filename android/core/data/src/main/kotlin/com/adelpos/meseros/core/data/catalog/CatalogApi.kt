@@ -1,12 +1,12 @@
 package com.adelpos.meseros.core.data.catalog
 
-import com.adelpos.meseros.core.data.api.ApiErrors
-import com.adelpos.meseros.core.data.session.AuthorizedServer
-import com.adelpos.meseros.core.data.session.apiUrl
-import com.adelpos.meseros.core.data.session.execute
-import com.adelpos.meseros.core.data.session.request
-import com.adelpos.meseros.core.domain.error.AppError
-import com.adelpos.meseros.core.domain.error.AppResult
+import com.adelpos.core.model.error.AppError
+import com.adelpos.core.model.error.AppResult
+import com.adelpos.core.network.api.ApiErrors
+import com.adelpos.core.network.session.AuthorizedServer
+import com.adelpos.core.network.session.apiUrl
+import com.adelpos.core.network.session.execute
+import com.adelpos.core.network.session.request
 import java.io.IOException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers

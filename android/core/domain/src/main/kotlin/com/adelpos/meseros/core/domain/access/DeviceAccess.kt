@@ -1,6 +1,8 @@
 package com.adelpos.meseros.core.domain.access
 
-import com.adelpos.meseros.core.domain.error.AppError
+import com.adelpos.core.model.access.RepairReason
+import com.adelpos.core.model.access.UnsentOrder
+import com.adelpos.core.model.error.AppError
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -88,18 +90,6 @@ sealed interface EntryResult {
     data class Failed(val error: AppError) : EntryResult
 }
 
-/** Por qué el dispositivo necesita emparejarse de nuevo. */
-enum class RepairReason {
-    /** El servidor presentó otro certificado (huella distinta): nunca se conecta. */
-    IDENTITY_CHANGED,
-
-    /** El servidor ya no reconoce la credencial del dispositivo (`DEVICE_*`). */
-    NOT_RECOGNIZED,
-
-    /** La credencial cifrada ya no se puede abrir (se perdió la llave del Keystore). */
-    CREDENTIAL_LOST,
-}
-
 /** Estado del dispositivo frente al servidor del restaurante: decide qué pantalla se ve. */
 sealed interface DeviceStatus {
     /** Leyendo lo guardado. */
@@ -129,7 +119,7 @@ sealed interface DeviceStatus {
 
     /**
      * «Actualiza el servidor del restaurante» (anterior a 0.13.0 o sin una de las capacidades de
-     * `ServerCompatibility.REQUIRED_CAPABILITIES`).
+     * `WaiterServerRequirements.REQUIRED_CAPABILITIES`).
      */
     data class UpdateServer(val serverVersion: String?) : DeviceStatus
 
@@ -217,24 +207,4 @@ object KnownWaiterInvalidation {
             .map(Known::userId)
             .toSet()
     }
-}
-
-/**
- * Permisos de Android que hacen falta para hablar con la red local del restaurante (§4), según la
- * versión del sistema y el `targetSdk` de la aplicación. Hoy (`targetSdk` 36, A1-D7) ninguno:
- * `NsdManager` y las conexiones a la red local no piden permiso. Android 17 (API 37) exige
- * `ACCESS_LOCAL_NETWORK` (grupo «Dispositivos cercanos») a las aplicaciones con `targetSdk` 37 o
- * mayor para **todo** el tráfico a la red local (búsqueda y conexiones); la pantalla de explicación
- * ya existe y se mostrará sola al subir el `targetSdk`.
- */
-object NetworkPermissions {
-    const val ACCESS_LOCAL_NETWORK = "android.permission.ACCESS_LOCAL_NETWORK"
-    private const val ANDROID_17 = 37
-
-    fun required(sdkInt: Int, targetSdk: Int): List<String> =
-        if (sdkInt >= ANDROID_17 && targetSdk >= ANDROID_17) {
-            listOf(ACCESS_LOCAL_NETWORK)
-        } else {
-            emptyList()
-        }
 }

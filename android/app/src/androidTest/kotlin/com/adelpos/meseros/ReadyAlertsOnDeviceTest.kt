@@ -15,13 +15,13 @@ import androidx.compose.ui.test.performClick
 import androidx.core.content.ContextCompat
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.adelpos.core.ui.theme.AdelTheme
 import com.adelpos.meseros.core.domain.ready.ReadyAlert
 import com.adelpos.meseros.core.domain.ready.ReadyAlertSettings
 import com.adelpos.meseros.core.domain.ready.ReadyChannels
 import com.adelpos.meseros.core.domain.ready.ReadyItem
 import com.adelpos.meseros.core.domain.ready.ReadyNotice
 import com.adelpos.meseros.core.domain.waiter.OrderMode
-import com.adelpos.meseros.core.ui.theme.AdelTheme
 import com.adelpos.meseros.ready.InAppAlerts
 import com.adelpos.meseros.ready.ReadyAlertNotifications
 import com.adelpos.meseros.ready.ReadyAlertsHelp

@@ -4,11 +4,11 @@ import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.adelpos.core.network.session.FixedServerAccess
 import com.adelpos.meseros.core.data.catalog.CatalogTestSupport.IMAGE_BYTES
 import com.adelpos.meseros.core.data.catalog.CatalogTestSupport.IMAGE_ID
 import com.adelpos.meseros.core.data.catalog.db.CatalogDatabase
 import com.adelpos.meseros.core.data.catalog.db.ImageRefEntity
-import com.adelpos.meseros.core.data.session.FixedServerAccess
 import java.io.File
 import kotlinx.coroutines.runBlocking
 import mockwebserver3.MockResponse

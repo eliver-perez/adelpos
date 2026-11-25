@@ -22,6 +22,9 @@ import androidx.compose.ui.test.printToLog
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.adelpos.core.ui.access.findserver.TAG_ADDRESS
+import com.adelpos.core.ui.access.findserver.TAG_FIND_SERVER
+import com.adelpos.core.ui.access.findserver.TAG_PAIRING_CODE
 import com.adelpos.meseros.core.capture.TAG_CAPTURE
 import com.adelpos.meseros.core.capture.TAG_CUSTOMER_NAME
 import com.adelpos.meseros.core.capture.TAG_CUSTOMER_PHONE
@@ -45,9 +48,6 @@ import com.adelpos.meseros.core.ui.layout.TAG_PANE_OPEN_SECONDARY
 import com.adelpos.meseros.core.ui.waiter.TAG_ORDER_STATE_PREFIX
 import com.adelpos.meseros.core.ui.waiter.TAG_TAKEAWAY_PAYMENT_PREFIX
 import com.adelpos.meseros.core.ui.waiter.TAG_TAKEAWAY_PREPARATION_PREFIX
-import com.adelpos.meseros.feature.access.findserver.TAG_ADDRESS
-import com.adelpos.meseros.feature.access.findserver.TAG_FIND_SERVER
-import com.adelpos.meseros.feature.access.findserver.TAG_PAIRING_CODE
 import com.adelpos.meseros.feature.access.pin.TAG_ENTRY
 import com.adelpos.meseros.feature.access.pin.TAG_WAITER_PREFIX
 import com.adelpos.meseros.feature.takeaway.TAG_TAKEAWAY

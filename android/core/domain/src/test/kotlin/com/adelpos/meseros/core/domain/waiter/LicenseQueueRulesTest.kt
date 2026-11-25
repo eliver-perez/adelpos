@@ -1,6 +1,6 @@
 package com.adelpos.meseros.core.domain.waiter
 
-import com.adelpos.meseros.core.domain.error.LicenseMessages
+import com.adelpos.core.model.error.LicenseMessages
 import com.adelpos.meseros.core.domain.waiter.WaiterFixtures.BURGER
 import com.adelpos.meseros.core.domain.waiter.WaiterFixtures.capture
 import com.adelpos.meseros.core.domain.waiter.WaiterFixtures.draft

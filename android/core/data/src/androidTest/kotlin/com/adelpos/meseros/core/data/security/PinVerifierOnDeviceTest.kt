@@ -4,8 +4,9 @@ import android.os.Build
 import android.os.SystemClock
 import android.util.Log
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.adelpos.core.model.security.SecretUnavailableException
+import com.adelpos.core.network.security.KeystoreSecretSealer
 import com.adelpos.meseros.core.domain.access.PinVerifier
-import com.adelpos.meseros.core.domain.security.SecretUnavailableException
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse

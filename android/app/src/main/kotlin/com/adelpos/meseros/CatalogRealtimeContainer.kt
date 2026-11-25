@@ -1,8 +1,12 @@
 package com.adelpos.meseros
 
 import android.content.Context
-import androidx.lifecycle.DefaultLifecycleObserver
-import androidx.lifecycle.LifecycleOwner
+import com.adelpos.core.model.connection.LinkState
+import com.adelpos.core.model.realtime.AccessInterruptions
+import com.adelpos.core.model.realtime.RealtimeFeed
+import com.adelpos.core.network.realtime.RealtimeClient
+import com.adelpos.core.network.realtime.RealtimeCursorSeed
+import com.adelpos.core.network.session.ServerAccess
 import com.adelpos.meseros.core.data.catalog.CatalogApi
 import com.adelpos.meseros.core.data.catalog.CatalogImageCache
 import com.adelpos.meseros.core.data.catalog.CatalogRepository
@@ -10,42 +14,15 @@ import com.adelpos.meseros.core.data.catalog.CatalogStore
 import com.adelpos.meseros.core.data.catalog.CatalogSynchronizer
 import com.adelpos.meseros.core.data.catalog.CatalogUpdateTriggers
 import com.adelpos.meseros.core.data.catalog.db.CatalogDatabase
-import com.adelpos.meseros.core.data.realtime.RealtimeClient
-import com.adelpos.meseros.core.data.realtime.RealtimeCursorSeed
 import com.adelpos.meseros.core.data.realtime.RecoveryStateCursorSeed
-import com.adelpos.meseros.core.data.session.ServerAccess
 import com.adelpos.meseros.core.domain.catalog.CatalogImages
 import com.adelpos.meseros.core.domain.catalog.CatalogSource
-import com.adelpos.meseros.core.domain.connection.LinkState
-import com.adelpos.meseros.core.domain.realtime.AccessInterruptions
-import com.adelpos.meseros.core.domain.realtime.RealtimeFeed
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-
-/**
- * Si la aplicación está en primer plano (alguna pantalla visible), según el ciclo de vida del
- * proceso (`ProcessLifecycleOwner`, que espera unos 700 ms al pasar a segundo plano para no
- * confundir una rotación con una salida).
- */
-class AppForeground : DefaultLifecycleObserver {
-    private val state = MutableStateFlow(false)
-
-    val inForeground: StateFlow<Boolean> = state.asStateFlow()
-
-    override fun onStart(owner: LifecycleOwner) {
-        state.value = true
-    }
-
-    override fun onStop(owner: LifecycleOwner) {
-        state.value = false
-    }
-}
 
 /**
  * Catálogo en el dispositivo y canal de tiempo real (Fase D), una instancia por proceso:

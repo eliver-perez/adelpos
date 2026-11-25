@@ -1,14 +1,14 @@
 package com.adelpos.meseros.core.data.waiter
 
-import com.adelpos.meseros.core.data.api.ApiErrors
-import com.adelpos.meseros.core.data.api.ApiJson
-import com.adelpos.meseros.core.data.api.ApiOutcome
-import com.adelpos.meseros.core.data.api.ApiProblem
+import com.adelpos.core.model.error.AppError
+import com.adelpos.core.model.error.LicenseMessages
+import com.adelpos.core.network.api.ApiErrors
+import com.adelpos.core.network.api.ApiJson
+import com.adelpos.core.network.api.ApiOutcome
+import com.adelpos.core.network.api.ApiProblem
 import com.adelpos.meseros.core.data.waiter.db.CustomerEditEntity
 import com.adelpos.meseros.core.data.waiter.db.WaiterDao
 import com.adelpos.meseros.core.data.waiter.db.WaiterStorage
-import com.adelpos.meseros.core.domain.error.AppError
-import com.adelpos.meseros.core.domain.error.LicenseMessages
 import com.adelpos.meseros.core.domain.money.Money
 import com.adelpos.meseros.core.domain.waiter.AccountBill
 import com.adelpos.meseros.core.domain.waiter.AccountSummary

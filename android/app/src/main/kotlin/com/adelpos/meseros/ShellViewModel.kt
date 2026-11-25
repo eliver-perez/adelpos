@@ -5,8 +5,8 @@ import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.AP
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
-import com.adelpos.meseros.core.domain.connection.ConnectionSummary
-import com.adelpos.meseros.core.domain.connection.LinkState
+import com.adelpos.core.model.connection.ConnectionSummary
+import com.adelpos.core.model.connection.LinkState
 import com.adelpos.meseros.core.domain.connection.PendingOrdersSource
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow

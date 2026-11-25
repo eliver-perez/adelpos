@@ -1,14 +1,14 @@
 package com.adelpos.meseros.core.data.ready
 
-import com.adelpos.meseros.core.domain.connection.LinkState
-import com.adelpos.meseros.core.domain.error.AppError
+import com.adelpos.core.model.connection.LinkState
+import com.adelpos.core.model.error.AppError
+import com.adelpos.core.model.realtime.ReconnectBackoff
 import com.adelpos.meseros.core.domain.ready.ReadyAlertsBatch
 import com.adelpos.meseros.core.domain.ready.ReadyAlertsLedger
 import com.adelpos.meseros.core.domain.ready.ReadyAlertsLifecycle
 import com.adelpos.meseros.core.domain.ready.ReadyAlertsLifecycle.ErrorAction
 import com.adelpos.meseros.core.domain.ready.ReadyAlertsProcessor
 import com.adelpos.meseros.core.domain.ready.ReadyBatchOutcome
-import com.adelpos.meseros.core.domain.realtime.ReconnectBackoff
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow

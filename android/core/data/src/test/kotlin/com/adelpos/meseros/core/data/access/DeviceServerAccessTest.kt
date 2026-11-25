@@ -4,18 +4,19 @@ import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import com.adelpos.meseros.core.data.api.ClientIdentity
+import com.adelpos.core.model.connection.FixedServerLink
+import com.adelpos.core.model.realtime.AccessInterruption
+import com.adelpos.core.model.server.ServerRelocator
+import com.adelpos.core.model.text.Hex
+import com.adelpos.core.network.api.ClientIdentity
+import com.adelpos.core.network.api.ClientKinds
+import com.adelpos.core.network.session.AuthorizedServer
 import com.adelpos.meseros.core.data.db.AppDatabase
 import com.adelpos.meseros.core.data.db.PairedServerEntity
-import com.adelpos.meseros.core.data.session.AuthorizedServer
 import com.adelpos.meseros.core.data.session.DeviceServerAccess
 import com.adelpos.meseros.core.domain.access.DeviceStatus
 import com.adelpos.meseros.core.domain.access.EntryResult
 import com.adelpos.meseros.core.domain.access.NoUnsentOrders
-import com.adelpos.meseros.core.domain.connection.FixedServerLink
-import com.adelpos.meseros.core.domain.realtime.AccessInterruption
-import com.adelpos.meseros.core.domain.server.ServerRelocator
-import com.adelpos.meseros.core.domain.text.Hex
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -61,7 +62,7 @@ class DeviceServerAccessTest {
                 dao = database.access(),
                 sealer = sealer,
                 destroyKey = {},
-                identity = ClientIdentity("0.1.0"),
+                identity = ClientIdentity("0.1.0", ClientKinds.ANDROID),
                 relocator = ServerRelocator({ emptyList() }, { _, _ -> false }, { 0L }),
                 link = FixedServerLink(),
                 unsentOrders = NoUnsentOrders,
@@ -169,7 +170,7 @@ class DeviceServerAccessTest {
                         dao = database.access(),
                         sealer = sealer,
                         destroyKey = {},
-                        identity = ClientIdentity("0.1.0"),
+                        identity = ClientIdentity("0.1.0", ClientKinds.ANDROID),
                         relocator = ServerRelocator({ emptyList() }, { _, _ -> false }, { 0L }),
                         link = link.monitor,
                         unsentOrders = NoUnsentOrders,

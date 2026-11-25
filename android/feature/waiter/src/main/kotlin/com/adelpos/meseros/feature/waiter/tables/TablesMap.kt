@@ -29,6 +29,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.adelpos.core.ui.theme.AdelDimens
 import com.adelpos.meseros.core.domain.waiter.DiningTable
 import com.adelpos.meseros.core.domain.waiter.RestaurantView
 import com.adelpos.meseros.core.domain.waiter.TableMapFit
@@ -37,7 +38,6 @@ import com.adelpos.meseros.core.domain.waiter.TableShape
 import com.adelpos.meseros.core.ui.components.tableStateColors
 import com.adelpos.meseros.core.ui.components.tableStateIcon
 import com.adelpos.meseros.core.ui.components.tableStateLabel
-import com.adelpos.meseros.core.ui.theme.AdelDimens
 import com.adelpos.meseros.feature.waiter.R
 
 /**

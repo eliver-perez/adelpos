@@ -17,8 +17,8 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.adelpos.core.ui.theme.AdelDimens
 import com.adelpos.meseros.core.ui.icons.CatalogIcons
-import com.adelpos.meseros.core.ui.theme.AdelDimens
 
 /**
  * Botones −/+ de 48 dp con el valor en medio («Sin», «Normal», «Extra», «2»). [decreaseLabel] e

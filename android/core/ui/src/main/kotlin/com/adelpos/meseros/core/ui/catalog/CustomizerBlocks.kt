@@ -31,6 +31,9 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import com.adelpos.core.ui.components.SecondaryButton
+import com.adelpos.core.ui.theme.AdelDimens
+import com.adelpos.core.ui.theme.AdelTheme
 import com.adelpos.meseros.core.domain.catalog.Catalog
 import com.adelpos.meseros.core.domain.catalog.CatalogProduct
 import com.adelpos.meseros.core.domain.catalog.ComboChoices
@@ -52,9 +55,6 @@ import com.adelpos.meseros.core.domain.catalog.QuickNoteOption
 import com.adelpos.meseros.core.domain.money.Money
 import com.adelpos.meseros.core.domain.money.MoneyFormat
 import com.adelpos.meseros.core.ui.R
-import com.adelpos.meseros.core.ui.components.SecondaryButton
-import com.adelpos.meseros.core.ui.theme.AdelDimens
-import com.adelpos.meseros.core.ui.theme.AdelTheme
 
 /*
  * Bloques del personalizador táctil (puerto de `TouchCustomizer` y `CustomizationBlocks` del

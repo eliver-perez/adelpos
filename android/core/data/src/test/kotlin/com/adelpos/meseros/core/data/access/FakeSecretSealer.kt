@@ -1,7 +1,7 @@
 package com.adelpos.meseros.core.data.access
 
-import com.adelpos.meseros.core.domain.security.SecretSealer
-import com.adelpos.meseros.core.domain.security.SecretUnavailableException
+import com.adelpos.core.model.security.SecretSealer
+import com.adelpos.core.model.security.SecretUnavailableException
 import java.nio.ByteBuffer
 import java.security.SecureRandom
 import javax.crypto.AEADBadTagException

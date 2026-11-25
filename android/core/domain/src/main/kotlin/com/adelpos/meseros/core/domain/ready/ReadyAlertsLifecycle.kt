@@ -1,7 +1,7 @@
 package com.adelpos.meseros.core.domain.ready
 
-import com.adelpos.meseros.core.domain.error.AppError
-import com.adelpos.meseros.core.domain.realtime.ReconnectBackoff
+import com.adelpos.core.model.error.AppError
+import com.adelpos.core.model.realtime.ReconnectBackoff
 
 /**
  * Cuándo arranca y cuándo se detiene el servicio de avisos (§4.3 y §0.5.5 de la Fase 0, A2-D8).

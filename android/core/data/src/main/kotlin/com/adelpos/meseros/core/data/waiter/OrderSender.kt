@@ -1,16 +1,16 @@
 package com.adelpos.meseros.core.data.waiter
 
+import com.adelpos.core.model.error.AppError
+import com.adelpos.core.model.error.LicenseMessages
+import com.adelpos.core.network.api.ApiErrors
+import com.adelpos.core.network.api.ApiJson
+import com.adelpos.core.network.api.ApiOutcome
+import com.adelpos.core.network.api.ApiProblem
+import com.adelpos.core.network.session.ServerTransport
 import com.adelpos.meseros.core.data.access.AccessRepository
-import com.adelpos.meseros.core.data.api.ApiErrors
-import com.adelpos.meseros.core.data.api.ApiJson
-import com.adelpos.meseros.core.data.api.ApiOutcome
-import com.adelpos.meseros.core.data.api.ApiProblem
 import com.adelpos.meseros.core.data.catalog.toDto
-import com.adelpos.meseros.core.data.session.ServerTransport
 import com.adelpos.meseros.core.data.waiter.db.WaiterDao
 import com.adelpos.meseros.core.data.waiter.db.WaiterStorage
-import com.adelpos.meseros.core.domain.error.AppError
-import com.adelpos.meseros.core.domain.error.LicenseMessages
 import com.adelpos.meseros.core.domain.waiter.OrderReview
 import com.adelpos.meseros.core.domain.waiter.OrderSendRules
 import com.adelpos.meseros.core.domain.waiter.OrderState

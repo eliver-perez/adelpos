@@ -1,8 +1,8 @@
 package com.adelpos.meseros.core.data.access
 
-import com.adelpos.meseros.core.data.security.PinnedTrustManager
-import com.adelpos.meseros.core.domain.pairing.PairingProtocol
-import com.adelpos.meseros.core.domain.text.Hex
+import com.adelpos.core.model.pairing.PairingProtocol
+import com.adelpos.core.model.text.Hex
+import com.adelpos.core.network.security.PinnedTrustManager
 import java.util.concurrent.ConcurrentLinkedQueue
 import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse

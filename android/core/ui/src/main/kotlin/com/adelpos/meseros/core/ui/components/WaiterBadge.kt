@@ -28,11 +28,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.adelpos.core.ui.components.LocalUserActivity
+import com.adelpos.core.ui.components.reportsUserActivity
+import com.adelpos.core.ui.icons.AdelIcons
+import com.adelpos.core.ui.theme.AdelDimens
+import com.adelpos.core.ui.theme.AdelTheme
+import com.adelpos.core.ui.theme.waiterBadgeColors
 import com.adelpos.meseros.core.ui.R
-import com.adelpos.meseros.core.ui.icons.AdelIcons
-import com.adelpos.meseros.core.ui.theme.AdelDimens
-import com.adelpos.meseros.core.ui.theme.AdelTheme
-import com.adelpos.meseros.core.ui.theme.waiterBadgeColors
 
 /**
  * Distintivo de un mesero: un círculo con su inicial en el color que eligió el administrador (dato

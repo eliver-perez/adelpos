@@ -23,6 +23,10 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import com.adelpos.core.ui.components.PrimaryButton
+import com.adelpos.core.ui.components.SecondaryButton
+import com.adelpos.core.ui.theme.AdelDimens
+import com.adelpos.core.ui.theme.AdelTheme
 import com.adelpos.meseros.core.domain.catalog.AvailabilityStatus
 import com.adelpos.meseros.core.domain.catalog.Catalog
 import com.adelpos.meseros.core.domain.catalog.CatalogImages
@@ -30,10 +34,6 @@ import com.adelpos.meseros.core.domain.catalog.CustomizationCheck
 import com.adelpos.meseros.core.domain.catalog.CustomizationProblem
 import com.adelpos.meseros.core.domain.catalog.LineSelection
 import com.adelpos.meseros.core.ui.R
-import com.adelpos.meseros.core.ui.components.PrimaryButton
-import com.adelpos.meseros.core.ui.components.SecondaryButton
-import com.adelpos.meseros.core.ui.theme.AdelDimens
-import com.adelpos.meseros.core.ui.theme.AdelTheme
 
 /**
  * Personalizador táctil de una partida: presentación, complementos, porciones con −/+

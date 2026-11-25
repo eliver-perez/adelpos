@@ -1,10 +1,10 @@
 package com.adelpos.meseros.core.data.catalog
 
-import com.adelpos.meseros.core.data.session.ServerAccess
-import com.adelpos.meseros.core.domain.connection.LinkState
-import com.adelpos.meseros.core.domain.realtime.RealtimeFeed
-import com.adelpos.meseros.core.domain.realtime.RealtimeScopes
-import com.adelpos.meseros.core.domain.realtime.RealtimeSignal
+import com.adelpos.core.model.connection.LinkState
+import com.adelpos.core.model.realtime.RealtimeFeed
+import com.adelpos.core.model.realtime.RealtimeScopes
+import com.adelpos.core.model.realtime.RealtimeSignal
+import com.adelpos.core.network.session.ServerAccess
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay

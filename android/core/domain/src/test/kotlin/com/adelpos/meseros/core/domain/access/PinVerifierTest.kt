@@ -1,6 +1,6 @@
 package com.adelpos.meseros.core.domain.access
 
-import com.adelpos.meseros.core.domain.security.SecretUnavailableException
+import com.adelpos.core.model.security.SecretUnavailableException
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals

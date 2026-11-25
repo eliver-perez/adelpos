@@ -1,5 +1,8 @@
 package com.adelpos.meseros.feature.waiter
 
+import com.adelpos.core.model.connection.LinkState
+import com.adelpos.core.model.error.AppError
+import com.adelpos.core.model.error.AppResult
 import com.adelpos.meseros.core.capture.CaptureDependencies
 import com.adelpos.meseros.core.domain.access.ActiveWaiter
 import com.adelpos.meseros.core.domain.access.WaiterProfile
@@ -8,9 +11,6 @@ import com.adelpos.meseros.core.domain.catalog.CatalogQuery
 import com.adelpos.meseros.core.domain.catalog.CatalogSource
 import com.adelpos.meseros.core.domain.catalog.CatalogSyncStatus
 import com.adelpos.meseros.core.domain.catalog.LineSelection
-import com.adelpos.meseros.core.domain.connection.LinkState
-import com.adelpos.meseros.core.domain.error.AppError
-import com.adelpos.meseros.core.domain.error.AppResult
 import com.adelpos.meseros.core.domain.money.Money
 import com.adelpos.meseros.core.domain.preferences.TablesView
 import com.adelpos.meseros.core.domain.preferences.TablesViewPreference
