@@ -21,6 +21,8 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.adelpos.core.model.error.LicenseMessages
+import com.adelpos.core.testing.MainComputer
+import com.adelpos.core.testing.SystemDialogs
 import com.adelpos.core.ui.access.findserver.TAG_ADDRESS
 import com.adelpos.core.ui.access.findserver.TAG_FIND_SERVER
 import com.adelpos.core.ui.access.findserver.TAG_PAIRING_CODE

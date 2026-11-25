@@ -1,4 +1,4 @@
-package com.adelpos.meseros
+package com.adelpos.core.testing
 
 import java.util.concurrent.TimeUnit
 import kotlinx.serialization.json.Json

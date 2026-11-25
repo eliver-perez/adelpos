@@ -24,6 +24,8 @@ import com.adelpos.core.network.api.PinnedHttpClient
 import com.adelpos.core.network.realtime.RealtimeClient
 import com.adelpos.core.network.session.AuthorizedServer
 import com.adelpos.core.network.session.FixedServerAccess
+import com.adelpos.core.testing.GoTestServer
+import com.adelpos.core.testing.MainComputer
 import com.adelpos.core.ui.theme.AdelTheme
 import com.adelpos.meseros.core.data.catalog.CatalogApi
 import com.adelpos.meseros.core.data.catalog.CatalogImageCache

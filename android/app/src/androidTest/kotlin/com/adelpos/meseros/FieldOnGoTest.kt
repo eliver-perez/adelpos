@@ -36,6 +36,8 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
 import androidx.test.runner.lifecycle.Stage
+import com.adelpos.core.testing.MainComputer
+import com.adelpos.core.testing.SystemDialogs
 import com.adelpos.core.ui.access.findserver.TAG_ADDRESS
 import com.adelpos.core.ui.access.findserver.TAG_FIND_SERVER
 import com.adelpos.core.ui.access.findserver.TAG_PAIRING_CODE

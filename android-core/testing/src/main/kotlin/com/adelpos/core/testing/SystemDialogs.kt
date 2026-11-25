@@ -1,4 +1,4 @@
-package com.adelpos.meseros
+package com.adelpos.core.testing
 
 import android.app.UiAutomation
 import android.util.Log

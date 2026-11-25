@@ -29,6 +29,7 @@ import com.adelpos.core.network.api.ClientIdentity
 import com.adelpos.core.network.api.ClientKinds
 import com.adelpos.core.network.api.PinnedHttpClient
 import com.adelpos.core.network.api.ServerApi
+import com.adelpos.core.testing.MainComputer
 import com.adelpos.core.ui.access.findserver.TAG_ADDRESS
 import com.adelpos.core.ui.access.findserver.TAG_FIND_SERVER
 import com.adelpos.core.ui.access.findserver.TAG_PAIRING_CODE

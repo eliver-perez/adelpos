@@ -40,3 +40,6 @@ include(":model")
 include(":network")
 
 include(":ui")
+
+// Solo para las pruebas instrumentadas de las aplicaciones contra el Go temporal.
+include(":testing")
