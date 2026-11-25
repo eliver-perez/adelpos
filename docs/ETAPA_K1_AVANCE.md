@@ -1801,3 +1801,226 @@ capturar.
 
   Si la computadora principal no responde o ya no reconoce la pantalla, la tableta borra lo suyo de todos modos y dice
   que hay que revocarla en Terminales.
+
+## Revisión R1 (correcciones) y Fase E · Terminales, licencia y el «Reconectando» del escritorio
+
+Agente S, 24/11/2026, en `$SP/wt/k1-a` (rama `etapa-k1-a`, con `etapa-k1` `70ee1a1` y `etapa-k1-r1` fusionadas en
+`f545c4d`, y después `etapa-k1` `efaaba7` en `5f1d291`), `ISO_TAG=A`. En Go solo cambiaron las correcciones de la R1, una
+línea de `kitchen/access` y la ruta de K1-D32 que pidió el coordinador (abajo); los 30 s del canal siguen. No toqué
+`android/`, `cocina/`, `android-core/`, `docs/etapas/` ni `contracts/`.
+
+### Commits
+
+| Commit    | Tema                                                                                                                                                               |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `f690bce` | Correcciones de la R1 (K1-D29). Ya unidas a `etapa-k1` por el coordinador.                                                                                         |
+| `f3830bf` | Terminales: la pantalla de cocina, la versión instalada de los tres tipos, los límites de color, `kitchen/access` sin pantallas.                                   |
+| `66c09f5` | Rust: el canal de eventos (`realtime.rs`) y `pool_idle_timeout(30 s)`.                                                                                             |
+| `ab244fd` | React: el estado único de conexión (`navigation/serverLink.ts`).                                                                                                   |
+| `85e79e1` | React: la pantalla de inicio de sesión o de alta ya cargada con la misma tolerancia (`useSession.ts`).                                                             |
+| `924ce67` | React: Mesas y Preparación sin el aviso de conexión propio que `ab244fd` había vuelto a conectar (ver abajo).                                                      |
+| `5f1d291` | Fusión de `etapa-k1` `efaaba7` (Fase C de M), pedida por el coordinador para K1-D32.                                                                               |
+| `895efa2` | K1-D32: `POST kitchen-display/unpair` («Volver a emparejar»), pedido por el coordinador a media fase.                                                              |
+| `9d7dd13` | Playwright: `native-driver.ts` con las reglas de Rust, las dos especificaciones nuevas, `pairing.ts`, los plazos de cinco y el texto «versión instalada» de la 9G. |
+
+### Qué se hizo
+
+**1. Correcciones de la R1 (K1-D29, `f690bce`).**
+
+- R1-1: `kitchen-display/settings-access` valida la longitud antes de consultar al supervisor, como `auth/login` (usuario
+  hasta 40 y contraseña hasta 256, sin contar un intento): 401 `AUTHORIZATION_INVALID` «El usuario o la contraseña no
+  son correctos.». Vacíos, 400 `VALIDATION_ERROR`, documentado en `docs/API_V1.md`, `openapi.json` y `api-k1.md` (nota
+  con hora al final).
+- R1-2: para una pantalla, la marca de «visto» es `UPDATE … WHERE id=$1 AND revoked_at IS NULL` en la misma
+  transacción; si no cambia ninguna fila, 401 `DEVICE_REVOKED` (`administration/kitchen_display.go`,
+  `touchKitchenDisplay`). La prueba de R1-2 exige solo la respuesta corregida.
+- Emparejar: `device_kind` y `X-Client-Kind` deben coincidir en los tres tipos cuando llega la cabecera (400
+  `CLIENT_KIND_MISMATCH`; `administration/pairing.go`). Antes de cambiarlo revisé que el escritorio manda `desktop` y la
+  aplicación de meseros `android` al emparejar (sus pruebas siguen pasando).
+
+**2. Terminales y licencia (§6, `f3830bf`).**
+
+- Sistema › Terminales: una pantalla se ve como «Pantalla de cocina». «Ver configuración» muestra su conexión, la
+  versión instalada, el cupo («Ocupa un cupo de pantalla de cocina», o liberado: «En la tableta se puede pedir otra vez
+  con «Usar esta pantalla».»), sus estaciones, letra, tema, sonido y volumen. «Editar» deja cambiar las estaciones (solo
+  las que reciben comandas en pantalla: `kds` y `both`; «Mostrar todas…» o una lista), «Tamaño de letra de la
+  pantalla», «Tema de la pantalla», «Sonido de pedidos» y «Volumen» (`DevicesPage.tsx`, `KitchenDisplayEditor`); guarda
+  con `PATCH devices/{id}` y `PUT kitchen/access`, que ya publican `kitchen_display.configuration.changed` (Fase A).
+- «Liberar cupo» de una pantalla dice el texto de K1-D30: «…En la tableta se puede pedir el cupo otra vez con «Usar
+  esta pantalla». Para que deje de usarse, revócala.». «Revocar»: «La pantalla deja de mostrar pedidos al momento y
+  libera su cupo de cocina…».
+- La versión instalada (K1-D9) se ve en la fila de todas las terminales: «Android 14 · versión instalada 0.1.1»,
+  «Esta computadora · versión instalada 0.15.0».
+- Cocina › Comandas y tiempos, sección «Colores de las pantallas de cocina»: «Color de atención desde (minutos de
+  espera)» y «Color de retraso desde (minutos de espera)» (10 y 20), con `kitchen.timing.manage` y la misma validación
+  que Go (`KitchenSettingsForm.tsx`, `displayLimitsProblem`).
+- Todo lo anterior se esconde sin la capacidad `kitchen-display-v1` (`serverCapabilities.ts`).
+- Cocina › Estaciones › Terminales de cocina ya no lista las pantallas (`kitchen/reads.go`: `kind NOT IN
+('android','kitchen')`): sus estaciones se eligen en Terminales.
+- Los cambios llegan a la tableta al momento: lo comprueba la especificación de Playwright desde la interfaz (el evento
+  de configuración llega a `events/snapshot` de la pantalla y `kitchen-display/orders` trae lo nuevo).
+
+**3. El «Reconectando» falso del escritorio (§7, K1-D10).**
+
+_Para el propietario._ Go cierra a propósito el canal de avisos del escritorio cada 30 segundos y la aplicación lo abre
+otra vez; así el servidor vuelve a revisar la sesión, los permisos y las estaciones. Hasta la 0.15.0, la parte de Rust
+del escritorio tomaba ese cierre normal como si se hubiera caído la conexión: avisaba «reconectando», esperaba medio
+segundo, volvía a abrir y avisaba «conectado». Por eso la barra mostraba «Reconectando» uno o dos segundos cada 30
+segundos aunque todo estuviera bien, y además todas las pantallas volvían a consultar al servidor sin necesidad. Ahora
+ese cierre normal se vuelve a abrir al momento, sin avisar nada, y solo cuenta como falla lo que de verdad lo es (el
+servidor no contesta, se corta a la mitad, se queda mudo 10 segundos o responde con un error). Además, el escritorio usa
+la misma tolerancia que la aplicación de meseros desde la A3: un corte breve no se nota; «Sin conexión» solo aparece si
+el servidor no contesta durante unos 20 segundos seguidos (o si la terminal por la red se queda sin red), y vuelve a «En
+línea» con la primera respuesta.
+
+_Rust (`66c09f5`, `desktop/src-tauri/src/realtime.rs`)._ El bucle es `follow(after, open, sink, active, timing)` con
+`ChannelLink` (cuándo mandar `connected` y `reconnecting`):
+
+- el fin normal de un canal que respondió 200 (cuerpo terminado sin error, después de 5 s o más) se vuelve a abrir al
+  momento desde el mismo cursor, sin `reconnecting`, sin esperar y sin otro `connected`;
+- falla real: no conectar, sin cabecera de respuesta en 10 s, cuerpo cortado, canal mudo 10 s (Go manda un mensaje cada
+  750 ms), un 5xx, `interrupted` de Go o un fin antes de 5 s. Entonces `reconnecting` y espera de 0,5 a 15 s; al
+  volver, un `connected`;
+- 401 y 403: `unauthorized` y el canal se detiene;
+- `pool_idle_timeout(30 s)` en los dos clientes `reqwest` (`main.rs` y `pairing.rs`): una conexión guardada más tiempo
+  que el de Go ya no se reutiliza cerrada.
+
+_React (`ab244fd`, `desktop/src/navigation/serverLink.ts`)._ Un solo estado con reglas puras (`ServerLinkTracker`, reloj
+inyectable) y una tienda para toda la ventana (`serverLink`, `useServerLink`):
+
+- lo alimentan cada respuesta de `services/api.ts` (cualquier respuesta HTTP es éxito; solo no llegar es falla), la
+  consulta de la sesión (que pasa por `api`) y el canal (`useRealtime`: `reconnecting` es falla; `connected` o un mensaje,
+  canal vivo);
+- «Sin conexión»: 3 fallas seguidas y 20 s desde la primera, o sin red del sistema en una terminal por la red; «En
+  línea» con el primer éxito; «Reconectando» (ámbar) solo con el canal caído más de esa tolerancia mientras Go responde;
+- lo leen la barra (`serverState`), la capa «Sin conexión con el servidor» (su «Reintentar» es el de Mesas y
+  Preparación desde la 9G, que bloquea esas pantallas sin desmontarlas), el aviso persistente y la sesión: con una sesión
+  abierta, `App.tsx` deriva el error de conexión del estado único; en la pantalla de inicio de sesión o de alta ya
+  cargada, `useSession.ts` solo pasa a «Revisa la conexión» con «Sin conexión» (`85e79e1`). Al arrancar sin servidor
+  sigue siendo inmediato. Tras un «Sin conexión», la vuelta recarga todo como antes (`announceReconnection`).
+- La Fase 0 nombraba el «Reintentar» de Mesas y de Preparación como lector aparte. Desde la 9G (`04a1f98`) `App.tsx` ya
+  no les pasa `connectionLost`: la capa lo sustituyó. En `ab244fd` los volví a conectar y quedaba un segundo
+  «Reintentar» inerte detrás de la capa; lo detectó la especificación de la 9D y lo quité en `924ce67`.
+
+_Driver de Playwright (`e2e/native-driver.ts`)._ `streamEvents` imita a Rust (renovación silenciosa, cabecera 10 s,
+canal mudo 10 s, fin antes de 5 s o `interrupted` como falla, espera creciente, `connected` una vez por falla) y las
+peticiones tienen los plazos de Rust (12 s; reportes 45, licencia 80, mantenimiento 130): sin ellos, con Go pausado,
+una petición del driver esperaba para siempre y la tolerancia nunca se cruzaba.
+
+**4. K1-D32, pedido por el coordinador a media fase (`895efa2`).** `POST kitchen-display/unpair` `{username, password}`
+en la lista cerrada de la pantalla:
+
+- las validaciones de `settings-access`, ahora en una sola función (`kitchenDisplayAdministrator`): vacíos 400; más de
+  40 o 256 caracteres, 401 `AUTHORIZATION_INVALID` sin contar un intento; `supervisorAuthorizer` con `devices.manage` y
+  el mismo contador de intentos (por pantalla y usuario, compartido entre las dos rutas). Sin el permiso, 403
+  `PERMISSION_DENIED` con la auditoría `kitchen_display.unpair_denied`;
+- revoca la propia pantalla con el mismo código que Terminales › «Revocar», extraído a `revokeDevice`
+  (`administration/devices.go`): fila del dispositivo, sesiones, credenciales de envío y al final el lock de cupos
+  (`seats.ReleaseDevice`). El canal se corta con `interrupted` `DEVICE_REVOKED` en su siguiente lectura;
+- 200 `{}`; auditoría `kitchen_display.unpaired` con el administrador como autor y la pantalla como dispositivo;
+- licencia «siempre» (`RowAlways`, sin fecha); no exige cupo;
+- contrato: `openapi.json` (`unpairKitchenDisplay`), `docs/API_V1.md`, `TestContractV1` y `$SP/k1/api-k1.md` (sección
+  13 bis y nota de las 22:15); nombres de las dos auditorías en `desktop/src/services/auditActions.ts`.
+
+### Decisiones propuestas
+
+1. **Los mensajes del canal no reinician la racha de fallas de las peticiones.** «Sin conexión» lo deciden las
+   peticiones a la API (la sesión se consulta cada 5 s); el canal vivo solo apaga «Reconectando». Si no, una terminal con
+   el canal abierto y la API sin responder (como simula `__adelOffline` en las especificaciones de la 9D) nunca diría
+   «Sin conexión». Las fallas del canal sí cuentan para «Sin conexión».
+2. **Plazos del canal en Rust: 10 s para la cabecera y 10 s de canal mudo.** Con la computadora principal detenida, la
+   conexión TCP puede abrirse y la respuesta no llegar nunca; Go manda un mensaje cada 750 ms, así que 10 s mudo es una
+   caída clara y queda dentro de los 20 s de la tolerancia.
+3. **Un fin «normal» antes de 5 s cuenta como falla**, para que un servidor que cerrara el canal enseguida no produzca un
+   bucle sin espera.
+4. **«Sin red del sistema» solo en una terminal por la red.** La computadora principal habla con su propio servidor por
+   127.0.0.1 aunque no haya red; seguir `navigator.onLine` ahí la bloquearía sin motivo.
+5. **La pantalla de acceso ya cargada (inicio de sesión, alta) usa la misma tolerancia**; al arrancar sin servidor,
+   «Revisa la conexión» sigue siendo inmediato.
+6. **Cocina › Estaciones › Terminales de cocina ya no lista las pantallas de cocina**: sus estaciones se eligen en
+   Terminales (un solo lugar; `GET kitchen/access` excluye `kitchen` como ya excluía `android`).
+7. **Plazos de 35 s en cinco especificaciones** (9d-colors, 9d-topbar-tables en dos lugares, 9f-kitchen-stations,
+   9f-topbar-map y 9g-two-terminals) que esperaban «Sin conexión» en 15 s: con la tolerancia, «Sin conexión» tarda unos
+   20 a 30 s (K1-D10).
+8. **K1-D32: sin `devices.manage`, la auditoría es `kitchen_display.unpair_denied`** (como `settings_denied` en los
+   ajustes), y el texto del 403 es «Ese usuario no puede volver a emparejar esta pantalla.».
+9. **Los errores de carga de una pantalla (por ejemplo el estado «No se pudo comunicar…» del mapa de Mesas) no pasan
+   por el estado único**: son la respuesta a una consulta que sí falló. Con el canal corregido ya no hay recargas cada
+   30 s, y durante un corte breve no se consulta nada (no llegan eventos), así que no aparecen.
+
+### Pruebas ejecutadas
+
+Todas con `ISO_TAG=A`; Playwright con Go temporal 8203, vista previa 1433, simulador de licencias 8491 con
+`ISO_LICENSE_TRUST` (`vectors.json`) y Go sin activar 8205 (`$SP/k1/E/pw-all.sh`, registros en `$SP/k1/E/pw-*.log`).
+
+| Qué                                                                                                                                                                                                                                     | Resultado                                                                                                                                                                                                  |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R1: `go-int ./internal/administration`, `./internal/operations -run TestStageK1`, `./internal/apicontract`; `go-unit`                                                                                                                   | Aprobado (antes de `f690bce`).                                                                                                                                                                             |
+| `go-int ./internal/kitchen` (`kitchen/access` sin pantallas)                                                                                                                                                                            | Aprobado (6 s).                                                                                                                                                                                            |
+| `go-int ./internal/operations` con `TestStageK1KitchenDisplay`, `TestStageK1R1KitchenDisplaySecurity`, `TestStage9FKitchenStations` y `TestRestaurantAcceptance` (usan `kitchen/access`)                                                | Aprobado (328 s).                                                                                                                                                                                          |
+| `go-int ./internal/administration -run TestStageTwoAcceptance` (Terminales e inicio de la terminal)                                                                                                                                     | Aprobado (106 s).                                                                                                                                                                                          |
+| K1-D32: `go-int ./internal/operations -run TestStageK1` (con la subprueba nueva y las llamadas de licencia), `./internal/apicontract`, `./internal/licensing`, `./internal/administration` completo                                     | Aprobado (64, 53, 12 y 286 s).                                                                                                                                                                             |
+| `go-unit` (vet normal e `integration`, `test -race` de todo, `GOOS=windows` build y vet), después de K1-D32                                                                                                                             | Aprobado.                                                                                                                                                                                                  |
+| Vitest completo con `tsc` (`iso.sh vitest`)                                                                                                                                                                                             | 107 archivos, 1014 pruebas aprobadas.                                                                                                                                                                      |
+| `npm run build`                                                                                                                                                                                                                         | Correcto (también lo hace cada corrida de Playwright).                                                                                                                                                     |
+| `cargo test --locked --offline` (7 pruebas nuevas del canal con un servidor HTTP en 127.0.0.1, más la ignorada de 10 minutos)                                                                                                           | 122 aprobadas, 4 ignoradas (entre ellas la de 10 minutos).                                                                                                                                                 |
+| Prueba de Rust de 10 minutos sin uso contra el Go temporal, por la escucha local (`http://127.0.0.1:8203`) y por la de red (`https://127.0.0.1:8463`), a la vez, 21:11 a 21:21                                                          | Las dos aprobadas: «600 s: 816 mensajes de cambios, 1 connected, 0 reconnecting» y «600 s: 818 mensajes de cambios, 1 connected, 0 reconnecting».                                                          |
+| El mismo script de la Fase F (`$SP/k1/E/idle-fase-f.sh`) con 20 s, sobre un Go temporal recién levantado                                                                                                                                | Las dos: «1 connected, 0 reconnecting».                                                                                                                                                                    |
+| Playwright `workflow-stagez-k1-reconnect` en Chromium y WebKit (cada uno: más de un minuto sin hacer nada; pausas de 1, 3 y 5 s; pausa de 42 s; otra de 3 s después; lo mismo como terminal por la red, con 35 s sin hacer nada)        | 2 de 2 en cada motor (2,8 y 2,1 min). Ninguna lectura distinta de «En línea» ni capa en los tramos sin hacer nada y en las pausas breves; en la larga, «Sin conexión» y la capa, y «En línea» al reanudar. |
+| Playwright `workflow-stagez-k1-terminals` en Chromium y WebKit                                                                                                                                                                          | 1 de 1 en cada motor (unos 10 s). La última corrida de la K1 en Chromium (3 de 3, 5,3 min) ya con K1-D32.                                                                                                  |
+| Playwright de lo afectado, Chromium: `restaurant.spec`, 9c-navigation, 9d-colors, 9d-topbar-tables, 9f-kitchen-stations, 9f-topbar-map, 9g-terminals (2), 9g-two-terminals (2), 9g-modality, a1-pin, a2-terminals, l1-notices, l1-seats | 15 de 15 (15,3 min).                                                                                                                                                                                       |
+| Lo mismo en WebKit                                                                                                                                                                                                                      | 15 de 15 (14,9 min).                                                                                                                                                                                       |
+| `fmt-check` y `md5` de `docs/etapas/*.md`                                                                                                                                                                                               | Correcto; `docs/etapas` sin cambios.                                                                                                                                                                       |
+
+Fallas encontradas por el camino, ya corregidas: un segundo «Reintentar» inerte detrás de la capa (la 9D, `924ce67`);
+cuatro esperas de «Sin conexión» de 15 s más una que se me había pasado (9f-topbar-map); el texto «versión instalada»
+en la 9G; en las especificaciones nuevas, el indicador fuera de la navegación principal y una consulta antes de que
+terminara «Liberar cupo». Cuando una especificación falla, las siguientes de la misma corrida fallan con «La aceptación
+debe comenzar con una base sin configurar» (el puente pierde la terminal preparada al reiniciarse el proceso de
+Playwright): no son fallas propias.
+
+Capturas en `$SP/k1/shots-E/` (`chromium-` y `webkit-`): `k1-terminales-configuracion`, `k1-terminales-editar`,
+`k1-cocina-colores`, `k1-terminales-liberar-cupo`, `k1-reconexion-sin-conexion` y `k1-reconexion-terminal-red`.
+
+### Prueba de 10 minutos para la Fase F
+
+Con un Go temporal recién levantado (sin configurar) y sus dos escuchas:
+
+```
+ISO_TAG=<tag> ISO_GO_PORT=<local> ISO_NET_PORT=<red> $SP/iso.sh <árbol> server-up
+$SP/k1/E/idle-fase-f.sh <árbol> <tag> <local> <red>        # 600 s por omisión; un 5.º argumento cambia los segundos
+ISO_TAG=<tag> $SP/iso.sh - server-down
+```
+
+El script configura el Go temporal con su token, entra como admin, toma la huella del certificado y corre a la vez
+`cargo test --locked --offline realtime::tests::idle_channel_against_go -- --ignored --nocapture` por
+`http://127.0.0.1:<local>` y por `https://127.0.0.1:<red>` (con `ADEL_IDLE_FINGERPRINT`). Cada una debe terminar con
+«600 s: … mensajes de cambios, 1 connected, 0 reconnecting» y `test result: ok`. La prueba rechaza 8181 y 8443.
+
+### No verificado o pendiente
+
+- Nada en la aplicación de escritorio instalada (.pkg): lo hará la Fase F. El «Reconectando» real lo cubren la prueba
+  de Rust de 10 minutos contra Go (local y por la red) y Playwright con el puente que imita a Rust.
+- El ámbar «Reconectando» (canal caído más de la tolerancia con Go respondiendo) solo está probado en Vitest
+  (`serverLink.test.ts`, `navigation.test.tsx`): con Go pausado se caen las dos cosas a la vez.
+- En Windows no corrí nada (`GOOS=windows` build y vet de Go sí).
+- K1-D32: la pantalla de la tableta («Volver a emparejar») es de M en la Fase D.
+
+### Decisiones del coordinador al cerrar la Fase E
+
+- **K1-D33. Margen cuando Android dice «sin red», solo en la aplicación de cocina** (lo pidió el agente M durante la
+  Fase D).
+  - **El problema:** el estado de conexión de la A3 declara «Sin conexión» al instante si Android dice que no hay red.
+    En una tableta, una falla de la wifi de 1 s ya mostraría el aviso grande, y el propietario pidió que una
+    desconexión de un segundo no muestre nada (§5.1).
+  - **La regla:** `ServerLinkTracker` recibe un margen opcional, contado desde el aviso de Android.
+    - En la aplicación de cocina es de 10 s: «Sin conexión» solo si la falta de red dura más que eso.
+    - Mientras dura el margen, las marcas se reintentan en silencio.
+    - En la de meseros el margen es 0, así que no cambia.
+  - **Por qué 10 s y no 5:** después de quitar el modo avión, la wifi tarda unos segundos en volver. Un corte de 5 s
+    puede verse en Android como 7 a 10 s sin red.
+- **K1-D34. Se aceptan las decisiones propuestas 1 a 9 de la Fase E.**
+- **K1-D35. Dos retoques de Terminales**, vistos en las capturas:
+  - «Sonido» se elige con el mismo control de dos opciones que la letra y el tema («Activado» o «Desactivado»);
+  - el texto de los cupos dice que una tableta de cocina ocupa su cupo mientras esté emparejada, y que se libera con
+    «Liberar cupo» o «Revocar».
