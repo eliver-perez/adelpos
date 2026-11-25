@@ -155,8 +155,13 @@
 # Suite `kitchen` (etapa K1, KitchenOnGoTest de la APLICACIÓN DE COCINA, com.adelpos.cocina, con su CocinaTestRunner y el
 # mismo tipo NSD de pruebas; con un servidor temporal nuevo): k1 emparejar la tableta como pantalla de cocina con el
 # código (la prueba hace de computadora principal por la escucha local) · k2 conectar (`kitchen-display/connect`, el
-# cupo de cocina) y la pantalla de pedidos vacía, «No hay pedidos». Las fases C y D de la etapa agregan sus pasos. Se
-# corre aparte (no entra en `all`, que es de la aplicación de meseros).
+# cupo de cocina) y la pantalla de pedidos vacía, «No hay pedidos» · k3 pedidos reales creados en Go (mesa con un
+# modificador y una nota, para llevar, un agregado y una cancelación) que aparecen sin tocar nada · k4 marcar un
+# platillo, el cierre automático y el botón del pedido; Go lo registra y deja el aviso al mesero (`ready_notices`, en
+# la base temporal: con ADELPOS_E2E_DATABASE_URL; sin ella, ese paso queda omitido) · k5 «Recientes» y «Recuperar»
+# (el aviso del platillo recuperado se quita) · k6 el tamaño de letra y el tema de `PATCH devices/{id}` llegan al
+# momento. La Fase D de la etapa agrega sus pasos. Se corre aparte (no entra en `all`, que es de la aplicación de
+# meseros).
 #
 # Seguridad: se niega a correr con los puertos del servicio real (8181, 8443), con un host que no sea la propia Mac
 # o si `GET version` de alguna de las dos escuchas no responde `test_mode: true`; la base solo con las guardas de
@@ -220,7 +225,7 @@ suite_steps() {
         adjustments) echo "a1 a2 a3 a4 a5 a6 a7" ;;
         license) echo "l1 l2 l3 l4 l5 l6 l7 l8" ;;
         connection) echo "c1" ;;
-        kitchen) echo "k1 k2" ;;
+        kitchen) echo "k1 k2 k3 k4 k5 k6" ;;
     esac
 }
 
@@ -1064,11 +1069,65 @@ connection_step() {
     esac
 }
 
+# Etapa K1: los avisos al mesero que deja marcar en la pantalla de cocina (app.ready_notices, los mismos de la A2).
+# Go no los da por su API a la principal: se cuentan en la base temporal, después de comprobar que es la de ESTE
+# servidor. Las cuentas son las que la prueba anotó en su registro (k4).
+ready_notices_of() {
+    test_sql "SELECT 1" >/dev/null
+    "$PSQL" "$ADELPOS_E2E_DATABASE_URL" -X -tAq -v ON_ERROR_STOP=1 \
+        -c "SELECT count(*) FROM app.ready_notices WHERE account_id = '$1'"
+}
+
+# k4: marcar en la pantalla deja el aviso de las dos cuentas; k5: recuperar el platillo quita el suyo.
+kitchen_notices() {
+    local step="$1" log="$SUITE_OUT/k4_marcarPlatilloCierreAutomaticoYPedido-logcat.txt"
+    local table takeaway counts="$SUITE_OUT/k4-avisos.txt" before now verdict
+    if ! database_allowed; then
+        skip_step "$step" "sin ADELPOS_E2E_DATABASE_URL: los avisos al mesero solo se ven en la base"
+        return
+    fi
+    table="$(logged_account "k4 mesa cuenta=" "$log")"
+    takeaway="$(logged_account "k4 llevar cuenta=" "$log")"
+    if [ -z "$table" ] || [ -z "$takeaway" ]; then
+        echo "$SUITE_NAME $step: FALLA (k4 no anotó sus cuentas)" | tee -a "$SUMMARY"
+        FAILED=1
+        return
+    fi
+    if [ "$step" = k4_avisosAlMesero ]; then
+        before="$(ready_notices_of "$table") $(ready_notices_of "$takeaway")"
+        echo "$before" >"$counts"
+        verdict="APROBADA"
+        case "$before" in 0\ * | *\ 0) verdict="FALLA" ;; esac
+        echo "$SUITE_NAME $step: $verdict (avisos en ready_notices: mesa ${before% *}, para llevar ${before#* })" |
+            tee -a "$SUMMARY"
+    else
+        before="$(cut -d' ' -f2 "$counts" 2>/dev/null)"
+        now="$(ready_notices_of "$takeaway")"
+        verdict="FALLA"
+        if [ -n "$before" ] && [ "$now" -lt "$before" ]; then
+            verdict="APROBADA"
+        fi
+        echo "$SUITE_NAME $step: $verdict (avisos del pedido para llevar: $before antes de recuperar, $now después)" |
+            tee -a "$SUMMARY"
+    fi
+    [ "$verdict" = APROBADA ] || FAILED=1
+}
+
 # Etapa K1: la aplicación de cocina (KitchenOnGoTest). Las capturas de cada paso se copian a <salida>/screens.
 kitchen_step() {
     case "$1" in
         k1) run_step k1_emparejarComoPantallaDeCocina ;;
         k2) run_step k2_conectarYPantallaDePedidosVacia ;;
+        k3) run_step k3_pedidosRealesAparecenSolos ;;
+        k4)
+            run_step k4_marcarPlatilloCierreAutomaticoYPedido
+            kitchen_notices k4_avisosAlMesero
+            ;;
+        k5)
+            run_step k5_recientesYRecuperar
+            kitchen_notices k5_avisosRecuperados
+            ;;
+        k6) run_step k6_letraYTemaDesdeTerminalesAlMomento ;;
         *) fail "paso desconocido de la suite kitchen: $1" ;;
     esac
     mkdir -p "$SUITE_OUT/screens"
