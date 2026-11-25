@@ -196,4 +196,23 @@ class LicenseMessagesTest {
         graceDays: Int? = null,
         clock: LicenseClock = LicenseClock.NOT_BLOCKED,
     ) = LicenseSummary(state = state, graceDaysRemaining = graceDays, clock = clock)
+
+    @Test
+    fun losTextosDeLaPantallaDeCocina() {
+        // §6 de la etapa K1, palabra por palabra.
+        assertEquals(
+            "No hay cupo de pantalla de cocina libre (2 de 2 en uso). Revoca otra pantalla en " +
+                "Terminales o amplía tu licencia.",
+            LicenseMessages.kitchenDisplayNoSeat(inUse = 2, limit = 2),
+        )
+        assertEquals(
+            "No hay cupo de pantalla de cocina libre. Revoca otra pantalla en Terminales o amplía " +
+                "tu licencia.",
+            LicenseMessages.kitchenDisplayNoSeat(inUse = null, limit = 2),
+        )
+        assertEquals(
+            "Esta pantalla dejó su cupo de cocina.",
+            LicenseMessages.KITCHEN_DISPLAY_SEAT_RELEASED,
+        )
+    }
 }
