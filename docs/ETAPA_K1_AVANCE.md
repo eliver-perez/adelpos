@@ -1549,3 +1549,255 @@ de R1-2). El coordinador decide si se queda.
     `X-Client-Kind` vale para los tres tipos cuando llega la cabecera.
 - **K1-D30. «Liberar cupo» no es definitivo:** la tableta puede pedir el cupo otra vez con «Usar esta pantalla», y lo
   definitivo es «Revocar». Lo dicen Terminales, junto a «Liberar cupo» (Fase E), y `docs/COCINA_INSTALAR.md` (Fase D).
+
+## Fase C · La pantalla de pedidos de la aplicación de cocina (§4)
+
+Agente M, 24/11/2026, en `$SP/wt/k1-b` (rama `etapa-k1-b`, con `etapa-k1` traída hasta `f690bce`: la Fase B, la R1 y
+sus correcciones), `ISO_TAG=B`, Go temporal 8211/8471, emuladores `Pixel_Tablet` (Android 17, consola 5580) y
+`ADEL_A1_Tablet_API26` (Android 8.0, 5582), en horizontal y de solo lectura. Guiones de la fase (fuera del
+repositorio) en `$SP/k1/B/`; resultados en `$SP/k1/after-C/`; capturas en `$SP/k1/capturas-C/`.
+
+### Resumen
+
+- La tableta ya es una **pantalla de cocina**: se conecta sola, muestra las tarjetas del pedido más antiguo al más
+  nuevo y se actualiza **sin tocar nada** con el canal de eventos (con varios eventos seguidos, una sola lectura).
+- **Tarjetas**:
+  - encabezado con la mesa o «Para llevar» y el cliente, el mesero, la hora de envío y la espera en vivo;
+  - platillos en letra grande con sus cambios y notas;
+  - «NUEVO», y «CANCELADO» tachado hasta que se marca el pedido;
+  - color por tiempo de espera con los límites generales.
+- **Marcar**:
+  - tocar un platillo lo marca: se atenúa con una palomita al momento;
+  - el botón grande «Pedido listo» marca la tarjeta completa, que desaparece;
+  - la tarjeta se cierra sola cuando todo lo vivo está listo;
+  - en las estaciones «por pedido», tocar el platillo no lo marca y un texto lo explica;
+  - con la hora del servidor incorrecta, los pedidos se siguen viendo pero no se pueden marcar, y un aviso lo dice.
+- **«Recientes»** muestra lo marcado en los últimos 30 minutos, con «Recuperar».
+- **Muchos pedidos**: columnas con desplazamiento y un aviso de cuántos quedan fuera de la vista.
+- **Letra y tema**: la letra (normal o grande) y el tema (oscuro o claro) que se cambian en Terminales llegan al
+  momento.
+- **Licencia y cupo**: sin cupo, cupo liberado con «Usar esta pantalla», y licencia sin activar (§6).
+- **Contra Go**, la suite `kitchen` tiene seis pasos con pedidos reales y **aprueba en los dos emuladores**. Incluye
+  el aviso al mesero que deja marcar (`ready_notices`) y que se quita al recuperar.
+- **K1-D28**: actualizar la 0.4.0 a la 0.4.1 encima aprueba en `ADEL_A1_Tablet_API26`, en sus dos partes.
+
+### 1. Lo que se hizo
+
+**Código** (`cocina/app/src/main/kotlin/com/adelpos/cocina/`):
+
+- `board/KitchenDisplayDtos.kt`: el contrato de `api-k1.md` §5–§9.
+- `board/Board.kt`: el modelo de la pantalla y `BoardMapper`.
+- `board/BoardRules.kt`: las reglas puras:
+  - orden de las tarjetas;
+  - espera y su texto;
+  - nivel de color;
+  - qué se puede tocar;
+  - botón del pedido;
+  - pedidos fuera de la vista;
+  - avisos de licencia;
+  - qué pantalla corresponde a cada error.
+- `board/KitchenDisplayService.kt`: las siete rutas de `kitchen-display/…`.
+- `board/KitchenBoard.kt`: el ciclo (K1-D25):
+  - `connect`, después `orders` con su cursor, después el canal;
+  - lecturas coalescidas;
+  - acuse de comandas (K1-D12);
+  - marcas e idempotencia por versión;
+  - Recientes;
+  - cupo.
+- `ui/OrdersScreen.kt`, `ui/OrderCardView.kt` y `ui/RecentDialog.kt`: la pantalla.
+- `access/KitchenAccess.kt`: da la credencial al canal y a las rutas de la pantalla.
+- `CocinaContainer` y `CocinaApplication`: arrancan el tablero y el `RealtimeClient` de `android-core` (el mismo de
+  meseros), con la conexión de la barra según el canal.
+
+**`android-core/`**:
+
+- `LicenseMessages`: los textos de la pantalla de cocina (§6: sin cupo con `in_use`/`limit`, cupo liberado, sin
+  activar, hora incorrecta, vencida y revocada) con su prueba.
+- `LicenseSummaryDto.toSummary()`: ahora público, para leer la licencia de `orders` igual que meseros.
+- `testing/SystemDialogs.dismissFullScreenNotice`: cierra el aviso de Android «Viewing full screen», que tapaba las
+  capturas la primera vez que se abre la aplicación de cocina.
+
+**Pruebas y guiones**:
+
+- JVM: `BoardRulesTest` y `KitchenBoardTest`.
+- Instrumentadas: `OrdersScreenTest`, `KitchenScreensTest` y `KitchenOnGoTest` (k1–k6).
+- `scripts/android-e2e.sh`: suite `kitchen` con los pasos k1–k6, más el conteo de `ready_notices` en la base temporal.
+
+**Commits** en `etapa-k1-b`:
+
+- `adb0320`: textos y licencia en `android-core`.
+- `31835aa`: la pantalla de pedidos.
+- `1fe6827`: corrección de una prueba.
+- `63017c8`: el aviso de pantalla completa en las capturas.
+- `90eca7d`: letra grande pareja, el aviso de pedidos fuera de la vista y el texto de la tarjeta mezclada.
+- `f6d5e4f`: lo marcado sin parpadeo.
+- `104a50e`: la suite `kitchen` con pedidos reales.
+
+### 2. Cómo se resolvió cada punto de la §4
+
+| Punto                    | Cómo                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Ciclo (K1-D25)           | `connect` → `orders` → canal `GET events` con la credencial de la pantalla. Cualquier evento con cambios (o `reset`) pide una lectura. Un canal `CONFLATED` deja una lectura en curso y **a lo más una pendiente**. El canal se abre desde el principio (también sin cupo) para recibir `license.changed` y los cambios de configuración.                                                                          |
+| Acuse (K1-D12)           | Después de pintar una lectura, `receipts` con sus `receipts_pending`. Si falla, la siguiente lectura las vuelve a traer; la tableta no avisa nada.                                                                                                                                                                                                                                                                 |
+| Espera en vivo           | `elapsed_seconds` de la lectura más el reloj monotónico de la tableta desde que llegó (`SystemClock.elapsedRealtime`). Nunca la hora de la tableta. Avanza cada segundo.                                                                                                                                                                                                                                           |
+| Color (K1-D17)           | Normal, «Atención: lleva tiempo esperando» (ámbar) y «Retrasado» (rojo), con `display_warning_minutes` y `display_late_minutes`. El borde y el encabezado usan los tokens de la paleta única.                                                                                                                                                                                                                      |
+| CANCELADO (K1-D23)       | Tachado en rojo con su etiqueta. Una tarjeta cerrada por cancelación queda con el botón «Quitar de la pantalla» (`orders/ready`).                                                                                                                                                                                                                                                                                  |
+| NUEVO                    | Etiqueta azul cuando `is_new`.                                                                                                                                                                                                                                                                                                                                                                                     |
+| Marcar                   | Al tocar, el platillo se ve listo al momento (atenuado y con palomita) y la tarjeta del botón se esconde. Manda la siguiente lectura de Go. `skipped` no es error: la lectura trae el estado real.                                                                                                                                                                                                                 |
+| Por pedido (K1-D14)      | Tocar el platillo no lo marca. Si toda la tarjeta es «por pedido», un texto al pie lo explica. En una tarjeta **mezclada** (platillos que se marcan al tocarlos y otros por pedido), cada platillo por pedido dice «Se marca con el botón «Pedido listo».».                                                                                                                                                        |
+| Hora incorrecta (K1-D16) | Aviso fijo arriba; platillos y botones deshabilitados; las lecturas siguen.                                                                                                                                                                                                                                                                                                                                        |
+| Recientes                | Botón «Recientes» en la barra: diálogo a pantalla completa con «Recuperar» por platillo y «Recuperar el pedido» si hay más de uno listo. Con `KITCHEN_NOT_RECOVERABLE` muestra el mensaje de Go y vuelve a leer `recent`.                                                                                                                                                                                          |
+| Muchos pedidos           | Columnas adaptables (`LazyVerticalStaggeredGrid`, 300 dp mínimo) con desplazamiento. El aviso «Hay N pedidos más: desliza para verlos» va **debajo** de las columnas, para no tapar ningún botón.                                                                                                                                                                                                                  |
+| Letra y tema             | Vienen de `display` en cada lectura. La letra grande es ×1.25 **pareja**, sobre la escala del sistema. El tema usa `AdelTheme` claro u oscuro.                                                                                                                                                                                                                                                                     |
+| Cupo y licencia (§6)     | Sin cupo: el texto con `in_use`/`limit`, y se vuelve a intentar `connect` cada 30 s además de con los eventos. Cupo liberado: «Usar esta pantalla» (`connect` con `take_seat: true`). `KITCHEN_DISPLAY_NOT_CONNECTED`: `connect` otra vez. Sin activar: no se muestran pedidos. Vencida o revocada: aviso y se sigue trabajando. `DEVICE_REVOKED` y `CLIENT_KIND_MISMATCH`: lo maneja la entrada, como en meseros. |
+| Textos                   | `PlainLanguageTest` (de `android-core`) ya recorre `cocina/`. Las capturas se revisaron: sin textos provisionales ni identificadores.                                                                                                                                                                                                                                                                              |
+
+**Puntos de enganche para la D:**
+
+- `KitchenBoard.retryLater` es hoy un reintento silencioso cada 5 s: ahí van la conexión tolerante y el aviso «Sin
+  conexión…».
+- Las marcas en camino (`dishesInFlight`/`cardsInFlight`) son el lugar del reintento silencioso de una marca.
+- Los `id` estables de las tarjetas sirven para saber cuál es nueva (sonido y animación).
+- `DisplaySettings` ya trae `soundEnabled` y `soundVolume`.
+
+### 3. Pruebas reales
+
+Todas en este árbol, con el código final salvo donde se dice. Resultados y listas de casos en `$SP/k1/after-C/`.
+
+| Prueba                                                                                          | Resultado                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ----------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| JVM y Robolectric de los tres builds (`--rerun`), `jvm-C.sh`                                    | **65 XML, 439 pruebas, 0 fallas**: `android/` 327, `android-core` 87 y `cocina` 25 (`BoardRulesTest` 8, `KitchenBoardTest` 10 y `KitchenAccessTest` 7). Lista de casos en `after-C/jvm/casos.txt`.                                                                                                                                                                                                                                             |
+| Lint de los tres builds                                                                         | Sin problemas. Solo las 2 sugerencias `AutoboxingStateCreation` de siempre en `android/feature/access`, que esta fase no toca.                                                                                                                                                                                                                                                                                                                 |
+| ktfmt de los tres builds y `fmt-check` del repositorio                                          | Correctos.                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `md5` de `docs/etapas/*.md`                                                                     | Igual que al empezar la Fase B; `docs/`, `contracts/`, `backend/`, `desktop/` y `config/` sin cambios.                                                                                                                                                                                                                                                                                                                                         |
+| Instrumentadas de cocina, `Pixel_Tablet`                                                        | **17**: 11 corridas y 6 omitidas (las de `KitchenOnGoTest`, que solo corren con el guion), 0 fallas. Son `OrdersScreenTest` (c1–c6 y c8), `KitchenScreensTest` y `KitchenAppStartTest`.                                                                                                                                                                                                                                                        |
+| Instrumentadas de cocina, `ADEL_A1_Tablet_API26`                                                | **17**: 11 corridas y 6 omitidas, 0 fallas.                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Instrumentadas de meseros y de `android-core`, `Pixel_Tablet` (por el cambio en `android-core`) | `android/` **158** (72 corridas, 86 omitidas) y `android-core` **10**; 0 fallas. Las mismas 168 de la línea base de la B.                                                                                                                                                                                                                                                                                                                      |
+| Instrumentadas de meseros y de `android-core`, `ADEL_A1_Tablet_API26`                           | `android/` **158** (70 corridas, 88 omitidas) y `android-core` **10**; 0 fallas. Las mismas 168 de la línea base.                                                                                                                                                                                                                                                                                                                              |
+| Suite `kitchen` contra el Go temporal, `Pixel_Tablet`                                           | **8/8 aprobadas** (`k1`–`k6` y los dos conteos de `ready_notices`), en 37 s.                                                                                                                                                                                                                                                                                                                                                                   |
+| Suite `kitchen` contra el Go temporal, `ADEL_A1_Tablet_API26`                                   | **8/8 aprobadas**, en 28 s. Se instala con `adb install --no-streaming -r -t` y `--no-install` (A3-D33): en Android 8 la instalación en flujo llegó a colgarse.                                                                                                                                                                                                                                                                                |
+| K1-D28, actualizar 0.4.0 → 0.4.1 encima, `ADEL_A1_Tablet_API26`, parte 1 (datos)                | Con la 0.4.0 debug, `w1` (emparejar y entrar) y `w3` (pedido sin conexión en la cola) aprobadas. Se instala encima la 0.4.1 sin desinstalar y `w4` aprueba: el pedido sale una sola vez, sin volver a entrar. La base, copiada antes y después, conserva el servidor emparejado, la mesera Ana y el pedido. El pedido ya estaba `received` al instalar encima, sin abrir la aplicación: lo mandó el trabajo en segundo plano al reprogramarse. |
+| K1-D28, parte 2 (firma)                                                                         | El APK 0.4.0 entregado y la 0.4.1 release firmada tienen el mismo certificado (`SHA-256 fb6a4bac…`). `adb install -r` encima funciona: `versionCode` 4 → 5, `firstInstallTime` sin cambio. La aplicación normal nunca se abrió.                                                                                                                                                                                                                |
+
+Detalle de la suite `kitchen` (cada paso es su propia instrumentación, con un Go temporal nuevo, su licencia de
+prueba y el ejecutor de pruebas, que nunca busca en la red real):
+
+- **`k1`** arma el restaurante por la API de la principal:
+  - estaciones «Cocina K» (por platillo) y «Barra K» (por pedido), las dos en pantalla;
+  - un ingrediente que se puede quitar, productos y rutas;
+  - una mesa y un mesero.
+
+  Después empareja la tableta como pantalla de cocina escribiendo la dirección.
+
+- **`k2`**: conecta sola y muestra «No hay pedidos».
+- **`k3`**: con la tableta abierta y sin tocarla, la principal manda dos pedidos y la tableta los muestra:
+  - mesa: 3 tacos sin cebolla, con la nota «Bien dorados»; un agua; 2 limonadas de la barra;
+  - para llevar, a nombre de Luisa Martínez: 2 hamburguesas.
+
+  Después se agrega un flan, que llega con «NUEVO», y se cancela el agua, que queda tachada con «CANCELADO». En la
+  tarjeta mezclada, la limonada dice que se marca con el botón.
+
+- **`k4`**:
+  - tocar los tacos → `kitchen/board` de Go los tiene `ready`;
+  - tocar lo único del pedido para llevar → la tarjeta se cierra sola;
+  - el botón de la mesa → el flan y las limonadas quedan listos y la tarjeta desaparece;
+  - queda «No hay pedidos».
+
+  El guion cuenta en la base temporal `app.ready_notices`: **6 avisos de la mesa y 2 del pedido para llevar**.
+
+- **`k5`**: «Recientes» → «Recuperar» la hamburguesa. En Go deja de estar lista, la tarjeta vuelve a la pantalla y
+  los avisos del pedido para llevar bajan de 2 a 0.
+- **`k6`**: `PATCH devices/{id}` con letra grande y tema claro llega al momento, y se comprueba en lo que se ve: el
+  alto del platillo pasa de 60 a 75 px en `Pixel_Tablet` y de 30 a 38 px en Android 8, y el fondo es claro en la
+  captura.
+
+Capturas en `$SP/k1/capturas-C/`:
+
+- `pixel-tablet/` y `tablet-api26/`, todas las pantallas nuevas:
+  - `c1` tarjetas;
+  - `c2` colores;
+  - `c3` marcado;
+  - `c4` hora incorrecta;
+  - `c5` Recientes;
+  - `c6` muchos pedidos;
+  - `c7` sin cupo, cupo liberado y sin activar;
+  - `c8` los dos tamaños por los dos temas;
+  - `b*`, las de la entrada.
+- `e2e-5580-kitchen/` y `e2e-5582-kitchen/`, las de los pedidos reales.
+
+Se revisaron una por una: sin textos provisionales, sin identificadores y sin nada en inglés de la aplicación. El
+único texto en inglés que apareció fue el aviso del sistema «Viewing full screen», que ahora se cierra antes de
+capturar.
+
+### 4. Decisiones propuestas
+
+1. **Un solo tablero por proceso.** `KitchenBoard` vive en el contenedor y no en la pantalla. Usa el `RealtimeClient`
+   de `android-core` con la credencial de la pantalla, sin sesión. Las lecturas se piden por un canal conflado: una
+   en curso y como mucho una pendiente. El canal de eventos se abre antes de `connect` y también sin cupo.
+2. **Espera en vivo**: `elapsed_seconds` de Go más el reloj monotónico de la tableta desde que llegó la lectura.
+   Nunca la hora de la tableta.
+3. **Marca optimista sin parpadeo.**
+   - Lo tocado se ve listo al momento.
+   - Si Go responde, sigue así hasta la primera lectura **empezada después** de la respuesta. Una lectura que ya iba
+     en camino lo hacía parpadear (listo → pendiente → listo).
+   - Lo encontré revisando el código por una captura de `k4` que no mostraba la marca. Esa captura resultó ser solo de
+     antes del cuadro con el cambio, pero la carrera era real: la cubre una prueba JVM, que falla sin el arreglo.
+   - Con un rechazo o sin respuesta, la marca se quita y manda lo que diga Go.
+4. **Tarjeta cerrada por cancelación** (K1-D23): su botón dice «Quitar de la pantalla» en vez de «Pedido listo».
+5. **Tarjeta mezclada** (estaciones por platillo y por pedido en la misma cuenta, K1-D14): debajo de cada platillo por
+   pedido, «Se marca con el botón «Pedido listo».». El texto del pie queda solo cuando toda la tarjeta es por pedido.
+6. **El aviso de pedidos fuera de la vista** va debajo de las columnas, no encima, porque tapaba los botones de la
+   última fila. Cuenta las tarjetas que no se ven **ni en parte**.
+7. **Letra grande**:
+   - es la tipografía ×1.25 de las tarjetas y avisos de la pantalla de pedidos, encima del tamaño de letra del sistema;
+   - no se cambia `fontScale`: Compose escala la letra grande de forma no lineal y los platillos crecían solo 8 %;
+   - la barra y «Recientes» quedan con letra normal;
+   - el tema claro u oscuro se aplica a toda la aplicación.
+8. **Recientes**:
+   - es un diálogo a pantalla completa desde la barra;
+   - «Recuperar» por platillo, y «Recuperar el pedido» cuando hay más de un platillo listo;
+   - con `KITCHEN_NOT_RECOVERABLE` muestra el mensaje de Go y vuelve a leer `recent`.
+9. **Sin cupo**: además de los eventos, la tableta vuelve a pedir `connect` cada 30 s. Sin respuesta de Go, lo
+   intenta otra vez en silencio cada 5 s; la tolerancia y el aviso son de la D.
+10. **`ready_notices` en la suite**: Go no los da por la API a la principal, así que el guion los cuenta en la base
+    temporal, con las mismas guardas que `test_sql` (solo `adel_pos_test_…`, nunca 55432, y la terminal principal
+    de ese servidor). Sin `ADELPOS_E2E_DATABASE_URL`, esos dos pasos quedan omitidos.
+11. **Capturas**: `SystemDialogs.dismissFullScreenNotice` cierra el aviso «Viewing full screen». Android lo muestra
+    una vez por instalación y tapaba las capturas de la aplicación de cocina.
+
+### 5. Hallazgos y notas
+
+- **Nada pendiente en Go** (no hizo falta `pedidos-M.md`). El contrato alcanzó tal cual, incluidos los cambios
+  de la R1, que para la tableta no cambian nada.
+- **Orden de los platillos** de una tarjeta: es el de Go (`items`). En un mismo envío, lo de la barra salió antes que
+  lo de la cocina, y lo cancelado conserva su lugar.
+- **K1-D28 en Android 8**: el pedido en cola salió al instalar encima, antes de abrir la 0.4.1, por el trabajo en
+  segundo plano. `w4` confirma que llegó una sola vez.
+- `upgrade.sh` ya no lee la base con `run-as … sqlite3`, porque Android 8 no lo permite. Ahora la copia con
+  `exec-out run-as … cat`, junto con su `-wal`, y la lee en la Mac.
+- `k1/B/e2e.sh` exporta `ADELPOS_E2E_DATABASE_URL` y `ADELPOS_E2E_PSQL` de la base temporal de B.
+- **Para la D**:
+  - En los emuladores, una captura tomada 0.4 s después de un cambio de estado puede salir sin el cambio. Una captura
+    de la pantalla desde la Mac, 5 s después, ya lo mostraba.
+  - Por eso `k4` espera a ver la palomita del platillo y `k6` espera a ver el alto del texto y el color del fondo
+    antes de capturar.
+  - La bandeja del sistema y la navegación quedan escondidas (pantalla completa de la B). El aviso de Android sale
+    una vez por instalación: en una tableta real, el dueño lo cierra una vez.
+
+### Decisiones del coordinador al cerrar la Fase C
+
+- **K1-D31. Se aceptan las decisiones propuestas 1 a 11 de la Fase C.** Las tarjetas siguen el orden de Go (del envío
+  más antiguo al más nuevo). Go manda como mucho 200 tarjetas, y con más de 200 pedidos abiertos el indicador no cuenta
+  las que faltan. Queda como limitación.
+- **K1-D32. «Volver a emparejar» en la tableta suelta el cupo.** El cupo está ligado al dispositivo (K1-D6). Si la
+  tableta solo borrara lo suyo, la pantalla vieja seguiría ocupando el cupo en Terminales hasta que alguien la
+  revocara, y con una licencia de una pantalla la nueva diría «No hay cupo». Por eso hay una ruta nueva de la lista
+  cerrada, `POST kitchen-display/unpair`:
+  - pide la contraseña del administrador como `settings-access` (mismas validaciones, mismo límite de intentos y
+    `devices.manage`);
+  - revoca el propio dispositivo igual que Terminales (suelta el cupo y corta el canal) y lo audita con el
+    administrador como autor;
+  - la tableta guarda la contraseña solo en memoria mientras los ajustes estén abiertos.
+
+  Si la computadora principal no responde o ya no reconoce la pantalla, la tableta borra lo suyo de todos modos y dice
+  que hay que revocarla en Terminales.
