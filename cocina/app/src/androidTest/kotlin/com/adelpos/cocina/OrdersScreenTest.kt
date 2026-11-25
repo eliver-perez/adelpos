@@ -5,6 +5,7 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -69,7 +70,8 @@ class OrdersScreenTest {
         compose.onNodeWithText("Mesa 4").assertIsDisplayed()
         compose.onNodeWithText("Para llevar").assertIsDisplayed()
         compose.onNodeWithText("Luisa Martínez").assertIsDisplayed()
-        compose.onNodeWithText("Ana López · Enviado a las 19:08").assertIsDisplayed()
+        // Mesa 4 y Mesa 7 son de Ana.
+        compose.onAllNodesWithText("Ana López · Enviado a las 19:08")[0].assertIsDisplayed()
         compose.onNodeWithText("3 × Tacos al pastor").assertIsDisplayed()
         compose.onNodeWithText("SIN Cebolla").assertIsDisplayed()
         compose.onNodeWithText("1 x Verde").assertIsDisplayed()
