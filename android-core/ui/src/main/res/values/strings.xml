@@ -19,6 +19,7 @@
 
     <string name="top_bar_back">Volver</string>
     <string name="top_bar_logo">AD-EL POS</string>
+    <string name="top_bar_logo_long_press">Abrir los ajustes</string>
 
     <!-- Dispositivo: tableta o teléfono. -->
     <string name="device_this_tablet">esta tableta</string>

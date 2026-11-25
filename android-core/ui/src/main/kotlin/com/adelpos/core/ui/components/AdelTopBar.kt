@@ -1,6 +1,7 @@
 package com.adelpos.core.ui.components
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -17,9 +18,12 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.adelpos.core.model.connection.ConnectionSummary
@@ -36,6 +40,9 @@ import com.adelpos.core.ui.theme.AdelTheme
  * Etapa A3 (§4.1 y §4.5): con [onBack], la flecha de regreso arriba a la izquierda (48 dp, además
  * del Atrás de Android; [backTag] la nombra para las pruebas); con [logo], el logotipo de AD-EL POS
  * junto al título (las pantallas de entrada), en su versión clara u oscura según el tema.
+ *
+ * Etapa K1 (§5.4): con [onLogoLongPress], una pulsación larga en el logotipo abre algo escondido
+ * (los ajustes de la pantalla de cocina). Un toque normal no hace nada.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -46,6 +53,7 @@ fun AdelTopBar(
     onBack: (() -> Unit)? = null,
     backTag: String = TAG_TOP_BAR_BACK,
     logo: Boolean = false,
+    onLogoLongPress: (() -> Unit)? = null,
     actions: @Composable RowScope.() -> Unit = {},
 ) {
     TopAppBar(
@@ -77,7 +85,13 @@ fun AdelTopBar(
                                 },
                             ),
                         contentDescription = stringResource(R.string.top_bar_logo),
-                        modifier = Modifier.height(LOGO_HEIGHT).testTag(TAG_TOP_BAR_LOGO),
+                        modifier =
+                            Modifier.height(LOGO_HEIGHT)
+                                .longPress(
+                                    onLogoLongPress,
+                                    stringResource(R.string.top_bar_logo_long_press),
+                                )
+                                .testTag(TAG_TOP_BAR_LOGO),
                     )
                 }
                 Text(
@@ -98,6 +112,21 @@ fun AdelTopBar(
                 titleContentColor = AdelTheme.colors.text,
             ),
     )
+}
+
+// La pulsación larga del logotipo, también para los lectores de pantalla (su acción de mantener
+// presionado, con [label]). Sin acción, el logotipo no reacciona.
+private fun Modifier.longPress(action: (() -> Unit)?, label: String): Modifier {
+    if (action == null) {
+        return this
+    }
+    return this.pointerInput(action) { detectTapGestures(onLongPress = { action() }) }
+        .semantics {
+            onLongClick(label = label) {
+                action()
+                true
+            }
+        }
 }
 
 // El logotipo mide 3 × 1: a 28 dp de alto ocupa unos 84 dp y deja lugar al título y al indicador
