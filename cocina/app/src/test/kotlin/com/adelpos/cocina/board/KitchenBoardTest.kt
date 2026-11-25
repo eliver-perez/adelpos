@@ -237,6 +237,31 @@ class KitchenBoardTest {
     }
 
     @Test
+    fun unaLecturaQueYaIbaEnCaminoNoHaceParpadearLoMarcado() = runTest {
+        service.ordersAnswers += ApiOutcome.Success(response(orders = listOf(card("t1"))))
+        val board = board()
+        access.status.value = KitchenStatus.Ready("Restaurante", "Cocina 1")
+        advanceUntilIdle()
+        // Una lectura lenta sale antes de marcar y trae el platillo todavía pendiente.
+        service.readDelayMillis = 1_000
+        service.ordersAnswers += ApiOutcome.Success(response(orders = listOf(card("t1"))))
+        signals.tryEmit(RealtimeSignal.Changes(2, listOf(event())))
+        runCurrent()
+        board.markDish("t1", "t1-a")
+        runCurrent()
+        assertEquals(setOf("t1-a"), board.state.value.markingDishes)
+        // Llega la lectura vieja: el platillo se sigue viendo listo.
+        service.ordersAnswers += ApiOutcome.Success(response(orders = emptyList()))
+        advanceTimeBy(1_001)
+        runCurrent()
+        assertEquals(setOf("t1-a"), board.state.value.markingDishes)
+        // La lectura empezada después de marcar manda (Go ya cerró la tarjeta).
+        advanceUntilIdle()
+        assertTrue(board.state.value.markingDishes.isEmpty())
+        assertEquals(emptyList<String>(), board.state.value.board?.cards?.map { it.id })
+    }
+
+    @Test
     fun conLaHoraIncorrectaNoSePuedeMarcar() = runTest {
         service.markAnswer = rejected(409, "SYSTEM_CLOCK_INVALID")
         service.ordersAnswers += ApiOutcome.Success(response(orders = listOf(card("t1"))))

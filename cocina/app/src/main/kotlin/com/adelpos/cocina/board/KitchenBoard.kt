@@ -9,6 +9,7 @@ import com.adelpos.core.network.session.AuthorizedServer
 import com.adelpos.core.network.session.FixedServerAccess
 import com.adelpos.core.network.session.ServerAccess
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
@@ -132,6 +133,13 @@ class KitchenBoard(
     private val dishesInFlight: MutableSet<String> = ConcurrentHashMap.newKeySet()
     private val cardsInFlight: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
+    // Las marcas ya respondidas siguen a la vista hasta una lectura **empezada después** de la
+    // respuesta (el número de lectura que la confirma): una lectura que ya iba en camino trae lo de
+    // antes de marcar y haría parpadear el platillo (listo → pendiente → listo).
+    private val readsStarted = AtomicLong(0)
+    private val dishesConfirmed = ConcurrentHashMap<String, Long>()
+    private val cardsConfirmed = ConcurrentHashMap<String, Long>()
+
     /** Empieza a seguir el estado de la entrada en [scope] (una sola vez por proceso). */
     fun start(scope: CoroutineScope): Job {
         this.scope = scope
@@ -145,6 +153,8 @@ class KitchenBoard(
                     } else {
                         channel.set(null)
                         reads = null
+                        dishesConfirmed.clear()
+                        cardsConfirmed.clear()
                         mutableState.value = BoardState()
                         mutableRecent.value = RecentState.Hidden
                     }
@@ -204,9 +214,12 @@ class KitchenBoard(
     }
 
     private suspend fun read() {
+        val number = readsStarted.incrementAndGet()
         when (val outcome = service.orders()) {
             is ApiOutcome.Success -> {
                 val board = BoardMapper.board(outcome.value, monotonic())
+                dishesConfirmed.values.removeIf { it <= number }
+                cardsConfirmed.values.removeIf { it <= number }
                 mutableState.update { current ->
                     current.copy(
                         screen = BoardScreen.Orders,
@@ -214,8 +227,14 @@ class KitchenBoard(
                         settings = board.settings,
                         // Lo que Go ya respondió está en esta lectura (manda Go); lo que todavía
                         // va en camino se sigue viendo marcado.
-                        markingDishes = current.markingDishes intersect dishesInFlight,
-                        markingCards = current.markingCards intersect cardsInFlight,
+                        markingDishes =
+                            current.markingDishes.filterTo(mutableSetOf()) {
+                                it in dishesInFlight || dishesConfirmed.containsKey(it)
+                            },
+                        markingCards =
+                            current.markingCards.filterTo(mutableSetOf()) {
+                                it in cardsInFlight || cardsConfirmed.containsKey(it)
+                            },
                         clockInvalid = false,
                     )
                 }
@@ -317,11 +336,17 @@ class KitchenBoard(
         dishIds: Set<String>,
         cardIds: Set<String>,
     ) {
+        if (outcome is ApiOutcome.Success) {
+            // Antes de dejar de estar «en camino», para que ninguna lectura la vea sin las dos.
+            val confirmingRead = readsStarted.get() + 1
+            dishIds.forEach { dishesConfirmed[it] = confirmingRead }
+            cardIds.forEach { cardsConfirmed[it] = confirmingRead }
+        }
         dishesInFlight.removeAll(dishIds)
         cardsInFlight.removeAll(cardIds)
         when (outcome) {
             // Idempotente por versión: lo que ya estaba listo vuelve en `skipped` y es un éxito.
-            // Se sigue viendo marcado hasta la siguiente lectura, que trae lo que dice Go.
+            // Se sigue viendo marcado hasta la lectura empezada después, que trae lo que dice Go.
             is ApiOutcome.Success -> requestRead()
             is ApiOutcome.Rejected -> {
                 mutableState.update {
