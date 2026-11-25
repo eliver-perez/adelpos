@@ -2024,3 +2024,279 @@ El script configura el Go temporal con su token, entra como admin, toma la huell
   - «Sonido» se elige con el mismo control de dos opciones que la letra y el tema («Activado» o «Desactivado»);
   - el texto de los cupos dice que una tableta de cocina ocupa su cupo mientras esté emparejada, y que se libera con
     «Liberar cupo» o «Revocar».
+
+## Fase D · Conexión tolerante, alertas, pantalla, ajustes y `docs/COCINA_INSTALAR.md` (§5)
+
+Agente M, 24/11/2026, en `$SP/wt/k1-b` (rama `etapa-k1-b`, con `etapa-k1` traída hasta `895efa2`, que trae
+`kitchen-display/unpair`), `ISO_TAG=B`, Go temporal 8211/8471, emuladores `Pixel_Tablet` (Android 17, consola 5580) y
+`ADEL_A1_Tablet_API26` (Android 8.0, 5582), en horizontal y de solo lectura. Guiones de la fase (fuera del
+repositorio) en `$SP/k1/B/`; resultados en `$SP/k1/after-D/`; capturas en `$SP/k1/capturas-D/`.
+
+### Resumen
+
+- **Conexión tolerante**:
+  - un corte de la computadora de 1 a 5 s no muestra nada (`kill -STOP` del Go temporal);
+  - un corte de red de 1, 3 y 5 s tampoco: Android ve 1,3 a 6,0 s sin red, dentro del margen de 10 s de K1-D33;
+  - una marca hecha durante un corte se repite sola y Go la registra una vez;
+  - un corte largo muestra arriba «Sin conexión con la computadora principal. Reconectando…», no deja marcar y se
+    quita solo.
+- **Alertas**:
+  - un sonido con cada pedido nuevo y otro distinto con cada cancelación o cambio, generados en la aplicación;
+  - salen por el canal de notificaciones, con el «Sonido» y el «Volumen» de Terminales;
+  - nunca en la primera lectura, y una sola vez al volver de «Sin conexión»;
+  - la tarjeta nueva late en azul.
+- **Pantalla**: siempre encendida, y abre directo en Pedidos.
+- **Ajustes en la tableta**:
+  - se abren con una pulsación larga en el logotipo y la contraseña de un administrador, que se guarda solo en memoria;
+  - muestran la dirección, la conexión y la versión;
+  - «Volver a emparejar» (`kitchen-display/unpair`) suelta el cupo.
+- **`docs/COCINA_INSTALAR.md`**: la guía para el dueño.
+- **La prueba de punta a punta (§8) aprueba en los dos emuladores**: Ana envía a cocina desde la aplicación de
+  meseros, la pantalla de cocina lo marca listo y le llega «Mesa R4 · 2 platillos listos».
+
+### 1. Lo que se hizo
+
+**`android-core/`**
+
+- `model/.../connection/ServerLinkTracker.kt`: el **margen sin red** opcional (K1-D33,
+  `networkLossGraceMillis`):
+  - con 0, como siempre: la falta de red de Android es «Sin conexión» al instante;
+  - con un margen, «Sin conexión» solo si la falta de red dura más que el margen, contado desde el aviso de Android;
+  - si pasa del margen, al volver la red sigue «Sin conexión» hasta el primer éxito;
+  - `nextDecisionIn` avisa cuándo vence el margen, para que el monitor vuelva a publicar el estado;
+  - la tolerancia de las fallas (3 en 20 s) no cambia.
+- `network/.../ServerLinkMonitor.kt`: pasa el margen al tracker. Meseros queda en 0 (sin ningún cambio); la pantalla de
+  cocina usa 10 s.
+- `ui/.../AdelTopBar.kt`: `onLogoLongPress`. Una pulsación larga en el logotipo abre los ajustes, también con su
+  acción para lectores de pantalla («Abrir los ajustes»); un toque normal no hace nada.
+
+**`cocina/`**
+
+- **Conexión tolerante** (`board/KitchenBoard.kt`):
+  - la pantalla sigue el estado único de conexión, el mismo de la barra (`serverLink.state`);
+  - dentro de la tolerancia (y del margen) no se ve nada;
+  - una marca sin respuesta queda en una cola y se repite sola cada 2 s, con su palomita a la vista;
+  - con «Sin conexión», las marcas pendientes esperan y se repiten al volver; las descarta el rechazo de Go
+    (`skipped` cuenta como éxito);
+  - una respuesta mal formada se toma como «Go respondió»: manda la lectura;
+  - al volver de «Sin conexión», lectura completa;
+  - con «Sin conexión» (`BoardState.offline`):
+    - un aviso grande arriba (`ui/OrdersScreen.kt`, «Sin conexión con la computadora principal. Reconectando…» y «No
+      se puede marcar nada…»);
+    - `markingAllowed` en falso: platillos y botones desactivados.
+- **Alertas**:
+  - `board/BoardAlerts.kt` compara cada lectura con la anterior por **tareas**:
+    - lo nuevo pendiente → sonido de pedido nuevo;
+    - lo cancelado ahora o un `pending_change` nuevo → sonido de cambio; una modificación suena solo como cambio;
+    - nada en la primera lectura, por lo que recupera esta pantalla (60 s) ni por lo que otra marca listo;
+    - a lo más un sonido de cada tipo por lectura.
+  - `alerts/Tones.kt`: los tonos se generan en la aplicación, en PCM con subida y bajada suaves:
+    - pedido nuevo: sol, si, mi, que suben;
+    - cambio: dos pares de notas que bajan, más graves.
+  - `alerts/ToneAlertPlayer.kt`:
+    - reproduce con `AudioTrack` en un hilo propio, con uso `USAGE_NOTIFICATION_EVENT`;
+    - aplica el volumen de Terminales (bajo 0,35, medio 0,65 y alto 1,0) y solo suena si «Sonido» está activado.
+  - `ui/OrderCardView.kt`: el borde de la tarjeta nueva late tres veces en azul (menos de 2 s); `freshCards` guarda
+    desde cuándo es nueva.
+- **Pantalla** (`MainActivity.kt`):
+  - `FLAG_KEEP_SCREEN_ON` en la ventana;
+  - el arranque directo en Pedidos ya venía de la Fase B (lo guardado en Room).
+- **Ajustes** (`settings/KitchenSettings.kt` y `ui/SettingsDialog.kt`):
+  - se abren con una pulsación larga en el logotipo, que ahora se ve siempre en la barra y abre los ajustes solo con
+    la pantalla lista;
+  - piden el usuario y la contraseña de un administrador, que valida `settings-access`;
+  - la contraseña vive **solo en memoria** y se borra al cerrarlos, al volver a emparejar, si la pantalla deja de
+    estar lista y a los 2 minutos sin tocar nada;
+  - muestran la dirección, la conexión y la versión;
+  - «Volver a emparejar» pide confirmación y llama a `kitchen-display/unpair`:
+    - con 200, se borra todo;
+    - sin respuesta, o si Go ya no reconoce la pantalla (401), se borra de todos modos y se dice que hay que revocarla
+      en Terminales;
+    - con un 401, 403 o 429 de la contraseña, se queda abierto con el mensaje.
+  - Los textos de cada error van en palabras claras: 401, 403, 429, 400 y sin conexión.
+- **`docs/COCINA_INSTALAR.md`**: la guía para el dueño.
+
+**Pruebas y guiones**
+
+- JVM:
+  - `ServerLinkTrackerTest`: 6 pruebas nuevas del margen;
+  - `BoardAlertsTest` (10), `TonesTest` (3) y `KitchenSettingsTest` (9);
+  - `KitchenBoardTest`: 9 pruebas nuevas, de la tolerancia (con el `ServerLinkMonitor` real y un reloj simulado), el
+    reintento, «Sin conexión», los sonidos y lo recuperado.
+- Instrumentadas:
+  - `ConnectionAndSettingsScreensTest`: «Sin conexión», la animación, la pulsación larga, la contraseña, los ajustes y
+    «Volver a emparejar»;
+  - `KitchenAppStartTest` comprueba la pantalla siempre encendida.
+- Contra Go:
+  - `KitchenOnGoTest` k7–k13;
+  - `NetworkEpisodes`: la falta de red como la ve Android;
+  - `AlertsOnGoTest` e1: el lado del mesero de la prueba de punta a punta.
+- `scripts/android-e2e.sh`:
+  - pasos k7–k13, con los cortes en segundo plano;
+  - suite `endtoend`, con las dos aplicaciones en el mismo dispositivo.
+
+### 2. Pruebas reales
+
+Resultados en `$SP/k1/after-D/`. «A» es `Pixel_Tablet` (Android 17) y «8» es `ADEL_A1_Tablet_API26` (Android 8).
+
+**Comprobaciones de los tres builds**
+
+| Prueba                                          | Resultado                                                                                     |
+| ----------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| JVM y Robolectric (`--rerun`, `jvm-D.sh`)       | **68 XML, 476 pruebas, 0 fallas**: `android/` 327, `android-core` 93 (model 60) y `cocina` 56 |
+| Lint                                            | Sin problemas; solo las 2 sugerencias de siempre en `android/feature/access`                  |
+| ktfmt, `fmt-check`, `md5` de `docs/etapas/*.md` | Correctos; `backend/`, `desktop/`, `config/` y `contracts/` sin cambios                       |
+
+**Instrumentadas, en cada emulador**
+
+| Prueba                                           | Resultado                                                                                                                    |
+| ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| Cocina (`connectedDebugAndroidTest`)             | 15 corridas, 0 fallas. Las de Go se omiten aquí: corren con su guion                                                         |
+| Meseros y `android-core` (`android-core` cambió) | **A**: 159 (87 omitidas) + 10. **8**: 158 (88 omitidas) + 10. 0 fallas, los mismos casos de la línea base más `e1` (omitida) |
+
+**Suite `kitchen` contra el Go temporal, en los dos emuladores**
+
+| Paso                     | Resultado                                                                                                                                                                                                                     |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| k1–k6 (los de la Fase C) | Aprobados en las dos corridas completas, A y 8                                                                                                                                                                                |
+| k7                       | Aprobado en A y 8. Cinco pausas del Go de 1 a 5 s con 5 s entre ellas, ningún aviso, «sin respuesta 0»                                                                                                                        |
+| k8                       | Aprobado en A y 8 (corrida `k1`–`k8`). Corte de 18 s; la marca se queda sin respuesta una vez, se repite y Go la registra una sola vez; ningún aviso                                                                          |
+| k9                       | Aprobado en A y 8. Pausa de 45 s: el aviso aparece, el botón está desactivado, tocar no marca y se recupera solo. El aviso se vio 4 s: con el Go pausado, la primera falla llega a los 15 s y el aviso a los 41 s (sección 5) |
+| k10                      | Aprobado en A (modo avión) y en 8 (wifi y datos con root). Medidas en la sección 3                                                                                                                                            |
+| k11                      | Aprobado en A y 8. Contraseña equivocada con «El usuario o la contraseña no son correctos.»; con la del administrador, dirección `10.0.2.2:8471`, «En línea» y `0.1.0`; al cerrar se borra la contraseña                      |
+| k13                      | Aprobado en A y 8. Vuelve a «Buscar el servidor»; en Go, la pantalla queda revocada (`revoked_at`) y `devices/sessions-summary` pasa de 1 a 0 pantallas de cocina en uso                                                      |
+
+**Suite `endtoend` (§8)**
+
+| Prueba              | Resultado                                                                                                                                                                                                                                                           |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `endtoend` en A y 8 | **4/4 en los dos**: r1 (meseros) prepara y entra Ana; c1 empareja la cocina; e1 Ana envía 2 Filete R desde la aplicación y cierra; k12 (cocina, en paralelo) ve la tarjeta «Mesa R4» y la marca lista; a Ana le llega «Mesa R4 · 2 platillos listos / 2 × Filete R» |
+
+**Capturas** (`capturas-D.sh`, 14 pruebas en cada emulador, más las de las suites), en `$SP/k1/capturas-D/`:
+
+- `d1` «Sin conexión»;
+- `d2` la tarjeta nueva a media animación;
+- `d3` la contraseña y el error sin permiso;
+- `d4` los ajustes;
+- `d5` «Volver a emparejar»;
+- `d6` «revócala en Terminales»;
+- de las suites:
+  - `k8` el platillo marcado durante el corte;
+  - `k9` «Sin conexión»;
+  - `k11` los ajustes y la contraseña equivocada;
+  - `k13` la confirmación y «Buscar el servidor».
+
+Todas se revisaron: ningún texto provisional ni identificador.
+
+**Lo que falló y se corrigió**:
+
+- en la primera corrida de la suite, k8 (cómo se leía el historial de Go), k10 en los dos emuladores (el guion) y k11 y
+  k13 en A, que fallaron porque el modo avión quedó encendido;
+- las dos primeras corridas de `endtoend`: la mesa R8 fuera de la vista, y después el salón que agregaba k1.
+
+Los detalles están en la sección 5.
+
+### 3. Medidas del modo avión y del corte de red (K1-D33)
+
+`k10` corta la red del emulador desde la Mac:
+
+- `Pixel_Tablet`: modo avión real (`cmd connectivity airplane-mode`);
+- `ADEL_A1_Tablet_API26`: Android 8 no tiene esa orden, así que se cortan los datos y después la wifi con `adb root`
+  (`svc`), y se devuelven al revés.
+
+La prueba anota cuándo Android pierde y recupera la red predeterminada (el mismo aviso que usa la aplicación) y cuándo
+se ve «Sin conexión». El guion anota además cuánto tardó Android en tener red otra vez, según
+`dumpsys connectivity`.
+
+| Corte | `Pixel_Tablet` (modo avión): sin red para Android | `ADEL_A1_Tablet_API26` (wifi y datos): sin red para Android | Aviso                                                                 |
+| ----- | ------------------------------------------------- | ----------------------------------------------------------- | --------------------------------------------------------------------- |
+| 1 s   | 2,9 s                                             | 1,3 s                                                       | ninguno en los dos                                                    |
+| 3 s   | 4,0 s                                             | 3,3 s                                                       | ninguno en los dos                                                    |
+| 5 s   | 6,0 s                                             | 5,3 s                                                       | ninguno en los dos                                                    |
+| 35 s  | 36,1 s                                            | 35,3 s                                                      | el aviso aparece al pasar el margen de 10 s y se quita solo al volver |
+
+Con el modo avión, después de quitarlo la wifi tarda 1 a 2 s en volver. Ningún corte de 5 s pasó de los 10 s del
+margen, así que no hizo falta cambiarlo.
+
+La primera corrida del guion tenía el modo avión al revés («enable» cortaba la red) y midió unos 21 s sin red en cada
+corte. Era un error del guion, no del emulador: se corrigió y se volvió a medir.
+
+### 4. Decisiones propuestas
+
+1. **El margen sin red** (K1-D33, del coordinador) es un parámetro del tracker compartido, con 0 por omisión. Meseros
+   no cambia.
+2. **Reintento de marcas**:
+   - cada 2 s mientras haya «En línea», también dentro de la tolerancia;
+   - con «Sin conexión», esperan y se repiten al volver;
+   - no hay número máximo de intentos: es idempotente por versión y la palomita se queda hasta que Go responde.
+3. **El aviso grande** se ve en cualquier pantalla de pedidos (también «Conectando» o sin cupo) mientras el estado único
+   de conexión diga «Sin conexión». La barra también lo dice.
+4. **Sonidos**:
+   - a lo más uno de cada tipo por lectura;
+   - **nunca en la primera lectura** (al abrir la aplicación, al emparejar o al salir de una pantalla sin pedidos);
+   - **al volver de «Sin conexión», una sola vez** por lo que llegó mientras tanto, comparado con lo último que se vio;
+   - lo que esta pantalla recupera no suena durante 60 s;
+   - lo que se recupera desde otra pantalla o desde el escritorio sí suena como pedido nuevo, porque la tableta no lo
+     distingue.
+5. **El canal de audio** es el de notificaciones (`USAGE_NOTIFICATION_EVENT`):
+   - suena aunque el volumen de multimedia esté bajo;
+   - respeta «No molestar»;
+   - el volumen que manda es el de notificaciones. Lo dice la guía.
+6. **La animación** marca las tarjetas nuevas y las cambiadas: el borde azul late tres veces.
+7. **Los ajustes**:
+   - el logotipo se ve siempre en la barra de cocina; la pulsación larga solo abre los ajustes con la pantalla lista;
+   - el usuario se escribe, no hay un «admin» fijo;
+   - se cierran solos a los 2 minutos sin tocar nada.
+8. **«Volver a emparejar» sin respuesta** borra lo de la tableta y lo dice: «La computadora principal no respondió. Esta
+   pantalla ya no está emparejada aquí, pero puede seguir en Terminales ocupando su cupo de cocina: revócala ahí.».
+9. **Pruebas contra Go**: la marca que se repite se prueba con el Go pausado 18 s. Con cortes de 1 a 5 s la petición
+   solo espera (el cliente espera 15 s), así que nada falla y no hay qué repetir. Con 18 s sí se queda sin respuesta, y
+   no llega al aviso: hacen falta 3 fallas y 20 s.
+
+### 5. Hallazgos y pendientes
+
+- **Ninguna ruta nueva de Go**: con `unpair` (`895efa2`) alcanzó. No hizo falta `pedidos-M.md`.
+- **El canal de eventos se renueva cada 30 s sin contar como falla.**
+  - En k7 la pantalla estuvo abierta más de 45 s con cinco pausas del Go (más de una renovación del canal).
+  - Terminó con «sin respuesta 0» (`serverLink.noAnswers`) y ningún aviso.
+  - Lo mismo en k8, k11 y k13 (minutos con la aplicación abierta).
+- **Diálogos y barras del sistema**: con un diálogo abierto (ajustes o «Recientes»), Android muestra un momento las
+  barras del sistema encima de la pantalla completa. Se esconden al cerrarlo. Es solo de aspecto.
+- **La marca que se repite y el historial de Go**:
+  - Go registra la marca una sola vez: un solo `states.changed` de esa pantalla desde la recuperación de k5;
+  - la petición original, que llega cuando el Go se reanuda, la marca;
+  - la repetición vuelve con `already_ready`.
+- **Primera corrida de la suite**: falló en partes del guion y de las pruebas, no de la aplicación:
+  - el modo avión al revés en el guion;
+  - los datos y la wifi cortados en dos pasos en Android 8;
+  - el historial de cocina leído como objeto, y contando también la marca de k4;
+  - la mesa R8 fuera de la vista;
+  - el salón «Salón K» que agregaba k1: el mesero veía ese salón primero. En `endtoend`, k1 corre con
+    `-e restaurant existing` y no arma nada.
+
+  Se corrigió y se volvió a correr; los resultados de la sección 2 son los de la última corrida.
+
+- **El aviso con la computadora colgada tarda más que con la red cortada.** Con el Go pausado, la computadora acepta
+  la conexión pero no responde, así que cada falla tarda lo que el plazo de la petición:
+  - el canal da la conexión por muerta a los 10 s;
+  - la primera falla que cuenta llega hacia los 15 s;
+  - el aviso sale a los ~41 s (hacen falta 3 fallas en 20 s).
+
+  Con la red cortada, Android lo dice y el aviso sale a los 10 s del margen. Sigue la regla de la A3, que esta fase no
+  cambia.
+
+- **Me equivoqué una vez con el guion**: cambié una línea de `scripts/android-e2e.sh` mientras corría la suite
+  `endtoend` en 8. Esa corrida terminó con un error de sintaxis al final (después de sus pasos) y se repitió entera.
+- **Para la Fase F** (o el coordinador): `CLAUDE.md`, `android/CLAUDE.md`, `docs/API_V1.md` y `docs/ANDROID_INSTALAR.md`
+  quedan por actualizar con la etapa. Esta fase solo agregó `docs/COCINA_INSTALAR.md`.
+
+### Decisiones del coordinador al cerrar la Fase D
+
+- **K1-D36. Se aceptan las decisiones propuestas 1 a 9 de la Fase D.** Las medidas confirman el margen de 10 s de
+  K1-D33: ningún corte de 5 s pasó de 6 s sin red para Android.
+- **K1-D37. Limitación conocida: con la computadora principal colgada, el aviso tarda unos 41 s.**
+  - Pasa cuando la computadora acepta la conexión pero no responde. Cada falla dura lo que el plazo de la petición
+    (15 s), y la regla de la A3 pide 3 fallas en 20 s.
+  - Con la red cortada, el aviso sale a los 10 s del margen.
+  - No se cambia la regla de la A3, que las dos aplicaciones comparten. Mientras tanto la tableta sigue mostrando los
+    pedidos y reintenta en silencio.
