@@ -18,7 +18,10 @@ import com.adelpos.cocina.board.DisplaySettings
 import com.adelpos.cocina.board.OrderCard
 import com.adelpos.cocina.board.RecentState
 import com.adelpos.cocina.board.TaskRef
+import com.adelpos.cocina.settings.SettingsActions
+import com.adelpos.cocina.settings.SettingsScreen
 import com.adelpos.cocina.ui.CocinaScreen
+import com.adelpos.cocina.ui.SettingsInfo
 import com.adelpos.core.model.connection.LinkState
 import com.adelpos.core.model.pairing.PairingFlow
 import com.adelpos.core.model.pairing.PairingProblem
@@ -78,12 +81,44 @@ class RecordedActions : BoardActions {
     }
 }
 
+/** Las acciones de los ajustes, anotadas (sin Go). */
+class RecordedSettings : SettingsActions {
+    val calls = mutableListOf<String>()
+
+    override fun open() {
+        calls += "open"
+    }
+
+    override fun submit(username: String, password: String) {
+        calls += "submit $username/$password"
+    }
+
+    override fun touch() = Unit
+
+    override fun askUnpair() {
+        calls += "ask-unpair"
+    }
+
+    override fun cancelUnpair() {
+        calls += "cancel-unpair"
+    }
+
+    override fun confirmUnpair() {
+        calls += "confirm-unpair"
+    }
+
+    override fun close() {
+        calls += "close"
+    }
+}
+
 /**
  * La pantalla de la aplicación con un estado que la prueba cambia (el contenido se pone una sola
  * vez) y el reloj monotónico simulado ([clockMillis]).
  */
 class ScreenHost(private val compose: ComposeContentTestRule) {
     val actions = RecordedActions()
+    val settingsActions = RecordedSettings()
     var clockMillis = 0L
 
     private class Shown(
@@ -91,6 +126,7 @@ class ScreenHost(private val compose: ComposeContentTestRule) {
         val link: LinkState,
         val board: BoardState,
         val recent: RecentState,
+        val settings: SettingsScreen,
     )
 
     private var shown: MutableState<Shown>? = null
@@ -100,8 +136,9 @@ class ScreenHost(private val compose: ComposeContentTestRule) {
         board: BoardState = BoardState(),
         recent: RecentState = RecentState.Hidden,
         link: LinkState = LinkState.ONLINE,
+        settings: SettingsScreen = SettingsScreen.Closed,
     ) {
-        val next = Shown(status, link, board, recent)
+        val next = Shown(status, link, board, recent, settings)
         val current = shown
         if (current != null) {
             compose.runOnIdle { current.value = next }
@@ -120,6 +157,9 @@ class ScreenHost(private val compose: ComposeContentTestRule) {
                     onCheckAgain = {},
                     onRepair = {},
                     clock = { clockMillis },
+                    settings = now.settings,
+                    settingsActions = settingsActions,
+                    settingsInfo = SettingsInfo("192.168.1.20:8443", now.link, "0.1.0"),
                 )
             }
         }

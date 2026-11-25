@@ -3,6 +3,7 @@ package com.adelpos.cocina
 import android.content.res.Configuration
 import android.os.Build
 import android.view.View
+import android.view.WindowManager
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -106,7 +107,7 @@ class KitchenScreensTest {
 
 /**
  * La aplicación real al abrirla sin emparejar (instalación nueva): en horizontal, a pantalla
- * completa (sin barras del sistema) y en «Buscar el servidor».
+ * completa (sin barras del sistema), con la pantalla siempre encendida y en «Buscar el servidor».
  */
 @RunWith(AndroidJUnit4::class)
 class KitchenAppStartTest {
@@ -132,6 +133,11 @@ class KitchenAppStartTest {
             @Suppress("DEPRECATION") val flags = activity.window.decorView.systemUiVisibility
             @Suppress("DEPRECATION") assertTrue(flags and View.SYSTEM_UI_FLAG_FULLSCREEN != 0)
         }
+        // §5.3: la pantalla nunca se apaga mientras la aplicación está abierta.
+        assertTrue(
+            activity.window.attributes.flags and WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON !=
+                0,
+        )
         screenshot("b0-inicio-sin-emparejar")
     }
 }
