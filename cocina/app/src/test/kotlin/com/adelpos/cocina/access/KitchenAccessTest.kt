@@ -116,8 +116,13 @@ class KitchenAccessTest {
         access.start()
         access.onPaired(paired())
         assertEquals(KitchenStatus.Ready("Restaurante de prueba", "Cocina 1"), access.status.value)
-        // Sin conexión no se pregunta a Go: la pantalla sigue «Conectando…» hasta que responda.
-        assertEquals(DisplayConnection.Connecting, access.display.value)
+        // La conexión para el canal de eventos: la credencial del dispositivo, sin sesión.
+        val channel = access.channelServer()
+        assertEquals(null, channel?.userId)
+        assertEquals(
+            "6a1c8e7d-3f0b-4e2a-8c55-1d9e0f2b3a47",
+            channel?.credentials?.get("X-Device-ID"),
+        )
         assertEquals("Cocina 1", dao.stored?.deviceName)
         // El mismo propósito de la credencial que la aplicación de meseros (K1-D2).
         assertEquals("device-credential", PairedDevice.CREDENTIAL_PURPOSE)

@@ -29,25 +29,6 @@ sealed interface KitchenStatus {
 }
 
 /**
- * La pantalla frente a Go una vez emparejada y con el servidor compatible: si ya se conectó como
- * pantalla de cocina (`POST kitchen-display/connect`, que ocupa su cupo de cocina; K1-D6) o por qué
- * no. Lo muestra la pantalla de pedidos.
- */
-sealed interface DisplayConnection {
-    /** Todavía no responde `connect` (al arrancar, después de un corte o sin conexión). */
-    data object Connecting : DisplayConnection
-
-    /** Conectada: la pantalla de pedidos muestra lo de sus estaciones. */
-    data object Connected : DisplayConnection
-
-    /**
-     * La licencia, el cupo o la hora no lo permiten (los códigos de la puerta de la L1, con el
-     * texto de `LicenseMessages`, nunca el `message` de Go). Se vuelve a intentar al comprobar.
-     */
-    data class Refused(val text: String) : DisplayConnection
-}
-
-/**
  * Lo que la aplicación de cocina exige al servidor del restaurante (etapa K1, K1-D3): la 0.16.0 o
  * posterior con la capacidad `kitchen-display-v1` (la pantalla de cocina como tipo de dispositivo,
  * sus rutas y sus eventos). Un servidor anterior responde `CLIENT_KIND_INVALID` a una pantalla de

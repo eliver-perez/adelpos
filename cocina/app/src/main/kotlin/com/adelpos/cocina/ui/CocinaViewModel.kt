@@ -6,9 +6,11 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.adelpos.cocina.CocinaContainer
-import com.adelpos.cocina.access.DisplayConnection
 import com.adelpos.cocina.access.KitchenAccess
 import com.adelpos.cocina.access.KitchenStatus
+import com.adelpos.cocina.board.BoardState
+import com.adelpos.cocina.board.KitchenBoard
+import com.adelpos.cocina.board.RecentState
 import com.adelpos.core.model.connection.LinkState
 import com.adelpos.core.model.connection.ServerLink
 import kotlinx.coroutines.flow.StateFlow
@@ -17,16 +19,23 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
 
 /**
- * La raíz de la aplicación de cocina: qué pantalla se ve ([status]) y el estado único de conexión
- * de la barra ([link]). Lee lo guardado al crearse y vuelve a comprobar el servidor cuando vuelve
- * la conexión.
+ * La raíz de la aplicación de cocina: qué pantalla se ve ([status]), el estado único de conexión de
+ * la barra ([link]) y la pantalla de pedidos ([board], [recent]; sus acciones son las de
+ * [boardActions]). Lee lo guardado al crearse y vuelve a comprobar el servidor cuando vuelve la
+ * conexión.
  */
-class CocinaViewModel(private val access: KitchenAccess, serverLink: ServerLink) : ViewModel() {
+class CocinaViewModel(
+    private val access: KitchenAccess,
+    serverLink: ServerLink,
+    val boardActions: KitchenBoard,
+) : ViewModel() {
     val status: StateFlow<KitchenStatus> = access.status
 
     val link: StateFlow<LinkState> = serverLink.state
 
-    val display: StateFlow<DisplayConnection> = access.display
+    val board: StateFlow<BoardState> = boardActions.state
+
+    val recent: StateFlow<RecentState> = boardActions.recent
 
     init {
         viewModelScope.launch { access.start() }
@@ -47,7 +56,7 @@ class CocinaViewModel(private val access: KitchenAccess, serverLink: ServerLink)
 
     companion object {
         fun factory(container: CocinaContainer): ViewModelProvider.Factory = viewModelFactory {
-            initializer { CocinaViewModel(container.access, container.serverLink) }
+            initializer { CocinaViewModel(container.access, container.serverLink, container.board) }
         }
     }
 }
