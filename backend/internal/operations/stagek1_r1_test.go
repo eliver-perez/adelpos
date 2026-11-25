@@ -438,6 +438,13 @@ func testR1ClosedList(t *testing.T, fixture *r1Fixture) {
 	if response := fixture.routed(fixture.display, "GET", "/api/v1/kitchen-display%2Forders", nil, headers, true); response.status != 200 {
 		t.Fatalf("la ruta escapada de la lista: %d %s", response.status, response.body)
 	}
+	// OPTIONS lo responde el enrutador sin llegar a la aplicación (sin Origin permitido, 403 PREFLIGHT_REJECTED).
+	for _, route := range []string{"auth/me", "kitchen-display/orders", "restaurant/state"} {
+		response := fixture.routed(stolen, "OPTIONS", "/api/v1/"+route, nil, headers, true)
+		if response.status != 403 || response.code() != "PREFLIGHT_REJECTED" {
+			t.Fatalf("OPTIONS %s: %d %s", route, response.status, response.body)
+		}
+	}
 	// La credencial de envío del mesero tampoco abre nada a la pantalla.
 	offline := map[string]string{"X-Client-Kind": "kitchen", "X-Client-Version": "0.1.0", administration.OfflineCredentialHeader: strings.Repeat("a", 43)}
 	if response := fixture.routed(fixture.display, "POST", "/api/v1/restaurant/offline-orders", map[string]any{}, offline, true); response.status != 403 ||
