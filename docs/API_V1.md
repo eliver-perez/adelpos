@@ -29,9 +29,10 @@ sin conexión y el cursor de eventos de la recuperación (ver «Modo Mesero»). 
    servidor y nunca decide una regla de negocio. Los importes viajan como cadenas decimales con dos decimales
    (`"130.00"`, IVA incluido); nunca como números de punto flotante.
 2. **Identificación del cliente**: cada petición lleva `X-Client-Version` (la versión de la aplicación,
-   `MAJOR.MINOR.PATCH`) y `X-Client-Kind` (`desktop`, `android` o, desde la etapa K1, `kitchen`). Si la versión es anterior a la mínima **de su
-   tipo de cliente** (`min_client_versions` de `getVersion`, desde la etapa A1: `desktop` 0.10.0 y `android` 0.1.0,
-   porque la aplicación Android numera sus versiones aparte), las rutas de la aplicación responden **426
+   `MAJOR.MINOR.PATCH`) y `X-Client-Kind` (`desktop`, `android` o, desde la etapa K1, `kitchen`). Si la versión es
+   anterior a la mínima **de su tipo de cliente** (`min_client_versions` de `getVersion`, desde la etapa A1: `desktop`
+   0.10.0 y `android` 0.1.0, porque la aplicación Android numera sus versiones aparte; desde la etapa K1, `kitchen`
+   0.1.0, la aplicación de cocina), las rutas de la aplicación responden **426
    `CLIENT_UPDATE_REQUIRED`** («Actualiza esta terminal») con `details.min_client_version` (la mínima de ese tipo).
    Sin `X-Client-Kind` se exige la general, `min_client_version`, que es la del escritorio y se conserva para los
    clientes que solo leen esa propiedad. **Por la escucha de red** (HTTPS, la única que usan las terminales y
@@ -41,8 +42,8 @@ sin conexión y el cursor de eventos de la recuperación (ver «Modo Mesero»). 
    anteriores a la 9G, que solo existen en esa computadora). Con la credencial de un dispositivo, `X-Client-Kind` debe
    coincidir con el tipo con que se emparejó (`android` en un teléfono o tableta de meseros, `desktop` en una terminal
    de escritorio y, desde la etapa K1, `kitchen` en una pantalla de cocina; etapa A1, revisión R3): si no, **400
-   `CLIENT_KIND_MISMATCH`**, para que nadie tome la
-   mínima de otro tipo de cliente. Una versión o un tipo que el servidor no reconoce es 400
+   `CLIENT_KIND_MISMATCH`**, para que nadie tome la mínima de otro tipo de cliente. Una versión o un tipo que el
+   servidor no reconoce es 400
    (`CLIENT_VERSION_INVALID`, `CLIENT_KIND_INVALID`).
 3. **Servidor más viejo que el cliente**: el cliente lee `GET /api/v1/version` (siempre responde, sin sesión ni
    cabeceras) y compara `server_version` con la versión mínima de servidor que necesita (en el escritorio,
@@ -56,7 +57,9 @@ sin conexión y el cursor de eventos de la recuperación (ver «Modo Mesero»). 
    agrupados y roles de fábrica, `API_CONTRACTS.md`); desde la etapa L1, `license-v1` (lo de la sección «Licencia del
    servidor principal»); desde la etapa K1, `kitchen-display-v1` (lo de la sección «Pantalla de cocina»)). La aplicación
    Android 0.1.0 exige un servidor 0.12.0 o posterior; el escritorio 0.12.0 sigue
-   funcionando con un servidor 0.11.0 y solo muestra lo del PIN si el servidor anuncia `waiter-pin-v1`.
+   funcionando con un servidor 0.11.0 y solo muestra lo del PIN si el servidor anuncia `waiter-pin-v1`. La aplicación de
+   cocina 0.1.0 exige `kitchen-display-v1` (servidor 0.16.0); el escritorio esconde lo de las pantallas de cocina si el
+   servidor no la anuncia.
 4. **Credenciales**: la terminal (o el teléfono) emparejada envía `X-Device-ID` y `X-Device-Token`; con sesión,
    además `Authorization: Bearer <token>` (desde la etapa A1, en `submitOfflineOrder` el teléfono puede enviar en su
    lugar la credencial de envío del mesero, `X-Offline-Credential`; ver «Entrada con PIN y credencial de envío»). Los tokens se guardan en el almacén seguro del sistema. Go valida terminal,
@@ -147,7 +150,9 @@ sin conexión y el cursor de eventos de la recuperación (ver «Modo Mesero»). 
    `SHA-256(nT)` de su número aleatorio de 32 bytes → `server_nonce` (nS), `pairing_secret` (para las demás llamadas,
    en `X-Pairing-Secret`) y vencimiento a 5 minutos. Después `revealPairingNonce` con nT. El código de 6 dígitos que
    muestra el teléfono es `SHA-256(huella ‖ nT ‖ nS ‖ id de la solicitud en 16 bytes)`, primeros 8 bytes big-endian
-   módulo 10⁶ (vector de prueba en `administration/pairing_test.go`: `166101`).
+   módulo 10⁶ (vector de prueba en `administration/pairing_test.go`: `166101`). `createPairingRequest` dice el tipo de
+   dispositivo, `device_kind` (`desktop`, `android` o, desde la etapa K1, `kitchen`), que debe coincidir con
+   `X-Client-Kind` cuando llega la cabecera (400 `CLIENT_KIND_MISMATCH`, K1-D29).
 3. Un administrador escribe ese código en la computadora principal (Sistema › Terminales; solo ahí se aprueba). El
    cliente consulta `getPairingRequest` cada 2 s; con `approved`, `claimPairingCredential` entrega una sola vez
    `device_id` y `device_token`, que se guardan en el almacén seguro junto con `server_id` y la huella.
@@ -182,7 +187,11 @@ sin conexión y el cursor de eventos de la recuperación (ver «Modo Mesero»). 
      nada; a lo más recibe un evento de algo que ya ve (y vuelve a leer de más).
 4. `streamEvents` (`GET /events`, con `events.read`): mensajes «changes» cada 750 ms con `cursor`, `reset` y
    `events` (tipo, ámbito y agregado, nunca importes). El flujo dura 30 s; el cliente se reconecta con
-   `?after=<cursor>` (o `Last-Event-ID`). Fuera de la ventana de 5000 eventos llega `reset: true` y el cliente vuelve a
+   `?after=<cursor>` (o `Last-Event-ID`). **Ese fin a los 30 s es normal y no es una falla** (etapa K1, K1-D10): Go lo
+   renueva a propósito para volver a revisar sesión, permisos y estaciones, y el cliente vuelve a abrir el canal al
+   momento desde su cursor, sin avisar nada ni esperar. Solo cuenta como falla no conectar, no recibir la respuesta, un
+   cuerpo cortado, un canal sin mensajes durante varios segundos (Go manda uno cada 750 ms), un 5xx o `interrupted`.
+   Fuera de la ventana de 5000 eventos llega `reset: true` y el cliente vuelve a
    consultar todo. Desde la 9G existe el ámbito **`catalog`**: `catalog.changed` (cualquier cambio del catálogo),
    `catalog.product.sold_out` y `catalog.product.available` (con el producto como agregado). Desde la etapa A1,
    **`restaurant.account.preparation_changed`** (ver «Estados de preparación»). Un cliente ignora los tipos que no
@@ -855,7 +864,7 @@ decide; el cliente solo muestra el mensaje o arma el suyo con `details`.
 | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `cash_registers`   | La terminal que abre un turno de caja, y la terminal que crea o modifica un pedido con un turno activo en su caja aunque lo abriera otra (dos terminales con la misma caja física ocupan dos cupos, L1-D3). Cambiar de cajero en la misma terminal no ocupa otro.                                                                                                                                                                | Al cerrar ese turno (confirmar el arqueo), también desde otra computadora: se liberan todas las terminales que lo usaban. Si la terminal se cae o se revoca, el cupo sigue hasta cerrar el turno.                                                                        |
 | `order_takers`     | La **terminal** (no el usuario) que crea o modifica un pedido sin turno activo en su caja: varios meseros con su PIN en una tableta ocupan uno, y volver a «Selecciona tu usuario» no lo libera. El pedido que entrega la cola de una tableta sin sesión (con la credencial de envío) también lo ocupa. Cuenta por actividad. Consultar no ocupa nada; las previas (`previewEdit` y la del borrador) solo renuevan su actividad. | A los **15 minutos** sin crear ni modificar pedidos (valor del servidor), cuando se cierra la última sesión de esa terminal (cerrar sesión, revocarla, vencer), al revocar la terminal, al abrir turno en su caja o desde Terminales («Liberar cupo», `devices.manage`). |
-| `kitchen_displays` | La terminal de escritorio en Cocina › Preparación: `setKitchenDisplayMode` con `active: true`, ligado a la sesión que entra. Desde la etapa K1, la pantalla de cocina Android al conectarse (`connectKitchenDisplay`), ligado al dispositivo.                                                                                                                                                                                    | Con `active: false`, al cerrar esa sesión o desde Terminales. La de una pantalla Android, al revocarla o desde Terminales («Liberar cupo»); nunca por la red.                                                                                                            |
+| `kitchen_displays` | La terminal de escritorio en Cocina › Preparación: `setKitchenDisplayMode` con `active: true`, ligado a la sesión que entra. Desde la etapa K1, la pantalla de cocina Android al conectarse (`connectKitchenDisplay`), ligado al dispositivo.                                                                                                                                                                                    | Con `active: false`, al cerrar esa sesión o desde Terminales. La de una pantalla Android, al revocarla, desde Terminales («Liberar cupo») o con «Volver a emparejar» (`unpairKitchenDisplay`); nunca por la red.                                                         |
 
 - **Qué ocupa cupo**: `openAccount`, `saveDraft`, `confirmDraft`, `editUnits` y `submitOfflineOrder` (crear o modificar
   un pedido); abrir turno; y `setKitchenDisplayMode`. **Cobrar y las operaciones de efectivo nunca piden cupo**, ni
@@ -887,12 +896,12 @@ decide; el cliente solo muestra el mensaje o arma el suyo con `details`.
   ocupa cada terminal; `POST devices/{id}/seat/release` libera su comandero o su cocina y cierra sus sesiones;
   `devices/sessions-summary` conserva `by_kind` y agrega `seats` con `in_use` y `limit` por cupo (`limited: true`).
 
-## Pantalla de cocina (etapa K1, Fase A)
+## Pantalla de cocina (etapa K1)
 
 Capacidad `kitchen-display-v1` (servidor 0.16.0, esquema 29). La aplicación de cocina para Android (`cocina/`) funciona
 **solo como pantalla de cocina**: un dispositivo `kind = "kitchen"` sin usuario ni sesión, siempre abierto en modo
 cocina. Go es la única autoridad de las tarjetas, las estaciones, el cupo y la licencia; la tableta solo calcula el color
-por tiempo con `server_time`, los límites y su reloj monotónico. Decisiones K1-D3 a K1-D17 en
+por tiempo con `server_time`, los límites y su reloj monotónico. Decisiones K1-D3 a K1-D35 en
 [ETAPA_K1_AVANCE.md](ETAPA_K1_AVANCE.md).
 
 - **Emparejar**: el flujo de siempre (`createPairingRequest` … `claimPairingCredential`) con `device_kind: "kitchen"` y
@@ -901,8 +910,9 @@ por tiempo con `server_time`, los límites y su reloj monotónico. Decisiones K1
   400 `CLIENT_KIND_INVALID` al tipo `kitchen`: la aplicación lo explica como «Actualiza el servidor del restaurante».
 - **Solo su lista cerrada**: con la credencial de un dispositivo `kitchen` Go atiende solo `connectKitchenDisplay`,
   `getKitchenDisplayOrders`, `markKitchenDisplayItemsReady`, `markKitchenDisplayOrderReady`, `getKitchenDisplayRecent`,
-  `recoverKitchenDisplayItems`, `acknowledgeKitchenDisplayReceipts`, `checkKitchenDisplaySettingsAccess`, el canal de
-  eventos (`streamEvents`) y `getLicenseStatus` (el resumen). Todo lo demás —sesión, PIN, pedidos, cobros, cocina del
+  `recoverKitchenDisplayItems`, `acknowledgeKitchenDisplayReceipts`, `checkKitchenDisplaySettingsAccess`,
+  `unpairKitchenDisplay`, el canal de eventos (`streamEvents`) y `getLicenseStatus` (el resumen). Todo lo demás —sesión,
+  PIN, pedidos, cobros, cocina del
   escritorio, administración, mantenimiento, avisos de platillos listos, agente de impresión, licencia salvo el estado—
   responde **403 `KITCHEN_DISPLAY_ONLY`** y queda en el Registro de movimientos, aunque la petición lleve el
   `Authorization` de otra sesión (nunca se valida). Sus permisos son una lista cerrada en código: ver y avanzar la
@@ -952,14 +962,15 @@ por tiempo con `server_time`, los límites y su reloj monotónico. Decisiones K1
 - **`unpairKitchenDisplay`** (`POST /kitchen-display/unpair`, `{username, password}`, K1-D32): «Volver a emparejar» en
   la tableta. Las mismas validaciones y respuestas de error que `checkKitchenDisplaySettingsAccess`, con el mismo límite
   de intentos (compartido entre las dos rutas). Con el administrador responde 200 `{}` y revoca la propia pantalla igual
-  que `revokeDevice`: suelta su cupo de pantalla de cocina, el canal de eventos se corta con `interrupted`
+  que «Revocar» en Terminales (`POST devices/{id}/revoke`): suelta su cupo de pantalla de cocina, el canal de eventos se
+  corta con `interrupted`
   `DEVICE_REVOKED` y desde entonces toda petición de la pantalla responde 401 `DEVICE_REVOKED`. La auditoría
   `kitchen_display.unpaired` lleva al administrador como autor y a la pantalla como dispositivo. No exige cupo (también
   sin cupo o con el cupo liberado) y se permite en cualquier estado de la licencia y con la hora incorrecta. Así la
   pantalla nueva encuentra libre el cupo de la vieja.
 - **Licencia y hora**: Vencida y Revocada muestran y marcan; Sin activar responde `LICENSE_NOT_ACTIVATED` en todo menos
-  el canal de eventos, `getLicenseStatus`, los ajustes y «Volver a emparejar»; con la hora del equipo incorrecta se lee, pero marcar, recuperar
-  y el acuse responden `SYSTEM_CLOCK_INVALID`.
+  el canal de eventos, `getLicenseStatus`, los ajustes y «Volver a emparejar»; con la hora del equipo incorrecta se lee,
+  pero marcar, recuperar y el acuse responden `SYSTEM_CLOCK_INVALID`.
 - **Eventos de la pantalla** (`streamEvents` con su credencial; solo `after`): `license.changed`,
   `kitchen_display.configuration.changed` (ámbito `configuration`, con la pantalla o sin agregado: sus estaciones, letra,
   tema, sonido o cupo, o la configuración general de cocina), los eventos de cocina de sus estaciones
@@ -976,7 +987,10 @@ por tiempo con `server_time`, los límites y su reloj monotónico. Decisiones K1
   `kitchen_display_theme`, `kitchen_display_sound` y `kitchen_display_volume` (solo en una pantalla de cocina); las
   estaciones se eligen con `PUT kitchen/access` (solo las de recepción «pantalla» o «impresora y pantalla»); los límites
   de color con `PUT kitchen/timing` (`display_warning_minutes`, `display_late_minutes`, con `kitchen.timing.manage`).
-  Cada cambio llega a la pantalla al momento.
+  Cada cambio llega a la pantalla al momento. `GET kitchen/access` (Cocina › Estaciones › Terminales de cocina) ya no
+  lista las pantallas: sus estaciones se eligen en Terminales. «Liberar cupo» (`POST devices/{id}/seat/release`) **no
+  es definitivo** (K1-D30): la pantalla lo puede pedir otra vez con «Usar esta pantalla» (`take_seat: true`); para que
+  deje de usarse, «Revocar» (`POST devices/{id}/revoke`).
 
 ## Licencia del servidor principal (etapa L1, fase B)
 
