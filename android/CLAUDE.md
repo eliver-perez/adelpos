@@ -16,6 +16,18 @@ cliente más del servidor del restaurante** y usa la API v1 de la 9G
 [docs/ETAPA_L1_AVANCE.md](../docs/ETAPA_L1_AVANCE.md) (decisiones L1-Dn). Las reglas generales del repositorio
 siguen en [CLAUDE.md](../CLAUDE.md) y [AGENTS.md](../AGENTS.md).
 
+**Etapa K1 (aplicación de cocina)**: lo que la aplicación de meseros comparte con la de cocina
+([cocina/CLAUDE.md](../cocina/CLAUDE.md)) se **movió** con `git mv`, sin cambiar su comportamiento, a
+[android-core/](../android-core/CLAUDE.md): un build de Gradle propio que `android/` incluye con
+`includeBuild("../android-core")` (K1-D2 de [docs/ETAPA_K1_AVANCE.md](../docs/ETAPA_K1_AVANCE.md)). Allí viven el estado
+único de conexión, el emparejamiento, el cliente con la huella fijada, la API v1, el canal de eventos, el Keystore, el
+tema con la paleta, los íconos, los botones, la barra con el indicador y las pantallas de buscar el servidor, del código
+y de estado (paquetes `com.adelpos.core.model`, `….network` y `….ui`). Las reglas de abajo valen igual para ese código;
+las rutas `core:domain`, `core:data` y `core:ui` que nombran algo que se movió se leen en su módulo de `android-core`
+(tabla de «Estructura»). Lo que se guarda en el dispositivo (alias del Keystore, propósitos, archivos y clases de Room,
+trabajador de la cola, tipos NSD y el tipo de cliente) es fijo y no cambió: la 0.4.1 se instala encima de la 0.4.0 sin
+emparejar de nuevo.
+
 ## Identificador y nombres (A2-D5)
 
 Una sola convención, la misma para el identificador de la aplicación, los `namespace` de Gradle y los paquetes de
@@ -49,8 +61,8 @@ paquetes que se desinstalan antes de las instrumentadas, en «Pruebas») y en es
    escritorio. **Ningún texto provisional o de desarrollo** (etapa A3, §1, A3-D11): nada de «todavía no…», «aún
    no…», notas de etapas o fases, «próximamente», «provisional», «por ahora», «más adelante», «en desarrollo»,
    «versión de prueba», «(muestra)» ni identificadores internos. Un estado real se dice sin ellas («No hay mesas
-   guardadas», no «Todavía no hay…»). Lo vigila `PlainLanguageTest` (`core:ui`, JVM): lee los recursos de las carpetas
-   `values` de **todos** los módulos (cada `<string>`, `<plurals>` y `<string-array>`, sin comentarios) y las
+   guardadas», no «Todavía no hay…»). Lo vigila `PlainLanguageTest` (`android-core:ui`, JVM, desde la K1): lee los recursos de las carpetas
+   `values` de **todos** los módulos de `android/`, `android-core/` y `cocina/` (cada `<string>`, `<plurals>` y `<string-array>`, sin comentarios) y las
    cadenas literales de Kotlin de `src/main` (sin comentarios ni las líneas de `require`, `check`, `error(`, `Log.` y
    `…Exception(`). Una excepción solo se agrega a su lista `allowed` con el archivo, el patrón y su porqué; una que ya
    no encuentra nada hace fallar la prueba. Los mensajes de Go se muestran tal cual (los vigila la prueba de textos de
@@ -66,7 +78,7 @@ paquetes que se desinstalan antes de las instrumentadas, en «Pruebas») y en es
 6. **`minSdk` 26** (Android 8.0, tabletas económicas), `targetSdk` 36 y `compileSdk` 37 (A1-D7). Toda API más nueva va
    detrás de `Build.VERSION.SDK_INT` (o en una función con `@RequiresApi`) y se prueba en `ADEL_A1_Tablet_API26`. Las
    diferencias conocidas están en el avance, §1.6 (resumen abajo).
-7. **Colores solo en el tema**: `core/ui/.../theme/AdelPalette.kt` es el único archivo con colores escritos (los mismos
+7. **Colores solo en el tema**: `android-core/ui/.../theme/AdelPalette.kt` (desde la K1) es el único archivo con colores escritos de las dos aplicaciones (los mismos
    tokens de `desktop/src/styles.css`, en ambos temas, con el mismo significado). Las pantallas usan
    `MaterialTheme.colorScheme` o `AdelTheme.colors`. `ColorsOnlyInPaletteTest` falla con cualquier `Color(0x…)`, color
    con nombre o hexadecimal en recursos fuera de la paleta.
@@ -86,7 +98,7 @@ paquetes que se desinstalan antes de las instrumentadas, en «Pruebas») y en es
     `AdelDimens`); un solo botón principal por panel.
 13. **El indicador de conexión siempre visible** en la barra superior común (`AdelTopBar` + `ConnectionIndicator`):
     «En línea», «Sin conexión» y «N pedidos por enviar». **Un solo estado de conexión** (etapa A3, A3-D1):
-    `AppContainer.serverLink` (`ServerLinkMonitor` de `core:data` con las reglas puras de `ServerLinkTracker` en
+    `AppContainer.serverLink` (`ServerLinkMonitor` de `android-core:network` con las reglas puras de `ServerLinkTracker` en
     `core:domain`, `ServerLink` para quien lo lee). Lo alimentan la red de Android y **cada respuesta de Go** del
     cliente del servidor emparejado (`ServerAnswersInterceptor` en `PinnedHttpClient`, el punto único; cualquier
     respuesta HTTP es un éxito, una cancelación propia no cuenta). Lo leen la barra, «Selecciona tu usuario» y la
@@ -105,7 +117,7 @@ paquetes que se desinstalan antes de las instrumentadas, en «Pruebas») y en es
     cierra una conexión libre a los 60 s y OkHttp la guardaba 5 minutos sin revisarla antes de un `GET`; por eso el pool
     guarda las conexiones libres **30 s** y una lectura sin respuesta se repite **una vez** con una conexión nueva
     (nunca una escritura: llevan su `operation_id`; ni un canal ni un plazo vencido; `retryOnConnectionFailure` sigue en
-    `false`). Toda llamada de OkHttp de `core:data` se espera con `Call.awaitResponse` (`core/data/…/api/CallAwait.kt`,
+    `false`). Toda llamada de OkHttp de `core:data` se espera con `Call.awaitResponse` (`android-core/network/…/api/CallAwait.kt`,
     la única): si la corrutina se cancela cuando la respuesta ya llegó, la respuesta se cierra en `Dispatchers.IO`,
     nunca en el hilo de la corrutina (cerrar una conexión TLS escribe en la red y en el hilo principal Android lanzaba
     `NetworkOnMainThreadException`: la aplicación se cerraba; Fase E de la A3, `CallAwaitTest`).
@@ -187,9 +199,28 @@ Dependencias entre módulos: `app` → todos; `feature:*` → `core:ui` (→ `co
 `feature:takeaway`, `core:capture` (→ `core:ui`); `core:data` → `core:domain`. Un módulo `feature` nunca depende de otro
 `feature`.
 
+**Etapa K1 (K1-D2)**: lo compartido con la aplicación de cocina pasó a `android-core` (dónde vive cada pieza:
+[android-core/CLAUDE.md](../android-core/CLAUDE.md), «Módulos»); la tabla de arriba dice para qué la usa meseros:
+
+- de `core:domain` a `android-core:model`: `LinkState`/`ConnectionSummary`, `DefaultNetworkTracker`,
+  `ServerLink`/`ServerAnswers`, `ServerLinkTracker`, `AppError`, `SecretSealer`, `Hex`, `server/`, `pairing/`,
+  `realtime/`, `error/` y `license/`, y `RepairReason`, `NetworkPermissions` y `UnsentOrder`. Se quedan aquí
+  `PendingOrdersSource`, `access/` (sin esos tres) y `WaiterServerRequirements` (lo que meseros exige al servidor);
+- de `core:data` a `android-core:network`: `api/` (salvo `MoneySerializer` y los DTO del PIN, `PinDtos.kt`),
+  `security/`, `discovery/`, `network/` (como `connection/`, con `AppForeground`), `realtime/` (salvo
+  `RecoveryStateCursorSeed`), `session/` (salvo `DeviceServerAccess`), `wipe/`, `license/`, `PairingRepository` y
+  `PairedConnection` (la entrada con PIN se arma sobre ella en `PinCalls.kt`);
+- de `core:ui` a `android-core:ui`: el tema y la paleta, `AdelIcons`, los botones, `AdelTopBar` con
+  `ConnectionIndicator`, `UserActivity` y el logotipo; de `feature:access`, las pantallas de buscar el servidor, del
+  código y de estado y sus textos (`AccessTexts`).
+
+`core:domain` → `com.adelpos.core:model`, `core:data` → `com.adelpos.core:network` y `core:ui` →
+`com.adelpos.core:ui`, todas con `api` y resueltas por el build incluido.
+
 **Versión de la aplicación**: un solo lugar, `android/gradle.properties` (`adelpos.versionName`, `adelpos.versionCode`;
-0.2.0 y 2 en la A2; 0.3.0 y 3 en la A3; desde la L1, **0.4.0 y 4**). La usan el APK y la cabecera `X-Client-Version`
-(`BuildConfig.VERSION_NAME` → `ClientIdentity`).
+0.2.0 y 2 en la A2; 0.3.0 y 3 en la A3; 0.4.0 y 4 en la L1; desde la K1, **0.4.1 y 5**: el código compartido pasó a
+`android-core` y se instala encima de la 0.4.0 sin emparejar de nuevo). La usan el APK y la cabecera
+`X-Client-Version` (`BuildConfig.VERSION_NAME` → `ClientIdentity`, con el tipo de cliente `ClientKinds.ANDROID`).
 
 ## Comandos
 
@@ -205,8 +236,12 @@ no están definidos; necesitan Android Studio instalado, por eso **no** forman p
 | `./scripts/dev.sh android-connected`    | Pruebas instrumentadas; con más de un dispositivo, elegir con `ANDROID_SERIAL=emulator-5580`.      |
 | `scripts/android-e2e.sh`                | Extremo a extremo contra un servidor Go **temporal** (ver «Pruebas»); nunca el servicio real.      |
 
-Los agentes de la etapa usan el arnés aislado (`$SP/iso.sh <árbol> gradle <tareas…>`, `emu-up`, `server-up`), que da el
-mismo entorno. Los comentarios de línea (`//`) se escriben de 100 columnas como máximo: ktfmt corta los más largos.
+Desde la etapa K1 (K1-D20), los `dev.sh android-*` recorren los tres proyectos Android: `android-core`, `android` y
+`cocina` (`android-build`, las dos aplicaciones; `android-test`, la JVM de `android-core:model` y de `core:domain`); cada
+build corre sus propias pruebas y su Lint en su carpeta.
+
+Los agentes de la etapa usan el arnés aislado (`$SP/iso.sh <árbol> gradle <tareas…>`, con `ISO_GRADLE_DIR=cocina` o
+`android-core` para los otros proyectos; `emu-up`, `server-up`), que da el mismo entorno. Los comentarios de línea (`//`) se escriben de 100 columnas como máximo: ktfmt corta los más largos.
 
 ## Pruebas
 
@@ -310,7 +345,8 @@ mismo entorno. Los comentarios de línea (`//`) se escriben de 100 columnas como
   `app/build.gradle.kts`; paquete de pruebas `com.adelpos.meseros.test`). Antes de crear el contenedor, busca por NSD
   el tipo `_adelpostest._tcp` y toma `clientVersion` de los argumentos. Ayudantes: `TestDevice` (un servidor
   emparejado que no responde y un mesero conocido para entrar sin conexión, con el Keystore real), `FakeAccess`
-  (entrada falsa para las pantallas con estados forzados) y `MainComputer`.
+  (entrada falsa para las pantallas con estados forzados) y `MainComputer` (desde la K1, con `GoTestServer` y
+  `SystemDialogs`, en `android-core:testing`, compartidos con las pruebas de la aplicación de cocina).
 - **`testOptions.targetSdk = 36` en las bibliotecas que tocan la red** (`core:data`): el APK de pruebas de una
   biblioteca toma `compileSdk` (37) si no se indica, y en Android 17 un `targetSdk` 37 exige `ACCESS_LOCAL_NETWORK`
   (visto: `SecurityException: Missing local network permission` al anunciar por NSD). Se prueba con el nivel de la
@@ -336,7 +372,8 @@ ADELPOS_E2E_NEW_SERVER=<orden> scripts/android-e2e.sh --suite all`**, que levant
   ese módulo. Comprobar siempre los resultados en `*/build/outputs/androidTest-results/connected/` (contar los XML
   de cada módulo) y desinstalar antes, con `adb -s <serie> uninstall`, la aplicación y sus pruebas
   (`com.adelpos.meseros`, `com.adelpos.meseros.test`, `com.adelpos.meseros.core.data.test`,
-  `com.adelpos.meseros.core.ui.test`; `core:capture` y `feature:takeaway` no tienen pruebas instrumentadas propias) y
+  `com.adelpos.meseros.core.ui.test`; `core:capture` y `feature:takeaway` no tienen pruebas instrumentadas propias; desde
+  la K1, también las de `android-core`: `com.adelpos.core.network.test` y `com.adelpos.core.ui.test`) y
   las de la 0.1.0 (`local.adel.pos.android`, `local.adel.pos.android.test` y sus bibliotecas `….core.data.test` y
   `….core.ui.test`): un APK de entrega firmado instalado a mano es «otra firma»
   de la misma aplicación para el `debug`.
@@ -371,7 +408,7 @@ emparejado, el mesero activo y sus credenciales. Otro módulo (catálogo, modo M
   olvidar el emparejamiento y destruir la llave del Keystore. Hoy registra el catálogo con sus imágenes; **la Fase E
   registra ahí** la cola de pedidos y sus borradores y cancela su trabajo (`WorkManager.cancelAllWork()`). Todo módulo
   nuevo que guarde datos del restaurante se registra ahí.
-- **Versiones** (`ServerCompatibility.check`: servidor 0.13.0 o posterior con `waiter-pin-v1` y, desde la A2,
+- **Versiones** (`ServerCompatibility.check` de `android-core` con `WaiterServerRequirements`: servidor 0.13.0 o posterior con `waiter-pin-v1` y, desde la A2,
   `takeaway-v1`, `device-precheck-printer-v1` y `ready-alerts-v1` —A2-D6: cada fase agrega la capacidad que usa—, y
   la mínima de Android de `min_client_versions`): se
   comprueba con `GET version` **antes de pedir el código de emparejamiento** (también con la dirección escrita; `PairingRepository.request`) y en cada comprobación ya emparejado. Un servidor viejo da
@@ -733,15 +770,17 @@ arma la aplicación (A2-D10) con las plantillas de `app/src/main/res/values/stri
 
 ## Dependencias
 
-- Versiones en `gradle/libs.versions.toml` (las de la Fase 0, avance §1.2; fuentes y para qué en
+- Versiones en el **catálogo único** `android-core/gradle/libs.versions.toml` (desde la K1, K1-D2; las de la Fase 0, avance §1.2; fuentes y para qué en
   [docs/DEPENDENCIES.md](../docs/DEPENDENCIES.md), «Etapa A1 · Android»).
 - **Bloqueo**: un `gradle.lockfile` por proyecto con todas sus configuraciones, `buildscript-gradle.lockfile` (los
   complementos) y `settings-gradle.lockfile`.
 - **Verificación**: `gradle/verification-metadata.xml` con el SHA-256 de cada artefacto (módulos, POM y complementos).
-  Una dependencia que no está ahí hace fallar la compilación. `aapt2` es un artefacto por sistema operativo: solo está el
+  Una dependencia que no está ahí hace fallar la compilación. Desde la K1, este archivo verifica también lo que
+  resuelve `android-core` (en un build compuesto manda el del build raíz). `aapt2` es un artefacto por sistema operativo: solo está el
   de macOS (`-osx`).
 - **Agregar o cambiar una dependencia**: editar el catálogo y regenerar ambos con un emulador encendido (las pruebas
-  instrumentadas resuelven artefactos propios):
+  instrumentadas resuelven artefactos propios). Desde la K1, en los tres proyectos y en el orden de
+  [android-core/CLAUDE.md](../android-core/CLAUDE.md), «Dependencias, bloqueos y verificación»; el de `android/` es:
 
   ```sh
   ANDROID_SERIAL=emulator-5592 ./gradlew resolveAllDependencies assembleDebug assembleRelease assembleDebugAndroidTest \
@@ -773,7 +812,8 @@ keyPassword=…
 Sin ellas, `assembleRelease` produce `app-release-unsigned.apk`. La llave de desarrollo del APK de prueba (nunca una
 llave de publicación) la creó la Fase G de la A1 y vive fuera del repositorio, en `~/.android/adel-pos-dev/`
 (`signing.properties` y su almacén). **Es la misma para la 0.1.0 y la 0.2.0**: el cambio de identificador (A2-D5) no
-pide otra llave, porque Android solo exige la misma firma para actualizar el mismo paquete. Huella SHA-256 del
+pide otra llave, porque Android solo exige la misma firma para actualizar el mismo paquete. Desde la K1, también firma
+la aplicación de cocina (`cocina/`, la misma regla de «fuera del repositorio»). Huella SHA-256 del
 certificado (`apksigner verify --print-certs`, «CN=AD-EL POS desarrollo - APK de prueba, O=AD-EL POS»):
 `fb6a4bac93052ca9051342ea122ed90469340a3685de14243bdab288d71c7c86`; un APK de entrega con otra huella no es el de
 siempre.
