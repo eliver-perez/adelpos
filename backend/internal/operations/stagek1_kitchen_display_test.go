@@ -6,10 +6,13 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -23,6 +26,7 @@ import (
 	"local/ad-el-pos/server/internal/licenseseats/seatstest"
 	"local/ad-el-pos/server/internal/licensing"
 	"local/ad-el-pos/server/internal/licensing/licensingtest"
+	"local/ad-el-pos/server/internal/localsetup"
 	"local/ad-el-pos/server/internal/operations"
 )
 
@@ -286,6 +290,9 @@ func TestStageK1KitchenDisplay(t *testing.T) {
 	fixture.display = fixture.kitchenDevice(t, "Pantalla cocina K1")
 	fixture.second = fixture.kitchenDevice(t, "Pantalla barra K1")
 
+	t.Run("emparejar como pantalla de cocina", func(t *testing.T) {
+		testStageK1KitchenDisplayPairing(t, fixture)
+	})
 	t.Run("la pantalla no captura, no cobra ni administra: solo su lista cerrada", func(t *testing.T) {
 		testStageK1KitchenDisplayClosedList(t, fixture)
 	})
@@ -313,6 +320,70 @@ func TestStageK1KitchenDisplay(t *testing.T) {
 	t.Run("estados de la licencia y hora del equipo incorrecta", func(t *testing.T) {
 		testStageK1KitchenDisplayLicense(t, fixture)
 	})
+}
+
+func testStageK1KitchenDisplayPairing(t *testing.T, fixture *kitchenDisplayFixture) {
+	identity, err := localsetup.EnsureIdentity(filepath.Join(t.TempDir(), localsetup.IdentityFolder))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture.service.Identity = &administration.ServerIdentity{ServerID: identity.ServerID, Fingerprint: identity.Fingerprint}
+	defer func() { fixture.service.Identity = nil }()
+	nonce := make([]byte, 32)
+	if _, err := rand.Read(nonce); err != nil {
+		t.Fatal(err)
+	}
+	request := func(kind, clientKind string) (int, []byte) {
+		return fixture.send(testTerminal{}, "POST", "pairing/requests", map[string]any{"name": "Tableta de cocina K1",
+			"device_kind": kind, "os": "Android 14", "app_version": "0.1.0", "commitment": administration.PairingCommitment(nonce)},
+			map[string]string{"X-Client-Kind": clientKind, "X-Client-Version": "0.1.0"})
+	}
+	// La aplicación de cocina solo se empareja como pantalla, y una pantalla solo desde ella.
+	for _, wrong := range [][2]string{{"android", "kitchen"}, {"desktop", "kitchen"}, {"kitchen", "android"}, {"kitchen", "desktop"}} {
+		if code, response := request(wrong[0], wrong[1]); code != 400 || errorCode(t, response) != "CLIENT_KIND_MISMATCH" {
+			t.Fatalf("emparejar %s con X-Client-Kind %s: %d %s", wrong[0], wrong[1], code, response)
+		}
+	}
+	code, response := request("kitchen", "kitchen")
+	if code != 200 {
+		t.Fatalf("pedir el código como pantalla: %d %s", code, response)
+	}
+	created := decodeResponse[map[string]string](t, response)
+	secret := map[string]string{"X-Pairing-Secret": created["pairing_secret"], "X-Client-Kind": "kitchen", "X-Client-Version": "0.1.0"}
+	if code, response := fixture.send(testTerminal{}, "POST", "pairing/requests/"+created["request_id"]+"/reveal",
+		map[string]string{"terminal_nonce": hex.EncodeToString(nonce)}, secret); code != 200 {
+		t.Fatalf("revelar: %d %s", code, response)
+	}
+	serverNonce, err := hex.DecodeString(created["server_nonce"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	pairingCode, err := administration.PairingCode(identity.Fingerprint, nonce, serverNonce, created["request_id"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	// En Terminales la solicitud dice que es una pantalla de cocina.
+	requests := decodeResponse[struct {
+		Requests []map[string]any `json:"requests"`
+	}](t, fixture.adminCall(t, "GET", "devices/pairing-requests", nil, 200)).Requests
+	if len(requests) == 0 || requests[0]["device_kind"] != "kitchen" {
+		t.Fatalf("solicitud en Terminales: %v", requests)
+	}
+	fixture.adminCall(t, "POST", "devices/pairing-requests/"+created["request_id"]+"/approve", map[string]string{"code": pairingCode}, 200)
+	code, response = fixture.send(testTerminal{}, "POST", "pairing/requests/"+created["request_id"]+"/claim", map[string]any{}, secret)
+	if code != 200 {
+		t.Fatalf("reclamar: %d %s", code, response)
+	}
+	claimed := decodeResponse[map[string]string](t, response)
+	paired := testTerminal{deviceID: claimed["device_id"], deviceToken: claimed["device_token"]}
+	if fixture.count(t, "SELECT count(*)::int FROM app.devices WHERE id=$1 AND kind='kitchen' AND app_version='0.1.0'", paired.deviceID) != 1 {
+		t.Fatal("la pantalla emparejada no quedó como kitchen")
+	}
+	// Desde ahí es una pantalla: se conecta y no inicia sesión.
+	fixture.displayCall(t, paired, "POST", "kitchen-display/connect", map[string]any{}, 200)
+	fixture.displayError(t, paired, "POST", "auth/login", map[string]string{"username": "admin", "password": "admin"}, 403, "KITCHEN_DISPLAY_ONLY")
+	// Se revoca para que no ocupe cupo en lo que sigue.
+	fixture.adminCall(t, "POST", "devices/"+paired.deviceID+"/revoke", map[string]any{}, 200)
 }
 
 func testStageK1KitchenDisplayClosedList(t *testing.T, fixture *kitchenDisplayFixture) {
