@@ -10,7 +10,7 @@
 #   ADELPOS_E2E_NETWORK_URL=https://127.0.0.1:8454 \
 #   ADELPOS_E2E_PROVISIONING_FILE=/ruta/al/provisioning-token \
 #   [ADELPOS_E2E_DATABASE_URL=postgresql://usuario:clave@127.0.0.1:55499/adel_pos_test_…] \
-#   scripts/android-e2e.sh [--suite access|catalog|waiter|field|takeaway|precheck|alerts|adjustments|license|connection|all] \
+#   scripts/android-e2e.sh [--suite access|catalog|waiter|field|takeaway|precheck|alerts|adjustments|license|connection|kitchen|all] \
 #       [--steps "…"] \
 #       [--no-install] [--out <carpeta>]
 #
@@ -152,6 +152,12 @@
 # <salida>/<suite>.
 # La suite `connection` se corre aparte.
 #
+# Suite `kitchen` (etapa K1, KitchenOnGoTest de la APLICACIÓN DE COCINA, com.adelpos.cocina, con su CocinaTestRunner y el
+# mismo tipo NSD de pruebas; con un servidor temporal nuevo): k1 emparejar la tableta como pantalla de cocina con el
+# código (la prueba hace de computadora principal por la escucha local) · k2 conectar (`kitchen-display/connect`, el
+# cupo de cocina) y la pantalla de pedidos vacía, «No hay pedidos». Las fases C y D de la etapa agregan sus pasos. Se
+# corre aparte (no entra en `all`, que es de la aplicación de meseros).
+#
 # Seguridad: se niega a correr con los puertos del servicio real (8181, 8443), con un host que no sea la propia Mac
 # o si `GET version` de alguna de las dos escuchas no responde `test_mode: true`; la base solo con las guardas de
 # arriba. Las pruebas usan el tipo NSD `_adelpostest._tcp` (AdelTestRunner): nunca buscan ni prueban el servidor real
@@ -159,7 +165,8 @@
 #
 # Aplicación: `com.adelpos.meseros` (A2-D5) con su paquete de pruebas `com.adelpos.meseros.test`. Antes de instalar
 # se desinstalan también los de la 0.1.0 (`local.adel.pos.android` y su `.test`): para Android son otra aplicación y
-# no deben quedar en el emulador junto a la nueva.
+# no deben quedar en el emulador junto a la nueva. La suite `kitchen` usa la aplicación de cocina (`com.adelpos.cocina`,
+# proyecto Gradle cocina/, etapa K1) con su paquete de pruebas `com.adelpos.cocina.test`.
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -196,7 +203,8 @@ suite_class() {
         adjustments) echo "AdjustmentsOnGoTest" ;;
         license) echo "LicenseOnGoTest" ;;
         connection) echo "ConnectionOnGoTest" ;;
-        *) fail "suite desconocida: $1 (access, catalog, waiter, field, takeaway, precheck, alerts, adjustments, license, connection o all)" ;;
+        kitchen) echo "KitchenOnGoTest" ;;
+        *) fail "suite desconocida: $1 (access, catalog, waiter, field, takeaway, precheck, alerts, adjustments, license, connection, kitchen o all)" ;;
     esac
 }
 
@@ -212,6 +220,7 @@ suite_steps() {
         adjustments) echo "a1 a2 a3 a4 a5 a6 a7" ;;
         license) echo "l1 l2 l3 l4 l5 l6 l7 l8" ;;
         connection) echo "c1" ;;
+        kitchen) echo "k1 k2" ;;
     esac
 }
 
@@ -246,6 +255,26 @@ APP_ID="com.adelpos.meseros"
 TEST_PACKAGE="$APP_ID.test"
 TEST_RUNNER="$TEST_PACKAGE/$APP_ID.AdelTestRunner"
 LEGACY_APP_ID="local.adel.pos.android"
+# Proyecto Gradle de la aplicación que se instala (etapa K1: android para meseros, cocina para la de cocina).
+GRADLE_DIR="android"
+
+# Etapa K1: la suite `kitchen` es de la aplicación de cocina, con su ejecutor (el mismo tipo NSD de pruebas). No hay una
+# versión anterior de cocina que desinstalar.
+select_app() {
+    if [ "$1" = kitchen ]; then
+        APP_ID="com.adelpos.cocina"
+        TEST_PACKAGE="$APP_ID.test"
+        TEST_RUNNER="$TEST_PACKAGE/$APP_ID.CocinaTestRunner"
+        LEGACY_APP_ID=""
+        GRADLE_DIR="cocina"
+    else
+        APP_ID="com.adelpos.meseros"
+        TEST_PACKAGE="$APP_ID.test"
+        TEST_RUNNER="$TEST_PACKAGE/$APP_ID.AdelTestRunner"
+        LEGACY_APP_ID="local.adel.pos.android"
+        GRADLE_DIR="android"
+    fi
+}
 
 # Host y puerto de una URL «esquema://host:puerto»; solo la propia Mac y nunca los puertos del servicio real.
 check_url() {
@@ -472,13 +501,17 @@ install_app() {
     # Se desinstalan la aplicación y sus pruebas (una copia con otra firma haría fallar la instalación) y también
     # las de la 0.1.0, que para Android son otra aplicación.
     local package
-    for package in "$APP_ID" "$TEST_PACKAGE" "$LEGACY_APP_ID" "$LEGACY_APP_ID.test"; do
+    local packages=("$APP_ID" "$TEST_PACKAGE")
+    if [ -n "$LEGACY_APP_ID" ]; then
+        packages+=("$LEGACY_APP_ID" "$LEGACY_APP_ID.test")
+    fi
+    for package in "${packages[@]}"; do
         "$ADB" -s "$ANDROID_SERIAL" uninstall "$package" >/dev/null 2>&1 || true
     done
-    if [ ! -f "$PROJECT_ROOT/android/local.properties" ]; then
-        echo "sdk.dir=$ANDROID_HOME" >"$PROJECT_ROOT/android/local.properties"
+    if [ ! -f "$PROJECT_ROOT/$GRADLE_DIR/local.properties" ]; then
+        echo "sdk.dir=$ANDROID_HOME" >"$PROJECT_ROOT/$GRADLE_DIR/local.properties"
     fi
-    (cd "$PROJECT_ROOT/android" && ./gradlew --console=plain -q :app:installDebug :app:installDebugAndroidTest) \
+    (cd "$PROJECT_ROOT/$GRADLE_DIR" && ./gradlew --console=plain -q :app:installDebug :app:installDebugAndroidTest) \
         >"$SUITE_OUT/install.log" 2>&1 || {
         tail -20 "$SUITE_OUT/install.log" >&2
         fail "no se pudo instalar la aplicación ni sus pruebas"
@@ -1031,11 +1064,24 @@ connection_step() {
     esac
 }
 
+# Etapa K1: la aplicación de cocina (KitchenOnGoTest). Las capturas de cada paso se copian a <salida>/screens.
+kitchen_step() {
+    case "$1" in
+        k1) run_step k1_emparejarComoPantallaDeCocina ;;
+        k2) run_step k2_conectarYPantallaDePedidosVacia ;;
+        *) fail "paso desconocido de la suite kitchen: $1" ;;
+    esac
+    mkdir -p "$SUITE_OUT/screens"
+    "$ADB" -s "$ANDROID_SERIAL" pull "/sdcard/Android/data/$APP_ID/files/screens/." \
+        "$SUITE_OUT/screens" >/dev/null 2>&1 || echo "sin capturas que copiar" | tee -a "$SUMMARY"
+}
+
 # Corre los pasos [steps] de [suite] contra el servidor ya preparado.
 run_suite() {
     local suite="$1" steps="$2" install="$3"
     SUITE_NAME="$suite"
     TEST_CLASS="$(suite_class "$suite")"
+    select_app "$suite"
     SUITE_OUT="$4"
     mkdir -p "$SUITE_OUT"
     {
@@ -1060,6 +1106,7 @@ run_suite() {
             adjustments) adjustments_step "$step" ;;
             license) license_step "$step" ;;
             connection) connection_step "$step" ;;
+            kitchen) kitchen_step "$step" ;;
         esac
     done
 }
