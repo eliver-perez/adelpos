@@ -45,7 +45,8 @@ import (
 //     pantalla, encabezado de la cuenta, configuración) y la reconexión con el estado completo sin pérdidas ni
 //     duplicados; revocar desconecta al momento;
 //   - la versión instalada de los tres tipos, la contraseña del administrador para los ajustes, el cupo de cocina
-//     ligado al dispositivo («Liberar cupo» y «Usar esta pantalla») y los estados de la licencia y de la hora.
+//     ligado al dispositivo («Liberar cupo» y «Usar esta pantalla»), «Volver a emparejar» en la tableta (K1-D32: revoca
+//     la pantalla y suelta su cupo) y los estados de la licencia y de la hora.
 //
 // Usa su propia base desde cero.
 
@@ -313,6 +314,9 @@ func TestStageK1KitchenDisplay(t *testing.T) {
 	})
 	t.Run("cupo de cocina ligado al dispositivo, Liberar cupo y Usar esta pantalla", func(t *testing.T) {
 		testStageK1KitchenDisplaySeats(t, fixture)
+	})
+	t.Run("volver a emparejar en la tableta revoca la pantalla y suelta su cupo (K1-D32)", func(t *testing.T) {
+		testStageK1KitchenDisplayUnpair(t, fixture)
 	})
 	t.Run("revocar desconecta al momento", func(t *testing.T) {
 		testStageK1KitchenDisplayRevocation(t, fixture)
@@ -1055,6 +1059,124 @@ func testStageK1KitchenDisplaySeats(t *testing.T, fixture *kitchenDisplayFixture
 	}
 }
 
+// testStageK1KitchenDisplayUnpair es K1-D32: «Volver a emparejar» en la tableta pide la contraseña de un administrador
+// (las mismas validaciones y el mismo límite de intentos que settings-access) y revoca la propia pantalla como
+// Terminales › «Revocar»: suelta su cupo y la pantalla nueva lo toma, aunque la licencia tenga los cupos justos.
+func testStageK1KitchenDisplayUnpair(t *testing.T, fixture *kitchenDisplayFixture) {
+	unpair := func(terminal testTerminal, username, password string) (int, []byte) {
+		return fixture.send(terminal, "POST", "kitchen-display/unpair", map[string]string{"username": username, "password": password},
+			kitchenHeaders)
+	}
+	revoked := func(terminal testTerminal) bool {
+		return fixture.count(t, "SELECT count(*)::int FROM app.devices WHERE id=$1 AND revoked_at IS NOT NULL", terminal.deviceID) == 1
+	}
+	seats := func(terminal testTerminal) int {
+		return fixture.count(t, "SELECT count(*)::int FROM app.license_seats WHERE device_id=$1", terminal.deviceID)
+	}
+	// Una licencia con los cupos de cocina justos: la pantalla vieja ocupa el último y la nueva no tiene cupo.
+	held := fixture.count(t, "SELECT count(*)::int FROM app.license_seats WHERE kind='kitchen_display'")
+	source := seatstest.NewSource(seatstest.ContractMaximum, seatstest.ContractMaximum, held+1)
+	fixture.service.Seats = licenseseats.NewManager(licenseseats.Options{Limits: source})
+	defer func() { fixture.service.Seats = seatstest.Roomy() }()
+	old := fixture.kitchenDevice(t, "Pantalla vieja K1")
+	fresh := fixture.kitchenDevice(t, "Pantalla nueva K1")
+	fixture.displayCall(t, old, "POST", "kitchen-display/connect", map[string]any{}, 200)
+	fixture.displayError(t, fresh, "POST", "kitchen-display/connect", map[string]any{}, 409, "LICENSE_SEAT_UNAVAILABLE")
+
+	// Las validaciones de settings-access: vacíos, 400; más largos que el inicio de sesión, 401 sin contar un intento;
+	// la contraseña equivocada, 401; sin devices.manage, 403. Nada de eso revoca ni suelta el cupo.
+	fixture.displayError(t, old, "POST", "kitchen-display/unpair", map[string]string{"username": "", "password": ""}, 400, "VALIDATION_ERROR")
+	fixture.displayError(t, old, "POST", "kitchen-display/unpair", map[string]string{"username": "admin"}, 400, "VALIDATION_ERROR")
+	fixture.displayError(t, old, "POST", "kitchen-display/unpair", map[string]string{"username": strings.Repeat("a", 41), "password": "admin"},
+		401, "AUTHORIZATION_INVALID")
+	fixture.displayError(t, old, "POST", "kitchen-display/unpair", map[string]string{"username": "admin", "password": strings.Repeat("a", 257)},
+		401, "AUTHORIZATION_INVALID")
+	fixture.displayError(t, old, "POST", "kitchen-display/unpair", map[string]string{"username": "admin", "password": "otra"},
+		401, "AUTHORIZATION_INVALID")
+	fixture.displayError(t, old, "POST", "kitchen-display/unpair",
+		map[string]string{"username": "mesero_k1", "password": "Clave temporal de mesero_k1"}, 403, "PERMISSION_DENIED")
+	if revoked(old) || seats(old) != 1 {
+		t.Fatal("un intento rechazado revocó la pantalla o soltó su cupo")
+	}
+	fixture.orders(t, old)
+	if fixture.count(t, `SELECT count(*)::int FROM app.audit_events WHERE device_id=$1 AND action='kitchen_display.unpair_denied'
+        AND NOT success AND after_state->>'username'='mesero_k1'`, old.deviceID) != 1 ||
+		fixture.count(t, `SELECT count(*)::int FROM app.audit_events WHERE device_id=$1 AND action='authorization.failed'`, old.deviceID) != 1 {
+		t.Fatal("auditoría de los intentos rechazados")
+	}
+
+	// Un escritorio o un teléfono de meseros: la ruta es solo de las pantallas (y no revoca a quien la llama).
+	phone := (&readyFixture{waiterModeFixture: fixture.waiterModeFixture}).tabletWithVersion(t, "Teléfono K1-D32", "0.4.1")
+	for _, client := range []struct {
+		name     string
+		terminal testTerminal
+		headers  map[string]string
+	}{
+		{"escritorio", fixture.admin, map[string]string{"X-Client-Kind": "desktop", "X-Client-Version": "0.16.0"}},
+		{"teléfono", phone, map[string]string{"X-Client-Kind": "android", "X-Client-Version": "0.4.1"}},
+	} {
+		code, response := fixture.send(client.terminal, "POST", "kitchen-display/unpair", map[string]string{"username": "admin", "password": "admin"},
+			client.headers)
+		if code != 403 || errorCode(t, response) != "KITCHEN_DISPLAY_REQUIRED" || revoked(client.terminal) {
+			t.Fatalf("%s: %d %s", client.name, code, response)
+		}
+	}
+
+	// Con el administrador: 200 {}, la pantalla queda revocada como desde Terminales y su cupo, libre.
+	sessionsBefore := fixture.count(t, "SELECT count(*)::int FROM app.sessions")
+	code, response := unpair(old, "Admin ", "admin")
+	if code != 200 || strings.TrimSpace(string(response)) != "{}" {
+		t.Fatalf("volver a emparejar: %d %s", code, response)
+	}
+	if !revoked(old) || seats(old) != 0 || fixture.count(t, "SELECT count(*)::int FROM app.sessions") != sessionsBefore {
+		t.Fatal("la pantalla no quedó revocada con su cupo libre")
+	}
+	if fixture.count(t, `SELECT count(*)::int FROM app.audit_events a JOIN app.users u ON u.id=a.actor_id
+        WHERE a.action='kitchen_display.unpaired' AND a.success AND a.actor_kind='user' AND u.username='admin' AND a.device_id=$1
+        AND a.entity_id::text=$2 AND a.after_state->>'revoked'='true'`, old.deviceID, old.deviceID) != 1 {
+		t.Fatal("auditoría de volver a emparejar")
+	}
+	// Después, toda petición de la pantalla vieja responde 401 DEVICE_REVOKED (también volver a intentarlo).
+	fixture.displayError(t, old, "GET", "kitchen-display/orders", nil, 401, "DEVICE_REVOKED")
+	fixture.displayError(t, old, "GET", "events/snapshot?after=0", nil, 401, "DEVICE_REVOKED")
+	fixture.displayError(t, old, "POST", "kitchen-display/unpair", map[string]string{"username": "admin", "password": "admin"}, 401,
+		"DEVICE_REVOKED")
+	// La pantalla nueva toma el cupo que soltó.
+	fixture.displayCall(t, fresh, "POST", "kitchen-display/connect", map[string]any{}, 200)
+	fixture.orders(t, fresh)
+
+	// Sin cupo y con el cupo liberado también se puede volver a emparejar (la ruta no exige cupo).
+	without := fixture.kitchenDevice(t, "Pantalla K1 sin cupo")
+	fixture.displayError(t, without, "POST", "kitchen-display/connect", map[string]any{}, 409, "LICENSE_SEAT_UNAVAILABLE")
+	if code, response := unpair(without, "admin", "admin"); code != 200 || !revoked(without) {
+		t.Fatalf("sin cupo: %d %s", code, response)
+	}
+	fixture.adminCall(t, "POST", "devices/"+fresh.deviceID+"/seat/release", map[string]any{}, 200)
+	fixture.displayError(t, fresh, "GET", "kitchen-display/orders", nil, 409, "KITCHEN_DISPLAY_SEAT_RELEASED")
+	if code, response := unpair(fresh, "admin", "admin"); code != 200 || !revoked(fresh) || seats(fresh) != 0 {
+		t.Fatalf("con el cupo liberado: %d %s", code, response)
+	}
+
+	// El mismo límite de intentos que settings-access (por pantalla y usuario): cinco fallos entre las dos rutas y
+	// después ni la contraseña correcta pasa en ninguna.
+	shared := fixture.kitchenDevice(t, "Pantalla K1 intentos")
+	for attempt := range 5 {
+		route := "kitchen-display/settings-access"
+		if attempt%2 == 1 {
+			route = "kitchen-display/unpair"
+		}
+		fixture.displayError(t, shared, "POST", route, map[string]string{"username": "admin", "password": "Clave K1-D32 equivocada"}, 401,
+			"AUTHORIZATION_INVALID")
+	}
+	fixture.displayError(t, shared, "POST", "kitchen-display/unpair", map[string]string{"username": "admin", "password": "admin"}, 429,
+		"AUTHORIZATION_THROTTLED")
+	fixture.displayError(t, shared, "POST", "kitchen-display/settings-access", map[string]string{"username": "admin", "password": "admin"}, 429,
+		"AUTHORIZATION_THROTTLED")
+	if revoked(shared) {
+		t.Fatal("el límite de intentos dejó revocar")
+	}
+}
+
 func testStageK1KitchenDisplayRevocation(t *testing.T, fixture *kitchenDisplayFixture) {
 	server := httptest.NewServer(fixture.service)
 	defer server.Close()
@@ -1135,6 +1257,14 @@ func testStageK1KitchenDisplayLicense(t *testing.T, fixture *kitchenDisplayFixtu
 	fixture.displayCall(t, fixture.display, "GET", "events/snapshot?after=0", nil, 200)
 	fixture.displayCall(t, fixture.display, "GET", "license/status", nil, 200)
 	fixture.displayCall(t, fixture.display, "POST", "kitchen-display/settings-access", map[string]string{"username": "admin", "password": "admin"}, 200)
+	// «Volver a emparejar» (K1-D32) funciona siempre, como los ajustes: sin activar, vencida y con la hora incorrecta.
+	unpairs := func(name string) {
+		t.Helper()
+		terminal := fixture.kitchenDevice(t, name)
+		fixture.displayCall(t, terminal, "POST", "kitchen-display/unpair", map[string]string{"username": "admin", "password": "admin"}, 200)
+		fixture.displayError(t, terminal, "GET", "license/status", nil, 401, "DEVICE_REVOKED")
+	}
+	unpairs("Pantalla K1 sin activar")
 	// Vigente.
 	expires := clock.Now().Add(72 * time.Hour)
 	licenses.Accept(manager, licensingtest.Subscription(expires, 3, 3, 3))
@@ -1152,6 +1282,7 @@ func testStageK1KitchenDisplayLicense(t *testing.T, fixture *kitchenDisplayFixtu
 	items := card(t, view, accountID).Items
 	fixture.mark(t, fixture.display, "items/ready", items[0].Tasks)
 	fixture.displayCall(t, fixture.display, "POST", "kitchen-display/recover", map[string]any{"tasks": items[0].Tasks}, 200)
+	unpairs("Pantalla K1 vencida")
 	// Revocada: igual.
 	licenses.Accept(manager, licensingtest.Revoked(licensing.ReasonTransferred))
 	if state := fixture.orders(t, fixture.display).License.State; state != licensing.StateRevoked {
@@ -1174,4 +1305,5 @@ func testStageK1KitchenDisplayLicense(t *testing.T, fixture *kitchenDisplayFixtu
 	fixture.displayError(t, fixture.display, "POST", "kitchen-display/receipts", map[string]any{"receipts": []map[string]string{
 		{"ticket_id": "00000000-0000-4000-8000-0000000000aa", "station_id": fixture.cocina.ID}}}, 409, "SYSTEM_CLOCK_INVALID")
 	fixture.displayCall(t, fixture.display, "GET", "kitchen-display/recent", nil, 200)
+	unpairs("Pantalla K1 hora incorrecta")
 }

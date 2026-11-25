@@ -393,8 +393,8 @@ func testR1ClosedList(t *testing.T, fixture *r1Fixture) {
 	allowed := map[string]bool{
 		"POST kitchen-display/connect": true, "GET kitchen-display/orders": true, "GET kitchen-display/recent": true,
 		"POST kitchen-display/items/ready": true, "POST kitchen-display/orders/ready": true, "POST kitchen-display/recover": true,
-		"POST kitchen-display/receipts": true, "POST kitchen-display/settings-access": true, "GET events/snapshot": true,
-		"GET license/status": true,
+		"POST kitchen-display/receipts": true, "POST kitchen-display/settings-access": true, "POST kitchen-display/unpair": true,
+		"GET events/snapshot": true, "GET license/status": true,
 	}
 	accountsBefore := fixture.count(t, "SELECT count(*)::int FROM app.restaurant_accounts")
 	sessionsBefore := fixture.count(t, "SELECT count(*)::int FROM app.sessions")
@@ -477,7 +477,7 @@ func testR1OtherKinds(t *testing.T, fixture *r1Fixture) {
 	routes := []struct{ method, route string }{
 		{"POST", "kitchen-display/connect"}, {"GET", "kitchen-display/orders"}, {"GET", "kitchen-display/recent"},
 		{"POST", "kitchen-display/items/ready"}, {"POST", "kitchen-display/orders/ready"}, {"POST", "kitchen-display/recover"},
-		{"POST", "kitchen-display/receipts"}, {"POST", "kitchen-display/settings-access"},
+		{"POST", "kitchen-display/receipts"}, {"POST", "kitchen-display/settings-access"}, {"POST", "kitchen-display/unpair"},
 		{"GET", "kitchen-display/orders/"}, {"HEAD", "kitchen-display/orders"}, {"DELETE", "kitchen-display/connect"},
 	}
 	clients := []struct {

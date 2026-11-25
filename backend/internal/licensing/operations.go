@@ -457,7 +457,7 @@ func classifyKitchenDisplay(method string, parts []string) Operation {
 		return known(RowKitchen, false)
 	case "POST items/ready", "POST orders/ready", "POST recover", "POST receipts":
 		return known(RowKitchen, true)
-	case "POST settings-access":
+	case "POST settings-access", "POST unpair":
 		return known(RowAlways, false)
 	}
 	return unknownOperation(method)

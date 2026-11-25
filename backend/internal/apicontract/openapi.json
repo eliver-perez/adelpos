@@ -3373,6 +3373,107 @@
           }
         ]
       }
+    },
+    "/kitchen-display/unpair": {
+      "post": {
+        "operationId": "unpairKitchenDisplay",
+        "summary": "Volver a emparejar: revoca esta pantalla y suelta su cupo",
+        "description": "Etapa K1 (capacidad kitchen-display-v1, K1-D32): solo con la credencial de un dispositivo kitchen, sin sesión. Con otro tipo de dispositivo, 403 KITCHEN_DISPLAY_REQUIRED. «Volver a emparejar» en la tableta pide la contraseña de quien puede administrar terminales (devices.manage), con las mismas validaciones y el mismo límite de intentos que POST /kitchen-display/settings-access (compartido entre las dos rutas): vacíos, 400 VALIDATION_ERROR; un usuario de más de 40 caracteres o una contraseña de más de 256, 401 AUTHORIZATION_INVALID sin contar un intento; incorrectos, 401 AUTHORIZATION_INVALID; 429 AUTHORIZATION_THROTTLED; sin el permiso, 403 PERMISSION_DENIED. Con el administrador, revoca la propia pantalla igual que POST /devices/{id}/revoke: suelta su cupo de pantalla de cocina, el canal de eventos se corta con interrupted DEVICE_REVOKED y desde entonces toda petición de la pantalla responde 401 DEVICE_REVOKED. Auditoría kitchen_display.unpaired con el administrador como autor y la pantalla como dispositivo. Se permite en cualquier estado de la licencia y no exige cupo (también sin cupo o con el cupo liberado).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "username": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 40
+                  },
+                  "password": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  }
+                },
+                "required": ["username", "password"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Pantalla revocada y cupo libre.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "El usuario o la contraseña vacíos (VALIDATION_ERROR).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Usuario o contraseña incorrectos, o demasiado largos (AUTHORIZATION_INVALID); también DEVICE_REVOKED (la pantalla ya está revocada).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "El usuario no puede administrar terminales (PERMISSION_DENIED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Cinco intentos fallidos en 15 minutos (AUTHORIZATION_THROTTLED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Pantalla de cocina"],
+        "security": [
+          {
+            "deviceId": [],
+            "deviceToken": []
+          }
+        ]
+      }
     }
   },
   "components": {

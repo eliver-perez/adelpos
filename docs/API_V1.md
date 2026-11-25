@@ -130,6 +130,7 @@ sin conexión y el cursor de eventos de la recuperación (ver «Modo Mesero»). 
 | `recoverKitchenDisplayItems`        | `POST /kitchen-display/recover`                | Pantalla de cocina: regresar lo marcado por error (etapa K1).                  |
 | `acknowledgeKitchenDisplayReceipts` | `POST /kitchen-display/receipts`               | Pantalla de cocina: confirmar que ya muestra unas comandas (etapa K1).         |
 | `checkKitchenDisplaySettingsAccess` | `POST /kitchen-display/settings-access`        | Pantalla de cocina: contraseña de un administrador para los ajustes (K1).      |
+| `unpairKitchenDisplay`              | `POST /kitchen-display/unpair`                 | Pantalla de cocina: «Volver a emparejar», se revoca y suelta su cupo (K1).     |
 
 ## Encontrar el servidor y emparejarse (fases B y C)
 
@@ -948,8 +949,16 @@ por tiempo con `server_time`, los límites y su reloj monotónico. Decisiones K1
   sesión) o 403 `PERMISSION_DENIED`. El usuario o la contraseña vacíos responden 400 `VALIDATION_ERROR`; un usuario de
   más de 40 caracteres o una contraseña de más de 256, 401 `AUTHORIZATION_INVALID` sin contar un intento (revisión R1,
   K1-D29).
+- **`unpairKitchenDisplay`** (`POST /kitchen-display/unpair`, `{username, password}`, K1-D32): «Volver a emparejar» en
+  la tableta. Las mismas validaciones y respuestas de error que `checkKitchenDisplaySettingsAccess`, con el mismo límite
+  de intentos (compartido entre las dos rutas). Con el administrador responde 200 `{}` y revoca la propia pantalla igual
+  que `revokeDevice`: suelta su cupo de pantalla de cocina, el canal de eventos se corta con `interrupted`
+  `DEVICE_REVOKED` y desde entonces toda petición de la pantalla responde 401 `DEVICE_REVOKED`. La auditoría
+  `kitchen_display.unpaired` lleva al administrador como autor y a la pantalla como dispositivo. No exige cupo (también
+  sin cupo o con el cupo liberado) y se permite en cualquier estado de la licencia y con la hora incorrecta. Así la
+  pantalla nueva encuentra libre el cupo de la vieja.
 - **Licencia y hora**: Vencida y Revocada muestran y marcan; Sin activar responde `LICENSE_NOT_ACTIVATED` en todo menos
-  el canal de eventos, `getLicenseStatus` y los ajustes; con la hora del equipo incorrecta se lee, pero marcar, recuperar
+  el canal de eventos, `getLicenseStatus`, los ajustes y «Volver a emparejar»; con la hora del equipo incorrecta se lee, pero marcar, recuperar
   y el acuse responden `SYSTEM_CLOCK_INVALID`.
 - **Eventos de la pantalla** (`streamEvents` con su credencial; solo `after`): `license.changed`,
   `kitchen_display.configuration.changed` (ámbito `configuration`, con la pantalla o sin agregado: sus estaciones, letra,

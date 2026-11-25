@@ -97,6 +97,27 @@ func validAndroidHome(screen string) bool {
 	return slices.Contains(androidTerminalHomeScreens, screen)
 }
 
+// revokeDevice revoca una terminal: Terminales › «Revocar» y, desde la K1 (K1-D32), «Volver a emparejar» de una
+// pantalla de cocina (kitchen-display/unpair). La credencial deja de valer (toda petición responde 401 DEVICE_REVOKED y
+// el canal de eventos se corta con interrupted en su siguiente lectura), se cierran sus sesiones y se sueltan sus cupos.
+// Orden de los locks: la fila del dispositivo, sus sesiones y al final 7820148311 (seats.ReleaseDevice).
+func revokeDevice(ctx context.Context, tx pgx.Tx, deviceID string, seats *licenseseats.Manager) error {
+	if _, err := tx.Exec(ctx, "UPDATE app.devices SET revoked_at=coalesce(revoked_at,now()) WHERE id=$1", deviceID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, "UPDATE app.sessions SET revoked_at=now(),revoke_reason='device_revoked' WHERE device_id=$1 AND revoked_at IS NULL", deviceID); err != nil {
+		return err
+	}
+	// Etapa A1 (A1-D1): las credenciales de envío de los meseros en este dispositivo también dejan de valer (la
+	// credencial del dispositivo ya se rechaza antes con DEVICE_REVOKED; esto deja el registro coherente).
+	if _, err := revokeOfflineCredentials(ctx, tx, "device_id", deviceID, "device_revoked"); err != nil {
+		return err
+	}
+	// Etapa L1 (revisión R3, R3-1): la terminal revocada ya no captura; su comandero y su cocina se liberan con sus
+	// sesiones (las sesiones se cerraron antes de pedir el lock de los cupos). Su caja sigue hasta cerrar el turno.
+	return seats.ReleaseDevice(ctx, tx, deviceID)
+}
+
 func devices(ctx context.Context, tx pgx.Tx, request Request, principal Principal, parts []string, seats *licenseseats.Manager) (any, error) {
 	if request.Method == "GET" && len(parts) == 1 {
 		if err := principal.require("devices.read"); err != nil {
@@ -139,20 +160,7 @@ func devices(ctx context.Context, tx pgx.Tx, request Request, principal Principa
 		return nil, err
 	}
 	if request.Method == "POST" && len(parts) == 3 && parts[2] == "revoke" {
-		if _, err := tx.Exec(ctx, "UPDATE app.devices SET revoked_at=coalesce(revoked_at,now()) WHERE id=$1", deviceID); err != nil {
-			return nil, err
-		}
-		if _, err := tx.Exec(ctx, "UPDATE app.sessions SET revoked_at=now(),revoke_reason='device_revoked' WHERE device_id=$1 AND revoked_at IS NULL", deviceID); err != nil {
-			return nil, err
-		}
-		// Etapa A1 (A1-D1): las credenciales de envío de los meseros en este dispositivo también dejan de valer (la
-		// credencial del dispositivo ya se rechaza antes con DEVICE_REVOKED; esto deja el registro coherente).
-		if _, err := revokeOfflineCredentials(ctx, tx, "device_id", deviceID, "device_revoked"); err != nil {
-			return nil, err
-		}
-		// Etapa L1 (revisión R3, R3-1): la terminal revocada ya no captura; su comandero y su cocina se liberan con sus
-		// sesiones (las sesiones se cerraron antes de pedir el lock de los cupos). Su caja sigue hasta cerrar el turno.
-		if err := seats.ReleaseDevice(ctx, tx, deviceID); err != nil {
+		if err := revokeDevice(ctx, tx, deviceID, seats); err != nil {
 			return nil, err
 		}
 		return map[string]bool{"ok": true}, audit(ctx, tx, principal, "device.revoked", "device", &deviceID, previous, map[string]bool{"revoked": true}, true)

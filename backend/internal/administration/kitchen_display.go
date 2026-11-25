@@ -12,6 +12,7 @@ import (
 	"local/ad-el-pos/server/internal/events"
 	"local/ad-el-pos/server/internal/kitchen"
 	"local/ad-el-pos/server/internal/licenseseats"
+	"local/ad-el-pos/server/internal/payments"
 )
 
 // Pantalla de cocina para Android (etapa K1, Fase A; §2 y §3 de la especificación, decisiones K1-D3, K1-D4, K1-D6,
@@ -27,7 +28,8 @@ import (
 //   - el principal: el dispositivo con la lista cerrada de permisos kitchen.DisplayPermissions, nunca de un rol;
 //   - el cupo de cocina ligado al dispositivo (K1-D6): connect lo ocupa con el claim y el lock 7820148311 de la L1; las
 //     demás rutas de pedidos lo exigen;
-//   - la contraseña del administrador para los ajustes de la tableta (K1-D13);
+//   - la contraseña del administrador para los ajustes de la tableta (K1-D13) y para «Volver a emparejar», que revoca
+//     la propia pantalla y suelta su cupo (K1-D32);
 //   - la lógica de cocina está en kitchen/display.go y reutiliza la de la 9F.
 //
 // Orden de los locks: las escrituras toman 7820148305 exclusivo antes de tocar la fila del dispositivo (última
@@ -50,6 +52,7 @@ var kitchenDisplayRoutes = map[string]bool{
 	"POST kitchen-display/recover":         true,
 	"POST kitchen-display/receipts":        true,
 	"POST kitchen-display/settings-access": true,
+	"POST kitchen-display/unpair":          true,
 	// El canal de eventos (GET events llega aquí como events/snapshot) y el resumen de la licencia del dispositivo.
 	"GET events/snapshot": true,
 	"GET license/status":  true,
@@ -90,6 +93,8 @@ func (service *Service) kitchenDisplay(ctx context.Context, tx pgx.Tx, request R
 		return service.kitchenDisplayConnect(ctx, tx, request, principal)
 	case "kitchen-display/settings-access":
 		return kitchenDisplaySettingsAccess(ctx, tx, request, principal)
+	case "kitchen-display/unpair":
+		return service.kitchenDisplayUnpair(ctx, tx, request, principal)
 	}
 	if err := service.requireKitchenDisplaySeat(ctx, tx, request.DeviceID); err != nil {
 		return nil, err
@@ -303,11 +308,53 @@ func displaySeatFault(err error) error {
 }
 
 // kitchenDisplaySettingsAccess atiende POST kitchen-display/settings-access {username, password} (§5.4, K1-D13): los
-// ajustes de la tableta piden la contraseña de un administrador. Se valida con supervisorAuthorizer en esta misma
-// transacción, sin crear ni reemplazar sesiones, con el mismo límite de intentos que el inicio de sesión y sin registrar
-// la contraseña. «Administrador» es quien puede administrar terminales (devices.manage). La tableta no recibe ningún
-// token: solo {authorized: true}.
+// ajustes de la tableta piden la contraseña de un administrador. La tableta no recibe ningún token: solo
+// {authorized: true}.
 func kitchenDisplaySettingsAccess(ctx context.Context, tx pgx.Tx, request Request, principal Principal) (any, error) {
+	supervisor, err := kitchenDisplayAdministrator(ctx, tx, request, principal, "kitchen_display.settings_denied",
+		"Ese usuario no puede abrir los ajustes de esta pantalla.")
+	if err != nil {
+		return nil, err
+	}
+	if err := audit(ctx, tx, principal, "kitchen_display.settings_opened", "device", &principal.DeviceID, nil,
+		map[string]string{"username": supervisor.Username}, true); err != nil {
+		return nil, err
+	}
+	return map[string]bool{"authorized": true}, nil
+}
+
+// kitchenDisplayUnpair atiende POST kitchen-display/unpair {username, password} (K1-D32): «Volver a emparejar» en la
+// tableta. Con la contraseña de un administrador, la pantalla se revoca a sí misma igual que Terminales › «Revocar»
+// (revokeDevice: suelta el cupo, cierra lo suyo y corta el canal con interrupted DEVICE_REVOKED) y así la pantalla
+// nueva encuentra el cupo libre. Después, toda petición de esta pantalla responde 401 DEVICE_REVOKED. La auditoría
+// kitchen_display.unpaired lleva al administrador como autor y a la pantalla como dispositivo.
+func (service *Service) kitchenDisplayUnpair(ctx context.Context, tx pgx.Tx, request Request, principal Principal) (any, error) {
+	supervisor, err := kitchenDisplayAdministrator(ctx, tx, request, principal, "kitchen_display.unpair_denied",
+		"Ese usuario no puede volver a emparejar esta pantalla.")
+	if err != nil {
+		return nil, err
+	}
+	previous, err := object(ctx, tx, devicesQuery+" WHERE d.id=$1", principal.DeviceID)
+	if err != nil {
+		return nil, err
+	}
+	if err := revokeDevice(ctx, tx, principal.DeviceID, service.seats()); err != nil {
+		return nil, err
+	}
+	author := Principal{UserID: supervisor.UserID, Username: supervisor.Username, DeviceID: principal.DeviceID}
+	if err := audit(ctx, tx, author, "kitchen_display.unpaired", "device", &principal.DeviceID, previous,
+		map[string]bool{"revoked": true}, true); err != nil {
+		return nil, err
+	}
+	return map[string]any{}, nil
+}
+
+// kitchenDisplayAdministrator valida {username, password} de un administrador en una ruta de la pantalla
+// (settings-access y unpair). Se valida con supervisorAuthorizer en esta misma transacción, sin crear ni reemplazar
+// sesiones, con el mismo límite de intentos que el inicio de sesión (compartido entre las dos rutas: es por pantalla y
+// usuario) y sin registrar la contraseña. «Administrador» es quien puede administrar terminales (devices.manage); sin
+// ese permiso, 403 con la auditoría denied y el texto de la ruta.
+func kitchenDisplayAdministrator(ctx context.Context, tx pgx.Tx, request Request, principal Principal, denied, deniedMessage string) (*payments.Supervisor, error) {
 	var input struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
@@ -336,18 +383,13 @@ func kitchenDisplaySettingsAccess(ctx context.Context, tx pgx.Tx, request Reques
 		return nil, err
 	}
 	if !slices.Contains(supervisor.Permissions, "devices.manage") {
-		if err := audit(ctx, tx, principal, "kitchen_display.settings_denied", "device", &principal.DeviceID, nil,
+		if err := audit(ctx, tx, principal, denied, "device", &principal.DeviceID, nil,
 			map[string]string{"username": supervisor.Username}, false); err != nil {
 			return nil, err
 		}
-		return nil, &Fault{Status: 403, Code: "PERMISSION_DENIED", Message: "Ese usuario no puede abrir los ajustes de esta pantalla.",
-			Commit: true}
+		return nil, &Fault{Status: 403, Code: "PERMISSION_DENIED", Message: deniedMessage, Commit: true}
 	}
-	if err := audit(ctx, tx, principal, "kitchen_display.settings_opened", "device", &principal.DeviceID, nil,
-		map[string]string{"username": supervisor.Username}, true); err != nil {
-		return nil, err
-	}
-	return map[string]bool{"authorized": true}, nil
+	return supervisor, nil
 }
 
 // settingsAccessInvalid es el rechazo de un usuario o una contraseña incorrectos en los ajustes de la pantalla.

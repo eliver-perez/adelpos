@@ -218,6 +218,8 @@ export const auditActionLabels: Record<string, string> = {
   'kitchen_display.seat_taken': 'Pantalla de cocina volvió a ocupar su cupo',
   'kitchen_display.settings_denied': 'Ajustes de la pantalla de cocina rechazados',
   'kitchen_display.settings_opened': 'Ajustes de la pantalla de cocina abiertos',
+  'kitchen_display.unpair_denied': 'Volver a emparejar la pantalla de cocina rechazado',
+  'kitchen_display.unpaired': 'Pantalla de cocina revocada para volver a emparejarla',
   'legacy.analysis_finished': 'Revisión del paquete del sistema anterior terminada',
   'legacy.analysis_requested': 'Revisión del paquete del sistema anterior solicitada',
   'legacy.batch_replaced': 'Historial del sistema anterior reemplazado',

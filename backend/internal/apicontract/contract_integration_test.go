@@ -1077,4 +1077,9 @@ func contractKitchenDisplay(t *testing.T, client *contractClient, data contractW
 		!strings.Contains(message, "kitchen.ticket.created") {
 		t.Fatalf("el canal de la pantalla no cumple el contrato: %v (%.600s)", err, message)
 	}
+	// K1-D32: «Volver a emparejar» revoca la pantalla (al final: después ya nada le responde).
+	display.call("POST", "/kitchen-display/unpair", map[string]string{"username": "admin", "password": "otra"}, nil, 401)
+	display.call("POST", "/kitchen-display/unpair", map[string]string{"username": "admin", "password": "admin"}, nil, 200)
+	display.call("GET", "/kitchen-display/orders", nil, nil, 401)
+	client.call("POST", "/kitchen-display/unpair", map[string]string{"username": "admin", "password": "admin"}, nil, 403)
 }

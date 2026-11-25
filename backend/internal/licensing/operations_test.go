@@ -94,6 +94,8 @@ func TestClassifyOperation(t *testing.T) {
 		{"POST", "kitchen-display/recover", RowKitchen, true},
 		{"POST", "kitchen-display/receipts", RowKitchen, true},
 		{"POST", "kitchen-display/settings-access", RowAlways, false},
+		// K1-D32: «Volver a emparejar» (revoca la propia pantalla y suelta su cupo), siempre, como los ajustes.
+		{"POST", "kitchen-display/unpair", RowAlways, false},
 		// F6: reportes, historial y respaldos, siempre y sin fecha.
 		{"GET", "reports/run/sales.by_day", RowRecords, false},
 		{"GET", "reports/export/sales.by_day?format=csv", RowRecords, false},
