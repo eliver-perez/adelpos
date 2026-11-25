@@ -12,7 +12,8 @@ import { useSyncExternalStore } from 'react';
 // Lo alimentan la consulta de la sesión y cada respuesta de services/api.ts (cualquier respuesta HTTP es un éxito; solo
 // no llegar al servidor es una falla) y los mensajes del canal de eventos (useRealtime: sus fallas cuentan también para
 // «Sin conexión»; sus mensajes solo dicen que el canal está vivo). Lo leen la barra, la capa «Sin conexión con el
-// servidor», el aviso persistente y los avisos de Mesas y de Preparación: nunca se contradicen.
+// servidor» (con su «Reintentar», que cubre Mesas y Preparación desde la 9G), el aviso persistente y la sesión
+// (useSession.ts): nunca se contradicen.
 //
 // La causa del «Reconectando» falso de la 0.15.0 era otra (Rust trataba como falla la renovación normal del canal cada
 // 30 s, realtime.rs); esto es la tolerancia que pide la §7 para que un corte breve tampoco se note.

@@ -202,7 +202,8 @@ function ApplicationContent({
   const realtimeEnabled = permissions.includes('events.read');
   useRealtime(identity?.user.id ?? '', realtimeEnabled);
   // Etapa K1 (Fase E, K1-D10): un solo estado de conexión con la tolerancia de la A3 (navigation/serverLink.ts). Lo
-  // leen la barra, la capa «Sin conexión con el servidor», el aviso persistente y los avisos de Mesas y Preparación.
+  // leen la barra, la capa «Sin conexión con el servidor» (con su «Reintentar», que cubre Mesas y Preparación desde la
+  // 9G), el aviso persistente y la sesión.
   const link = useServerLink();
   const operationMode = isOperation(screen);
   const can = (permission: string) => identity?.user.permissions.includes(permission) ?? false;
@@ -614,12 +615,7 @@ function ApplicationContent({
       case 'kitchen':
         return (
           // Sin conexión, la capa «Sin conexión con el servidor» ofrece «Reintentar» (etapa 9G, fase C).
-          <KitchenPage
-            can={can}
-            timezone={identity.establishment.timezone}
-            connectionLost={connectionLost}
-            onRetryConnection={() => void session.refresh()}
-          />
+          <KitchenPage can={can} timezone={identity.establishment.timezone} />
         );
       case 'catalog':
         return <CatalogPage can={can} />;
@@ -874,8 +870,6 @@ function ApplicationContent({
                 requestKey={operationRequest}
                 can={can}
                 cashShortcut={cashShortcut}
-                connectionLost={connectionLost}
-                onRetryConnection={() => void session.refresh()}
                 onViewChange={setOperationView}
                 onCaptureChange={setCaptureActive}
                 onCommandState={setOperationCommands}
