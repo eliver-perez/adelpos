@@ -831,3 +831,193 @@ Las «Decisiones propuestas» y las dudas de arriba quedan así. Mandan sobre el
   paralelo con la A y después la C y la D. La revisión independiente R1 (emparejamiento como pantalla de cocina y la
   autorización de sus rutas) corre al terminar la A, mientras M sigue; sus correcciones las hace S. La Fase F, un agente
   para la regresión y el coordinador para la documentación, los entregables y la fusión.
+
+## Fase A · Servidor: dispositivo de cocina, estaciones, API y eventos
+
+Agente S, 24/11/2026, en `$SP/wt/k1-a` (rama `etapa-k1-a`, desde `etapa-k1` `45fa9b2`), `ISO_TAG=A`. Contrato para
+la aplicación de cocina en `$SP/k1/api-k1.md` (lo usa el agente M; dos cambios anotados al final). Las rutas son del
+árbol; los números de línea, los del último commit de la fase.
+
+### Qué se hizo
+
+- **Migración 0029** (`backend/migrations/0029_pantalla_de_cocina.sql`, sección «Fase A»; esquema 29): límites de color
+  generales en `kitchen_settings` (`display_warning_minutes` 10 y `display_late_minutes` 20, con sus `CHECK`); ajustes
+  de cada pantalla en `devices` (`kitchen_display_text_size`, `_theme`, `_sound` activado por omisión, `_volume` y
+  `kitchen_display_seat_released_at`, el «cupo liberado» de K1-D6, solo en un `kitchen`); el cupo `kitchen_display`
+  sin sesión y `kitchen_kds_receipts.user_id` vacío **solo para un dispositivo `kitchen`** (un disparador por tabla que
+  responde 23514 como un `CHECK`); la tabla `kitchen_display_dismissals` (ver la decisión propuesta 1) y dos índices
+  (`kitchen_tasks_ready_idx` para «Recientes» y `kitchen_tickets_release_idx` para los acuses pendientes). No cambia
+  ninguna fila existente. `config/product.json`: `schema_version` 29 (lo exigen las pruebas de subida: la última
+  migración debe coincidir con el esquema del producto) y `min_client_versions.kitchen` `0.1.0`; `version` sigue en
+  0.15.0 (lo sube la Fase F).
+- **Tipo `kitchen`** (K1-D3): `httpapi.ClientKinds` con `kitchen` (`httpapi/clientversion.go:55`), capacidad
+  `kitchen-display-v1` (`httpapi/router.go`), `matchClientKind` exige `kitchen` a un dispositivo `kitchen`
+  (`administration/service.go:524`) y emparejar con `device_kind: kitchen` exige `X-Client-Kind: kitchen` y al revés
+  (`administration/pairing.go`, 400 `CLIENT_KIND_MISMATCH`). `GET devices` ya informa `kind`; Terminales pone la
+  etiqueta en la Fase E.
+- **Principal de la pantalla** (K1-D4): `authenticateDevice` devuelve el tipo (`service.go:467`); justo después de
+  `matchClientKind` y **antes** de la puerta de la licencia y de toda ruta de sesión, PIN, envío, agente o avisos, un
+  dispositivo `kitchen` va a `service.kitchenDisplay` (`service.go:390`, `administration/kitchen_display.go:67`), que
+  solo atiende su lista cerrada (`kitchen_display.go:44`: las ocho `kitchen-display/*`, `events/snapshot` y
+  `license/status`). Todo lo demás: **403 `KITCHEN_DISPLAY_ONLY`**, auditado como `access.denied` con el dispositivo
+  como autor; `authenticateSession` nunca corre, aunque llegue un `Authorization` de otra sesión. `kitchen-display/*`
+  con otro tipo: **403 `KITCHEN_DISPLAY_REQUIRED`** (`service.go:394`), también auditado. Permisos en una lista cerrada
+  en código (`kitchen.DisplayPermissions`: `kitchen.states.read`, `kitchen.states.manage`, `events.read`).
+- **Rutas `kitchen-display/*`** (sección 9 del avance, ajustadas): `connect`, `orders`, `items/ready`, `orders/ready`,
+  `recent`, `recover`, `receipts` y `settings-access`. La lógica de cocina está en `kitchen/display.go` y reutiliza la de
+  la 9F sin copiar reglas:
+  - `advanceTasks` y `taskStatesChanged`, extraídos de `saveStates` (`kitchen/states.go`): mismas validaciones, mismos
+    eventos `kitchen.state.changed` por estación, la preparación de la cuenta y, con ella, el aviso de platillos listos
+    (`recordReadyNotices`);
+  - `recordReceipt`, extraído de `ackTicket` (`kitchen/reads.go`), para el acuse sin usuario (K1-D12);
+  - `documents.KitchenPartDetails`, extraído de `renderKitchenParts` (`documents/render_kitchen.go`): los renglones de
+    cada parte en la pantalla son los mismos de la comanda impresa (la impresión no cambia: las pruebas de plantillas
+    pasan);
+  - `stationscope.Load` con la pantalla como terminal y sin usuario, restringido con `Scope.Within` a las estaciones
+    `kds`/`both` (K1-D11).
+- **Tarjetas** (K1-D5, `kitchen/display.go:317` y `:342`): la cuenta en las estaciones de la pantalla por rondas;
+  «NUEVO» = llegó después del primer envío de la ronda; «CANCELADO» dentro de la ronda; cierre solo cuando lo último que
+  pasó fue marcar listo; mesa o «Para llevar» con el cliente (`title`/`subtitle`), mesero = responsable de la cuenta o
+  quien envió; platillos agrupados por partida, estación, envío, versión y estado, con modificadores, notas,
+  `pending_change` y `tracking`. Las estaciones «por pedido» (K1-D14): `items/ready` responde 400 y `orders/ready`
+  marca el pedido completo de la estación.
+- **Marcas** (K1-D4): `{tasks: [{id, version_id}]}`, idempotentes por estado y versión, sin `operation_id`; lo ya
+  listo, cancelado o cambiado va en `skipped` (`already_ready`, `cancelled`, `changed`). Historial y auditoría sin
+  usuario y con el dispositivo (`kitchen_history` admite `actor_id` y `operation_id` vacíos: `kitchen/context.go`).
+- **Aviso al mesero** (K1-D8): marcar desde la pantalla registra el aviso de la A2 igual que hoy; `recover` regresa la
+  tarea a «En preparación» si había empezado antes de marcarla (`started_at < ready_at`) o a «Por preparar», y **borra
+  sus `ready_notices`**; volver a marcar crea uno nuevo (otra secuencia). Fuera de 30 minutos, 409
+  `KITCHEN_NOT_RECOVERABLE`.
+- **Eventos** (K1-D7): `kitchen.DisplayEvents` (`kitchen/display.go:1153`) con `events.ReadWith` (extraído de
+  `events.Read`, mismo cursor y ventana): `license.changed`, `kitchen_display.configuration.changed` (de esa pantalla
+  o sin agregado), los de cocina de sus estaciones (`ticket.created`, `state.changed`, `change.pending`,
+  `kds.received`) y los de encabezado de las cuentas con tareas en sus estaciones (`restaurant.account.updated`,
+  `.move`, `.assign`, `.merged`, `.split`, `.cancelled`, `restaurant.items.transferred`), por sus unidades o por sus
+  liberaciones (así llega también el de la cuenta de origen de una combinación o transferencia). El evento de
+  configuración se publica en `PATCH devices/{id}` de una pantalla, en «Liberar cupo» de una pantalla y en las
+  escrituras de cocina de estaciones, formatos, tiempos y acceso (`kitchen/handler.go`). Revocar: `interrupted` con
+  `DEVICE_REVOKED` en menos de un segundo (lo comprueba la prueba por SSE real).
+- **Estado completo**: `orders` lee el cursor (`events.Head`) **antes** que las tarjetas en la misma transacción
+  (`kitchen_display.go:221`).
+- **Cupo y licencia** (K1-D6, K1-D16): `connect` ocupa `kitchen_displays` con el mismo `claim` y el lock 7820148311
+  (`licenseseats.ConnectKitchenDisplay`), fila sin sesión que cuenta mientras el dispositivo `kitchen` no esté revocado
+  (`licenseseats/store.go`, `inUseCondition`). Sin cupo, 409 `LICENSE_SEAT_UNAVAILABLE` con el mensaje de la §6.
+  «Liberar cupo» deja la pantalla en «cupo liberado» y le avisa; `connect` responde `KITCHEN_DISPLAY_SEAT_RELEASED`
+  hasta `take_seat: true` («Usar esta pantalla», auditado). Las lecturas y marcas exigen el cupo
+  (`KITCHEN_DISPLAY_SEAT_RELEASED` o `KITCHEN_DISPLAY_NOT_CONNECTED`). `kitchen-display/*` es la fila F5 en la tabla de
+  la licencia (`licensing/operations.go`, `classifyKitchenDisplay`): Vencida y Revocada muestran y marcan, Sin activar no
+  muestra, con la hora incorrecta se lee pero no se marca; `settings-access` es «siempre».
+- **Contraseña del administrador** (K1-D13, `kitchen_display.go:292`): `supervisorAuthorizer` con `devices.manage`, sin
+  sesión ni token, auditado `kitchen_display.settings_opened` (o `settings_denied`).
+- **Versión instalada** (K1-D9): `touchDevice` (`service.go:494`) guarda `X-Client-Version` válida en la misma
+  sentencia de `last_seen_at`, para los tres tipos; también por el canal de eventos y el de avisos (que ahora pasan la
+  cabecera).
+- **Terminales (lado Go)**: `PATCH devices/{id}` con letra, tema, sonido y volumen (solo `kitchen`); `GET devices` y
+  la configuración con `kitchen_display`, `app_version`, `online`, `seats` y `kitchen_display_station_options`;
+  `PUT kitchen/access` solo con estaciones `kds`/`both` para una pantalla; límites de color en `PUT kitchen/timing` (y
+  en `PUT kitchen/settings`, porque el escritorio guarda lo que leyó; ver la decisión propuesta 6).
+- **Contrato**: ocho operaciones nuevas en `openapi.json` (con sus esquemas `KitchenDisplay*`, `X-Client-Kind` con
+  `kitchen` y la descripción del canal de la pantalla), la sección «Pantalla de cocina» de `docs/API_V1.md`, la sección
+  K1 de `API_CONTRACTS.md` y el paso `contractKitchenDisplay` de `TestContractV1` (empareja por la API como `kitchen`).
+
+### Decisiones propuestas
+
+1. **La tarjeta cerrada por una cancelación espera a que se marque** (§4: lo cancelado no desaparece «hasta que se
+   marque el pedido»). Con K1-D5 literal, cancelar lo último que faltaba cerraría la tarjeta al momento y la cocina no
+   vería la cancelación. Por eso, si lo último que pasó en la ronda fue una cancelación (posterior a todo «Listo»), la
+   tarjeta queda con `status: "cancelled"` hasta que alguien toca el botón del pedido (`orders/ready` la da por vista) o
+   pasan 30 minutos. Necesita guardar «vista»: tabla nueva `kitchen_display_dismissals` (una fila por tarea cancelada;
+   no se tocó `kitchen_tasks` para no cambiar la forma del tablero de la 9F). Es una tabla, no la tarjeta: K1-D5 («sin
+   tabla nueva») se mantiene para el modelo de la tarjeta.
+2. **`orders` no ocupa el cupo** (solo `connect`): sin cupo responde `KITCHEN_DISPLAY_SEAT_RELEASED` o el código nuevo
+   **`KITCHEN_DISPLAY_NOT_CONNECTED`** (409, volver a `connect`). Así una lectura nunca toma el lock de los cupos y
+   «Liberar cupo» no se deshace con la siguiente lectura.
+3. **La regla de la tableta es «con cualquier evento, volver a leer `orders`»**: `orders` trae también la
+   configuración y la licencia, y su error decide la pantalla (sin cupo, cupo liberado, sin licencia). El contrato es
+   más simple para M que reaccionar por tipo de evento.
+4. **Orden de los locks de la pantalla**: para una pantalla, `authenticateDevice` no toca la fila del dispositivo;
+   `touchDevice` va después de tomar 7820148305 exclusivo en las escrituras (el mismo orden que `PUT kitchen/access`:
+   7820148305 → fila del dispositivo) y en `connect` antes de 7820148311. Las lecturas no toman 7820148305: leer el
+   cursor antes que las tarjetas basta para no perder nada (los productores publican con 7820148306 hasta el commit).
+5. **`kitchen.ticket.created` por estación es el evento de «pedido nuevo»** (también de agregado, modificación y
+   cancelación); `kitchen.released` (sin estación) no llega a la pantalla, como a todo usuario sin
+   `kitchen.stations.all`. Los cambios de mesa y de mesero se llaman `restaurant.account.move` y `.assign`.
+6. **`PUT kitchen/settings` acepta los límites de color** (si cambian, exige `kitchen.timing.manage`): el escritorio
+   actual guarda el formulario con todo lo que leyó de `GET kitchen/settings`, que ahora los trae; sin esto, Cocina ›
+   Comandas y tiempos fallaría con 400. Los límites viven en `SettingsView`, no en `Settings`, para no cambiar la forma de
+   las comandas guardadas.
+7. **Emparejar**: `device_kind: kitchen` ⇔ `X-Client-Kind: kitchen` (400 `CLIENT_KIND_MISMATCH` si uno sí y el otro no;
+   sin cabecera, herramientas locales, no se compara). Un `kitchen` emparejado antes de la K1 (no debería existir: el
+   escritorio siempre fue `desktop`) ahora es pantalla y ya no puede usar la aplicación de escritorio.
+8. **La versión instalada** se escribe en la misma sentencia de `last_seen_at` (no hay escritura extra); en
+   `ready-alerts` se sigue escribiendo como mucho una vez por minuto, salvo que cambie la versión.
+9. **Acuses pendientes** (`receipts_pending`): solo de las comandas de las tarjetas que se muestran y con la regla de
+   Comandas («ningún dispositivo la confirmó»); una comanda de una ronda ya cerrada sigue «pendiente» en Comandas, como
+   hoy sin pantalla.
+10. **La pantalla muestra también las estaciones inactivas** (como el tablero de la 9F), para que lo pendiente no
+    desaparezca al desactivar una estación a media operación.
+11. **Límite del cuerpo** de `kitchen-display/*`: 2 MiB, como `kitchen/*` (una marca admite 1000 tareas).
+
+### Archivos
+
+- Nuevos: `backend/migrations/0029_pantalla_de_cocina.sql`, `backend/internal/kitchen/display.go` (y
+  `display_test.go`), `backend/internal/administration/kitchen_display.go` (y `kitchen_display_test.go`),
+  `backend/internal/database/stagek1_upgrade_test.go`, `backend/internal/operations/stagek1_kitchen_display_test.go`.
+- Cambiados: `administration/service.go` (punto único, `authenticateDevice`, `touchDevice`, `matchClientKind`),
+  `devices.go`, `license_seats.go` («Liberar cupo» de una pantalla), `pairing.go`, `http.go`, `events.go`,
+  `ready_alerts.go`; `kitchen/states.go`, `reads.go`, `settings.go`, `stations.go`, `handler.go`, `context.go`;
+  `documents/render_kitchen.go`; `events/store.go`; `stationscope/scope.go`; `licenseseats/store.go` y
+  `operations.go`; `licensing/operations.go`; `httpapi/clientversion.go` y `router.go`; `apicontract/openapi.json` y
+  `contract_integration_test.go`; `docs/API_V1.md`; `API_CONTRACTS.md`; `config/product.json` (y sus copias de `sync`);
+  `database/stage9h_upgrade_test.go` (excluye la tabla nueva del conteo, como con las de la A1, A2 y L1).
+- No toqué `android/`, `cocina/`, `android-core/`, `desktop/` (salvo la copia generada de `product.json`), `docs/etapas/`
+  ni `contracts/`.
+
+### Pruebas ejecutadas
+
+| Qué                                                                                                                                                                                                                                                                                     | Resultado                                                                                                                                             |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `iso.sh go-unit` (vet normal e `integration`, `test -race` de todo, `GOOS=windows` build y vet)                                                                                                                                                                                         | Aprobado (al final de la fase).                                                                                                                       |
+| `go-int ./internal/database` (TestStageK1Upgrade 28 → 29 y todas las de subida anteriores hasta la 29)                                                                                                                                                                                  | Aprobado.                                                                                                                                             |
+| `go-int ./internal/kitchen`, `./internal/licenseseats`, `./internal/licensing`                                                                                                                                                                                                          | Aprobado.                                                                                                                                             |
+| `go-int ./internal/administration`                                                                                                                                                                                                                                                      | Aprobado (286 s).                                                                                                                                     |
+| `go-int ./internal/operations` completo (9F, A1, A2, L1 y la K1)                                                                                                                                                                                                                        | Aprobado (877 s).                                                                                                                                     |
+| `go-int ./internal/operations -run TestStageK1KitchenDisplay` (con el emparejamiento por la API)                                                                                                                                                                                        | Aprobado.                                                                                                                                             |
+| `go-int ./internal/apicontract` (TestContractV1 con `contractKitchenDisplay` y la de la licencia)                                                                                                                                                                                       | Aprobado.                                                                                                                                             |
+| `go-int ./cmd/ad-el-pos-server` (con el candado `$SP/k1/candado-cmd`)                                                                                                                                                                                                                   | Aprobado.                                                                                                                                             |
+| `format`, `fmt-check`, `sync-check` (lo hace `format`/`sync`) y `md5` de `docs/etapas/*.md`                                                                                                                                                                                             | Correcto; `docs/etapas` sin cambios.                                                                                                                  |
+| Playwright Chromium `restaurant.spec` y `workflow-stage9f-kitchen-stations` (Cocina › Comandas y tiempos guarda con lo que leyó, ya con los límites nuevos; estaciones y terminales de cocina), con `ISO_GO_PORT=8203`, `ISO_PREVIEW_PORT=1433` e `ISO_LICENSE_TRUST` de `vectors.json` | 2 de 2 aprobadas (1,8 min). Un primer intento sin `ISO_LICENSE_TRUST` no pudo activar la licencia de prueba (configuración del arnés, no del código). |
+
+`TestStageK1KitchenDisplay` (`internal/operations/stagek1_kitchen_display_test.go`) cubre lo de la §8 «Servidor»:
+emparejar como pantalla por la API (y los tipos de cliente equivocados); la lista cerrada (33 familias de rutas con el
+`Authorization` del administrador: sesión, PIN, captura, cobros, cocina del escritorio, catálogo, administración,
+mantenimiento, licencia, reportes, agente, avisos, inventario…; su auditoría; `KITCHEN_DISPLAY_REQUIRED`;
+`CLIENT_KIND_MISMATCH`); conectar y la configuración; el filtrado por estación (`PUT kitchen/access`) y por recepción
+(impresora, pantalla y ambas) con la impresión de hoy (trabajos solo de las estaciones con impresora); tarjetas de mesa y
+para llevar, mesero, modificadores y notas, «NUEVO», «CANCELADO», la tarjeta cerrada por una cancelación y su
+cancelación vista desde otra pantalla; marcar platillo y pedido (idempotente, versión distinta, «por pedido», 403 y 404
+sin marcar nada); el aviso al mesero al marcar, que recuperar no avise y borre el aviso, y que volver a marcar sí
+avise; recientes y recuperar (a «Por preparar» y a «En preparación», y fuera de 30 minutos); el acuse y Comandas; los
+eventos de pedido nuevo, agregado, cancelación, marca desde otra pantalla, cambio de mesa, configuración y licencia (y los
+que no le tocan); la reconexión con el estado completo sin duplicados ni pendientes; la versión instalada de los tres
+tipos; la contraseña de los ajustes; el cupo («Liberar cupo», «Usar esta pantalla», sin cupo con el mensaje de la §6,
+sin licencia válida); revocar por SSE real; y Sin activar, Vigente, Vencida, Revocada y la hora del equipo incorrecta.
+
+### No verificado o pendiente
+
+- Nada con emuladores ni tabletas (la Fase A no los usa). La conexión por la escucha de red (HTTPS) de la pantalla la
+  probará M con el Go temporal.
+- WebKit y el resto de Playwright (la fase no cambió el escritorio; solo agregó campos a respuestas que usa y
+  `PUT kitchen/settings` los acepta de vuelta).
+- La revisión independiente R1 (emparejamiento como pantalla y la autorización de sus rutas) viene después.
+
+### Decisiones del coordinador al cerrar la Fase A
+
+- **K1-D23. Se aceptan las decisiones propuestas 1 a 11 de la Fase A.** La tarjeta que cerró una cancelación espera a
+  que se marque el pedido (o 30 minutos), como pide la §4; `kitchen_display_dismissals` guarda solo «cancelación vista»
+  y no cambia el modelo de la tarjeta de K1-D5, que sigue calculado en Go.
+- **K1-D24. Solo `connect` ocupa el cupo.** `orders` y las marcas nunca toman el lock 7820148311; sin cupo responden
+  `KITCHEN_DISPLAY_NOT_CONNECTED` (volver a `connect`) o `KITCHEN_DISPLAY_SEAT_RELEASED` (K1-D6).
+- **K1-D25. La regla de la tableta**: con cualquier evento, volver a leer `orders`, que trae la configuración y la
+  licencia y cuyo error decide la pantalla. La tableta agrupa los eventos seguidos en una sola lectura (una en curso y
+  como mucho una pendiente), para no leer una vez por evento en una ráfaga.
