@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Tema de la ventana antes de que Compose dibuje: oscuro, el de la cocina por omisión (§4). Los colores de la
+     aplicación viven solo en android-core/ui (AdelPalette.kt). -->
+<resources>
+    <style name="Theme.AdelPosCocina" parent="android:Theme.Material.NoActionBar" />
+</resources>

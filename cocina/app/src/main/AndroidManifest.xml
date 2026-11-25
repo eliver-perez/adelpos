@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!--
+    Aplicación de cocina (etapa K1). Los permisos de red (INTERNET y ACCESS_NETWORK_STATE) llegan del
+    manifiesto de android-core:network.
+
+    Seguridad (las mismas reglas que la aplicación de meseros, A1-D8):
+    - allowBackup="false", dataExtractionRules (Android 12+) y fullBackupContent (Android 8 a 11)
+      excluyen todo: ni la base local ni la credencial viajan en copias de seguridad ni en la
+      transferencia a otra tableta.
+    - usesCleartextTraffic="false": solo HTTPS. Las pruebas en el emulador permiten texto claro
+      hacia 10.0.2.2 desde src/debug (network_security_config), nunca en el APK de entrega.
+    - enableOnBackInvokedCallback: atrás predictivo (Android 13+).
+
+    Solo en horizontal (§1 y §4 de la etapa K1): sensorLandscape deja girar la tableta 180 grados.
+    Android 16 ignora la orientación fija en pantallas grandes para las aplicaciones con targetSdk 36;
+    la propiedad PROPERTY_COMPAT_ALLOW_RESTRICTED_RESIZABILITY la conserva. Lint lo desaconseja
+    (DiscouragedApi): se ignora aquí a propósito, porque la pantalla de cocina se diseñó solo para
+    tabletas en horizontal.
+    -->
+    <application
+        android:name=".CocinaApplication"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:enableOnBackInvokedCallback="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.AdelPosCocina"
+        android:usesCleartextTraffic="false"
+        tools:targetApi="33">
+        <property
+            android:name="android.window.PROPERTY_COMPAT_ALLOW_RESTRICTED_RESIZABILITY"
+            android:value="true" />
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:screenOrientation="sensorLandscape"
+            tools:ignore="DiscouragedApi"
+            android:windowSoftInputMode="stateHidden|adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

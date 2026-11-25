@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Aplicación de cocina (etapa K1): textos del restaurante, sin tecnicismos ni textos provisionales (§4, «Regla de
+     textos»). Los de la entrada al dispositivo son los compartidos de android-core:ui. -->
+<resources xmlns:tools="http://schemas.android.com/tools" tools:locale="es">
+    <string name="app_name">AD-EL POS Cocina</string>
+    <!-- Nombre que se propone al emparejar (se puede cambiar antes de pedir el código). -->
+    <string name="device_default_name">Cocina 1</string>
+
+    <!-- Pantalla de pedidos (§4). -->
+    <string name="orders_title">Pedidos</string>
+    <string name="orders_empty">No hay pedidos</string>
+    <string name="orders_connecting">Conectando con la computadora principal…</string>
+    <string name="orders_empty_detail">Los pedidos que envíen los meseros a las estaciones de esta pantalla aparecen aquí.</string>
+</resources>
