@@ -85,3 +85,26 @@ func TestEverything(t *testing.T) {
 		t.Fatal("el alcance sin filtro permite todas las estaciones")
 	}
 }
+
+// Etapa K1 (Fase A): la pantalla de cocina restringe su alcance a las estaciones que reciben en pantalla. El resultado
+// nunca es «todas» ni amplía el alcance de origen.
+func TestWithinRestrictsAndNeverWidens(t *testing.T) {
+	stations := []Station{
+		{ID: "a", Name: "Cocina", InTerminal: true},
+		{ID: "b", Name: "Barra", InTerminal: true},
+		{ID: "c", Name: "Postres", InTerminal: false},
+	}
+	selection := Compute(false, false, true, stations)
+	within := selection.Within([]string{"b", "c", "z"})
+	if within.All || !within.Allows("b") || within.Allows("a") || within.Allows("c") || within.Allows("z") ||
+		len(within.IDs()) != 1 || !within.Common() {
+		t.Fatalf("restringir una selección: %+v %v", within, within.IDs())
+	}
+	everything := Compute(true, false, true, stations).Within([]string{"a", "c"})
+	if everything.All || !everything.Allows("a") || !everything.Allows("c") || everything.Allows("b") || everything.Summary().All {
+		t.Fatalf("restringir «todas»: %v", everything.IDs())
+	}
+	if empty := selection.Within(nil); empty.All || empty.Common() || len(empty.IDs()) != 0 || empty.Allows("a") {
+		t.Fatalf("sin estaciones en pantalla: %v", empty.IDs())
+	}
+}

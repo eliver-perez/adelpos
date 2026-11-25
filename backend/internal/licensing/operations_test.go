@@ -84,6 +84,16 @@ func TestClassifyOperation(t *testing.T) {
 		{"POST", "kitchen/releases/" + id + "/release", RowKitchen, true},
 		{"POST", "kitchen/jobs/" + id + "/retry", RowKitchen, true},
 		{"POST", "kitchen/print-jobs/rerender", RowKitchen, true},
+		// Etapa K1 (Fase A, K1-D6 y K1-D16): la pantalla de cocina Android. Sus lecturas también son F5 («Sin activar»
+		// no muestra pedidos); marcar, recuperar y el acuse registran con fecha; la contraseña de los ajustes, siempre.
+		{"POST", "kitchen-display/connect", RowKitchen, false},
+		{"GET", "kitchen-display/orders", RowKitchen, false},
+		{"GET", "kitchen-display/recent", RowKitchen, false},
+		{"POST", "kitchen-display/items/ready", RowKitchen, true},
+		{"POST", "kitchen-display/orders/ready", RowKitchen, true},
+		{"POST", "kitchen-display/recover", RowKitchen, true},
+		{"POST", "kitchen-display/receipts", RowKitchen, true},
+		{"POST", "kitchen-display/settings-access", RowAlways, false},
 		// F6: reportes, historial y respaldos, siempre y sin fecha.
 		{"GET", "reports/run/sales.by_day", RowRecords, false},
 		{"GET", "reports/export/sales.by_day?format=csv", RowRecords, false},
@@ -147,6 +157,8 @@ func TestUnknownOperationsTakeTheMostRestrictiveClass(t *testing.T) {
 		{"POST", "restaurant/accounts/11111111-2222-4333-8444-555555555555/teleport"},
 		{"POST", "payments/accounts/11111111-2222-4333-8444-555555555555/magic"},
 		{"DELETE", "kitchen/states"},
+		{"DELETE", "kitchen-display/orders"},
+		{"POST", "kitchen-display/orders"},
 		{"POST", "nueva-ruta"},
 		{"POST", "sessions"},
 	} {
