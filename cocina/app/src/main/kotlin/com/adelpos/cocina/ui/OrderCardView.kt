@@ -1,5 +1,7 @@
 package com.adelpos.cocina.ui
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -17,13 +19,18 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
@@ -46,6 +53,14 @@ import java.time.format.DateTimeFormatter
 /** Transparencia de lo que ya está listo (atenuado, §4). */
 private const val READY_ALPHA = 0.45f
 
+// La animación de la tarjeta nueva: tres latidos en menos de 2 s.
+private const val HIGHLIGHT_PULSES = 3
+private const val HIGHLIGHT_UP_MILLIS = 220
+private const val HIGHLIGHT_DOWN_MILLIS = 380
+
+/** El estado de una tarjeta mientras se anima como nueva (lo leen las pruebas). */
+const val FRESH_STATE = "nueva"
+
 /**
  * Una tarjeta de pedido (§4): el encabezado con la mesa (o «Para llevar» y el cliente), el mesero,
  * la hora de envío y la espera en vivo con el color por tiempo (normal, atención, retraso; K1-D17);
@@ -63,6 +78,7 @@ fun OrderCardView(
     onDish: (String) -> Unit,
     onOrder: () -> Unit,
     modifier: Modifier = Modifier,
+    freshSince: Long? = null,
 ) {
     val colors = AdelTheme.colors
     val level = BoardRules.level(waitSeconds, settings)
@@ -72,11 +88,40 @@ fun OrderCardView(
             WaitLevel.ATTENTION -> colors.amberSoft to colors.amber
             WaitLevel.LATE -> colors.redSoft to colors.red
         }
+    // La animación breve de la tarjeta nueva (§5.2), para quien no escuchó el sonido: el borde
+    // azul late tres veces (una vez por cada valor de [freshSince]).
+    val highlight = remember(card.id) { Animatable(0f) }
+    LaunchedEffect(card.id, freshSince) {
+        if (freshSince != null) {
+            repeat(HIGHLIGHT_PULSES) {
+                highlight.animateTo(1f, tween(HIGHLIGHT_UP_MILLIS))
+                highlight.animateTo(0f, tween(HIGHLIGHT_DOWN_MILLIS))
+            }
+        }
+    }
+    val fresh = highlight.value > 0f
+    val borderWidth =
+        when {
+            fresh -> 3.dp + 3.dp * highlight.value
+            level == WaitLevel.NORMAL -> 1.dp
+            else -> 3.dp
+        }
+    val borderColor = if (fresh) lerp(accent, colors.blue, highlight.value) else accent
     Surface(
-        modifier = modifier.fillMaxWidth().testTag("$TAG_CARD_PREFIX${card.id}"),
+        modifier =
+            modifier
+                .fillMaxWidth()
+                .testTag("$TAG_CARD_PREFIX${card.id}")
+                .then(
+                    if (fresh) {
+                        Modifier.semantics { stateDescription = FRESH_STATE }
+                    } else {
+                        Modifier
+                    },
+                ),
         shape = RoundedCornerShape(12.dp),
         color = colors.background,
-        border = BorderStroke(if (level == WaitLevel.NORMAL) 1.dp else 3.dp, accent),
+        border = BorderStroke(borderWidth, borderColor),
     ) {
         Column {
             Header(

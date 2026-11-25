@@ -2,6 +2,8 @@ package com.adelpos.cocina
 
 import android.app.Application
 import androidx.lifecycle.ProcessLifecycleOwner
+import com.adelpos.cocina.access.KitchenStatus
+import kotlinx.coroutines.launch
 
 /**
  * Proceso de la aplicación de cocina: crea el contenedor de dependencias una sola vez, al primer
@@ -25,5 +27,14 @@ class CocinaApplication : Application() {
         // La pantalla de pedidos y su canal de eventos (con la aplicación a la vista).
         container.realtime.start(container.appScope)
         container.board.start(container.appScope)
+        // Los ajustes abiertos se cierran (y olvidan la contraseña) si la pantalla deja de estar
+        // lista.
+        container.appScope.launch {
+            container.access.status.collect { status ->
+                if (status !is KitchenStatus.Ready) {
+                    container.kitchenSettings.onNotReady()
+                }
+            }
+        }
     }
 }

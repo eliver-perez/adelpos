@@ -105,38 +105,77 @@ fun OrdersScreen(
         shapes = MaterialTheme.shapes,
         typography = scaled,
     ) {
-        Box(modifier = modifier.fillMaxSize().testTag(TAG_ORDERS)) {
-            when (val screen = state.screen) {
-                BoardScreen.Connecting ->
-                    CenteredMessage(
-                        title = stringResource(R.string.orders_connecting),
-                        tag = TAG_ORDERS_CONNECTING,
-                    )
-                is BoardScreen.NoSeat ->
-                    CenteredMessage(
-                        title = LicenseMessages.kitchenDisplayNoSeat(screen.inUse, screen.limit),
-                        tag = TAG_ORDERS_NO_SEAT,
-                    )
-                BoardScreen.SeatReleased ->
-                    CenteredMessage(
-                        title = LicenseMessages.KITCHEN_DISPLAY_SEAT_RELEASED,
-                        detail = stringResource(R.string.seat_released_detail),
-                        tag = TAG_ORDERS_SEAT_RELEASED,
-                        action = {
-                            PrimaryButton(
-                                text = stringResource(R.string.seat_take),
-                                onClick = actions::takeSeat,
-                                modifier = Modifier.testTag(TAG_TAKE_SEAT),
-                            )
-                        },
-                    )
-                BoardScreen.NotActivated ->
-                    CenteredMessage(
-                        title = LicenseMessages.KITCHEN_DISPLAY_NOT_ACTIVATED,
-                        tag = TAG_ORDERS_NOT_ACTIVATED,
-                    )
-                BoardScreen.Orders -> Board(state = state, actions = actions, clock = clock)
+        Column(modifier = modifier.fillMaxSize()) {
+            if (state.offline) {
+                OfflineBanner()
             }
+            OrdersContent(state = state, actions = actions, clock = clock)
+        }
+    }
+}
+
+/**
+ * «Sin conexión» (§5.1): un aviso grande y claro arriba de todo, que dice además que no se puede
+ * marcar (los platillos y los botones quedan desactivados). Se quita solo al volver la conexión.
+ */
+@Composable
+private fun OfflineBanner() {
+    val colors = AdelTheme.colors
+    Column(
+        modifier =
+            Modifier.fillMaxWidth()
+                .background(colors.red)
+                .padding(horizontal = AdelDimens.ScreenPadding, vertical = 16.dp)
+                .testTag(TAG_OFFLINE),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.offline_title),
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+            color = colors.onAccent,
+        )
+        Text(
+            text = stringResource(R.string.offline_detail),
+            style = MaterialTheme.typography.titleMedium,
+            color = colors.onAccent,
+        )
+    }
+}
+
+@Composable
+private fun OrdersContent(state: BoardState, actions: BoardActions, clock: () -> Long) {
+    Box(modifier = Modifier.fillMaxSize().testTag(TAG_ORDERS)) {
+        when (val screen = state.screen) {
+            BoardScreen.Connecting ->
+                CenteredMessage(
+                    title = stringResource(R.string.orders_connecting),
+                    tag = TAG_ORDERS_CONNECTING,
+                )
+            is BoardScreen.NoSeat ->
+                CenteredMessage(
+                    title = LicenseMessages.kitchenDisplayNoSeat(screen.inUse, screen.limit),
+                    tag = TAG_ORDERS_NO_SEAT,
+                )
+            BoardScreen.SeatReleased ->
+                CenteredMessage(
+                    title = LicenseMessages.KITCHEN_DISPLAY_SEAT_RELEASED,
+                    detail = stringResource(R.string.seat_released_detail),
+                    tag = TAG_ORDERS_SEAT_RELEASED,
+                    action = {
+                        PrimaryButton(
+                            text = stringResource(R.string.seat_take),
+                            onClick = actions::takeSeat,
+                            modifier = Modifier.testTag(TAG_TAKE_SEAT),
+                        )
+                    },
+                )
+            BoardScreen.NotActivated ->
+                CenteredMessage(
+                    title = LicenseMessages.KITCHEN_DISPLAY_NOT_ACTIVATED,
+                    tag = TAG_ORDERS_NOT_ACTIVATED,
+                )
+            BoardScreen.Orders -> Board(state = state, actions = actions, clock = clock)
         }
     }
 }
@@ -185,6 +224,7 @@ private fun Board(state: BoardState, actions: BoardActions, clock: () -> Long) {
                     timezone = board.timezone,
                     onDish = { dishId -> actions.markDish(card.id, dishId) },
                     onOrder = { actions.markOrder(card.id) },
+                    freshSince = state.freshCards[card.id],
                 )
             }
         }
@@ -210,7 +250,7 @@ private fun Board(state: BoardState, actions: BoardActions, clock: () -> Long) {
 @Composable
 private fun Notices(state: BoardState, onDismiss: () -> Unit) {
     val colors = AdelTheme.colors
-    if (!state.markingAllowed) {
+    if (state.clockBlocked) {
         NoticeBar(
             text = LicenseMessages.KITCHEN_DISPLAY_CLOCK_INVALID,
             background = colors.redSoft,
@@ -328,3 +368,4 @@ const val TAG_TAKE_SEAT = "kitchen-take-seat"
 const val TAG_NOTICE_CLOCK = "kitchen-notice-clock"
 const val TAG_NOTICE_LICENSE = "kitchen-notice-license"
 const val TAG_NOTICE_MESSAGE = "kitchen-notice-message"
+const val TAG_OFFLINE = "kitchen-offline"

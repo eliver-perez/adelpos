@@ -11,6 +11,8 @@ import com.adelpos.cocina.access.KitchenStatus
 import com.adelpos.cocina.board.BoardState
 import com.adelpos.cocina.board.KitchenBoard
 import com.adelpos.cocina.board.RecentState
+import com.adelpos.cocina.settings.KitchenSettings
+import com.adelpos.cocina.settings.SettingsScreen
 import com.adelpos.core.model.connection.LinkState
 import com.adelpos.core.model.connection.ServerLink
 import kotlinx.coroutines.flow.StateFlow
@@ -28,6 +30,7 @@ class CocinaViewModel(
     private val access: KitchenAccess,
     serverLink: ServerLink,
     val boardActions: KitchenBoard,
+    val settingsActions: KitchenSettings,
 ) : ViewModel() {
     val status: StateFlow<KitchenStatus> = access.status
 
@@ -36,6 +39,12 @@ class CocinaViewModel(
     val board: StateFlow<BoardState> = boardActions.state
 
     val recent: StateFlow<RecentState> = boardActions.recent
+
+    /** Los ajustes de la tableta (§5.4). */
+    val settings: StateFlow<SettingsScreen> = settingsActions.screen
+
+    /** La dirección vigente de la computadora principal, para los ajustes. */
+    fun serverAddress(): String = access.serverAddress().orEmpty()
 
     init {
         viewModelScope.launch { access.start() }
@@ -56,7 +65,14 @@ class CocinaViewModel(
 
     companion object {
         fun factory(container: CocinaContainer): ViewModelProvider.Factory = viewModelFactory {
-            initializer { CocinaViewModel(container.access, container.serverLink, container.board) }
+            initializer {
+                CocinaViewModel(
+                    container.access,
+                    container.serverLink,
+                    container.board,
+                    container.kitchenSettings,
+                )
+            }
         }
     }
 }

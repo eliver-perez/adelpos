@@ -543,6 +543,40 @@ class AlertsOnGoTest {
         assertTrue(runBlocking { controller.ledger.seenIds() }.isEmpty())
     }
 
+    /**
+     * Etapa K1, la prueba de punta a punta (§8, suite `endtoend` de `android-e2e.sh`): Ana captura
+     * y envía a cocina desde **esta aplicación**; con la aplicación cerrada (el servicio sigue), la
+     * **pantalla de cocina** (la aplicación de cocina en el mismo emulador, que el guion corre
+     * mientras tanto con la cuenta que se anota aquí) marca el pedido listo y el aviso «Platillos
+     * listos» llega a Ana.
+     */
+    @Test
+    fun e1_enviaACocinaYLlegaElAvisoDeLaPantallaDeCocina() {
+        val ids = loadIds()
+        grantNotifications()
+        launch()
+        enter(ids.getValue("ana"), ANA_PIN)
+        waitForService()
+        // La mesa R4, como r2: se ve sin desplazar la lista en cualquier tableta (en esta suite r2
+        // no corre).
+        newAccountOn(ids.getValue("table4"))
+        addProduct(ids.getValue("filete"))
+        addProduct(ids.getValue("filete"))
+        showOrder()
+        waitFor("${TAG_SYNC_PREFIX}saved")
+        tap(TAG_SEND_TO_KITCHEN)
+        val sent = waitForOrder(ids.getValue("ana")) { it.state == OrderState.RECEIVED }
+        val accountId = sent.receivedAccountId!!
+        // La aplicación de meseros se cierra (el servicio sigue) y la pantalla de cocina se abre.
+        closeApp()
+        waitForService()
+        log("e1 enviado a cocina cuenta=$accountId")
+        val alert = waitForAlert(accountId, timeout = 240_000)
+        assertEquals("Mesa R4 · 2 platillos listos", title(alert))
+        assertEquals("2 × Filete R", text(alert))
+        log("e1 aviso de la pantalla de cocina: ${title(alert)} / ${text(alert)}")
+    }
+
     // --- Dispositivo ---
 
     private fun readyAlertsOn(): Boolean = arguments.getString("readyAlerts") == "on"

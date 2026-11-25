@@ -6,10 +6,11 @@ import android.os.SystemClock
 import android.util.Log
 import com.adelpos.cocina.access.KitchenAccess
 import com.adelpos.cocina.access.KitchenServerRequirements
+import com.adelpos.cocina.alerts.ToneAlertPlayer
 import com.adelpos.cocina.board.HttpKitchenDisplayService
 import com.adelpos.cocina.board.KitchenBoard
-import com.adelpos.cocina.board.KitchenDisplayService
 import com.adelpos.cocina.db.KitchenDatabase
+import com.adelpos.cocina.settings.KitchenSettings
 import com.adelpos.core.model.connection.LinkState
 import com.adelpos.core.model.error.AppError
 import com.adelpos.core.model.pairing.PairingFlow
@@ -76,7 +77,8 @@ class CocinaContainer(context: Context, private val settings: Settings = Setting
      * aplicación de meseros): lo leen la barra y la pantalla de pedidos; lo alimentan la red de
      * Android y cada respuesta de Go del cliente del servidor emparejado. Lo arranca
      * [CocinaApplication]. Con el canal de eventos abierto no hace falta la sonda periódica (como
-     * en meseros).
+     * en meseros). Con el margen sin red de la cocina (K1-D33): un corte de la wifi de hasta 10 s
+     * no muestra nada; en meseros es 0.
      */
     val serverLink: ServerLinkMonitor by lazy {
         ServerLinkMonitor(
@@ -89,8 +91,12 @@ class CocinaContainer(context: Context, private val settings: Settings = Setting
             scope = appScope,
             clock = SystemClock::elapsedRealtime,
             log = { message -> Log.i(SERVER_LINK_TAG, message) },
+            networkLossGraceMillis = NETWORK_LOSS_GRACE_MILLIS,
         )
     }
+
+    /** Los sonidos de la pantalla de pedidos (§5.2): tonos generados, canal de notificaciones. */
+    val alertPlayer: ToneAlertPlayer by lazy { ToneAlertPlayer() }
 
     private val database: KitchenDatabase by lazy { KitchenDatabase.open(appContext) }
 
@@ -129,8 +135,25 @@ class CocinaContainer(context: Context, private val settings: Settings = Setting
         )
     }
 
-    /** Las rutas de la pantalla de cocina (`kitchen-display/…`). */
-    private val displayService: KitchenDisplayService by lazy { HttpKitchenDisplayService(access) }
+    /** Las rutas de la pantalla de cocina (`kitchen-display/…`), también las de los ajustes. */
+    private val displayService: HttpKitchenDisplayService by lazy {
+        HttpKitchenDisplayService(access)
+    }
+
+    /**
+     * Los ajustes de la tableta (§5.4): contraseña de un administrador solo en memoria y «Volver a
+     * emparejar» (K1-D32). [CocinaApplication] los cierra si la pantalla deja de estar lista.
+     */
+    val kitchenSettings: KitchenSettings by lazy {
+        KitchenSettings(
+            service = displayService,
+            link = serverLink.state,
+            forget = access::forgetServer,
+            report = access::report,
+            scope = appScope,
+            clock = SystemClock::elapsedRealtime,
+        )
+    }
 
     /**
      * La pantalla de pedidos frente a Go (§4): `connect`, `orders`, el canal de eventos y las
@@ -142,6 +165,8 @@ class CocinaContainer(context: Context, private val settings: Settings = Setting
             service = displayService,
             signals = flow { emitAll(realtime.signals) },
             monotonic = SystemClock::elapsedRealtime,
+            link = serverLink.state,
+            alerts = alertPlayer,
         )
     }
 
@@ -172,6 +197,10 @@ class CocinaContainer(context: Context, private val settings: Settings = Setting
 
     private companion object {
         const val SERVER_LINK_TAG = "CocinaLink"
+
+        // K1-D33: con Android sin red, «Sin conexión» solo si dura más de esto. Después de quitar
+        // el modo avión la wifi tarda unos segundos en volver: un corte de 5 s se ve como 7 a 10.
+        const val NETWORK_LOSS_GRACE_MILLIS = 10_000L
 
         // La interrupción del canal como el error que decide la entrada (revocada, 426…).
         fun appError(interruption: AccessInterruption): AppError =

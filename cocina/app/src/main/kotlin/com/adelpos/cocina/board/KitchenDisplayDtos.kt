@@ -160,6 +160,12 @@ data class RecoverResultDto(val recovered: Int = 0, val skipped: List<SkippedDto
 
 const val TRACKING_ITEM = "item"
 const val TRACKING_ORDER = "order"
+
+/** El usuario y la contraseña de un administrador (ajustes en la tableta, K1-D13 y K1-D32). */
+@Serializable data class AdministratorRequest(val username: String, val password: String)
+
+@Serializable data class SettingsAccessDto(val authorized: Boolean = false)
+
 const val STATUS_PENDING = "pending"
 const val STATUS_READY = "ready"
 const val STATUS_CANCELLED = "cancelled"

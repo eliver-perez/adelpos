@@ -1,17 +1,22 @@
 package com.adelpos.cocina.board
 
 import com.adelpos.cocina.access.KitchenStatus
+import com.adelpos.core.model.connection.LinkState
 import com.adelpos.core.model.error.AppError
 import com.adelpos.core.model.realtime.RealtimeEvent
 import com.adelpos.core.model.realtime.RealtimeSignal
 import com.adelpos.core.network.api.ApiOutcome
 import com.adelpos.core.network.api.ApiProblem
 import com.adelpos.core.network.api.IgnoredBody
+import com.adelpos.core.network.connection.ServerLinkMonitor
 import com.adelpos.core.network.session.AuthorizedServer
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
@@ -49,6 +54,7 @@ class KitchenBoardTest {
         var connectAnswers = ArrayDeque<ApiOutcome<ConnectResponseDto>>()
         var ordersAnswers = ArrayDeque<ApiOutcome<OrdersResponseDto>>()
         var markAnswer: ApiOutcome<MarkResultDto> = ApiOutcome.Success(MarkResultDto(updated = 1))
+        val markAnswers = ArrayDeque<ApiOutcome<MarkResultDto>>()
         var recoverAnswer: ApiOutcome<RecoverResultDto> = ApiOutcome.Success(RecoverResultDto(1))
         var readDelayMillis = 0L
         val marked = mutableListOf<List<TaskRef>>()
@@ -70,13 +76,13 @@ class KitchenBoardTest {
         override suspend fun markItems(tasks: List<TaskRef>): ApiOutcome<MarkResultDto> {
             calls += "items/ready"
             marked += tasks
-            return markAnswer
+            return markAnswers.removeFirstOrNull() ?: markAnswer
         }
 
         override suspend fun markOrder(tasks: List<TaskRef>): ApiOutcome<MarkResultDto> {
             calls += "orders/ready"
             marked += tasks
-            return markAnswer
+            return markAnswers.removeFirstOrNull() ?: markAnswer
         }
 
         override suspend fun recent(): ApiOutcome<RecentResponseDto> {
@@ -100,14 +106,18 @@ class KitchenBoardTest {
     private val service = FakeService()
     private val signals = MutableSharedFlow<RealtimeSignal>(extraBufferCapacity = 16)
     private var monotonic = 0L
+    private val link = MutableStateFlow(LinkState.ONLINE)
+    private val played = mutableListOf<Pair<Set<AlertSound>, String>>()
 
-    private fun TestScope.board(): KitchenBoard {
+    private fun TestScope.board(linkState: StateFlow<LinkState> = link): KitchenBoard {
         val board =
             KitchenBoard(
                 access = access,
                 service = service,
                 signals = signals,
                 monotonic = { monotonic },
+                link = linkState,
+                alerts = { sounds, volume -> played += sounds to volume },
             )
         board.start(TestScope(UnconfinedTestDispatcher(testScheduler)))
         return board
@@ -259,6 +269,241 @@ class KitchenBoardTest {
         advanceUntilIdle()
         assertTrue(board.state.value.markingDishes.isEmpty())
         assertEquals(emptyList<String>(), board.state.value.board?.cards?.map { it.id })
+    }
+
+    // --- Fase D: conexión tolerante (§5.1) ---
+
+    @Test
+    fun sinConexionAvisoGrandeNoSeMarcaYAlVolverSeLeeTodo() = runTest {
+        repeat(3) {
+            service.ordersAnswers += ApiOutcome.Success(response(orders = listOf(card("t1"))))
+        }
+        val board = board()
+        access.status.value = KitchenStatus.Ready("Restaurante", "Cocina 1")
+        advanceUntilIdle()
+        assertFalse(board.state.value.offline)
+        link.value = LinkState.OFFLINE
+        runCurrent()
+        assertTrue(board.state.value.offline)
+        assertFalse("no se puede marcar", board.state.value.markingAllowed)
+        assertFalse("tampoco es la hora", board.state.value.clockBlocked)
+        board.markDish("t1", "t1-a")
+        board.markOrder("t1")
+        advanceUntilIdle()
+        assertTrue(service.marked.isEmpty())
+        assertEquals(
+            "los pedidos se siguen viendo",
+            listOf("t1"),
+            board.state.value.board?.cards?.map { it.id },
+        )
+        val readsBefore = service.calls.count { it == "orders" }
+        link.value = LinkState.ONLINE
+        advanceUntilIdle()
+        assertFalse(board.state.value.offline)
+        assertTrue(board.state.value.markingAllowed)
+        assertEquals(
+            "al volver, el estado completo",
+            readsBefore + 1,
+            service.calls.count { it == "orders" },
+        )
+    }
+
+    @Test
+    fun unaMarcaSinRespuestaSeRepiteEnSilencioConSuPalomita() = runTest {
+        repeat(3) {
+            service.ordersAnswers += ApiOutcome.Success(response(orders = listOf(card("t1"))))
+        }
+        val board = board()
+        access.status.value = KitchenStatus.Ready("Restaurante", "Cocina 1")
+        advanceUntilIdle()
+        service.markAnswers += ApiOutcome.NoAnswer(AppError.Unreachable, requestSent = true)
+        service.markAnswers += ApiOutcome.NoAnswer(AppError.Unreachable, requestSent = true)
+        // La tercera vez Go ya la tenía (la primera sí le llegó): skipped, que es un éxito.
+        service.markAnswers +=
+            ApiOutcome.Success(
+                MarkResultDto(updated = 0, skipped = listOf(SkippedDto("t1-a-1", "already_ready"))),
+            )
+        board.markDish("t1", "t1-a")
+        runCurrent()
+        assertEquals(1, service.marked.size)
+        assertEquals(setOf("t1-a"), board.state.value.markingDishes)
+        assertFalse("sin ningún aviso", board.state.value.offline)
+        assertEquals(null, board.state.value.notice)
+        advanceTimeBy(2_001)
+        assertEquals(2, service.marked.size)
+        assertEquals(setOf("t1-a"), board.state.value.markingDishes)
+        advanceTimeBy(2_001)
+        assertEquals(3, service.marked.size)
+        advanceUntilIdle()
+        assertEquals(3, service.marked.size)
+        // La lectura de después manda (aquí Go ya cerró la tarjeta).
+        assertTrue(board.state.value.markingDishes.isEmpty())
+    }
+
+    @Test
+    fun conSinConexionLaMarcaEsperaYSeRepiteAlVolver() = runTest {
+        repeat(3) {
+            service.ordersAnswers += ApiOutcome.Success(response(orders = listOf(card("t1"))))
+        }
+        val board = board()
+        access.status.value = KitchenStatus.Ready("Restaurante", "Cocina 1")
+        advanceUntilIdle()
+        service.markAnswers += ApiOutcome.NoAnswer(AppError.Unreachable, requestSent = false)
+        board.markDish("t1", "t1-a")
+        runCurrent()
+        link.value = LinkState.OFFLINE
+        advanceTimeBy(60_000)
+        assertEquals("esperando la conexión", 1, service.marked.size)
+        assertEquals(setOf("t1-a"), board.state.value.markingDishes)
+        link.value = LinkState.ONLINE
+        advanceUntilIdle()
+        assertEquals(2, service.marked.size)
+        assertTrue(board.state.value.markingDishes.isEmpty())
+    }
+
+    @Test
+    fun siGoDiceOtraCosaLaMarcaPendienteSeQuita() = runTest {
+        repeat(3) {
+            service.ordersAnswers += ApiOutcome.Success(response(orders = listOf(card("t1"))))
+        }
+        val board = board()
+        access.status.value = KitchenStatus.Ready("Restaurante", "Cocina 1")
+        advanceUntilIdle()
+        service.markAnswers += ApiOutcome.NoAnswer(AppError.Unreachable, requestSent = true)
+        service.markAnswers += rejected(400, "KITCHEN_VALIDATION")
+        board.markDish("t1", "t1-a")
+        advanceUntilIdle()
+        assertEquals(2, service.marked.size)
+        assertTrue(board.state.value.markingDishes.isEmpty())
+    }
+
+    @Test
+    fun laToleranciaDeLaCocinaConUnRelojSimulado() = runTest {
+        // El estado único de conexión real (el de la barra), con el margen sin red de la cocina.
+        var now = 0L
+        val monitor =
+            ServerLinkMonitor(
+                network = emptyFlow(),
+                initialNetwork = LinkState.ONLINE,
+                foreground = MutableStateFlow(false),
+                channelOpen = flowOf(true),
+                probing = { _, _ -> true },
+                scope = backgroundScope,
+                clock = { now },
+                networkLossGraceMillis = 10_000,
+            )
+        val board = board(monitor.state)
+        access.status.value = KitchenStatus.Ready("Restaurante", "Cocina 1")
+        advanceUntilIdle()
+        // Un corte de 1 a 5 s: una falla y luego responde. Nada visible.
+        for (seconds in 1..5) {
+            monitor.noAnswer()
+            now += seconds * 1_000L
+            runCurrent()
+            assertFalse("corte de $seconds s", board.state.value.offline)
+            monitor.answered()
+        }
+        // Sin red de Android 9 s (dentro del margen): nada; 11 s: «Sin conexión».
+        monitor.onNetwork(LinkState.OFFLINE)
+        now += 9_000
+        monitor.onNetwork(LinkState.ONLINE)
+        runCurrent()
+        assertFalse(board.state.value.offline)
+        monitor.onNetwork(LinkState.OFFLINE)
+        now += 11_000
+        monitor.onNetwork(LinkState.OFFLINE)
+        runCurrent()
+        assertTrue(board.state.value.offline)
+        monitor.onNetwork(LinkState.ONLINE)
+        monitor.answered()
+        runCurrent()
+        assertFalse(board.state.value.offline)
+        // Tres fallas o más durante más de 20 s: «Sin conexión».
+        repeat(4) {
+            monitor.noAnswer()
+            now += 6_000
+        }
+        monitor.noAnswer()
+        runCurrent()
+        assertTrue(board.state.value.offline)
+        monitor.answered()
+        runCurrent()
+        assertFalse(board.state.value.offline)
+    }
+
+    // --- Fase D: alertas (§5.2) ---
+
+    @Test
+    fun suenaLoNuevoUnaVezYNoLaPrimeraLectura() = runTest {
+        service.ordersAnswers += ApiOutcome.Success(response(orders = listOf(card("t1"))))
+        service.ordersAnswers +=
+            ApiOutcome.Success(response(orders = listOf(card("t1"), card("t2"))))
+        service.ordersAnswers +=
+            ApiOutcome.Success(response(orders = listOf(card("t1"), card("t2"))))
+        val board = board()
+        access.status.value = KitchenStatus.Ready("Restaurante", "Cocina 1")
+        advanceUntilIdle()
+        assertTrue("la primera lectura no suena", played.isEmpty())
+        assertTrue(board.state.value.freshCards.isEmpty())
+        signals.tryEmit(RealtimeSignal.Changes(1, listOf(event())))
+        advanceUntilIdle()
+        assertEquals(listOf(setOf(AlertSound.NEW_ORDER) to "medium"), played)
+        assertEquals(setOf("t2"), board.state.value.freshCards.keys)
+        // La misma lectura otra vez no vuelve a sonar.
+        signals.tryEmit(RealtimeSignal.Changes(2, listOf(event())))
+        advanceUntilIdle()
+        assertEquals(1, played.size)
+    }
+
+    @Test
+    fun conElSonidoApagadoSoloSeAnima() = runTest {
+        val quiet = DisplayConfigDto(soundEnabled = false)
+        service.ordersAnswers +=
+            ApiOutcome.Success(response(orders = listOf(card("t1"))).copy(display = quiet))
+        service.ordersAnswers +=
+            ApiOutcome.Success(
+                response(orders = listOf(card("t1"), card("t2"))).copy(display = quiet),
+            )
+        val board = board()
+        access.status.value = KitchenStatus.Ready("Restaurante", "Cocina 1")
+        advanceUntilIdle()
+        signals.tryEmit(RealtimeSignal.Changes(1, listOf(event())))
+        advanceUntilIdle()
+        assertTrue(played.isEmpty())
+        assertEquals(setOf("t2"), board.state.value.freshCards.keys)
+    }
+
+    @Test
+    fun alVolverDeSinConexionSuenaUnaSolaVez() = runTest {
+        service.ordersAnswers += ApiOutcome.Success(response(orders = listOf(card("t1"))))
+        // Mientras no había conexión llegaron tres pedidos.
+        service.ordersAnswers +=
+            ApiOutcome.Success(
+                response(orders = listOf(card("t1"), card("t2"), card("t3"), card("t4"))),
+            )
+        val board = board()
+        access.status.value = KitchenStatus.Ready("Restaurante", "Cocina 1")
+        advanceUntilIdle()
+        link.value = LinkState.OFFLINE
+        runCurrent()
+        link.value = LinkState.ONLINE
+        advanceUntilIdle()
+        assertEquals(listOf(setOf(AlertSound.NEW_ORDER) to "medium"), played)
+        assertEquals(setOf("t2", "t3", "t4"), board.state.value.freshCards.keys)
+    }
+
+    @Test
+    fun loRecuperadoAquiNoSuena() = runTest {
+        service.ordersAnswers += ApiOutcome.Success(response(orders = emptyList()))
+        service.ordersAnswers += ApiOutcome.Success(response(orders = listOf(card("t1"))))
+        val board = board()
+        access.status.value = KitchenStatus.Ready("Restaurante", "Cocina 1")
+        advanceUntilIdle()
+        board.openRecent()
+        board.recover(listOf(TaskRef("t1-a-1", "v1"), TaskRef("t1-b-1", "v1")))
+        advanceUntilIdle()
+        assertEquals(listOf("t1"), board.state.value.board?.cards?.map { it.id })
+        assertTrue(played.isEmpty())
     }
 
     @Test
