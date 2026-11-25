@@ -243,6 +243,13 @@ describe('Preparación en modo cocina', () => {
     board.sound_alert = true;
     renderBoard();
     await cards();
+    // Las tarjetas a la vista no garantizan que React ya corrió el efecto que escucha el primer toque: con la Mac
+    // cargada (la regresión de la K1), el toque llegaba antes y no se contaba. Se espera a que lo escuche.
+    await waitFor(() => {
+      fireEvent.pointerDown(document.body);
+      expect(sound.unlock).toHaveBeenCalled();
+    });
+    sound.unlock.mockClear();
     fireEvent.pointerDown(document.body);
     fireEvent.keyDown(document.body, { key: 'a' });
     expect(sound.unlock).toHaveBeenCalledTimes(2);
