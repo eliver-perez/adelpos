@@ -563,7 +563,8 @@ test('barra superior y Mesas (etapa 9D, fases B y C)', async ({ page }, testInfo
     (window as unknown as { __adelOffline: boolean }).__adelOffline = true;
   });
   const offline = page.locator('.app-topbar .server-status-offline');
-  await expect(offline).toHaveText('Sin conexión', { timeout: 15000 });
+  // Etapa K1 (K1-D10): «Sin conexión» solo tras 3 fallas seguidas durante 20 s, con la tolerancia de la A3.
+  await expect(offline).toHaveText('Sin conexión', { timeout: 35000 });
   expect(await computed(offline, 'color')).toBe(await token(page, '--danger'));
   const retry = page.getByRole('button', { name: 'Reintentar', exact: true });
   await expect(retry).toBeVisible();
@@ -646,7 +647,8 @@ test('barra superior y Mesas (etapa 9D, fases B y C)', async ({ page }, testInfo
   // Etapa 9G (fase C, D11): sin conexión, la capa «Sin conexión con el servidor» cubre la captura (también la
   // barra reducida) y es la que ofrece «Reintentar»; la barra conserva Caja, el usuario y el estado.
   const layer = page.getByRole('alertdialog', { name: 'Sin conexión con el servidor' });
-  await expect(layer).toBeVisible({ timeout: 15000 });
+  // Etapa K1 (K1-D10): «Sin conexión» solo tras 3 fallas seguidas durante 20 s, con la tolerancia de la A3.
+  await expect(layer).toBeVisible({ timeout: 35000 });
   await expect(reduced.locator('.server-status-offline')).toBeVisible();
   const reducedCut = await reduced.evaluate((root) =>
     Array.from(root.querySelectorAll<HTMLElement>('.cash-shortcut button, .user-menu button'))

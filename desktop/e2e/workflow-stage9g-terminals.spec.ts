@@ -135,7 +135,8 @@ test('Terminales: aprobación con código, renombrar, configuración, revocació
   const renamed = page.locator('tbody tr').filter({ hasText: 'Caja de la barra' });
   await renamed.getByRole('button', { name: 'Ver configuración', exact: true }).click();
   const configuration = page.getByRole('region', { name: 'Configuración de Caja de la barra' });
-  await expect(configuration).toContainText('Windows · versión 0.10.0');
+  // Etapa K1 (K1-D9): con la capacidad kitchen-display-v1, Terminales dice «versión instalada».
+  await expect(configuration).toContainText('Windows · versión instalada 0.10.0');
   await expect(configuration).toContainText('Mesas');
   await expect(configuration).toContainText('Todas');
   await expect(configuration).toContainText('Sin impresoras propias');

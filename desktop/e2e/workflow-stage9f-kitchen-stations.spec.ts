@@ -393,8 +393,9 @@ test('terminal de cocina por estaciones: intersección, colores y sin «Actualiz
     await page.evaluate(() => {
       (window as unknown as { __adelOffline: boolean }).__adelOffline = true;
     });
+    // Etapa K1 (K1-D10): «Sin conexión» solo tras 3 fallas seguidas durante 20 s, con la tolerancia de la A3.
     await expect(appBar(page).locator('.server-status-offline')).toHaveText('Sin conexión', {
-      timeout: 15000,
+      timeout: 35000,
     });
     const retry = page.getByRole('button', { name: 'Reintentar', exact: true });
     await expect(retry).toBeVisible();

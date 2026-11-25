@@ -539,7 +539,8 @@ test('color de marca, estados, avisos, destructivos y cursor (etapa 9D, fase A)'
     (window as unknown as { __adelOffline: boolean }).__adelOffline = true;
   });
   const offline = page.locator('.app-topbar .server-status-offline');
-  await expect(offline).toBeVisible({ timeout: 15000 });
+  // Etapa K1 (K1-D10): «Sin conexión» solo tras 3 fallas seguidas durante 20 s, con la tolerancia de la A3.
+  await expect(offline).toBeVisible({ timeout: 35000 });
   await toastViews(page, testInfo, 'warning', 'alert');
   await views(page, testInfo, 'barra-sin-conexion', {
     element: bar,
