@@ -188,11 +188,12 @@ func AccountPreparation(ctx context.Context, tx pgx.Tx, accountID string) (strin
 }
 func VersionPreparation(ctx context.Context, tx pgx.Tx, accountID, versionID string) (string, error) {
 	var pendingChange bool
+	// Etapa K1.1 (K11-D4): un aviso que se dio por terminado (dismissed_at) ya no está pendiente.
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT FROM app.kitchen_pending_changes c
-		WHERE c.account_id=$1 AND $2='' OR EXISTS(SELECT FROM app.restaurant_item_units u
+		WHERE c.dismissed_at IS NULL AND (c.account_id=$1 AND $2='' OR EXISTS(SELECT FROM app.restaurant_item_units u
 		WHERE u.account_id=$1 AND ($2='' OR u.version_id::text=$2)
 		AND (coalesce(c.payload->'modified_unit_ids','[]')||coalesce(c.payload->'added_unit_ids','[]')||
-		coalesce(c.payload->'cancelled_unit_ids','[]')||coalesce(c.payload->'unit_ids','[]')) ? u.id::text))`, accountID, versionID).Scan(&pendingChange); err != nil {
+		coalesce(c.payload->'cancelled_unit_ids','[]')||coalesce(c.payload->'unit_ids','[]')) ? u.id::text)))`, accountID, versionID).Scan(&pendingChange); err != nil {
 		return "", err
 	}
 	if pendingChange {

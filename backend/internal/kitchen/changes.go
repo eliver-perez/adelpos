@@ -79,8 +79,8 @@ func (handler *service) integrateChange(eventID, accountID, kind string, payload
 					routing.Stations[stationID] = frozen
 				}
 			}
+			// Etapa K1.1 (K11-D2): los componentes nuevos siguen K11-D1 (decideRoute) y nunca dejan el aviso pendiente.
 			entry.Version, entry.Routing = version, routing
-			warnings = append(warnings, routing.Warnings...)
 		}
 		for _, task := range previous {
 			station, err := one[Station](handler.ctx, handler.tx, "SELECT to_jsonb(s) FROM app.kitchen_stations s WHERE id=$1", task.StationID)
@@ -93,9 +93,23 @@ func (handler *service) integrateChange(eventID, accountID, kind string, payload
 		}
 		plan = append(plan, entry)
 	}
+	// Cancelar antes de liberar no genera preparación ni papel para algo que cocina nunca recibió. Desde la etapa K1.1
+	// (K11-D2) se cancela siempre, también si queda el aviso de una estación desactivada que ya tenía la comanda; con
+	// «Cancelar cuenta» lo da por terminado Integrate (dismissAccountPending), con su historial.
+	if kind != "account.cancelled" {
+		_, err = handler.tx.Exec(handler.ctx, `UPDATE app.kitchen_releases r SET state='cancelled',revision=revision+1
+            WHERE state IN ('pending','scheduled','blocked') AND unit_ids && $1::uuid[]
+            AND NOT EXISTS(SELECT FROM app.restaurant_item_units u WHERE u.id=ANY(r.unit_ids) AND u.state='active')`, affected)
+		if err != nil {
+			return err
+		}
+	}
+	// El único aviso que queda pendiente es el de una estación desactivada que ya tenía la comanda (regla de la etapa 5
+	// y la 9D). Un aviso ya terminado (dismissed_at) no se vuelve a abrir.
 	if len(warnings) > 0 {
 		_, err := handler.tx.Exec(handler.ctx, `INSERT INTO app.kitchen_pending_changes(event_id,account_id,kind,payload,warnings)
-            VALUES ($1,$2,$3,$4,$5) ON CONFLICT(event_id) DO UPDATE SET warnings=excluded.warnings,revision=kitchen_pending_changes.revision+1`,
+            VALUES ($1,$2,$3,$4,$5) ON CONFLICT(event_id) DO UPDATE SET warnings=excluded.warnings,revision=kitchen_pending_changes.revision+1
+            WHERE kitchen_pending_changes.dismissed_at IS NULL`,
 			eventID, accountID, kind, payload, encoded(warnings))
 		if err != nil {
 			return err
@@ -116,13 +130,6 @@ func (handler *service) integrateChange(eventID, accountID, kind string, payload
 		if _, err := handler.createRelease(eventID, accountID, change.OrderID, change.Added); err != nil {
 			return err
 		}
-	}
-	// Cancelar antes de liberar no genera preparación ni papel para algo que cocina nunca recibió.
-	_, err = handler.tx.Exec(handler.ctx, `UPDATE app.kitchen_releases r SET state='cancelled',revision=revision+1
-        WHERE state IN ('pending','scheduled','blocked') AND unit_ids && $1::uuid[]
-        AND NOT EXISTS(SELECT FROM app.restaurant_item_units u WHERE u.id=ANY(r.unit_ids) AND u.state='active')`, affected)
-	if err != nil {
-		return err
 	}
 	_, err = handler.tx.Exec(handler.ctx, "DELETE FROM app.kitchen_pending_changes WHERE event_id=$1", eventID)
 	return err
@@ -254,11 +261,16 @@ func (handler *service) retryChange(id string) (any, error) {
 	var accountID, kind string
 	var payload []byte
 	var revision int
-	err := handler.tx.QueryRow(handler.ctx, `SELECT account_id,kind,payload,revision
+	var dismissed bool
+	err := handler.tx.QueryRow(handler.ctx, `SELECT account_id,kind,payload,revision,dismissed_at IS NOT NULL
 		FROM app.kitchen_pending_changes WHERE event_id=$1`, id).
-		Scan(&accountID, &kind, &payload, &revision)
+		Scan(&accountID, &kind, &payload, &revision, &dismissed)
 	if err != nil {
 		return nil, err
+	}
+	// Etapa K1.1 (K11-D4): el aviso de una cuenta que ya no está abierta se dio por terminado y no se vuelve a mandar.
+	if dismissed {
+		return nil, changeNotPending()
 	}
 	if revision != input.Revision {
 		return nil, conflict()

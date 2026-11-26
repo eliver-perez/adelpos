@@ -235,6 +235,10 @@ func TestClientMinimumVersionByKind(t *testing.T) {
 	if !found["kitchen-display-v1"] || minimums["kitchen"] != "0.1.0" {
 		t.Fatalf("capacidades de la etapa K1: %v %v", capabilities, minimums)
 	}
+	// Etapa K1.1 (K11-D5): la cobertura del enrutamiento y «Productos sin ruta».
+	if !found["kitchen-coverage-v1"] {
+		t.Fatalf("capacidades de la etapa K1.1: %v", capabilities)
+	}
 }
 
 func TestOpenAPIDocumentIsServed(t *testing.T) {
