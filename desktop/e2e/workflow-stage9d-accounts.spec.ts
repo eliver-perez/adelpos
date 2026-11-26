@@ -68,6 +68,43 @@ async function openWith(
   return account;
 }
 
+// Etapa K1.1 (K11-D9 y K11-D13): quitarle la hora a un pedido para llevar programado lo deja pendiente hasta que
+// alguien lo envíe a cocina: es la forma que queda de ver «Enviado · sin confirmar en cocina» (un producto sin ruta ya no
+// detiene el envío, K11-D1). Se cambia la cuenta con todos sus datos y sin programación.
+async function unschedule(driver: Driver, id: string) {
+  const current = (await call(driver, 'GET', `restaurant/accounts/${id}`)).account as Record<
+    string,
+    unknown
+  >;
+  const body: Record<string, unknown> = { operation_id: randomUUID() };
+  for (const key of [
+    'revision',
+    'name',
+    'mode',
+    'table_id',
+    'price_list_id',
+    'customer_name',
+    'phone',
+    'origin',
+    'notes',
+    'assigned_user_id',
+  ]) {
+    body[key] = current[key] ?? null;
+  }
+  await call(driver, 'PATCH', `restaurant/accounts/${id}`, {
+    ...body,
+    scheduled_local: '',
+    schedule_kind: '',
+  });
+}
+
+// Mañana a la 1 p.m. en la hora local de la computadora, con el formato que pide Go («AAAA-MM-DDTHH:MM»).
+function tomorrowAtOne() {
+  const date = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T13:00`;
+}
+
 async function readAccount(driver: Driver, id: string): Promise<ServerAccount> {
   return (await call(driver, 'GET', `restaurant/accounts/${id}`)).account as ServerAccount;
 }
@@ -195,8 +232,9 @@ test('cuentas y Para llevar: creación diferida, descartar, tarjetas y menú por
   await call(driver, 'POST', 'auth/login', { username: 'admin', password: 'admin' });
   await call(driver, 'PUT', 'terminal/preferences', { keyboard_mode: 'disabled' });
 
-  // 1. Datos por la API. Un producto sin ruta de preparación: su liberación queda bloqueada y la
-  // cuenta muestra «Enviado · sin confirmar en cocina» (como en la instalación real).
+  // 1. Datos por la API. Un producto sin ruta de preparación. Hasta la etapa K1.1 su liberación quedaba bloqueada y la
+  // cuenta mostraba «Enviado · sin confirmar en cocina»; desde la K1.1 (K11-D1) se envía igual y no necesita
+  // preparación, así que esa etiqueta se ve con un pedido para llevar programado al que se le quita la hora (K11-D9).
   const category = await call(driver, 'POST', 'catalog/categories', {
     name: 'Platillos D',
     active: true,
@@ -239,7 +277,7 @@ test('cuentas y Para llevar: creación diferida, descartar, tarjetas y menú por
     productID,
     false,
   );
-  // Mesa D3: un producto enviado, con la liberación bloqueada.
+  // Mesa D3: un producto enviado (sin ruta: no necesita preparación).
   const sent = await openWith(
     driver,
     { mode: 'dine_in', table_id: tables['Mesa D3'] },
@@ -247,7 +285,7 @@ test('cuentas y Para llevar: creación diferida, descartar, tarjetas y menú por
     true,
   );
   // Para llevar: un pedido vacío (como los #5, #8, #9 y #10) y siete enviados para ver cuántas
-  // tarjetas caben.
+  // tarjetas caben. El primero va programado y después se le quita la hora: queda pendiente de enviar a cocina.
   const emptyTakeaway = (
     await call(driver, 'POST', 'restaurant/accounts', {
       operation_id: randomUUID(),
@@ -260,15 +298,29 @@ test('cuentas y Para llevar: creación diferida, descartar, tarjetas y menú por
     takeaways.push(
       await openWith(
         driver,
-        { mode: 'takeaway', origin: 'Para llevar', customer_name: `Cliente D${index}` },
+        {
+          mode: 'takeaway',
+          origin: 'Para llevar',
+          customer_name: `Cliente D${index}`,
+          ...(index === 1
+            ? { scheduled_local: tomorrowAtOne(), schedule_kind: 'preparation' }
+            : {}),
+        },
         productID,
         true,
       ),
     );
   }
+  await unschedule(driver, takeaways[0]!.id);
+  await expect
+    .poll(async () => (await readAccount(driver, takeaways[0]!.id)).preparation_state, {
+      timeout: 20000,
+    })
+    .toBe('pending_release');
+  // Lo sin ruta ya no se detiene (K11-D1): Mesa D3 se envía y, sin nada que preparar, no queda pendiente.
   await expect
     .poll(async () => (await readAccount(driver, sent.id)).preparation_state, { timeout: 20000 })
-    .toBe('pending_release');
+    .toMatch(/^(released|ready)$/);
   await driver.request('POST', 'auth/logout');
 
   await page.setViewportSize({ width: 1280, height: 720 });

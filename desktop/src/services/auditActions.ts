@@ -197,6 +197,8 @@ export const auditActionLabels: Record<string, string> = {
   'inventory.warehouse_updated': 'Almacén modificado',
   'inventory.waste_recorded': 'Merma registrada',
   'kitchen.cancellations.dismissed': 'Cancelaciones vistas en la pantalla de cocina',
+  // Etapa K1.1 (K11-D4): un aviso o un envío de una cuenta que ya no está abierta, dado por terminado.
+  'kitchen.change.dismissed': 'Aviso de cocina sin entregar dado por terminado',
   'kitchen.change.retried': 'Cambio de un pedido reintentado en cocina',
   'kitchen.kds.acknowledged': 'Recepción de la comanda confirmada en cocina',
   'kitchen.print.cash_report_requested': 'Corte de caja enviado a imprimir',
@@ -205,6 +207,7 @@ export const auditActionLabels: Record<string, string> = {
   'kitchen.print.receipt_requested': 'Ticket enviado a imprimir',
   'kitchen.print.test_requested': 'Impresión de prueba solicitada',
   'kitchen.print.width_test_requested': 'Prueba de ancho solicitada',
+  'kitchen.release.dismissed': 'Pedido sin enviar a cocina dado por terminado',
   'kitchen.release.release': 'Pedido liberado a preparación',
   'kitchen.release.schedule': 'Pedido programado',
   'kitchen.route.saved': 'Ruta de preparación guardada',
@@ -215,6 +218,8 @@ export const auditActionLabels: Record<string, string> = {
   'kitchen.station.reordered': 'Estaciones reordenadas',
   'kitchen.station.saved': 'Estación guardada',
   'kitchen.timing.saved': 'Tiempos de preparación guardados',
+  // Etapa K1.1 (K11-D3): el ajuste «Productos sin ruta» de Cocina › Enrutamiento.
+  'kitchen.unrouted.saved': 'Productos sin ruta de cocina actualizado',
   'kitchen_display.seat_taken': 'Pantalla de cocina volvió a ocupar su cupo',
   'kitchen_display.settings_denied': 'Ajustes de la pantalla de cocina rechazados',
   'kitchen_display.settings_opened': 'Ajustes de la pantalla de cocina abiertos',

@@ -16,6 +16,8 @@ import { Select } from '../../components/Select';
 import { PreparationTaskCard } from './PreparationTaskCard';
 import { ScheduleEditor } from './ScheduleEditor';
 import { newArrivals, noCommonStationsMessage } from './preparationModel';
+import { PendingKitchen } from './PendingKitchen';
+import { kitchenCoverageCapability, serverHas } from '../../services/serverCapabilities';
 
 // Preparación en modo cocina (etapa 9F, §5.4): tarjetas legibles a distancia con botones grandes, color
 // por tiempo contra el objetivo (con texto), más antiguas primero, solo las estaciones visibles en esta
@@ -138,16 +140,30 @@ export function PreparationBoard({
           <p>{noCommonStationsMessage(board.station_scope)}</p>
         </section>
       )}
-      {board && (board.releases.length > 0 || board.pending_changes.length > 0) && (
-        <PendingReleases
-          board={board}
-          can={can}
-          execute={execute}
-          busy={busy}
-          changing={changing}
-          onSchedule={setSchedule}
-        />
-      )}
+      {board &&
+        (board.releases.length > 0 || board.pending_changes.length > 0) &&
+        // Etapa K1.1 (K11-D8): «Por enviar a cocina» con un servidor que ya no detiene un envío por un producto
+        // sin ruta; con uno anterior, el panel de siempre.
+        (serverHas(kitchenCoverageCapability) ? (
+          <PendingKitchen
+            board={board}
+            can={can}
+            execute={execute}
+            busy={busy}
+            changing={changing}
+            onSchedule={setSchedule}
+            onChanged={resource.reload}
+          />
+        ) : (
+          <PendingReleases
+            board={board}
+            can={can}
+            execute={execute}
+            busy={busy}
+            changing={changing}
+            onSchedule={setSchedule}
+          />
+        ))}
       {schedule && board && (
         <ScheduleEditor
           key={schedule.id}
@@ -204,8 +220,9 @@ export function PreparationBoard({
   );
 }
 
-// Pedidos pendientes de liberación y avisos de modificación o cancelación por revisar. Son
-// administrativos: Go solo los entrega con kitchen.stations.all, sin depender de la terminal.
+// Pedidos pendientes de liberación y avisos de modificación o cancelación por revisar, con un servidor anterior a
+// la 0.17.0 (sin kitchen-coverage-v1). Son administrativos: Go solo los entrega con kitchen.stations.all, sin
+// depender de la terminal.
 function PendingReleases({
   board,
   can,

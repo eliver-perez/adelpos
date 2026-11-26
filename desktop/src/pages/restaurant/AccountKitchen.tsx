@@ -17,6 +17,21 @@ export function distinctWarnings(warnings: string[]) {
   return Array.from(counts, ([text, count]) => ({ text, count }));
 }
 
+// Título de un envío a cocina de la cuenta. Etapa K1.1 (K11-D8): uno cancelado (sus productos se cancelaron o la
+// cuenta se cerró antes de enviarlo) dice «No se envió a cocina», no «Liberación pendiente».
+export function releaseTitle(release: Pick<Release, 'state'>) {
+  if (release.state === 'released') {
+    return 'Pedido liberado';
+  }
+  if (release.state === 'scheduled') {
+    return 'Pedido programado';
+  }
+  if (release.state === 'cancelled') {
+    return 'No se envió a cocina';
+  }
+  return 'Liberación pendiente';
+}
+
 export function AccountKitchen({
   bill,
   allStations,
@@ -44,22 +59,17 @@ export function AccountKitchen({
       <p>{preparationLabels[bill.account.preparation_state]}</p>
       <Notice>{board.error || releases.error}</Notice>
       {releases.data?.map((release) => (
-        <Accordion
-          key={release.id}
-          title={
-            release.state === 'released'
-              ? 'Pedido liberado'
-              : release.state === 'scheduled'
-                ? 'Pedido programado'
-                : 'Liberación pendiente'
-          }
-          summary={release.created_at}
-        >
-          {distinctWarnings(release.warnings).map((warning) => (
-            <Notice key={warning.text}>
-              {warning.count > 1 ? `${warning.text} (×${warning.count})` : warning.text}
-            </Notice>
-          ))}
+        <Accordion key={release.id} title={releaseTitle(release)} summary={release.created_at}>
+          {/* Etapa K1.1 (K11-D8): un envío cancelado no se mandó; sus advertencias viejas ya no importan. */}
+          {release.state === 'cancelled' ? (
+            <p>Sus productos se cancelaron o la cuenta se cerró antes de enviarlo.</p>
+          ) : (
+            distinctWarnings(release.warnings).map((warning) => (
+              <Notice key={warning.text}>
+                {warning.count > 1 ? `${warning.text} (×${warning.count})` : warning.text}
+              </Notice>
+            ))
+          )}
           <p className="muted">
             El seguimiento y la resolución de impresión se administran en Cocina y preparación.
           </p>
