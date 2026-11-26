@@ -2320,6 +2320,159 @@ summary {
   font-size: 20px;
   color: var(--warning);
 }
+/* Etapa K1.1 (§3, K11-D8): «Por enviar a cocina». Cada pedido dice qué pasa con él y cada botón lleva su texto
+   corto debajo. */
+.kitchen-pending-title {
+  font-size: 16px;
+  font-weight: 700;
+}
+.kitchen-pending-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.kitchen-pending-action {
+  display: flex;
+  flex: 1 1 180px;
+  flex-direction: column;
+  gap: 4px;
+}
+.kitchen-pending-action small {
+  font-size: 12px;
+  line-height: 1.5;
+}
+/* Etapa K1.1 (§4): avisos de la cobertura de Go (Enrutamiento, diagnóstico y resumen del asistente), en ámbar de
+   advertencia, cada uno con el botón que lleva a corregirlo. */
+.kitchen-coverage-warnings {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.kitchen-coverage-warnings li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--warning-soft);
+  border: 1px solid var(--warning-mark);
+  border-radius: 12px;
+}
+.kitchen-unrouted-list {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  background: var(--subtle);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.kitchen-unrouted-list h3,
+.kitchen-diagnostics h3,
+.kitchen-assistant-block h3 {
+  font-size: 15px;
+  font-weight: 700;
+}
+/* Etapa K1.1 (§4.1): asistente de qué recibe una pantalla de cocina, en Sistema › Terminales. */
+.kitchen-assistant {
+  display: grid;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.kitchen-assistant-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.kitchen-assistant-steps li {
+  padding: 6px 12px;
+  font-size: 13px;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+.kitchen-assistant-steps li[aria-current='step'] {
+  font-weight: 700;
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+}
+.kitchen-assistant-block {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  background: var(--subtle);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.kitchen-assistant-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.kitchen-assistant-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.kitchen-assistant-categories {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: 10px;
+}
+.kitchen-assistant-category {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+}
+.kitchen-assistant-warning {
+  font-size: 12px;
+  color: var(--warning);
+}
+.kitchen-assistant-footer {
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+/* Etapa K1.1 (§4.2): diagnóstico en «Ver configuración» de una pantalla de cocina. */
+.kitchen-diagnostics {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+.kitchen-diagnostics-stations {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: 12px;
+}
+.kitchen-diagnostics-stations article {
+  display: grid;
+  gap: 6px;
+  padding: 12px 16px;
+  font-size: 14px;
+  line-height: 1.5;
+  background: var(--subtle);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.kitchen-diagnostics-stations h4 {
+  font-size: 15px;
+  font-weight: 700;
+}
 .user-stations-permission {
   padding: 12px 14px;
   font-size: 13px;

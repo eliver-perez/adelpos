@@ -11,7 +11,7 @@ import { NavigationContext } from '../../navigation/NavigationContext';
 import type { NavigationValue } from '../../navigation/NavigationContext';
 import type { ProductBreakdown } from '../../services/catalog';
 import type { DraftItem } from '../../services/restaurant';
-import { distinctWarnings } from './AccountKitchen';
+import { distinctWarnings, releaseTitle } from './AccountKitchen';
 import { choiceLabel, chosenComplements, describeBreakdown } from './capture/captureRules';
 import { OperationalPage } from './OperationalPage';
 
@@ -1209,6 +1209,12 @@ describe('textos del detalle (§4.4)', () => {
       { text: 'Sin ruta: Filete', count: 2 },
       { text: 'Sin ruta: Agua', count: 1 },
     ]);
+    // Etapa K1.1 (K11-D8): un envío cancelado (sus productos se cancelaron o la cuenta se cerró antes de enviarlo)
+    // dice «No se envió a cocina», no «Liberación pendiente».
+    expect(releaseTitle({ state: 'cancelled' })).toBe('No se envió a cocina');
+    expect(releaseTitle({ state: 'pending' })).toBe('Liberación pendiente');
+    expect(releaseTitle({ state: 'released' })).toBe('Pedido liberado');
+    expect(releaseTitle({ state: 'scheduled' })).toBe('Pedido programado');
   });
 });
 

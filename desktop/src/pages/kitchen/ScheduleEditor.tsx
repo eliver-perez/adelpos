@@ -6,7 +6,8 @@ import { zonedInput } from '../../services/kitchen';
 import type { ExecuteKitchen, Release } from '../../services/kitchen';
 
 // Programación de un pedido pendiente de liberación (administrativa: kitchen.timing.manage y
-// kitchen.stations.all). Se abre desde «Pendientes de liberación y avisos» de Preparación.
+// kitchen.stations.all). Se abre desde el panel de pendientes de Preparación («Por enviar a cocina» › «Cambiar la
+// hora» desde la etapa K1.1; «Pendientes de liberación y avisos» › «Ajustar programación» con un servidor anterior).
 export function ScheduleEditor({
   release,
   current,

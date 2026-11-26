@@ -20,7 +20,8 @@ export interface QuotedDraftLine {
 
 // Estado de cocina de un producto enviado, una sola vez por producto (etapa 9D, §4.4): «Cancelado»;
 // «Enviado · sin confirmar en cocina» si su liberación quedó bloqueada (antes «Pendiente de
-// liberación · revisar cocina», repetido en el encabezado); si no, «En cocina» con su preparación.
+// liberación · revisar cocina», repetido en el encabezado) o, desde la K1.1, si espera a que alguien
+// la envíe a cocina; si no, «En cocina» con su preparación.
 function kitchenState(line: ConfirmedLine) {
   if (line.state === 'cancelled') {
     return { tag: 'Cancelado', tone: 'capture-tag-cancelled', detail: '' };
