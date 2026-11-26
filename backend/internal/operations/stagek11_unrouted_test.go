@@ -10,22 +10,24 @@ import (
 	"local/ad-el-pos/server/internal/catalog"
 	"local/ad-el-pos/server/internal/kitchen"
 	"local/ad-el-pos/server/internal/operations"
+	"local/ad-el-pos/server/internal/payments"
 )
 
-// Etapa K1.1 (Fase 0, prueba de reproducción; §1, §2 y §6 de la especificación) contra PostgreSQL con la API real: la
-// configuración del propietario —estación «Cocina» con recepción «Solo pantalla de cocina», Desayunos y Hamburguesas a
-// Cocina, Refrescos (Coca Cola 600ml) y Extras (Papas a la francesa) sin ruta y una pantalla de cocina con todas las
-// estaciones— y lo que debe pasar con la regla nueva de la §2:
+// Etapa K1.1 (Fase 0, prueba de reproducción, y Fase A; §1, §2, §3 y §6 de la especificación) contra PostgreSQL con la
+// API real: la configuración del propietario —estación «Cocina» con recepción «Solo pantalla de cocina», Desayunos y
+// Hamburguesas a Cocina, Refrescos (Coca Cola 600ml) y Extras (Papas a la francesa) sin ruta y una pantalla de cocina
+// con todas las estaciones— y lo que debe pasar con la regla nueva de la §2 (K11-D1):
 //   - los cuatro pedidos (solo machacado; machacado + hamburguesa; machacado + Coca Cola; machacado + Coca Cola +
 //     papas) llegan a la pantalla con lo que tiene ruta, y la Coca Cola y las papas no aparecen;
-//   - ninguno queda en «Pendientes de liberación y avisos» ni bloqueado, y todas sus unidades se liberan una vez (lo
-//     que no necesita preparación, como hoy una ruta «Sin preparación», sin tarea);
+//   - ninguno queda en «Por enviar a cocina» ni bloqueado, y todas sus unidades se liberan una vez (lo que no necesita
+//     preparación, como una ruta «Sin preparación», sin tarea);
 //   - la tarjeta no se cierra sola por lo que no necesita preparación y el aviso de platillos listos al mesero sale
 //     cuando lo que tiene ruta está listo;
 //   - con una estación que imprime, la comanda impresa lleva solo lo que tiene ruta.
 //
-// Con la 0.16.0 falla en los casos 3 y 4: un solo producto sin ruta deja la liberación entera en «blocked»
-// (kitchen/releases.go, prepareRelease) y la pantalla no recibe nada. Usa su propia base desde cero.
+// Las demás reglas de la Fase A (K11-D1 a K11-D5) están en stagek11_rules_test.go. Con la 0.16.0 fallaba en los casos 3
+// y 4: un solo producto sin ruta dejaba la liberación entera en «blocked» y la pantalla no recibía nada. Usa su propia
+// base desde cero.
 
 type unroutedFixture struct {
 	*kitchenDisplayFixture
@@ -34,6 +36,8 @@ type unroutedFixture struct {
 	hamburguesa catalog.Product
 	coca        catalog.Product
 	papas       catalog.Product
+	// cashMethod es el efectivo, para cobrar las cuentas de las pruebas de pendientes (Fase A).
+	cashMethod string
 }
 
 // product crea una categoría con un solo producto.
@@ -142,6 +146,12 @@ func TestStageK11UnroutedProducts(t *testing.T) {
 	}
 	fixture.display = fixture.kitchenDevice(t, "Tableta de cocina K1.1")
 	fixture.displayCall(t, fixture.display, "POST", "kitchen-display/connect", map[string]any{}, 200)
+	for _, method := range decodeResponse[[]payments.Method](t, fixture.adminCall(t, "GET", "payments/methods", nil, 200)) {
+		if method.Code != nil && *method.Code == "cash" {
+			fixture.cashMethod = method.ID
+		}
+	}
+	fixture.adminCall(t, "POST", "payments/shifts", map[string]any{"operation_id": randomID(), "opening_float": "0"}, 200)
 
 	t.Run("los cuatro pedidos del propietario llegan a la pantalla con lo que tiene ruta", func(t *testing.T) {
 		cases := []struct {
@@ -212,5 +222,40 @@ func TestStageK11UnroutedProducts(t *testing.T) {
             JOIN app.kitchen_releases r ON r.id=t.release_id WHERE r.account_id=$1`, accountID); jobs != 1 {
 			t.Fatalf("trabajos de impresión: %d, esperado 1", jobs)
 		}
+	})
+
+	// Fase A (stagek11_rules_test.go).
+	t.Run("con «Enviar a una estación» la Coca Cola y las papas llegan a esa estación", func(t *testing.T) {
+		testStageK11SendToStation(t, fixture)
+	})
+	t.Run("una modificación sigue la ruta congelada aunque después se configure la ruta", func(t *testing.T) {
+		testStageK11FrozenModification(t, fixture)
+	})
+	t.Run("una ruta a una estación desactivada no detiene lo demás", func(t *testing.T) {
+		testStageK11InactiveStation(t, fixture)
+	})
+	t.Run("una impresora desactivada no detiene nada y la pantalla recibe la comanda", func(t *testing.T) {
+		testStageK11InactivePrinter(t, fixture)
+	})
+	t.Run("combo con componentes sin ruta propia y combo vacío", func(t *testing.T) {
+		testStageK11Combos(t, fixture)
+	})
+	t.Run("al cobrar se da por terminado el aviso pendiente y reabrir no lo revive", func(t *testing.T) {
+		testStageK11PendingOnPayment(t, fixture)
+	})
+	t.Run("un pedido para llevar cobrado y sin entregar sigue abierto; al entregarse se cierra", func(t *testing.T) {
+		testStageK11PendingTakeaway(t, fixture)
+	})
+	t.Run("al cancelar se da por terminado lo no enviado y el aviso pendiente", func(t *testing.T) {
+		testStageK11PendingCancel(t, fixture)
+	})
+	t.Run("combinar conserva el pendiente en la cuenta abierta", func(t *testing.T) {
+		testStageK11PendingMerge(t, fixture)
+	})
+	t.Run("un bloqueado de antes de la 0.17.0 se envía con la regla nueva", func(t *testing.T) {
+		testStageK11OldBlocked(t, fixture)
+	})
+	t.Run("cobertura del enrutamiento con cada aviso y «Productos sin ruta»", func(t *testing.T) {
+		testStageK11Coverage(t, fixture)
 	})
 }
