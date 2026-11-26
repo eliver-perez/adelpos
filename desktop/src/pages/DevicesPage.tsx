@@ -27,6 +27,7 @@ import type { SelectOption } from '../components/Select';
 import { Check } from '../components/catalog/EditorFields';
 import {
   devicePrecheckPrinterCapability,
+  kitchenCoverageCapability,
   kitchenDisplayCapability,
   readyAlertsCapability,
   serverHas,
@@ -41,6 +42,9 @@ import {
   seatsHeldText,
 } from '../services/license';
 import { releaseDeviceSeat } from '../services/licenseOperations';
+import { KitchenDisplayAssistant } from './kitchenDisplay/KitchenDisplayAssistant';
+import type { AssistantStep, AssistantTarget } from './kitchenDisplay/KitchenDisplayAssistant';
+import { KitchenDisplayDiagnostics } from './kitchenDisplay/KitchenDisplayDiagnostics';
 
 // Etapa 9G (fase B, §3.2–§3.4): Sistema › Terminales también recibe las terminales nuevas que piden su
 // código (se aprueban escribiendo el código que muestra la terminal, solo en la computadora principal),
@@ -272,11 +276,14 @@ function PairingRequestItem({
   approveHere,
   canManage,
   onChanged,
+  onApproved,
 }: {
   request: PairingRequest;
   approveHere: boolean;
   canManage: boolean;
   onChanged: () => Promise<void>;
+  // Etapa K1.1 (§4.1): al aprobar una pantalla de cocina se abre el asistente de qué recibe.
+  onApproved?: (request: PairingRequest) => void;
 }) {
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
@@ -289,6 +296,9 @@ function PairingRequestItem({
       await api('approve_device_pairing', { id: request.id, body: { code: digits } });
       notifySuccess(`Terminal ${request.name} aprobada. Se conectará en unos segundos.`);
       setCode('');
+      if (request.device_kind === 'kitchen') {
+        onApproved?.(request);
+      }
     } catch (error) {
       notifyError(error, 'No se pudo aprobar la terminal.');
       setCode('');
@@ -389,9 +399,11 @@ function pairingAddresses(network: NonNullable<PairingRequests['network']>) {
 function PairingRequestsPanel({
   can,
   onChanged,
+  onKitchenApproved,
 }: {
   can: (key: string) => boolean;
   onChanged: () => Promise<void>;
+  onKitchenApproved?: (request: PairingRequest) => void;
 }) {
   const [data, setData] = useState<PairingRequests | null>(null);
   const [error, setError] = useState('');
@@ -471,6 +483,7 @@ function PairingRequestsPanel({
                 await load();
                 await onChanged();
               }}
+              onApproved={onKitchenApproved}
             />
           ))}
         </ul>
@@ -529,7 +542,18 @@ function SessionsSummaryPanel({ reloadKey }: { reloadKey: number }) {
   );
 }
 
-function DeviceConfigurationPanel({ device, onClose }: { device: Device; onClose: () => void }) {
+function DeviceConfigurationPanel({
+  device,
+  can,
+  onClose,
+  onConfigure,
+}: {
+  device: Device;
+  can: (key: string) => boolean;
+  onClose: () => void;
+  // Etapa K1.1: abre el asistente de qué recibe una pantalla de cocina (null sin la capacidad o sin permiso).
+  onConfigure: ((step: AssistantStep) => void) | null;
+}) {
   const configuration = useResource<DeviceConfiguration>('device_configuration', {
     id: device.id,
   });
@@ -538,7 +562,13 @@ function DeviceConfigurationPanel({ device, onClose }: { device: Device; onClose
   const waiterDevice = isWaiterDevice(shown);
   if (isKitchenDisplay(shown)) {
     return (
-      <KitchenDisplayConfiguration shown={shown} configuration={value} onClose={onClose}>
+      <KitchenDisplayConfiguration
+        shown={shown}
+        configuration={value}
+        can={can}
+        onClose={onClose}
+        onConfigure={shown.revoked_at ? null : onConfigure}
+      >
         <Notice>{configuration.error}</Notice>
       </KitchenDisplayConfiguration>
     );
@@ -651,7 +681,8 @@ function DeviceConfigurationPanel({ device, onClose }: { device: Device; onClose
       )}
       {!waiterDevice && (
         <p className="muted pairing-help">
-          Las estaciones y el aviso sonoro se eligen en Cocina › Estaciones › Terminales de cocina.
+          Las estaciones y el aviso sonoro se eligen en Cocina › Estaciones › Computadoras en modo
+          Cocina.
         </p>
       )}
       <button className="secondary-button mt-4" onClick={onClose}>
@@ -666,12 +697,16 @@ function DeviceConfigurationPanel({ device, onClose }: { device: Device; onClose
 function KitchenDisplayConfiguration({
   shown,
   configuration,
+  can,
   onClose,
+  onConfigure,
   children,
 }: {
   shown: Device;
   configuration: DeviceConfiguration | null;
+  can: (key: string) => boolean;
   onClose: () => void;
+  onConfigure: ((step: AssistantStep) => void) | null;
   children: ReactNode;
 }) {
   const settings = shown.kitchen_display;
@@ -733,13 +768,24 @@ function KitchenDisplayConfiguration({
           </div>
         </dl>
       )}
+      {/* Etapa K1.1 (§4.2): qué le llega por estación y los avisos de Go, cada uno con su botón para corregirlo. */}
+      {onConfigure && (
+        <KitchenDisplayDiagnostics deviceId={shown.id} can={can} onConfigure={onConfigure} />
+      )}
       <p className="muted pairing-help">
         Los colores por tiempo de espera de todas las pantallas se eligen en Cocina › Comandas y
         tiempos.
       </p>
-      <button className="secondary-button mt-4" onClick={onClose}>
-        Cerrar configuración
-      </button>
+      <div className="button-row mt-4">
+        {onConfigure && (
+          <button className="primary-button" onClick={() => onConfigure(1)}>
+            Configurar qué recibe
+          </button>
+        )}
+        <button className="secondary-button" onClick={onClose}>
+          Cerrar configuración
+        </button>
+      </div>
     </section>
   );
 }
@@ -1152,7 +1198,7 @@ function DeviceEditor({
           {!android && (
             <small className="muted">
               Con «Cocina» abre en Preparación. Las estaciones que muestra y el aviso sonoro se
-              eligen en Cocina › Estaciones › Terminales de cocina.
+              eligen en Cocina › Estaciones › Computadoras en modo Cocina.
             </small>
           )}
         </div>
@@ -1186,6 +1232,8 @@ export function DevicesPage({
   const registers = useResource<Register[]>('registers', { enabled: can('registers.read') });
   const [editing, setEditing] = useState<Device | null>(null);
   const [viewing, setViewing] = useState<Device | null>(null);
+  // Etapa K1.1 (§4.1): el asistente de qué recibe una pantalla de cocina (al aprobarla o con «Configurar qué recibe»).
+  const [assistant, setAssistant] = useState<AssistantTarget | null>(null);
   const [invite, setInvite] = useState<{ code: string; expires_at: string } | null>(null);
   const [busy, setBusy] = useState(false);
   // Etapa L1: los cupos se vuelven a consultar después de «Liberar cupo».
@@ -1193,6 +1241,13 @@ export function DevicesPage({
   const { confirm, dialog } = useConfirmDialog();
   const reloadDevices = devices.reload;
   const showSeats = serverHas(licenseCapability);
+  // La cobertura de Go la lee quien ve las estaciones de cocina; cada paso del asistente pide además su permiso.
+  const showCoverage = serverHas(kitchenCoverageCapability) && can('kitchen.stations.read');
+  function configure(target: AssistantTarget) {
+    setViewing(null);
+    setEditing(null);
+    setAssistant(target);
+  }
   // La lista se vuelve a consultar sola: estado en línea, usuario actual y terminales recién aprobadas.
   useEffect(() => {
     const timer = window.setInterval(() => void reloadDevices(), devicesRefreshMilliseconds);
@@ -1293,7 +1348,13 @@ export function DevicesPage({
           </button>
         )}
       </PageTitle>
-      <PairingRequestsPanel can={can} onChanged={reloadDevices} />
+      <PairingRequestsPanel
+        can={can}
+        onChanged={reloadDevices}
+        onKitchenApproved={
+          showCoverage ? (request) => configure({ deviceId: null, name: request.name }) : undefined
+        }
+      />
       <SessionsSummaryPanel reloadKey={seatsVersion} />
       <Notice>{devices.error || registers.error}</Notice>
       {invite && (
@@ -1309,6 +1370,14 @@ export function DevicesPage({
             Ocultar código
           </button>
         </section>
+      )}
+      {assistant && (
+        <KitchenDisplayAssistant
+          key={`${assistant.deviceId ?? 'nueva'}-${assistant.name}-${assistant.step ?? 1}`}
+          target={assistant}
+          can={can}
+          onClose={() => setAssistant(null)}
+        />
       )}
       {editing && (
         <>
@@ -1337,7 +1406,13 @@ export function DevicesPage({
         <DeviceConfigurationPanel
           key={viewing.id}
           device={viewing}
+          can={can}
           onClose={() => setViewing(null)}
+          onConfigure={
+            showCoverage
+              ? (step) => configure({ deviceId: viewing.id, name: viewing.name, step })
+              : null
+          }
         />
       )}
       <div className="surface table-container">
@@ -1398,6 +1473,14 @@ export function DevicesPage({
                       <button className="secondary-button" onClick={() => setViewing(device)}>
                         Ver configuración
                       </button>
+                      {showCoverage && isKitchenDisplay(device) && !device.revoked_at && (
+                        <button
+                          className="secondary-button"
+                          onClick={() => configure({ deviceId: device.id, name: device.name })}
+                        >
+                          Configurar qué recibe
+                        </button>
+                      )}
                       {showSeats &&
                         can('devices.manage') &&
                         !device.revoked_at &&

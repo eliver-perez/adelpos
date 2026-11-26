@@ -242,7 +242,7 @@ describe('Terminales: cada tipo solo ve lo que le aplica (etapa A3, §5)', () =>
       'Aviso sonoro de comandas nuevas',
       'Impresoras de esta terminal',
       'Impresoras de la computadora',
-      'Terminales de cocina',
+      'Computadoras en modo Cocina',
     ]) {
       expect(panel.textContent).not.toContain(missing);
     }
@@ -259,7 +259,7 @@ describe('Terminales: cada tipo solo ve lo que le aplica (etapa A3, §5)', () =>
       'Aviso sonoro de comandas nuevas',
       'Impresoras de esta terminal',
       'Impresoras de la computadora',
-      'Terminales de cocina',
+      'Computadoras en modo Cocina',
     ]) {
       expect(panel.textContent).toContain(present);
     }
