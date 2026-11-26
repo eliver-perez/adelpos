@@ -929,3 +929,108 @@ contrato, «Quitar datos de prueba» y las pruebas) lo comprueba la regresión c
   25/11/2026, y la base ya tiene actividad del día en curso. La Fase A comprobó que falla igual en `e73b921`, así que no
   viene de esta etapa. La Fase D corrige **solo la prueba**, con fechas relativas a la hora actual, sin tocar el código
   de la licencia.
+
+## Fase C · Aplicación de cocina
+
+Sin trabajo (K11-D10). `git diff --stat 310d7d7 -- android cocina android-core` está vacío al cerrar la etapa: cocina
+0.1.0 y meseros 0.4.1 sin cambio, sin APK nuevo y sin corridas en emuladores.
+
+## Fase D · Versión 0.17.0, documentación, regresión completa y `.pkg` (§7)
+
+Agente D, 26/11/2026, en `$SP/wt/k11-d` (rama `etapa-k1-1-d`, desde `etapa-k1-1` `d7c3734`), solo. Recursos:
+`ISO_TAG=D`; Playwright con el Go temporal en 8231, la vista previa en 1461, el simulador de licencias en 8511 y el Go
+sin activar en 8233; un Go limpio por motor en 8232/8502 (para las cuatro de «instalación limpia» de la 9H). Sin
+emuladores ni Android (K11-D10). Los guiones y registros (fuera del repositorio) están en `$SP/k11/D/`. El detalle
+completo, con el `.pkg`, está en [VERIFICATION_STAGEK1_1.md](VERIFICATION_STAGEK1_1.md).
+
+### Qué se hizo
+
+1. **Versión** (`f26eda3`): `config/product.json` en **0.17.0** con `node scripts/sync-metadata.mjs`
+   (`metadata.json`, la copia generada, `package.json`, `tauri.conf.json`, `Cargo.toml`) y los dos lockfile;
+   `schema_version` 30 (Fase A) y `min_client_versions` sin cambio. Meseros 0.4.1 y cocina 0.1.0 sin cambio:
+   `git diff --stat 310d7d7 -- android cocina android-core` está vacío. Los demás «0.16.0» del código son la versión
+   mínima del servidor que pide la aplicación de cocina, versiones de cliente de las pruebas o historia, y no cambian.
+2. **K11-D23** (`f3530cb`): `TestDatabaseTrustedTimeCopy` (`licensing/datapresence_integration_test.go:203`) con horas
+   relativas a la hora actual (el reloj simulado dos días adelante, la hora anterior cuatro días antes), comprobando lo
+   mismo; el código de la licencia no cambia. Antes fallaba en el árbol con «cada minuto la copia sube con el reloj:
+   {… Source:audit}». Se revisaron con `grep` las demás pruebas con fechas fijas de noviembre de 2026: ninguna depende de
+   que la hora real sea anterior a sus fechas (ver la verificación) y ninguna falló.
+3. **Documentación** (`07d4778`):
+   - `docs/COCINA_INSTALAR.md`: la sección 4 nueva («Que los pedidos lleguen a la pantalla»: con el asistente, los pasos
+     en orden sin él, «Productos sin ruta» y qué hacer con cada aviso del diagnóstico y de Enrutamiento), el paso 7 del
+     emparejamiento y «si un pedido no llega»; las secciones siguientes se renumeraron.
+   - `docs/KITCHEN_AND_PRINTING.md`: la sección «Pedidos mixtos y productos sin ruta · etapa K1.1» (la causa, la regla,
+     el ajuste, la cobertura con sus seis avisos, lo pendiente de cuentas que ya no están abiertas, el panel «Por enviar
+     a cocina» con cada caso y botón, la configuración guiada, la `0030` y las limitaciones) y, como historia, lo que dejó
+     de ser cierto («Enrutamiento y liberación», «Configuración inicial» pasos 3 y 5, «Documentos», la 9D, la impresora
+     inactiva de la 9F y «Computadoras en modo Cocina»).
+   - `CLAUDE.md`: la última revisión y las versiones, §3 (arquitectura y composición del backend), §4 (la `0030`), §6
+     (pruebas de la K1.1 y la regla de las fechas de K11-D23), §11–12 («Configuración guiada de cocina» y «Reglas
+     permanentes desde la etapa K1.1»), §15, §19 y §20 (la siguiente migración es la `0031`).
+   - `API_CONTRACTS.md` con la sección de la K1.1, y los nombres y versiones que cambiaron en `README.md`,
+     `docs/API_V1.md`, `docs/TERMINAL_DE_COCINA.md`, `docs/INVENTORY_AND_PURCHASING.md`,
+     `docs/licencias/PASO_A_PRODUCCION.md` e `INTEGRACION.md`. `cocina/CLAUDE.md` no cambia: nada de lo que dice dejó de
+     ser cierto.
+4. **Regresión completa, una sola vez**, sobre una copia exacta de `07d4778` (abajo).
+5. **`.pkg` 0.17.0** sobre una copia exacta de `07d4778` (después solo cambió Markdown): `desktop/src-tauri/target/release/bundle/macos-pkg/AD-EL POS_0.17.0.pkg`, 24 019 520 bytes, SHA-256
+   `14c23297624464066b8784e5bdb03249b141247cca182d74dee3b63737b66d7f` (copia también en `$SP/`). Comprobado con
+   `pkgutil --expand-full` (los tres paquetes 0.17.0, «Servidor del restaurante» marcada, arm64, el servidor de dentro
+   dice 0.17.0 con el esquema 30 y la `0030` embebida, scripts idénticos), `codesign --verify --deep --strict` (ad hoc,
+   válida), sin `-tags` de producción, con el `kid` `adelpos-test-202611-1`, y sin nada de `vectors.json`, `.lic`,
+   `.licreq`, `.pem`, `.key` ni llaves privadas. Los `.pkg` de 0.10.0 a 0.16.0 conservan su SHA-256.
+6. **Verificación** (`docs/VERIFICATION_STAGEK1_1.md`), la fila de la K1.1 en `CLAUDE.md` §13–14 y la referencia en §18
+   (`4e64b38`, último commit de la fase).
+
+### Decisiones propuestas
+
+- **Decisión propuesta · la carrera de `workflow-stage9d-accounts` se repite, no se corrige.** Es la misma que la K1
+  anotó en WebKit (K1-D39): la página entra y la prueba vuelve a entrar por la API con la misma terminal; una petición
+  de la página en camino recibe `SESSION_REPLACED`. Esa parte es de la 9D (la Fase B no la tocó). _Por qué_: el encargo
+  pide repetir una carrera de la prueba; si se repite en otra etapa, conviene que la prueba entre por la API antes de
+  entrar por la página.
+- **Observación para el coordinador** (fuera del alcance de la etapa, sin cambio): las capturas de Preparación muestran
+  la etiqueta «Liberado a preparación» en cada tarjeta y «No hay unidades de preparación en este filtro.», textos de la
+  9F parecidos a los que el propietario no entendió.
+
+### Pruebas realmente ejecutadas
+
+Sobre la copia exacta de `07d4778` (salvo donde se dice), el 26/11/2026 de 11:33 a 12:55:
+
+| Prueba                                                                                               | Resultado                                                                                                                                                                                                                |
+| ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `TestDatabaseTrustedTimeCopy` antes de corregirla (árbol, `f26eda3`)                                 | Falla: «cada minuto la copia sube con el reloj: {… Source:audit}»                                                                                                                                                        |
+| `go-int ./internal/licensing` con la prueba corregida (árbol, `f3530cb`)                             | Aprobado (20 s)                                                                                                                                                                                                          |
+| `fmt-check` y `sync-check`                                                                           | Aprobados en la copia y en el árbol antes de cada commit («Metadatos coherentes.», 0.17.0 y esquema 30)                                                                                                                  |
+| `go-unit` (vet normal e `integration`, `test -race`, `GOOS=windows` build y vet)                     | Aprobado (55 s): 39 paquetes `ok`, 7 sin pruebas de unidad                                                                                                                                                               |
+| `go vet -tags 'integration legacydocker'`, macOS y `GOOS=windows`                                    | Aprobado                                                                                                                                                                                                                 |
+| `go-int` de los 16 paquetes de `scripts/database.py` y `./internal/kitchen` (`./cmd` con el candado) | **17 de 17 a la primera** (`operations` 809 s, `administration` 296 s, `reports` 149 s, `./cmd/ad-el-pos-server` 67 s; los demás, de 3 a 56 s)                                                                           |
+| `cargo` (`cargo test --locked --offline`)                                                            | 122 aprobadas, 4 ignoradas                                                                                                                                                                                               |
+| `vitest` (`tsc` + Vitest)                                                                            | 110 archivos, 1 049 de 1 049                                                                                                                                                                                             |
+| `build`                                                                                              | Aprobado (el aviso de tamaño de siempre)                                                                                                                                                                                 |
+| `scripts/macos-pkg/test-scripts.sh` y `bash -n`                                                      | 31 comprobaciones correctas; `bash -n` sin errores                                                                                                                                                                       |
+| Playwright Chromium completo (55 pruebas, 43 especificaciones)                                       | 1.ª corrida: 21 de 55 (la carrera de `workflow-stage9d-accounts`, `SESSION_REPLACED`, y 33 en cascada). **2.ª corrida completa, sin cambios: 55 de 55** (26,9 min), con las 4 de «instalación limpia» y las 2 de la K1.1 |
+| Playwright WebKit completo                                                                           | **55 de 55 a la primera** (26,8 min)                                                                                                                                                                                     |
+| Pantalla de la Mac antes y después de cada corrida de Playwright                                     | Desbloqueada                                                                                                                                                                                                             |
+| Capturas de la K1.1 en tema claro (las 16 de la B y las de esta regresión en `$SP/k11/D/capturas-*`) | Revisadas: textos sencillos; Enrutamiento ya sin «por ahora»                                                                                                                                                             |
+| `.pkg` 0.17.0 (`build-macos-pkg` en una copia exacta de `07d4778`)                                   | Construido y comprobado (arriba); los anteriores sin cambio                                                                                                                                                              |
+| md5 de `docs/etapas/`, `docs/licencias/CONTRATO*` y `contracts/`                                     | Iguales antes y después (la especificación, `9363961a…`)                                                                                                                                                                 |
+| `git diff --stat 310d7d7 -- android cocina android-core`                                             | Vacío: sin Android (K11-D10)                                                                                                                                                                                             |
+
+### No verificado
+
+- Android (sin cambios, K11-D10), una tableta real, la comanda en papel, la ventana nativa y Windows (solo
+  `GOOS=windows`); el aviso pendiente real para una estación desactivada en Playwright; el `.pkg` instalado (parada del
+  propietario); las cifras de la Mac (no se leyó la instalación real).
+
+## Cierre del coordinador
+
+- **K11-D24. La carrera de `workflow-stage9d-accounts` se repite, no se corrige** (Decisión propuesta de la Fase D,
+  aceptada). Es la de K1-D39: la página entra y enseguida la prueba vuelve a entrar por la API con la misma terminal, y
+  una petición de la página en camino recibe `SESSION_REPLACED`. Esa parte de la prueba viene de la 9D y esta etapa no la
+  tocó. Si vuelve a ocurrir en otra etapa, la prueba debe entrar por la API antes de entrar por la página.
+- **K11-D25. Los textos de Preparación de la 9F quedan fuera de esta etapa.** «Liberado a preparación» y «No hay
+  unidades de preparación en este filtro.» se parecen a los que el propietario no entendió, pero la especificación no
+  los pide. Quedan anotados para una etapa siguiente.
+- **Fusión**: `etapa-k1-1-d` avanzó `etapa-k1-1` hasta `4e64b38` sin conflictos; después, este cierre del avance y la
+  fusión con `main`. El `.pkg` 0.17.0 (SHA-256 `14c23297624464066b8784e5bdb03249b141247cca182d74dee3b63737b66d7f`) queda
+  listo; instalarlo es la parada del propietario.
