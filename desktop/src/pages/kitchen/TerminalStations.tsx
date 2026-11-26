@@ -8,11 +8,12 @@ import { useLiveResource } from '../../hooks/useLiveResource';
 import { terminalHomes } from '../../navigation/sections';
 import type { DeviceScope, ExecuteKitchen, Station } from '../../services/kitchen';
 
-// «Terminales de cocina» (etapa 9F, §5.1 y decisión D6): por terminal, las estaciones que muestra
-// (todas, la opción predeterminada, o una selección) y el aviso sonoro al llegar una comanda nueva. Lo
-// que se ve en Cocina es la intersección con las estaciones que atiende cada usuario (Personal ›
-// Usuarios). Vive en Cocina › Estaciones, junto a las estaciones, con kitchen.stations.manage; la
-// pantalla de inicio de la terminal sigue en Sistema › Terminales.
+// «Computadoras en modo Cocina» (etapa 9F, §5.1 y decisión D6; antes «Terminales de cocina», etapa K1.1, K11-D7):
+// por computadora, las estaciones que muestra (todas, la opción predeterminada, o una selección) y el aviso sonoro al
+// llegar una comanda nueva. Lo que se ve en Cocina es la intersección con las estaciones que atiende cada usuario
+// (Personal › Usuarios). Vive en Cocina › Estaciones, junto a las estaciones, con kitchen.stations.manage; la
+// pantalla de inicio de la terminal sigue en Sistema › Terminales, igual que las pantallas de cocina (tabletas)
+// desde la etapa K1.
 export function TerminalStations({
   stations,
   execute,
@@ -41,9 +42,12 @@ export function TerminalStations({
 
   return (
     <Accordion
-      title="Terminales de cocina"
+      title="Computadoras en modo Cocina"
       summary="Estaciones que muestra cada terminal y aviso sonoro"
     >
+      <p className="muted text-sm">
+        Las pantallas de cocina (tabletas) se configuran en Sistema › Terminales.
+      </p>
       <Notice>{resource.error}</Notice>
       <ReferenceField
         optional

@@ -4,9 +4,11 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DeviceScope, Station } from '../../services/kitchen';
 import { chooseOption, optionLabels } from '../../testing/select';
+import { StationsAdmin } from './StationsAdmin';
 import { TerminalStations } from './TerminalStations';
 
-// Etapa 9F, fase C (§5.1): «Terminales de cocina» en Cocina › Estaciones. Por terminal, «Mostrar todas
+// Etapa 9F, fase C (§5.1): «Terminales de cocina» en Cocina › Estaciones (desde la K1.1, K11-D7, «Computadoras en
+// modo Cocina», con la línea que dice dónde se configuran las tabletas). Por terminal, «Mostrar todas
 // las estaciones» (predeterminada) o una selección con el selector múltiple, y el aviso sonoro; lo
 // guardado viaja a Go con la configuración que se leyó para rechazar una edición concurrente.
 
@@ -67,7 +69,7 @@ afterEach(() => {
 });
 
 async function chooseTerminal(name: string) {
-  fireEvent.click(screen.getByRole('button', { name: /Terminales de cocina/ }));
+  fireEvent.click(screen.getByRole('button', { name: /Computadoras en modo Cocina/ }));
   const terminal = screen.getByRole('combobox', { name: 'Terminal' });
   await waitFor(() => expect(optionLabels(terminal)).toContain(name));
   chooseOption(terminal, name);
@@ -88,6 +90,9 @@ describe('terminales de cocina', () => {
     );
     render(<TerminalStations stations={stations} execute={execute as never} busy={false} />);
     await chooseTerminal('Caja principal');
+    expect(
+      screen.getByText('Las pantallas de cocina (tabletas) se configuran en Sistema › Terminales.'),
+    ).toBeTruthy();
     expect(
       screen.getByText(
         'Esta terminal abre en Mesas. Para que abra directo en Cocina › Preparación, elige «Cocina» como pantalla inicial en Sistema › Terminales.',
@@ -144,5 +149,26 @@ describe('terminales de cocina', () => {
         expected_station_ids: ['s-barra'],
       },
     });
+  });
+});
+
+// Etapa K1.1 (§4.4, K11-D7): la recepción en pantalla se explica en lenguaje sencillo.
+describe('recepción en la pantalla de cocina', () => {
+  it('la estación que recibe en pantalla lo explica sin hablar de confirmaciones', async () => {
+    native.invoke.mockImplementation(async (command: string, args: { operation: string }) => {
+      if (command === 'api_request' && args.operation === 'kitchen_stations') {
+        return { status: 200, body: stations };
+      }
+      return { status: 200, body: [] };
+    });
+    render(<StationsAdmin can={() => true} execute={vi.fn() as never} busy={false} />);
+    fireEvent.click(await screen.findByRole('button', { name: /^Barra/ }));
+    expect(
+      await screen.findByText(
+        'Las pantallas de cocina muestran estos pedidos al momento. En Comandas se ve si la pantalla ya los recibió.',
+      ),
+    ).toBeTruthy();
+    expect(document.body.textContent).not.toContain('queda pendiente hasta que');
+    expect(screen.getByRole('button', { name: /Computadoras en modo Cocina/ })).toBeTruthy();
   });
 });
