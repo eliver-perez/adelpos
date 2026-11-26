@@ -84,6 +84,8 @@ type Plan struct {
 	allStationsDevices []string
 	// userLinks: algún usuario atendía una estación de prueba (etapa 9F, «Estaciones que puede atender»).
 	userLinks bool
+	// unroutedStation: «Productos sin ruta» iba a una estación de prueba (etapa K1.1, K11-D3).
+	unroutedStation bool
 }
 
 // Referencias que el plan maneja por su cuenta: configuración que se borra junto con el dato o que se
@@ -100,6 +102,8 @@ var (
 		{table: "kitchen_device_stations", column: "station_id"}:      true,
 		{table: "kitchen_user_stations", column: "station_id"}:        true,
 		{table: "inventory_station_warehouses", column: "station_id"}: true,
+		// Etapa K1.1 (K11-D3): la estación de «Productos sin ruta» se desvincula (decideUnroutedStation).
+		{table: "kitchen_settings", column: "unrouted_station_id"}: true,
 	}
 	printerHandled = map[reference]bool{
 		{table: "kitchen_printers", column: "fallback_id"}:        true,
@@ -227,7 +231,10 @@ func (builder *planBuilder) build() error {
 	if err := builder.decideDeviceLinks(); err != nil {
 		return err
 	}
-	return builder.decideUserLinks()
+	if err := builder.decideUserLinks(); err != nil {
+		return err
+	}
+	return builder.decideUnroutedStation()
 }
 
 func (builder *planBuilder) testPrinters() ([]printerRow, error) {
@@ -873,6 +880,36 @@ func (builder *planBuilder) decideUserLinks() error {
 		})
 	}
 	return rows.Err()
+}
+
+// decideUnroutedStation (etapa K1.1, K11-D3): si «Productos sin ruta» va a una estación de prueba, el ajuste vuelve a
+// «No necesitan preparación» antes de quitarla (la llave foránea impediría borrarla) y la vista previa lo dice en «Se
+// desvinculará». Vale también para una estación de prueba que se conserva desactivada, como sus rutas y sus terminales:
+// el ajuste nunca queda apuntando a un dato de prueba.
+func (builder *planBuilder) decideUnroutedStation() error {
+	plan := builder.plan
+	if len(plan.testStations) == 0 {
+		return nil
+	}
+	var stationID, stationName string
+	err := builder.tx.QueryRow(builder.ctx, `SELECT s.id::text, s.name FROM app.kitchen_settings k
+        JOIN app.kitchen_stations s ON s.id = k.unrouted_station_id
+        WHERE s.id::text = ANY($1::text[])`, list(plan.testStations)).Scan(&stationID, &stationName)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	plan.unroutedStation = true
+	plan.Unlink = append(plan.Unlink, Entry{
+		Kind: KindSetting,
+		ID:   "unrouted:" + stationID,
+		Name: "Productos sin ruta",
+		Reason: fmt.Sprintf("Iban a la estación de prueba «%s»; no necesitarán preparación hasta que elijas otra estación.",
+			stationName),
+	})
+	return nil
 }
 
 // list evita pasar un arreglo nulo a PostgreSQL: «x = ANY(NULL)» es NULL y «NOT (x = ANY(NULL))» también

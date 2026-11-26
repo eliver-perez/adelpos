@@ -68,7 +68,7 @@ confiable o de otra instalación se ignora y queda la última licencia válida.
 ### El entorno, fijado al compilar (L1-D18)
 
 - **Desarrollo** (sin etiqueta): confía en las llaves del entorno `test` (`config/licencias/llaves-test.json`) y apunta a
-  `https://licensing.sicrat.com`. Es la versión de esta etapa y la de los `.pkg` 0.15.0 y 0.16.0 (etapa K1).
+  `https://licensing.sicrat.com`. Es la versión de esta etapa y la de los `.pkg` 0.15.0, 0.16.0 (etapa K1) y 0.17.0 (etapa K1.1).
 - **Producción** (`-tags adelpos_production`): confía en `llaves-production.json` y en `soporte-production.pub.json`,
   que todavía no existen, así que **no compila** (`TestProductionBuildFailsWithoutProductionKeys`). Ver
   [PASO_A_PRODUCCION.md](PASO_A_PRODUCCION.md).

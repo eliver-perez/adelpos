@@ -81,6 +81,12 @@ func (handler *service) createRelease(eventID, accountID, orderID string, unitID
 	return readRelease(handler.ctx, handler.tx, release.ID)
 }
 
+// prepareRelease manda a la cocina lo que todavía no recibió de una liberación. Desde la etapa K1.1 (K11-D1) un envío
+// nunca se detiene por la configuración: lo que tiene ruta llega a sus estaciones activas; lo que no (o lo que solo
+// iba a estaciones desactivadas) sigue el ajuste «Productos sin ruta»; una impresora desactivada no detiene nada (el
+// trabajo queda en «Requiere intervención», enqueueJob, y con «Impresora y pantalla» la pantalla lo recibe igual). Toda
+// unidad activa se libera una sola vez, con o sin tarea, como con «Sin preparación». Ya no escribe «blocked»: ese
+// valor queda solo en las liberaciones anteriores a la 0.17.0.
 func (handler *service) prepareRelease(release *Release) error {
 	if release.State == "released" || release.State == "cancelled" {
 		return nil
@@ -91,7 +97,6 @@ func (handler *service) prepareRelease(release *Release) error {
 	}
 	versions := map[string]*versionSnapshot{}
 	plan := []preparedUnit{}
-	warnings := []string{}
 	routingSnapshot := map[string]Route{}
 	stationSnapshot := map[string]Station{}
 	for _, unit := range units {
@@ -117,28 +122,13 @@ func (handler *service) prepareRelease(release *Release) error {
 		if err != nil {
 			return err
 		}
-		warnings = append(warnings, routing.Warnings...)
 		for id, route := range routing.Snapshot {
 			routingSnapshot[id] = route
 		}
 		for _, station := range routing.Stations {
 			stationSnapshot[station.ID] = station
-			if station.Reception != "kds" {
-				printer, err := one[Printer](handler.ctx, handler.tx, "SELECT to_jsonb(p) FROM app.kitchen_printers p WHERE id=$1", station.PrinterID)
-				if err != nil {
-					return err
-				}
-				if !printer.Active {
-					warnings = append(warnings, "Impresora inactiva: "+printer.Name)
-				}
-			}
 		}
 		plan = append(plan, preparedUnit{Unit: unit, Version: version, Routing: routing})
-	}
-	if len(warnings) > 0 {
-		_, err := handler.tx.Exec(handler.ctx, `UPDATE app.kitchen_releases SET state='blocked',warnings=$1,
-            revision=revision+1 WHERE id=$2`, encoded(warnings), release.ID)
-		return err
 	}
 	if len(plan) == 0 {
 		_, err := handler.tx.Exec(handler.ctx, "UPDATE app.kitchen_releases SET state='cancelled',revision=revision+1 WHERE id=$1", release.ID)
@@ -205,6 +195,18 @@ func (handler *service) releaseAction(id, action string) (any, error) {
 	release, err := readRelease(handler.ctx, handler.tx, id)
 	if err != nil {
 		return nil, err
+	}
+	// Etapa K1.1 (K11-D4): «Enviar a cocina ahora» de algo que ya no está pendiente (ya enviado, cancelado o de una cuenta
+	// que ya no está abierta) responde 409 en lugar de 200 sin hacer nada, o de mandar a la cocina el pedido de una cuenta
+	// ya cobrada. Va antes de la revisión: quien vio el pedido pendiente recibe por qué ya no lo está.
+	if action == "release" {
+		pending, err := releaseStillPending(handler.ctx, handler.tx, release.ID)
+		if err != nil {
+			return nil, err
+		}
+		if !pending {
+			return nil, releaseNotPending()
+		}
 	}
 	if release.Revision != input.Revision {
 		return nil, conflict()
@@ -323,6 +325,14 @@ func Integrate(ctx context.Context, tx pgx.Tx, eventID, accountID, kind string, 
 		}
 		if err := handler.integrateChange(eventID, accountID, kind, change.After); err != nil {
 			return err
+		}
+		// Etapa K1.1 (K11-D2 y K11-D4): una cuenta cancelada no deja nada por enviar a cocina. Lo que la cocina nunca
+		// recibió se cancela y el aviso pendiente (también el de esta cancelación, si una estación desactivada tenía la
+		// comanda) se da por terminado, con su historial.
+		if kind == "account.cancelled" {
+			if err := handler.dismissAccountPending(accountID, dismissedAccountCancelled); err != nil {
+				return err
+			}
 		}
 		handler.notePreparationAccount(accountID)
 	case "account.updated":

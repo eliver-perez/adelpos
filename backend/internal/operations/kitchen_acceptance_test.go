@@ -44,6 +44,20 @@ func kitchenTasks(t *testing.T, fixture *restaurantFixture) []kitchen.Task {
 	}](t, fixture.adminCall(t, "GET", "kitchen/board?state=all", nil, 200))
 	return result.Tasks
 }
+
+// accountUnitReleases cuenta las liberaciones canónicas de las unidades de la cuenta. Desde la etapa K1.1 (K11-D1) los
+// pedidos sin ruta de las pruebas anteriores del mismo recorrido también se liberan (sin tarea, «No necesitan
+// preparación»), así que ya no se cuentan las de toda la base.
+func accountUnitReleases(t *testing.T, fixture *restaurantFixture, accountID string) int {
+	t.Helper()
+	var count int
+	if err := fixture.pool.QueryRow(fixture.ctx, `SELECT count(*) FROM app.kitchen_unit_releases k
+        JOIN app.restaurant_item_units u ON u.id=k.unit_id WHERE u.account_id=$1`, accountID).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	return count
+}
+
 func kitchenReleases(t *testing.T, fixture *restaurantFixture, bill operations.Bill) []kitchen.Release {
 	t.Helper()
 	return decodeResponse[[]kitchen.Release](t, fixture.adminCall(t, "GET", "kitchen/releases?account_id="+bill.Account.ID, nil, 200))
@@ -106,7 +120,7 @@ func testKitchenAcceptance(t *testing.T, fixture *restaurantFixture) {
 		if bill.Account.Totals.Total != "200.00" || bill.Account.PreparationState != "released" {
 			t.Fatalf("No se integró preparación: %+v", bill.Account)
 		}
-		if kitchenCount(t, fixture, "kitchen_unit_releases") != 2 || len(kitchenTasks(t, fixture)) != 4 || kitchenCount(t, fixture, "kitchen_print_jobs") != jobsBefore+2 {
+		if accountUnitReleases(t, fixture, bill.Account.ID) != 2 || len(kitchenTasks(t, fixture)) != 4 || kitchenCount(t, fixture, "kitchen_print_jobs") != jobsBefore+2 {
 			t.Fatal("Se duplicó la venta/liberación o no se separaron las estaciones que comparten impresora")
 		}
 		release = kitchenReleases(t, fixture, bill)[0]
@@ -117,8 +131,9 @@ func testKitchenAcceptance(t *testing.T, fixture *restaurantFixture) {
 		if !strings.Contains(documentText, "Guarniciones") || !strings.Contains(documentText, "Café y ñ; sin sal") {
 			t.Fatal("La comanda no conservó los complementos o las observaciones históricas")
 		}
-		fixture.mutate(t, "POST", "kitchen/releases/"+release.ID+"/release", map[string]any{"revision": release.Revision}, 200)
-		if kitchenCount(t, fixture, "kitchen_print_jobs") != jobsBefore+2 {
+		// Etapa K1.1 (K11-D4): liberar otra vez lo ya enviado responde 409 en lugar de 200 sin hacer nada.
+		again := fixture.mutate(t, "POST", "kitchen/releases/"+release.ID+"/release", map[string]any{"revision": release.Revision}, 409)
+		if errorCode(t, again) != "KITCHEN_RELEASE_NOT_PENDING" || kitchenCount(t, fixture, "kitchen_print_jobs") != jobsBefore+2 {
 			t.Fatal("Liberar otra vez duplicó comandas")
 		}
 	})
@@ -151,7 +166,7 @@ func testKitchenAcceptance(t *testing.T, fixture *restaurantFixture) {
 		bill = decodeResponse[operations.Bill](t, fixture.mutate(t, "POST", "restaurant/accounts/"+bill.Account.ID+"/cancel", map[string]any{
 			"revision": bill.Account.Revision, "version_id": bill.Lines[0].VersionID, "quantity": 1, "reason": "Cliente canceló una unidad",
 		}, 200))
-		if kitchenCount(t, fixture, "kitchen_unit_releases") != 2 {
+		if accountUnitReleases(t, fixture, bill.Account.ID) != 2 {
 			t.Fatal("Cancelar perdió el punto histórico de liberación")
 		}
 		var cancelled int
@@ -191,7 +206,7 @@ func testKitchenAcceptance(t *testing.T, fixture *restaurantFixture) {
 		if adapter.jobs[len(adapter.jobs)-1].Content != original.Content || copyJob.ID == original.ID {
 			t.Fatal("La copia alteró la presentación o reutilizó el trabajo físico")
 		}
-		if kitchenCount(t, fixture, "kitchen_unit_releases") != 2 {
+		if accountUnitReleases(t, fixture, bill.Account.ID) != 2 {
 			t.Fatal("Reimprimir creó otra liberación")
 		}
 		// Preparar otra copia y simular que el proceso cayó después de iniciar transporte.

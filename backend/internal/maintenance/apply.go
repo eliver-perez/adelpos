@@ -65,6 +65,9 @@ func Apply(ctx context.Context, tx pgx.Tx, plan *Plan, backup string) (Result, e
 		{`UPDATE app.devices SET kitchen_all_stations = true WHERE id::text = ANY($1::text[])`,
 			[]any{list(plan.allStationsDevices)}},
 		{`DELETE FROM app.kitchen_user_stations WHERE station_id::text = ANY($1::text[])`, []any{stations}},
+		// Etapa K1.1 (K11-D3): «Productos sin ruta» que iba a una estación de prueba vuelve a «No necesitan preparación».
+		{`UPDATE app.kitchen_settings SET unrouted_station_id = NULL WHERE unrouted_station_id::text = ANY($1::text[])`,
+			[]any{stations}},
 		{`UPDATE app.kitchen_routes SET revision = revision + 1, updated_at = now() WHERE id::text = ANY($1::text[])`,
 			[]any{list(plan.trimmedRoutes)}},
 		{`DELETE FROM app.kitchen_route_stations
@@ -120,6 +123,7 @@ func publishChanges(ctx context.Context, tx pgx.Tx, plan *Plan) error {
 		{"kitchen.stations.changed", len(plan.deleteStations)+len(plan.deactivateStations) > 0},
 		{"kitchen.routes.changed", len(plan.deleteRoutes)+len(plan.trimmedRoutes) > 0},
 		{"kitchen.access.changed", plan.deviceLinks || plan.userLinks},
+		{"kitchen.unrouted.changed", plan.unroutedStation},
 		{"payments.settings.changed", plan.receiptPrinter || len(plan.registerReceipts) > 0},
 	}
 	for _, change := range kitchen {

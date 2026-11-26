@@ -215,19 +215,32 @@ func testKitchenSchedulingAndGrouping(t *testing.T, fixture *restaurantFixture, 
 			t.Fatal("La nueva programación de la cuenta no llegó a la liberación pendiente")
 		}
 	})
-	t.Run("cocina rutas inexistentes no aparentan liberación y sin preparación es explícito", func(t *testing.T) {
+	// Etapa K1.1 (K11-D1): antes un producto sin ruta dejaba el envío bloqueado («nunca un envío aparente»). Ahora no lo
+	// detiene: sigue el ajuste «Productos sin ruta» (por omisión, «No necesitan preparación»), la decisión queda anotada
+	// en la liberación (unrouted) y no aparenta una tarea que nadie prepara. «Sin preparación» sigue siendo explícito.
+	t.Run("cocina un producto sin ruta no detiene el envío y sin preparación es explícito", func(t *testing.T) {
 		category := decodeResponse[catalog.Category](t, fixture.adminCall(t, "POST", "catalog/categories", catalog.Category{Metadata: catalog.Metadata{Name: "Sin ruta temporal", Active: true}}, 200))
 		item := decodeResponse[catalog.Product](t, fixture.adminCall(t, "POST", "catalog/products", catalog.Product{
 			Metadata: catalog.Metadata{Name: "Producto sin ruta", Active: true}, CategoryID: category.ID, Kind: "product", Code: "SIN_RUTA", BasePrice: "10",
 		}, 200))
+		tasksBefore := kitchenCount(t, fixture, "kitchen_tasks")
 		bill := fixture.capture(t, newAccount(t, fixture, "Falta ruta"), []catalog.LineRequest{{ProductID: item.ID, Quantity: 1}})
 		release := kitchenReleases(t, fixture, bill)[0]
-		if release.State != "blocked" || len(release.Warnings) == 0 || bill.Account.PreparationState != "pending_release" {
-			t.Fatal("Una ruta inexistente aparentó entrega a cocina")
+		frozen := release.RoutingSnapshot[item.ID]
+		if release.State != "released" || len(release.Warnings) != 0 || !frozen.Unrouted || frozen.Mode != "none" ||
+			bill.Account.PreparationState != "ready" || kitchenCount(t, fixture, "kitchen_tasks") != tasksBefore {
+			t.Fatalf("Un producto sin ruta detuvo el envío o aparentó una tarea: %+v, %s", release, bill.Account.PreparationState)
+		}
+		// «Enviar a cocina ahora» de algo ya enviado ya no responde 200 sin hacer nada (K11-D4).
+		body := fixture.mutate(t, "POST", "kitchen/releases/"+release.ID+"/release", map[string]any{"revision": release.Revision}, 409)
+		if errorCode(t, body) != "KITCHEN_RELEASE_NOT_PENDING" {
+			t.Fatalf("Liberar lo ya enviado: %s", body)
 		}
 		fixture.mutate(t, "POST", "kitchen/routes", kitchen.Route{ProductID: &item.ID, Mode: "none", StationIDs: []string{}}, 200)
-		fixture.mutate(t, "POST", "kitchen/releases/"+release.ID+"/release", map[string]any{"revision": release.Revision}, 200)
-		if fixture.refresh(t, bill.Account.ID).Account.PreparationState != "ready" {
+		bill = fixture.capture(t, newAccount(t, fixture, "Sin preparación"), []catalog.LineRequest{{ProductID: item.ID, Quantity: 1}})
+		release = kitchenReleases(t, fixture, bill)[0]
+		if frozen := release.RoutingSnapshot[item.ID]; release.State != "released" || frozen.Unrouted || frozen.Mode != "none" ||
+			fixture.refresh(t, bill.Account.ID).Account.PreparationState != "ready" {
 			t.Fatal("No se respetó Sin preparación")
 		}
 	})

@@ -308,7 +308,11 @@ func testStage9DCancelWithPermission(t *testing.T, fixture *stage9DFixture) {
 	blocked := rowCount(t, fixture.restaurantFixture, "SELECT count(*) FROM app.kitchen_releases WHERE account_id=$1 AND state='blocked'", bill.Account.ID)
 	consumed := rowCount(t, fixture.restaurantFixture, `SELECT count(*) FROM app.inventory_unit_consumptions c
         JOIN app.restaurant_item_units u ON u.id=c.restaurant_unit_id WHERE u.account_id=$1`, bill.Account.ID)
-	if released != 2 || blocked != 1 || consumed != 2 || bill.Account.DraftQuantity != 1 {
+	// Etapa K1.1 (K11-D1): el flan sin ruta ya no deja su envío bloqueado: se libera sin tarea («No necesitan
+	// preparación») y, como toda unidad liberada, registra su consumo. Que «Cancelar cuenta» da por terminado sin papel
+	// lo que la cocina no recibió lo comprueba TestStageK11UnroutedProducts (stagek11_rules_test.go,
+	// testStageK11PendingCancel).
+	if released != 3 || blocked != 0 || consumed != 3 || bill.Account.DraftQuantity != 1 {
 		t.Fatalf("Preparación: %d liberadas, %d bloqueadas, %d consumidas, borrador %d", released, blocked, consumed, bill.Account.DraftQuantity)
 	}
 	if bill.Account.CancelBlocker != "" || bill.Account.CancelRequiresAuthorization || bill.Account.Discardable {
@@ -361,8 +365,7 @@ func testStage9DCancelWithPermission(t *testing.T, fixture *stage9DFixture) {
         FROM app.restaurant_events WHERE id=$1`, eventID); named != "(nulo)" {
 		t.Fatalf("Con permiso propio el evento no lleva supervisor: %s", named)
 	}
-	// Cocina: las tareas liberadas se cancelan con su aviso de cancelación a la estación; la liberación
-	// bloqueada (sin ruta) se cancela sin papel.
+	// Cocina: las tareas liberadas se cancelan con su aviso de cancelación a la estación; no queda nada sin enviar.
 	if count := rowCount(t, fixture.restaurantFixture, `SELECT count(*) FROM app.kitchen_tasks k JOIN app.restaurant_item_units u ON u.id=k.unit_id
         WHERE u.account_id=$1 AND k.state<>'cancelled'`, bill.Account.ID); count != 0 {
 		t.Fatalf("Quedaron %d tareas de cocina activas", count)
@@ -394,9 +397,11 @@ func testStage9DCancelWithPermission(t *testing.T, fixture *stage9DFixture) {
 	if count := rowCount(t, fixture.restaurantFixture, "SELECT count(*) FROM app.sales_recognitions WHERE account_id=$1", bill.Account.ID); count != 0 {
 		t.Fatalf("La cuenta cancelada se reconoció como venta: %d", count)
 	}
-	// Inventario: dos solicitudes «cancel» del evento y, con el motivo que marca merma, «Preparado / merma».
+	// Inventario: una solicitud «cancel» del evento por unidad liberada y, con el motivo que marca merma, «Preparado /
+	// merma» para las que consumieron. Desde la etapa K1.1 (K11-D1) también el flan sin ruta se liberó (sin tarea): son
+	// tres solicitudes; el flan no tiene receta, así que siguen siendo dos clasificaciones (las papas).
 	if count := rowCount(t, fixture.restaurantFixture, `SELECT count(*) FROM app.inventory_consumption_requests
-        WHERE kind='cancel' AND source_id=$1`, eventID); count != 2 {
+        WHERE kind='cancel' AND source_id=$1`, eventID); count != 3 {
 		t.Fatalf("Solicitudes de cancelación al inventario: %d", count)
 	}
 	fixture.processInventory(t)
@@ -723,10 +728,11 @@ func (fixture *stage9DFixture) requireDiscardable(t *testing.T, bill operations.
 	}
 }
 
-// testStage9DCancelPendingKitchen cancela una cuenta con lo liberado en una estación inactiva: cocina
-// deja el aviso pendiente y la respuesta (y su reintento idempotente) ya lo dice, igual que una lectura
-// posterior; al reactivar la estación y reintentar el cambio de cocina, todo queda cancelado sin
-// duplicados.
+// testStage9DCancelPendingKitchen cancela una cuenta con lo liberado en una estación inactiva. Desde la etapa K1.1
+// (K11-D2 y K11-D4) una cuenta cancelada no deja nada en «Por enviar a cocina»: el aviso de la cancelación para la
+// estación desactivada se da por terminado en la misma operación, con su historial. La respuesta (y su reintento
+// idempotente) ya lo dice, igual que una lectura posterior, y al reactivar la estación «Volver a avisar» responde 409
+// sin imprimir nada. Las tareas de la estación desactivada son de unidades canceladas: Preparación ya no las muestra.
 func testStage9DCancelPendingKitchen(t *testing.T, fixture *stage9DFixture) {
 	bill := fixture.order(t, "Estación inactiva", nil, catalog.LineRequest{ProductID: fixture.fries.ID, Quantity: 2})
 	var station kitchen.Station
@@ -743,37 +749,47 @@ func testStage9DCancelPendingKitchen(t *testing.T, fixture *stage9DFixture) {
 	first := fixture.adminCall(t, "POST", route, body, 200)
 	cancelled := decodeResponse[operations.Bill](t, first)
 	read := fixture.refresh(t, bill.Account.ID)
-	if cancelled.Account.PreparationState != "change_pending" || read.Account.PreparationState != cancelled.Account.PreparationState {
+	if cancelled.Account.PreparationState != "cancelled" || read.Account.PreparationState != cancelled.Account.PreparationState {
 		t.Fatalf("Preparación en la respuesta: %s; en una lectura posterior: %s", cancelled.Account.PreparationState,
 			read.Account.PreparationState)
 	}
 	repeated := decodeResponse[operations.Bill](t, fixture.adminCall(t, "POST", route, body, 200))
-	if repeated.Account.PreparationState != "change_pending" || repeated.Account.Revision != cancelled.Account.Revision {
+	if repeated.Account.PreparationState != "cancelled" || repeated.Account.Revision != cancelled.Account.Revision {
 		t.Fatalf("El reintento idempotente debía devolver lo mismo: %+v", repeated.Account)
 	}
-	// El evento conserva la cuenta tal como quedó antes de integrar cocina.
-	var eventID string
+	// El aviso de la cancelación se registró y se dio por terminado; el evento conserva la cuenta tal como quedó antes de
+	// integrar cocina.
+	var eventID, reason string
 	var revision int
-	if err := fixture.pool.QueryRow(fixture.ctx, `SELECT event_id::text,revision FROM app.kitchen_pending_changes
-        WHERE account_id=$1 AND kind='account.cancelled'`, bill.Account.ID).Scan(&eventID, &revision); err != nil {
-		t.Fatalf("Sin aviso pendiente de cocina: %v", err)
+	if err := fixture.pool.QueryRow(fixture.ctx, `SELECT event_id::text,revision,coalesce(dismissed_reason,'') FROM app.kitchen_pending_changes
+        WHERE account_id=$1 AND kind='account.cancelled'`, bill.Account.ID).Scan(&eventID, &revision, &reason); err != nil {
+		t.Fatalf("Sin el aviso de cocina: %v", err)
+	}
+	if reason != "account_cancelled" || rowCount(t, fixture.restaurantFixture, `SELECT count(*) FROM app.kitchen_history
+        WHERE kind='change.dismissed' AND entity_id=$1`, eventID) != 1 {
+		t.Fatalf("El aviso de la cuenta cancelada no se dio por terminado: %q", reason)
 	}
 	if state := fixture.scalar(t, "SELECT payload->'after'->'account'->>'state' FROM app.restaurant_events WHERE id=$1", eventID); state != "voided" {
 		t.Fatalf("Cuenta en el evento: %s", state)
 	}
 	station.Active = true
 	fixture.mutate(t, "PATCH", "kitchen/stations/"+station.ID, station, 200)
-	fixture.mutate(t, "POST", "kitchen/changes/"+eventID+"/retry", map[string]any{"revision": revision}, 200)
-	if count := rowCount(t, fixture.restaurantFixture, `SELECT count(*) FROM app.kitchen_tickets
-        WHERE source_event_id=$1 AND kind='cancellation'`, eventID); count != 1 {
-		t.Fatalf("Avisos de cancelación tras el reintento: %d", count)
+	if code := errorCode(t, fixture.mutate(t, "POST", "kitchen/changes/"+eventID+"/retry", map[string]any{"revision": revision}, 409)); code != "KITCHEN_CHANGE_NOT_PENDING" {
+		t.Fatalf("«Volver a avisar» de la cuenta cancelada: %s", code)
 	}
-	if count := rowCount(t, fixture.restaurantFixture, `SELECT count(*) FROM app.kitchen_tasks k JOIN app.restaurant_item_units u ON u.id=k.unit_id
-        WHERE u.account_id=$1 AND k.state<>'cancelled'`, bill.Account.ID); count != 0 {
-		t.Fatalf("Quedaron %d tareas de cocina activas", count)
+	if count := rowCount(t, fixture.restaurantFixture, `SELECT count(*) FROM app.kitchen_tickets
+        WHERE source_event_id=$1 AND kind='cancellation'`, eventID); count != 0 {
+		t.Fatalf("Avisos de cancelación de un aviso terminado: %d", count)
+	}
+	board := decodeResponse[struct {
+		Tasks          []map[string]any `json:"tasks"`
+		PendingChanges []map[string]any `json:"pending_changes"`
+	}](t, fixture.adminCall(t, "GET", "kitchen/board?account_id="+bill.Account.ID, nil, 200))
+	if len(board.Tasks) != 0 || len(board.PendingChanges) != 0 {
+		t.Fatalf("La cuenta cancelada sigue en Preparación: %+v", board)
 	}
 	if state := fixture.refresh(t, bill.Account.ID).Account.PreparationState; state != "cancelled" {
-		t.Fatalf("Preparación tras el reintento de cocina: %s", state)
+		t.Fatalf("Preparación de la cuenta cancelada: %s", state)
 	}
 }
 

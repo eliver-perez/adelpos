@@ -218,6 +218,9 @@ export interface Board {
     warnings: string[];
     revision: number;
     created_at: string;
+    // Etapa K1.1 (contrato §6): las estaciones desactivadas a las que no se pudo avisar. Un servidor anterior no lo
+    // informa.
+    inactive_stations?: { id: string; name: string }[];
   }[];
   stations: Station[];
   server_time: string;
@@ -343,7 +346,10 @@ export const preparationLabels: Record<string, string> = {
   draft: 'Borrador por confirmar',
   confirmed_pending_dispatch: 'Pendiente de liberación',
   // Etapa 9D (§4.4, decisión 10): la liberación quedó bloqueada (por ejemplo, sin ruta de
-  // preparación) y se libera a mano en Cocina; el texto ya no suena a error.
+  // preparación) y se libera a mano en Cocina; el texto ya no suena a error. Desde la etapa K1.1
+  // (K11-D1) un producto sin ruta ya no detiene el envío: queda para un pedido que espera a que
+  // alguien lo envíe (por ejemplo, uno para llevar al que le quitaron la hora, K11-D9) y para los
+  // detenidos por una versión anterior.
   pending_release: 'Enviado · sin confirmar en cocina',
   change_pending: 'Cambio de cocina pendiente de revisión',
   scheduled: 'Programado para preparación',

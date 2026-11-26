@@ -10,7 +10,10 @@ sin conexión y el cursor de eventos de la recuperación (ver «Modo Mesero»). 
 **imprimir la precuenta** desde el dispositivo en su impresora (esquema 26, ver «Imprimir la precuenta») y los
 **avisos de platillos listos** (ver «Avisos de platillos listos»). La etapa K1
 ([etapas/ETAPA_K1_KDS_ANDROID_v3.md](etapas/ETAPA_K1_KDS_ANDROID_v3.md)) agregó la **pantalla de cocina para Android**
-(servidor 0.16.0, esquema 29, ver «Pantalla de cocina»).
+(servidor 0.16.0, esquema 29, ver «Pantalla de cocina»). La etapa K1.1
+([etapas/ETAPA_K1_1_COCINA_AJUSTES.md](etapas/ETAPA_K1_1_COCINA_AJUSTES.md)) agregó la **cobertura del enrutamiento**,
+**«Productos sin ruta»** y los dos 409 del panel de cocina (servidor 0.17.0, esquema 30, ver «Configuración guiada de
+cocina»).
 
 - **Contrato OpenAPI 3.1**: [`backend/internal/apicontract/openapi.json`](../backend/internal/apicontract/openapi.json)
   es la fuente. El servidor lo publica en `GET /api/v1/openapi.json` (sin sesión) y está incrustado en el binario.
@@ -134,6 +137,11 @@ sin conexión y el cursor de eventos de la recuperación (ver «Modo Mesero»). 
 | `acknowledgeKitchenDisplayReceipts` | `POST /kitchen-display/receipts`               | Pantalla de cocina: confirmar que ya muestra unas comandas (etapa K1).         |
 | `checkKitchenDisplaySettingsAccess` | `POST /kitchen-display/settings-access`        | Pantalla de cocina: contraseña de un administrador para los ajustes (K1).      |
 | `unpairKitchenDisplay`              | `POST /kitchen-display/unpair`                 | Pantalla de cocina: «Volver a emparejar», se revoca y suelta su cupo (K1).     |
+| `getKitchenCoverage`                | `GET /kitchen/coverage`                        | Qué llega a cada estación y pantalla, lo sin ruta y sus avisos (etapa K1.1).   |
+| `saveKitchenUnrouted`               | `PUT /kitchen/unrouted`                        | Guardar «Productos sin ruta» (etapa K1.1).                                     |
+| `releaseKitchenOrder`               | `POST /kitchen/releases/{id}/release`          | «Enviar a cocina ahora» un pedido pendiente (etapa K1.1 en el contrato).       |
+| `retryKitchenChange`                | `POST /kitchen/changes/{event_id}/retry`       | «Volver a avisar» un cambio pendiente (etapa K1.1 en el contrato).             |
+| `getKitchenBoard`                   | `GET /kitchen/board`                           | Preparación y «Por enviar a cocina» (etapa K1.1 en el contrato).               |
 
 ## Encontrar el servidor y emparejarse (fases B y C)
 
@@ -987,10 +995,72 @@ por tiempo con `server_time`, los límites y su reloj monotónico. Decisiones K1
   `kitchen_display_theme`, `kitchen_display_sound` y `kitchen_display_volume` (solo en una pantalla de cocina); las
   estaciones se eligen con `PUT kitchen/access` (solo las de recepción «pantalla» o «impresora y pantalla»); los límites
   de color con `PUT kitchen/timing` (`display_warning_minutes`, `display_late_minutes`, con `kitchen.timing.manage`).
-  Cada cambio llega a la pantalla al momento. `GET kitchen/access` (Cocina › Estaciones › Terminales de cocina) ya no
+  Cada cambio llega a la pantalla al momento. `GET kitchen/access` (Cocina › Estaciones › Computadoras en modo Cocina; hasta la K1.1, «Terminales de cocina») ya no
   lista las pantallas: sus estaciones se eligen en Terminales. «Liberar cupo» (`POST devices/{id}/seat/release`) **no
   es definitivo** (K1-D30): la pantalla lo puede pedir otra vez con «Usar esta pantalla» (`take_seat: true`); para que
   deje de usarse, «Revocar» (`POST devices/{id}/revoke`).
+
+## Configuración guiada de cocina (etapa K1.1)
+
+Capacidad `kitchen-coverage-v1` (servidor 0.17.0, esquema 30). Sin ella el escritorio esconde el asistente al emparejar
+una pantalla de cocina, el diagnóstico de Terminales, «Productos sin ruta» y la lista «Sin ruta» de Enrutamiento, y deja
+el panel de cocina como antes. Decisiones K11-D1 a K11-D14 en [ETAPA_K1_1_AVANCE.md](ETAPA_K1_1_AVANCE.md).
+
+- **Un envío nunca se detiene por la configuración** (K11-D1). Lo que tiene ruta llega a sus estaciones activas aunque
+  el mismo pedido lleve productos sin ruta; de una ruta se omiten las estaciones desactivadas; una impresora
+  desactivada no detiene nada (el trabajo espera en «Requiere intervención» y con «Impresora y pantalla» la pantalla lo
+  recibe igual). Un producto sin ruta (o cuya ruta solo va a estaciones desactivadas) sigue **«Productos sin ruta»**:
+  «No necesitan preparación» (por omisión: sin tarea, no detiene nada ni cierra sola una tarjeta) o «Enviar a una
+  estación». Toda unidad del envío se libera una vez, con o sin tarea. Ningún envío nuevo queda `blocked`; la cuenta
+  casi nunca dice «Enviado · sin confirmar en cocina» (`pending_release`).
+- **`getKitchenCoverage`** (`GET /kitchen/coverage`, `kitchen.stations.read`): solo lectura. Go resuelve cada producto
+  activo con la misma función que el envío (el cliente no calcula rutas) y responde `KitchenCoverage`:
+  - `unrouted` (`KitchenUnrouted`): `station_id`, `station_name`, `station_active` (null sin estación elegida) y
+    `effective` (`none`: no necesitan preparación; `station`: van a esa estación, activa).
+  - `stations`: todas, activas o no, en el orden de Estaciones, con `reception`, `printer` (`{id, name, active}` o
+    null), `categories` (las de su ruta de categoría, con cuántos productos llegan por ella), `products` (las
+    excepciones por producto), `receives_unrouted` y `display_ids` (las pantallas que la muestran). A una estación
+    desactivada no le llega nada.
+  - `no_preparation` (rutas «Sin preparación»), `unrouted_items` (lo que no va a ninguna estación por una ruta, por
+    categoría, con `whole_category` y el `reason` de cada producto: `no_route` o `inactive_station`; un combo con
+    componentes no se lista), `categories` (todas las activas con su ruta de categoría: `route_id`, `route_revision`,
+    `route_mode` y `station_ids`, para crearla con `POST kitchen/routes` o cambiarla con `PATCH kitchen/routes/{id}`) y
+    `displays` (las pantallas de cocina no revocadas con las estaciones activas de pantalla que muestran).
+  - `warnings` (`KitchenCoverageWarning`), con el texto listo y los ids de lo que hay que corregir: `display_without_stations`
+    («Esta pantalla no tiene estaciones.»), `display_no_screen_stations` («Ninguna de sus estaciones recibe comandas en
+    pantalla.»), `station_without_routes` («La estación Cocina no tiene categorías ni productos asignados.»),
+    `route_station_inactive` («Extras va a Barra, que está desactivada: sus productos se tratan como productos sin
+    ruta.»), `unrouted_station_inactive` («Los productos sin ruta iban a Barra, que está desactivada. Mientras siga así,
+    no necesitan preparación.») y `station_printer_inactive` («La impresora Comandas de Cocina está desactivada: sus
+    comandas esperan en la cola.»).
+- **`saveKitchenUnrouted`** (`PUT /kitchen/unrouted`, `kitchen.routing.manage`):
+  `{operation_id, station_id: uuid|null, expected_station_id: uuid|null}`. Responde el mismo `KitchenUnrouted`. Si lo
+  guardado no es `expected_station_id`, **409 `KITCHEN_UNROUTED_CHANGED`** (volver a leer); una estación que no existe o
+  está desactivada, 400 `KITCHEN_VALIDATION` («Elige una estación activa.»). Historial `unrouted.saved` y evento
+  `kitchen.unrouted.changed` (ámbito `configuration`). `GET kitchen/settings` lo trae como `unrouted_station_id`; `PUT
+kitchen/settings` y `PUT kitchen/timing` lo aceptan en el cuerpo y no lo cambian.
+- **Pendientes de cuentas que ya no están abiertas** (K11-D4): al cerrar una cuenta (el cobro o la entrega que la
+  liquida) o al cancelarla, Go da por terminado lo que la cocina nunca recibió: la liberación pasa a `cancelled`
+  (historial `release.dismissed`) y el aviso pendiente recibe `dismissed_at` (`change.dismissed`), con el motivo y el
+  actor de la operación, y publica `kitchen.releases.changed`. La pertenencia es la actual de las unidades: lo combinado,
+  dividido o transferido a una cuenta abierta sigue pendiente, y un pedido para llevar cobrado y sin entregar sigue
+  abierto (su pedido programado llega a la cocina a su hora). Reabrir una cuenta no revive lo terminado. La 0030 aplica
+  lo mismo a lo que ya existía. Los motivos (`after_value.reason` del historial y `dismissed_reason`) son una lista
+  cerrada: `account_not_open` (la 0030), `account_closed` (al cerrar) y `account_cancelled` (al cancelar).
+- **`getKitchenBoard`** (`GET /kitchen/board`, `kitchen.states.read`; ya existía, la etapa K1.1 lo agrega al
+  contrato): las tareas de Preparación y, con `kitchen.stations.all`, el panel «Por enviar a cocina». `releases` trae
+  solo lo que sigue esperando de cuentas abiertas (`pending`, `scheduled` o, solo de antes de la 0.17.0, `blocked`) con
+  `folio` y `account_name`; `pending_changes`, solo los avisos no terminados, cada uno con **`inactive_stations`**
+  (`[{id, name}]`, opcional): las estaciones desactivadas que tienen la comanda y a las que no se pudo avisar. Sin ese
+  campo (un servidor anterior), el escritorio muestra las advertencias de Go tal cual.
+- **`releaseKitchenOrder`** (`POST /kitchen/releases/{id}/release`, `{operation_id, revision}`; `kitchen.release` y
+  `kitchen.stations.all`, y `kitchen.release_early` antes de su hora): «Enviar a cocina ahora». Responde la liberación
+  (`KitchenRelease`), ya `released` (o `cancelled` si no le queda nada). Con una ya enviada, cancelada o de una cuenta que
+  ya no está abierta, **409 `KITCHEN_RELEASE_NOT_PENDING`** («Este pedido ya no está pendiente.»). Repetir con el mismo
+  `operation_id` devuelve la respuesta guardada.
+- **`retryKitchenChange`** (`POST /kitchen/changes/{event_id}/retry`, `{operation_id, revision}`; `kitchen.release` y
+  `kitchen.stations.all`): «Volver a avisar» a la estación que tenía la comanda, si ya está activa (`{reviewed: true}`).
+  Con un aviso ya terminado, **409 `KITCHEN_CHANGE_NOT_PENDING`** («Este aviso ya no está pendiente.»).
 
 ## Licencia del servidor principal (etapa L1, fase B)
 
@@ -1131,3 +1201,6 @@ en el servidor, en cada operación, antes que los cupos.
 | `KITCHEN_DISPLAY_SEAT_RELEASED`                          | 409    | La pantalla dejó su cupo de cocina: mostrar «Usar esta pantalla».                                                          |
 | `KITCHEN_DISPLAY_NOT_CONNECTED`                          | 409    | La pantalla no ocupa su cupo: volver a `connectKitchenDisplay`.                                                            |
 | `KITCHEN_NOT_RECOVERABLE`                                | 409    | Lo marcado ya no se puede regresar a la pantalla (más de 30 minutos, cancelado o cambiado).                                |
+| `KITCHEN_UNROUTED_CHANGED`                               | 409    | Otra persona cambió «Productos sin ruta»: volver a leer la cobertura antes de guardar.                                     |
+| `KITCHEN_RELEASE_NOT_PENDING`                            | 409    | El pedido ya se envió, se canceló o su cuenta ya no está abierta: volver a leer el panel.                                  |
+| `KITCHEN_CHANGE_NOT_PENDING`                             | 409    | El aviso ya se dio por terminado: volver a leer el panel.                                                                  |

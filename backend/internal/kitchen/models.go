@@ -96,6 +96,13 @@ type Route struct {
 	Mode       string   `json:"mode"`
 	StationIDs []string `json:"station_ids"`
 	Revision   int      `json:"revision"`
+	// Etapa K1.1 (K11-D1): solo en el routing_snapshot de una liberación, nunca en una ruta guardada. Unrouted dice que
+	// la decisión vino del ajuste «Productos sin ruta» (el producto no tenía ruta o su ruta solo iba a estaciones
+	// desactivadas); OmittedStationIDs son las estaciones desactivadas de su ruta que no recibieron. Se omiten vacíos:
+	// las fotografías anteriores no cambian de forma y una modificación posterior sigue la misma decisión aunque después
+	// se configure la ruta.
+	Unrouted          bool     `json:"unrouted,omitempty"`
+	OmittedStationIDs []string `json:"omitted_station_ids,omitempty"`
 }
 
 type Release struct {

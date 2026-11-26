@@ -433,9 +433,9 @@ func classifyKitchen(method string, parts []string) Operation {
 	case length == 3 && resource == "print-jobs" && parts[2] == "rerender":
 		return known(RowKitchen, true)
 	case resource == "stations" || resource == "printers" || resource == "routes" || resource == "settings" ||
-		resource == "timing" || resource == "access":
-		// Configuración de cocina: estaciones, impresoras (también la prueba de ancho), rutas, formatos, tiempos y
-		// acceso.
+		resource == "timing" || resource == "access" || resource == "unrouted":
+		// Configuración de cocina: estaciones, impresoras (también la prueba de ancho), rutas, formatos, tiempos,
+		// acceso y, desde la etapa K1.1, «Productos sin ruta» (PUT kitchen/unrouted).
 		return known(RowAdministration, true)
 	}
 	return unknownOperation(method)

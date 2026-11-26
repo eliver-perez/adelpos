@@ -572,6 +572,42 @@ func testTestDataRemoval(t *testing.T, env *delegationEnvironment) {
 		}
 	})
 
+	// Etapa K1.1 (K11-D3): «Productos sin ruta» que va a una estación de prueba se desvincula (vuelve a «No necesitan
+	// preparación») y la estación se elimina: el ajuste no cuenta como un registro de operación.
+	t.Run("K11_productos_sin_ruta_en_una_estacion_de_prueba", func(t *testing.T) {
+		// La estación de prueba desactivada en «9F_datos_con_operaciones…» conserva el nombre: se aparta para repetir
+		// la firma.
+		exec("UPDATE app.kitchen_stations SET name='Cocina caliente vendida 9F' WHERE name='Cocina caliente'")
+		testPrinter := printer("Destino controlado 9B", "Agente de aceptación no disponible")
+		hot := station("Cocina caliente", "printer", testPrinter)
+		env.call(env.admin, "PUT", "kitchen/unrouted", map[string]any{"operation_id": events.NewID(), "station_id": hot,
+			"expected_station_id": nil}, 200)
+		value := preview(env.admin)
+		if !slices.Equal(labels(value.Remove), []string{"station:Cocina caliente", "printer:Destino controlado 9B"}) ||
+			len(value.Deactivate) != 0 || !slices.Equal(labels(value.Unlink), []string{"setting:Productos sin ruta"}) {
+			t.Fatalf("vista previa: %+v", value)
+		}
+		if value.Unlink[0].Reason != "Iban a la estación de prueba «Cocina caliente»; no necesitarán preparación hasta que "+
+			"elijas otra estación." {
+			t.Fatalf("motivo del ajuste: %+v", value.Unlink[0])
+		}
+		before := eventCount("kitchen.unrouted.changed")
+		result := removed(remove(events.NewID(), value.PlanID, 200))
+		if !slices.Equal(labels(result.Unlinked), labels(value.Unlink)) {
+			t.Fatalf("resultado distinto de la vista previa: %+v", result)
+		}
+		if env.scalar(t, "SELECT count(*) FROM app.kitchen_settings WHERE unrouted_station_id IS NOT NULL") != 0 ||
+			env.scalar(t, "SELECT count(*) FROM app.kitchen_stations WHERE id=$1", hot) != 0 {
+			t.Fatal("el ajuste sigue apuntando a la estación de prueba o la estación sigue ahí")
+		}
+		if eventCount("kitchen.unrouted.changed") <= before {
+			t.Fatal("falta el evento kitchen.unrouted.changed para actualizar Enrutamiento")
+		}
+		if !preview(env.admin).Empty() {
+			t.Fatal("quedaron datos de prueba")
+		}
+	})
+
 	t.Run("9F_respaldo_real_con_pg_dump", func(t *testing.T) {
 		bin := os.Getenv("ADEL_PG_BIN")
 		if bin == "" {

@@ -427,6 +427,8 @@ func contractScenario(t *testing.T, client *contractClient) {
 	contractReadyAlerts(t, client, phone, waiterData)
 	// Etapa K1 (Fase A): la pantalla de cocina para Android, emparejada como kitchen y sin sesión.
 	contractKitchenDisplay(t, client, waiterData)
+	// Etapa K1.1 (Fase A): la cobertura del enrutamiento, «Productos sin ruta» y los dos 409 del panel de cocina.
+	contractKitchenCoverage(t, client, waiterData)
 	// Etapa L1 (Fase D): el modo Cocina y el rechazo por cupo de la licencia.
 	contractSeats(t, client, phone, waiterData)
 	client.call("POST", "/auth/logout", nil, nil, 200)
@@ -1082,4 +1084,171 @@ func contractKitchenDisplay(t *testing.T, client *contractClient, data contractW
 	display.call("POST", "/kitchen-display/unpair", map[string]string{"username": "admin", "password": "admin"}, nil, 200)
 	display.call("GET", "/kitchen-display/orders", nil, nil, 401)
 	client.call("POST", "/kitchen-display/unpair", map[string]string{"username": "admin", "password": "admin"}, nil, 403)
+}
+
+// contractKitchenCoverage recorre la configuración guiada de cocina (etapa K1.1, Fase A; K11-D3 a K11-D5): la cobertura
+// del enrutamiento con un producto sin ruta, el tablero con las estaciones desactivadas de un aviso pendiente, «Productos sin ruta» con su valor esperado (409 KITCHEN_UNROUTED_CHANGED y
+// 400 con una estación que no existe), «Enviar a cocina ahora» de un pedido programado (y su 409
+// KITCHEN_RELEASE_NOT_PENDING) y «Volver a avisar» de un aviso para una estación desactivada (y el 409
+// KITCHEN_CHANGE_NOT_PENDING de un aviso que se dio por terminado al cancelar su cuenta). Usa la estación «Cocina
+// contrato» (recepción en pantalla) y la ruta de la categoría «Contrato» del recorrido de los avisos.
+func contractKitchenCoverage(t *testing.T, client *contractClient, data contractWaiterData) {
+	ctx := context.Background()
+	refrescos := decodeContract[map[string]any](t, client.setup("POST", "/catalog/categories",
+		map[string]any{"name": "Refrescos contrato", "active": true}, 200))
+	soda := decodeContract[map[string]any](t, client.setup("POST", "/catalog/products", map[string]any{
+		"name": "Refresco contrato", "active": true, "category_id": refrescos["id"], "code": "REFRESCO-CONTRATO", "kind": "product",
+		"base_price": "30",
+	}, 200))
+	var stationID string
+	if err := client.pool.QueryRow(ctx, "SELECT id::text FROM app.kitchen_stations WHERE name='Cocina contrato'").Scan(&stationID); err != nil {
+		t.Fatal(err)
+	}
+	coverage := decodeContract[map[string]any](t, client.call("GET", "/kitchen/coverage", nil, nil, 200).Body.Bytes())
+	unrouted := coverage["unrouted"].(map[string]any)
+	if unrouted["effective"] != "none" || unrouted["station_id"] != nil {
+		t.Fatalf("«Productos sin ruta» por omisión: %v", unrouted)
+	}
+	foundSoda := false
+	for _, entry := range coverage["unrouted_items"].([]any) {
+		group := entry.(map[string]any)
+		products, _ := group["products"].([]any)
+		if group["category_id"] == refrescos["id"] && group["whole_category"] == true && len(products) == 1 &&
+			products[0].(map[string]any)["id"] == soda["id"] && products[0].(map[string]any)["reason"] == "no_route" {
+			foundSoda = true
+		}
+	}
+	if !foundSoda {
+		t.Fatalf("el refresco sin ruta no está en unrouted_items: %v", coverage["unrouted_items"])
+	}
+
+	// «Productos sin ruta»: a la estación, con su valor esperado.
+	save := map[string]any{"operation_id": contractID(), "station_id": stationID, "expected_station_id": nil}
+	saved := decodeContract[map[string]any](t, client.call("PUT", "/kitchen/unrouted", save, nil, 200).Body.Bytes())
+	if saved["effective"] != "station" || saved["station_id"] != stationID || saved["station_name"] != "Cocina contrato" {
+		t.Fatalf("«Enviar a una estación»: %v", saved)
+	}
+	repeated := decodeContract[map[string]any](t, client.call("PUT", "/kitchen/unrouted", save, nil, 200).Body.Bytes())
+	if repeated["station_id"] != stationID {
+		t.Fatalf("la repetición devolvió otra respuesta: %v", repeated)
+	}
+	stale := decodeContract[map[string]any](t, client.call("PUT", "/kitchen/unrouted", map[string]any{"operation_id": contractID(),
+		"station_id": nil, "expected_station_id": nil}, nil, 409).Body.Bytes())
+	if stale["error"].(map[string]any)["code"] != "KITCHEN_UNROUTED_CHANGED" {
+		t.Fatalf("valor esperado viejo: %v", stale)
+	}
+	client.call("PUT", "/kitchen/unrouted", map[string]any{"operation_id": contractID(), "station_id": contractID(),
+		"expected_station_id": stationID}, nil, 400)
+	client.call("PUT", "/kitchen/unrouted", map[string]any{"operation_id": contractID(), "station_id": nil,
+		"expected_station_id": stationID}, nil, 200)
+
+	open := func(body map[string]any, product string) string {
+		t.Helper()
+		body["operation_id"] = contractID()
+		body["items"] = []map[string]any{{"id": contractID(), "product_id": product, "variant_id": nil, "quantity": 1,
+			"customization": data.customization}}
+		opened := decodeContract[map[string]any](t, client.setup("POST", "/restaurant/accounts", body, 200))["account"].(map[string]any)
+		accountID := fmt.Sprint(opened["id"])
+		preview := decodeContract[map[string]any](t, client.setup("GET", "/restaurant/accounts/"+accountID+"/preview", nil, 200))
+		client.setup("POST", "/restaurant/accounts/"+accountID+"/confirm", map[string]any{"operation_id": contractID(),
+			"revision": opened["revision"], "expected_fingerprint": preview["fingerprint"]}, 200)
+		return accountID
+	}
+	// Un pedido para llevar programado, enviado a cocina antes de su hora.
+	location, err := time.LoadLocation("America/Monterrey")
+	if err != nil {
+		t.Fatal(err)
+	}
+	scheduled := open(map[string]any{"mode": "takeaway", "name": "Programado contrato", "origin": "Ventanilla",
+		"scheduled_local": time.Now().In(location).Add(3 * time.Hour).Format("2006-01-02T15:04"), "schedule_kind": "delivery"}, data.fries)
+	var releaseID string
+	var revision int
+	if err := client.pool.QueryRow(ctx, "SELECT id::text,revision FROM app.kitchen_releases WHERE account_id=$1 AND state='scheduled'",
+		scheduled).Scan(&releaseID, &revision); err != nil {
+		t.Fatalf("pedido programado: %v", err)
+	}
+	release := map[string]any{"operation_id": contractID(), "revision": revision}
+	sent := decodeContract[map[string]any](t, client.call("POST", "/kitchen/releases/"+releaseID+"/release", release, nil, 200).Body.Bytes())
+	if sent["state"] != "released" || sent["released_at"] == nil {
+		t.Fatalf("«Enviar a cocina ahora»: %v", sent)
+	}
+	client.call("POST", "/kitchen/releases/"+releaseID+"/release", release, nil, 200)
+	again := decodeContract[map[string]any](t, client.call("POST", "/kitchen/releases/"+releaseID+"/release",
+		map[string]any{"operation_id": contractID(), "revision": sent["revision"]}, nil, 409).Body.Bytes())
+	if again["error"].(map[string]any)["code"] != "KITCHEN_RELEASE_NOT_PENDING" {
+		t.Fatalf("enviar otra vez: %v", again)
+	}
+
+	// Un aviso para la estación desactivada que ya tenía la comanda: se vuelve a avisar al reactivarla.
+	var station map[string]any
+	for _, entry := range decodeContract[[]map[string]any](t, client.setup("GET", "/kitchen/stations", nil, 200)) {
+		if entry["id"] == stationID {
+			station = entry
+		}
+	}
+	setActive := func(active bool) {
+		t.Helper()
+		body := map[string]any{"operation_id": contractID()}
+		for _, key := range []string{"id", "name", "description", "sort_order", "reception", "printer_id", "target_minutes",
+			"warning_minutes", "overdue_minutes", "grouping", "tracking", "revision"} {
+			body[key] = station[key]
+		}
+		body["active"] = active
+		station = decodeContract[map[string]any](t, client.setup("PATCH", "/kitchen/stations/"+stationID, body, 200))
+	}
+	pendingChange := func(accountID string) (string, int) {
+		t.Helper()
+		var eventID string
+		var changeRevision int
+		if err := client.pool.QueryRow(ctx, "SELECT event_id::text,revision FROM app.kitchen_pending_changes WHERE account_id=$1",
+			accountID).Scan(&eventID, &changeRevision); err != nil {
+			t.Fatalf("aviso pendiente: %v", err)
+		}
+		return eventID, changeRevision
+	}
+	modified := open(map[string]any{"mode": "dine_in"}, data.fries)
+	setActive(false)
+	bill := decodeContract[map[string]any](t, client.setup("GET", "/restaurant/accounts/"+modified, nil, 200))
+	line := bill["lines"].([]any)[0].(map[string]any)
+	client.setup("POST", "/restaurant/accounts/"+modified+"/cancel", map[string]any{"operation_id": contractID(),
+		"revision": bill["account"].(map[string]any)["revision"], "version_id": line["version_id"], "quantity": 1,
+		"reason": "El cliente ya no lo quiso"}, 200)
+	eventID, changeRevision := pendingChange(modified)
+	// El panel «Por enviar a cocina» dice a qué estación desactivada no se pudo avisar.
+	board := decodeContract[map[string]any](t, client.call("GET", "/kitchen/board", nil, nil, 200).Body.Bytes())
+	inactive := []string{}
+	for _, entry := range board["pending_changes"].([]any) {
+		change := entry.(map[string]any)
+		if change["event_id"] != eventID {
+			continue
+		}
+		stations, _ := change["inactive_stations"].([]any)
+		for _, station := range stations {
+			inactive = append(inactive, fmt.Sprint(station.(map[string]any)["name"]))
+		}
+	}
+	if !slices.Equal(inactive, []string{"Cocina contrato"}) {
+		t.Fatalf("estaciones desactivadas del aviso pendiente: %v (%v)", inactive, board["pending_changes"])
+	}
+	setActive(true)
+	client.call("POST", "/kitchen/changes/"+eventID+"/retry", map[string]any{"operation_id": contractID(), "revision": changeRevision}, nil, 200)
+	// Cancelar la cuenta da por terminado su aviso pendiente.
+	cancelled := open(map[string]any{"mode": "dine_in"}, data.fries)
+	setActive(false)
+	reasonID := ""
+	for _, reason := range decodeContract[[]map[string]any](t, client.setup("GET", "/restaurant/cancel-reasons", nil, 200)) {
+		if reason["active"] == true {
+			reasonID = fmt.Sprint(reason["id"])
+		}
+	}
+	bill = decodeContract[map[string]any](t, client.setup("GET", "/restaurant/accounts/"+cancelled, nil, 200))
+	client.setup("POST", "/restaurant/accounts/"+cancelled+"/cancel-account", map[string]any{"operation_id": contractID(),
+		"revision": bill["account"].(map[string]any)["revision"], "reason_id": reasonID, "description": "Cuenta del contrato"}, 200)
+	eventID, changeRevision = pendingChange(cancelled)
+	finished := decodeContract[map[string]any](t, client.call("POST", "/kitchen/changes/"+eventID+"/retry",
+		map[string]any{"operation_id": contractID(), "revision": changeRevision}, nil, 409).Body.Bytes())
+	if finished["error"].(map[string]any)["code"] != "KITCHEN_CHANGE_NOT_PENDING" {
+		t.Fatalf("aviso de una cuenta cancelada: %v", finished)
+	}
+	setActive(true)
 }

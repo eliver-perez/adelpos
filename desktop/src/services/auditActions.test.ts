@@ -390,4 +390,17 @@ describe('nombres de las operaciones del Registro de movimientos (etapa A3, §1)
       .map(([label, actions]) => `${label}: ${actions.join(', ')}`);
     expect(shared).toEqual([]);
   });
+
+  it('los cambios de cocina de la etapa K1.1 tienen nombre aunque Go los escriba desde la migración', () => {
+    // K11-D3 y K11-D4: «Productos sin ruta» y lo que se da por terminado de una cuenta que ya no está abierta.
+    expect(auditActionLabel('kitchen.unrouted.saved')).toBe(
+      'Productos sin ruta de cocina actualizado',
+    );
+    expect(auditActionLabel('kitchen.release.dismissed')).toBe(
+      'Pedido sin enviar a cocina dado por terminado',
+    );
+    expect(auditActionLabel('kitchen.change.dismissed')).toBe(
+      'Aviso de cocina sin entregar dado por terminado',
+    );
+  });
 });

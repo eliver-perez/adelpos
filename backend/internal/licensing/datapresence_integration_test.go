@@ -207,8 +207,13 @@ func TestDatabaseTrustedTimeCopy(t *testing.T) {
 	if _, found, err := probe.TrustedTimeCopy(ctx); err != nil || found {
 		t.Fatalf("una base nueva no tiene copia: %v %v", found, err)
 	}
-	later := time.Date(2026, 11, 25, 12, 0, 0, 123456789, time.UTC)
-	earlier := time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
+	// Etapa K1.1 (K11-D23): las horas son relativas a la hora actual. La migración deja su registro de auditoría con la
+	// hora real y el gestor lo toma como la última actividad de la base, así que con fechas fijas la prueba caducaba en
+	// cuanto la hora real las pasaba. clockTime (la hora del reloj simulado) va dos días adelante de la hora real
+	// (por encima de esa actividad) y earlier, cuatro días antes que clockTime, como el 21 y el 25/11/2026 de antes.
+	clockTime := time.Now().UTC().Truncate(time.Hour).Add(48 * time.Hour)
+	later := clockTime.Add(123456789 * time.Nanosecond)
+	earlier := clockTime.Add(-96 * time.Hour)
 	if err := probe.RaiseTrustedTimeCopy(ctx, TrustedCopy{Time: later, Source: string(TimeFromOperation)}); err != nil {
 		t.Fatal(err)
 	}
@@ -251,17 +256,18 @@ func TestDatabaseTrustedTimeCopy(t *testing.T) {
 		}
 		return manager
 	}
+	h.clock.set(earlier.Format(time.RFC3339Nano))
 	manager := start()
-	h.clock.set("2026-11-25T12:00:00Z")
+	h.clock.set(clockTime.Format(time.RFC3339Nano))
 	manager.tick(ctx)
 	if copied, _, _ = probe.TrustedTimeCopy(ctx); !copied.Time.Equal(h.clock.now()) || copied.Source != string(TimeFromClock) {
 		t.Fatalf("cada minuto la copia sube con el reloj: %+v", copied)
 	}
-	h.clock.set("2026-11-21T12:00:00Z")
+	h.clock.set(earlier.Format(time.RFC3339Nano))
 	state := h.readState()
 	state.TrustedTime = &earlier
 	h.writeState(state)
-	if restarted := start(); !restarted.TrustedTime().Equal(time.Date(2026, 11, 25, 12, 0, 0, 0, time.UTC)) ||
+	if restarted := start(); !restarted.TrustedTime().Equal(clockTime) ||
 		!restarted.Clock().Blocked {
 		t.Fatalf("editar estado.json no baja la hora confiable: %s", restarted.TrustedTime())
 	}

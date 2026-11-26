@@ -305,10 +305,11 @@ test('terminal de cocina por estaciones: intersección, colores y sin «Actualiz
     await page.getByRole('button', { name: 'Guardar cambios', exact: true }).click();
     await expect(notice(page, 'Terminal actualizada.')).toBeVisible();
 
-    // 2. Cocina › Estaciones › Terminales de cocina: la terminal muestra la plancha y la freidora.
+    // 2. Cocina › Estaciones › Computadoras en modo Cocina (antes «Terminales de cocina», K11-D7): la terminal muestra
+    // la plancha y la freidora.
     await openSection(page, 'Cocina');
     await page.getByRole('button', { name: 'Estaciones', exact: true }).click();
-    await page.getByRole('button', { name: /^Terminales de cocina/ }).click();
+    await page.getByRole('button', { name: /^Computadoras en modo Cocina/ }).click();
     await chooseOption(page.getByRole('combobox', { name: 'Terminal', exact: true }), terminalName);
     await expect(page.getByText('Esta terminal abre en Cocina › Preparación.')).toBeVisible();
     const showAll = page.getByLabel('Mostrar todas las estaciones', { exact: true });

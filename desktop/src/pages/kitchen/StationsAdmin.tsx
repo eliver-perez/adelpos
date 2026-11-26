@@ -177,10 +177,11 @@ export function StationsAdmin({
                 }
               />
             )}
+            {/* Etapa K1.1 (K11-D7): la recepción en pantalla, en lenguaje sencillo. */}
             {selected.reception !== 'printer' && (
               <p className="muted">
-                La recepción en la pantalla de cocina queda pendiente hasta que una pantalla de
-                cocina autorizada reciba y confirme la comanda.
+                Las pantallas de cocina muestran estos pedidos al momento. En Comandas se ve si la
+                pantalla ya los recibió.
               </p>
             )}
             <Accordion

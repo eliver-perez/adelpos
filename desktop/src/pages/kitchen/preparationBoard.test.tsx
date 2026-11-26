@@ -2,8 +2,13 @@
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Board, Task } from '../../services/kitchen';
+import type { Board, Release, Task } from '../../services/kitchen';
+import {
+  kitchenCoverageCapability,
+  rememberServerCapabilities,
+} from '../../services/serverCapabilities';
 import { PreparationBoard } from './PreparationBoard';
+import { releaseCase, serverDayAndTime } from './PendingKitchen';
 
 // Etapa 9F, fase C (§5.4): modo cocina de Preparación con Go simulado por el puente: colores por tiempo
 // con texto, sin «Actualizar» («Reintentar» solo sin conexión), aviso sin estaciones en común en lugar
@@ -286,5 +291,141 @@ describe('Preparación en modo cocina', () => {
     // Sin el aviso, los toques no preparan el sonido.
     fireEvent.pointerDown(document.body);
     expect(sound.unlock).not.toHaveBeenCalled();
+  });
+});
+
+// Etapa K1.1 (§3, K11-D8 y K11-D9): «Por enviar a cocina» se explica solo. Cada pedido dice qué pasa con él en
+// lenguaje sencillo, cada botón lleva su texto corto, «Cambiar la hora» solo en los programados y un pedido detenido
+// por la versión anterior ya no muestra los renglones «Sin ruta de preparación».
+describe('Por enviar a cocina', () => {
+  function release(overrides: Partial<Release>): Release {
+    return {
+      id: 'r-base',
+      account_id: 'a1',
+      order_id: 'o1',
+      folio: 20,
+      account_name: 'Para llevar · Ana',
+      state: 'pending',
+      scheduled_at: null,
+      due_at: null,
+      automatic: false,
+      lead_minutes: 0,
+      warnings: [],
+      revision: 1,
+      created_at: '2026-11-13T17:00:00Z',
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    rememberServerCapabilities([kitchenCoverageCapability]);
+    board = {
+      ...baseBoard([]),
+      releases: [
+        release({
+          id: 'r-auto',
+          folio: 21,
+          state: 'scheduled',
+          scheduled_at: '2026-11-13T20:00:00Z',
+          due_at: '2026-11-13T19:45:00Z',
+          automatic: true,
+          lead_minutes: 15,
+        }),
+        release({
+          id: 'r-manual',
+          folio: 22,
+          state: 'scheduled',
+          scheduled_at: '2026-11-13T21:00:00Z',
+          due_at: '2026-11-13T21:00:00Z',
+        }),
+        release({ id: 'r-pending', folio: 23 }),
+        release({
+          id: 'r-blocked',
+          folio: 24,
+          state: 'blocked',
+          warnings: ['Sin ruta de preparación: Coca Cola 600ml'],
+        }),
+      ],
+    };
+  });
+
+  afterEach(() => {
+    rememberServerCapabilities([]);
+  });
+
+  it('cada caso tiene su título y su explicación, con la hora del restaurante', () => {
+    const timezone = 'America/Monterrey';
+    expect(serverDayAndTime('2026-11-13T19:45:00Z', timezone)).toBe('el 13/11/26 a la 1:45 p.m.');
+    expect(serverDayAndTime('2026-11-13T21:00:00Z', timezone)).toBe('el 13/11/26 a las 3:00 p.m.');
+    const [automatic, manual, waiting, blocked] = board.releases;
+    expect(releaseCase(automatic!, timezone)).toEqual({
+      title: 'Programado: se envía solo a su hora',
+      detail: 'Se envía a cocina solo el 13/11/26 a la 1:45 p.m.',
+    });
+    expect(releaseCase(manual!, timezone)).toEqual({
+      title: 'Programado: espera a que lo envíes',
+      detail: 'Programado para el 13/11/26 a las 3:00 p.m. Espera a que lo envíes a cocina.',
+    });
+    expect(releaseCase(waiting!, timezone).title).toBe('Espera a que lo envíes a cocina');
+    expect(releaseCase(blocked!, timezone).title).toBe('La cocina no recibió este pedido');
+  });
+
+  it('el panel se llama «Por enviar a cocina» y explica cada botón', async () => {
+    renderBoard();
+    expect(await screen.findByText('Por enviar a cocina')).toBeTruthy();
+    expect(screen.getByText('4 pedidos · 0 avisos')).toBeTruthy();
+    const automatic = screen.getByRole('article', { name: 'Pedido #21' });
+    expect(automatic.textContent).toContain('Programado: se envía solo a su hora');
+    // Antes de su hora el envío se adelanta; sin el permiso de liberar anticipadamente el botón no se puede usar.
+    expect(automatic.textContent).toContain('La cocina lo recibe al momento, antes de su hora.');
+    expect(within(automatic).getByRole('button', { name: 'Cambiar la hora' })).toBeTruthy();
+    expect(automatic.textContent).toContain(
+      'Cambia cuándo llega a cocina. No cambia el pedido ni su precio.',
+    );
+    const waiting = screen.getByRole('article', { name: 'Pedido #23' });
+    expect(waiting.textContent).toContain('Espera a que lo envíes a cocina');
+    expect(waiting.textContent).toContain('La cocina lo recibe al momento.');
+    expect(within(waiting).queryByRole('button', { name: 'Cambiar la hora' })).toBeNull();
+    const blocked = screen.getByRole('article', { name: 'Pedido #24' });
+    expect(blocked.textContent).toContain('La cocina no recibió este pedido');
+    expect(blocked.textContent).toContain('Se envió con la versión anterior');
+    expect(blocked.textContent).not.toContain('Sin ruta de preparación');
+    expect(within(blocked).getByRole('button', { name: 'Enviar a cocina ahora' })).toBeTruthy();
+    for (const old of [
+      'Bloqueado por configuración',
+      'Liberar a preparación',
+      'Ajustar programación',
+      'Pendientes de liberación',
+    ]) {
+      expect(document.body.textContent).not.toContain(old);
+    }
+  });
+
+  it('sin el permiso de liberar anticipadamente, un programado no se envía antes de su hora', async () => {
+    render(
+      <PreparationBoard
+        can={(key) => key !== 'kitchen.release_early'}
+        execute={vi.fn() as never}
+        busy={false}
+      />,
+    );
+    const automatic = await screen.findByRole('article', { name: 'Pedido #21' });
+    const send = within(automatic).getByRole('button', { name: 'Enviar a cocina ahora' });
+    expect((send as HTMLButtonElement).disabled).toBe(true);
+    expect(automatic.textContent).toContain(
+      'Para enviarlo antes de su hora hace falta el permiso de liberar anticipadamente.',
+    );
+    const waiting = screen.getByRole('article', { name: 'Pedido #23' });
+    expect(
+      (within(waiting).getByRole('button', { name: 'Enviar a cocina ahora' }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
+  });
+
+  it('«Cambiar la hora» abre la programación del pedido', async () => {
+    renderBoard();
+    const manual = await screen.findByRole('article', { name: 'Pedido #22' });
+    fireEvent.click(within(manual).getByRole('button', { name: 'Cambiar la hora' }));
+    expect(await screen.findByText('Programación de preparación · #22')).toBeTruthy();
   });
 });
