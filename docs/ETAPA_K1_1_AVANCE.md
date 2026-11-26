@@ -577,3 +577,355 @@ con estas decisiones antes de empezar las dos fases en paralelo.
 - **K11-D14. Versiones.** La `0030` es la única migración de la etapa, con una sección por fase. Si una prueba exige
   que `config/product.json` diga el esquema 30 junto con la migración, la Fase A cambia solo `schema_version`. La Fase D
   sube el servidor a 0.17.0.
+
+## Fase A · Servidor: productos sin ruta y pendientes de liberación
+
+Árbol `$SP/wt/k11-a`, rama `etapa-k1-1-a` (desde `etapa-k1-1` `e73b921`), `ISO_TAG=A`. Sin Go temporal ni emuladores
+(todo con `go-int` en el clúster temporal 55499). La especificación quedó intacta (md5 `9363961a…` antes y después de
+formatear).
+
+### Qué se hizo
+
+1. **K11-D1 · un envío nunca se bloquea.** La decisión de cada producto es una sola función, `decideRoute`
+   (`backend/internal/kitchen/routing.go:203`), que usan el envío (`resolveRouting`, `:300`) y la cobertura
+   (`coverage.go`). Con la ruta propia o la de su categoría (o, sin ellas, las estaciones de su combo) solo reciben las
+   estaciones **activas**; las desactivadas se anotan en `omitted_station_ids`. Sin estación por una ruta: un combo con
+   componentes no tiene parte propia (cada componente se resuelve solo; nunca `mode='none'` para un combo) y un producto
+   sin componentes (simple o combo vacío) sigue «Productos sin ruta» (`unrouted: true`): a la estación del ajuste si
+   está activa o «No necesitan preparación». Una modificación sigue la ruta congelada (`frozenDecision`, `:270`), de la
+   que solo reciben las estaciones activas. `prepareRelease` (`releases.go:90`) ya no junta advertencias ni escribe
+   `blocked`: la impresora desactivada tampoco detiene nada (el trabajo queda en «Requiere intervención» por
+   `enqueueJob`, como ya hacía, y con «Impresora y pantalla» la pantalla lo recibe). Toda unidad activa se libera una vez
+   (fila canónica e inventario), con o sin tarea. `Route` tiene los dos campos opcionales del `routing_snapshot`
+   (`models.go`); `POST/PATCH kitchen/routes` los rechaza como campos desconocidos.
+2. **K11-D2 · cambios de algo ya enviado** (`changes.go:26`). Los componentes nuevos siguen `decideRoute` y ya no dejan
+   aviso pendiente; el único aviso que queda es el de una estación desactivada que ya tenía la comanda. Lo que la cocina
+   nunca recibió se cancela **antes** de decidir si queda ese aviso (`:99`); con «Cancelar cuenta» lo da por terminado
+   `dismissAccountPending` con su historial (`releases.go:333`). Un aviso terminado no se reabre (`ON CONFLICT … WHERE
+dismissed_at IS NULL`).
+3. **K11-D3 · «Productos sin ruta».** `kitchen_settings.unrouted_station_id` (0030, NULL al actualizar).
+   `PUT kitchen/unrouted` (`settings.go:181`, `kitchen.routing.manage`): valor esperado, 409
+   `KITCHEN_UNROUTED_CHANGED`, 400 «Elige una estación activa.», historial `unrouted.saved`, evento
+   `kitchen.unrouted.changed` (configuración). `GET kitchen/settings` trae `unrouted_station_id`; `PUT kitchen/settings`
+   y `PUT kitchen/timing` lo aceptan en el cuerpo y no lo usan (el escritorio manda de vuelta todo lo que leyó y `decode`
+   rechaza campos desconocidos: sin esto, guardar «Comandas y tiempos» fallaría con 400). «Quitar datos de prueba»
+   (`maintenance/plan.go:889`, `apply.go:69`): si el ajuste va a una estación de prueba, «Se desvinculará: Productos sin
+   ruta» y vuelve a NULL antes de quitar la estación (si no, la llave foránea la habría dejado desactivada en lugar de
+   eliminada); `kitchen.unrouted.changed`.
+4. **K11-D4 · pendientes de cuentas que ya no están abiertas** (`kitchen/pending.go`). La regla, escrita una vez en SQL
+   (`releaseOpenSQL`, `changeOpenSQL`) y repetida en la 0030: una liberación sigue pendiente si alguna de sus unidades
+   activas está en una cuenta abierta (pertenencia actual); un aviso, si alguna de sus unidades activas está en una
+   cuenta abierta o su cuenta (o aquella en que terminó combinada, en cadena) sigue abierta. `dismissAccountPending`
+   (`:84`) toma la cuenta y las combinadas en ella, pasa las liberaciones a `cancelled` (`release.dismissed`) y pone
+   `dismissed_at`/`dismissed_reason` a los avisos (`change.dismissed`), con el motivo y el actor de la operación, y
+   publica `kitchen.releases.changed`. Se llama al cerrar (`payments/collect.go:662`, dentro de `closeIfSettled`, en su
+   transacción y con el 7820148305 que ya tomó el cobro: sin lock nuevo) y al cancelar (`account.cancelled`). Los
+   lectores filtran: `GET kitchen/board` (`reads.go:171`), `VersionPreparation` (`states.go`), `retryChange`
+   (409 `KITCHEN_CHANGE_NOT_PENDING`). «Enviar a cocina ahora» responde 409 `KITCHEN_RELEASE_NOT_PENDING` antes de mirar
+   la revisión (`releases.go:203`). Cada aviso del tablero lleva `inactive_stations` (ajuste 6 del contrato).
+5. **0030** (`backend/migrations/0030_productos_sin_ruta.sql`, sección «Fase A»): las dos columnas, el `CHECK` de
+   `dismissed_at`/`dismissed_reason` y lo existente: liberaciones `pending`/`scheduled`/`blocked` de cuentas que ya no
+   están abiertas → `cancelled` con `revision+1` y `release.dismissed` (`account_not_open`, `migration: '0030'`, sin
+   actor); avisos → `dismissed_at` con `change.dismissed`. Ninguna otra tabla cambia. Esquema 30 en
+   `config/product.json` (con sus copias generadas por `sync-metadata.mjs`: `backend/internal/product/metadata.json` y
+   `desktop/src/generated/product.json`).
+6. **K11-D5 · cobertura** (`kitchen/coverage.go:173`, `GET kitchen/coverage`, `kitchen.stations.read`): carga una vez la
+   configuración (`loadedRoutes` cumple `routeSource`) y resuelve cada producto activo con `decideRoute`. Forma y textos
+   del contrato. Capacidad `kitchen-coverage-v1` (`httpapi/router.go`).
+7. **Contrato v1**: `getKitchenCoverage`, `saveKitchenUnrouted`, `releaseKitchenOrder`, `retryKitchenChange` y
+   `getKitchenBoard` en `openapi.json` (esquemas `KitchenCoverage`, `KitchenCoverageWarning`, `KitchenUnrouted`,
+   `KitchenRelease`, `KitchenBoard`), la sección «Configuración guiada de cocina (etapa K1.1)» de `docs/API_V1.md` y su
+   paso `contractKitchenCoverage` en `TestContractV1`. `PUT kitchen/unrouted` y `GET kitchen/coverage` están en la tabla
+   de la licencia (`licensing/operations.go`, configuración de cocina y lectura).
+
+### Decisiones propuestas
+
+- **Decisión propuesta · rutas congeladas a una estación desactivada.** En una modificación, de la ruta congelada solo
+  reciben las estaciones activas y nunca se aplica el ajuste. _Por qué_: «las rutas congeladas no cambian» (K11-D2); si
+  la estación desactivada tenía la comanda, el aviso pendiente de siempre lo cubre; si no la tenía (un destino nuevo para
+  esa unidad), es lo mismo que K11-D1.
+- **Decisión propuesta · un combo con componentes cuya ruta solo va a estaciones desactivadas** se congela con
+  `station_ids: []` y `omitted_station_ids` (sin parte propia; sus componentes se resuelven solos). _Por qué_: así una
+  modificación sigue la misma decisión aunque se reactive la estación, sin tratar el combo como `mode='none'`.
+- **Decisión propuesta · «combo vacío» en la cobertura** es un combo cuyos componentes empiezan todos en cero (por
+  omisión el pedido lo manda vacío). _Por qué_: el catálogo exige al menos un lugar en un combo, así que «sin
+  componentes» solo existe en el pedido; la cobertura usa la configuración por omisión. En el envío la regla es la del
+  pedido real.
+- **Decisión propuesta · a quién se dan por terminados los pendientes.** A la cuenta que se cierra o se cancela y a las
+  que terminaron combinadas en ella, con la regla de «abierta» de arriba. Un aviso de una cancelación cuyas unidades se
+  quedaron en la cuenta combinada se conserva mientras la cuenta de destino esté abierta. _Por qué_: lo combinado sigue
+  pendiente (K11-D4, «al combinar se conserva»), y el motivo y el actor del historial son los de la operación que lo
+  terminó.
+- **Decisión propuesta · «Quitar datos de prueba»** desvincula el ajuste también cuando la estación de prueba se
+  conserva desactivada (por tener operaciones), igual que sus rutas y sus terminales. _Por qué_: el ajuste nunca queda
+  apuntando a un dato de prueba.
+- **Decisión propuesta · `operation_id` del historial de lo terminado** queda NULL (solo actor y dispositivo). _Por
+  qué_: `Integrate` no recibe la operación y `kitchen_history.operation_id` es una llave foránea diferida: apuntar a una
+  operación que no se guardó haría fallar al confirmar una cancelación o un cobro.
+- **Decisión propuesta · las tareas de una cuenta cancelada con su aviso pendiente** quedan como estaban (de unidades
+  canceladas): Preparación ya no las muestra (`u.state='active'`) y la pantalla las trata como canceladas (30 minutos).
+  La estación desactivada no recibe el aviso de cancelación. _Por qué_: es la consecuencia de K11-D2/K11-D4 («se da por
+  terminado cuando la cuenta se cancela») sin tocar tareas que nunca se cancelaron. **El coordinador puede preferir**
+  cancelar esas tareas sin papel al dar por terminado el aviso.
+
+### Pruebas existentes que cambiaron (y por qué)
+
+| Prueba                                                                                                                                | Antes                                                                         | Ahora                                                                                                                                                                  | Por qué                                                                                                                                                                                         |
+| ------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kitchen_scheduling_test.go` («cocina un producto sin ruta no detiene el envío…», antes «rutas inexistentes no aparentan liberación») | esperaba `blocked` y `pending_release`                                        | `released` sin tarea, `unrouted` congelado, `ready`, 409 `KITCHEN_RELEASE_NOT_PENDING` al reenviarlo; «Sin preparación» sigue explícito                                | K11-D1 y K11-D4; sigue protegiendo que no se aparente una tarea y que «Sin preparación» se respete                                                                                              |
+| `stage9d_accounts_test.go:308` (`testStage9DCancelWithPermission`)                                                                    | 2 liberadas, 1 bloqueada (flan sin ruta), 2 consumos, 2 solicitudes «cancel»  | 3 liberadas, 0 bloqueadas, 3 consumos, 3 solicitudes «cancel»; las clasificaciones siguen siendo 2 (el flan no tiene receta)                                           | K11-D1: el flan se libera sin tarea y registra su consumo como toda unidad liberada; que «Cancelar cuenta» da por terminado sin papel lo no enviado lo prueba ahora `testStageK11PendingCancel` |
+| `kitchen_acceptance_test.go` (`TestRestaurantAcceptance`, tres subpruebas de cocina)                                                  | contaba `kitchen_unit_releases` de toda la base (2) y reliberar respondía 200 | cuenta las de la cuenta (`accountUnitReleases`) y reliberar responde 409 `KITCHEN_RELEASE_NOT_PENDING` sin duplicar comandas                                           | los pedidos sin ruta de las subpruebas anteriores ahora se liberan (sin tarea); K11-D4                                                                                                          |
+| `stage9d_accounts_test.go` (`testStage9DCancelPendingKitchen`)                                                                        | `change_pending` y, al reactivar, «Volver a avisar» imprimía la cancelación   | `cancelled` en la respuesta, su reintento y la lectura; el aviso con `account_cancelled` y `change.dismissed`; «Volver a avisar» 409 sin imprimir; nada en Preparación | K11-D2/K11-D4: una cuenta cancelada no deja nada en el panel; sigue protegiendo que la respuesta, el reintento y la lectura coinciden                                                           |
+| `kitchen_changes_test.go:31-80`                                                                                                       | —                                                                             | sin cambios (pasa)                                                                                                                                                     | el aviso para la estación desactivada que tenía la comanda se conserva (K11-D2)                                                                                                                 |
+| `httpapi/clientversion_test.go`                                                                                                       | —                                                                             | también `kitchen-coverage-v1`                                                                                                                                          | capacidad nueva                                                                                                                                                                                 |
+| `licensing/operations_test.go`                                                                                                        | —                                                                             | `PUT kitchen/unrouted` (configuración) y `GET kitchen/coverage` (lectura)                                                                                              | tabla de la licencia                                                                                                                                                                            |
+| `administration/test_data_acceptance_test.go`                                                                                         | —                                                                             | subprueba `K11_productos_sin_ruta_en_una_estacion_de_prueba`                                                                                                           | K11-D3                                                                                                                                                                                          |
+
+### Pruebas nuevas
+
+- `TestStageK11UnroutedProducts` (`operations/stagek11_unrouted_test.go` y `stagek11_rules_test.go`): los cuatro
+  pedidos del propietario, la tarjeta y el aviso al mesero, la comanda impresa; «Enviar a una estación»; la modificación
+  con la ruta congelada; estación desactivada; impresora desactivada (`intervention` con el problema `inactive`, la pantalla lo
+  recibe); combo con componentes y combo vacío; al cobrar con un aviso pendiente (con `inactive_stations`) y al reabrir;
+  para llevar cobrado y sin entregar (sigue abierto y su programado llega con `ReleaseDue`) y al cerrar con la entrega;
+  al cancelar (programado y aviso pendiente); al combinar; un bloqueado de antes de la 0.17.0 que se envía con la regla
+  nueva (y la repetición con el mismo `operation_id`); los dos 409; la cobertura con los seis avisos y sus textos,
+  «Productos sin ruta» (400 y 409) y los permisos.
+- `TestStageK11Upgrade` (`database/stagek11_upgrade_test.go`): desde el esquema 29, bloqueados de cuentas cerrada,
+  cancelada, combinada y abierta, un programado de un para llevar cobrado sin entregar, uno ya liberado y tres avisos
+  (cerrada, abierta y combinada en una abierta). Solo cambian los dos bloqueados y el aviso de cuentas que ya no están
+  abiertas, con su historial; **todas las demás tablas** quedan con las mismas filas (sumas de comprobación de cada
+  tabla del esquema 29, como `TestStageK1Upgrade`).
+- `TestContractV1`: `contractKitchenCoverage`.
+
+### Pruebas realmente ejecutadas
+
+| Prueba                                                                                                                                        | Resultado                                                                                                                                                                                                                                                                                                        |
+| --------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `go-unit` (vet normal e `integration`, `test -race`, compilación y vet de Windows)                                                            | Aprobado                                                                                                                                                                                                                                                                                                         |
+| `go-int ./internal/operations` completo (con `./internal/payments`, sin pruebas de integración propias)                                       | 2 fallas de pruebas que esperaban lo de antes (`TestRestaurantAcceptance`: liberaciones contadas en toda la base y 200 al reliberar; `TestStage9DAccountCancellation`: consumo y solicitudes del flan ya liberado); corregidas en `e93f7d24` y vueltas a correr solas: aprobadas. Todo lo demás aprobado (818 s) |
+| `TestStageK11UnroutedProducts` (todas sus subpruebas)                                                                                         | Aprobado (varias corridas)                                                                                                                                                                                                                                                                                       |
+| `go-int ./internal/database` completo (con `TestStageK11Upgrade` y las actualizaciones anteriores, que ahora también aplican la 0030)         | Aprobado                                                                                                                                                                                                                                                                                                         |
+| `go-int ./internal/apicontract` completo (`TestContractV1` con `contractKitchenCoverage` y la de licencias)                                   | Aprobado                                                                                                                                                                                                                                                                                                         |
+| `go-int ./internal/administration` completo (con `K11_productos_sin_ruta_en_una_estacion_de_prueba` y `TestEveryOperationHasItsLicenseClass`) | Aprobado (294 s)                                                                                                                                                                                                                                                                                                 |
+| `go-int ./internal/licensing`                                                                                                                 | `TestDatabaseProbeCountsOnlyOperations` y `TestDatabaseRevisionCopyNeverGoesBack` aprobadas; `TestDatabaseTrustedTimeCopy` falla **igual en la base `e73b921`** (ver abajo)                                                                                                                                      |
+| `go-int ./cmd/ad-el-pos-server` (con el candado `candado-cmd`, borrado al terminar)                                                           | Aprobado (67 s)                                                                                                                                                                                                                                                                                                  |
+| `fmt-check`, `sync-check`                                                                                                                     | Aprobados                                                                                                                                                                                                                                                                                                        |
+| md5 de `docs/etapas/ETAPA_K1_1_COCINA_AJUSTES.md` antes y después                                                                             | Igual (`9363961a…`)                                                                                                                                                                                                                                                                                              |
+
+`./internal/kitchen` y `./internal/maintenance` no tienen pruebas de integración; sus unitarias corren en `go-unit`.
+
+### No verificado
+
+- Playwright y Vitest (los corre la B con esta rama). Ningún Go temporal (`server-up`) ni emulador.
+- `TestDatabaseTrustedTimeCopy` (`licensing`, integración) **falla también en la base** `e73b921` (comprobado con
+  `git archive` en una carpeta temporal): fija el reloj simulado en el 25/11/2026 12:00 y hoy (26/11) la última
+  actividad real de la base es posterior. No es de esta fase; las otras dos pruebas de integración de `licensing` pasan.
+
+## Fase B · Escritorio: configuración guiada, diagnóstico y panel
+
+Árbol `$SP/wt/k11-b`, rama `etapa-k1-1-b` (desde `etapa-k1-1` `e73b921`; con `etapa-k1-1-a` fusionada hasta
+`0766f71` para correr Playwright), `ISO_TAG=B`, Playwright en 8221/1451. Solo
+`desktop/` (React, Rust `src-tauri` y `e2e/`); sin tocar `backend/`, sin emuladores. Consume el contrato fijado con la
+Fase A tal cual (K11-D5) y hace K11-D6, K11-D7, K11-D8 y K11-D13. Todo lo nuevo se esconde sin la capacidad
+`kitchen-coverage-v1` (`desktop/src/services/serverCapabilities.ts:31`): con un servidor 0.16.0 Terminales, Enrutamiento
+y el panel de Preparación quedan como antes.
+
+### Qué se hizo
+
+1. **Lista cerrada**: `kitchen_coverage` (`GET kitchen/coverage`) y `kitchen_save_unrouted` (`PUT kitchen/unrouted`) en
+   `src-tauri/src/api.rs:92-93`, con su caso en `kitchen_routes_are_closed_and_keep_write_methods` (`api.rs:1414`), y
+   en el tipo `Operation` de `services/api.ts`. El puente de Playwright (`e2e/native-driver.ts`) lee las rutas de
+   `api.rs` con su expresión regular, así que las conoce sin cambios.
+2. **Tipos y textos de la cobertura** (`services/kitchenCoverage.ts`): los tipos tal como el contrato y funciones que
+   solo agrupan lo que Go ya resolvió por estación (React no decide rutas): las estaciones de una pantalla
+   (`displayStationIDs`, `:111`; una pantalla recién aprobada todavía no tiene dispositivo y muestra todas las
+   estaciones activas que reciben en pantalla, como Go por omisión), el resumen del asistente (`displaySummary`,
+   `:202`: «Esta pantalla recibirá: Desayunos, Hamburguesas.» / «No recibirá: Refrescos, Extras (no necesitan
+   preparación).», con lo que va a otra estación como «Bebidas (va a Barra)»), la lista «Sin ruta» (`unroutedNames`,
+   `:148`), los avisos de una pantalla (`displayWarnings`, `:251`: los suyos por `device_id` y los de sus estaciones) y
+   los de Enrutamiento (`routingWarnings`, `:265`), y lo que dicen las casillas del asistente (`categoryRouteText`,
+   `categoryArrives`, `categoryChangeWarning`: «Desayunos dejará de ir a Barra.»).
+3. **Asistente** (`pages/kitchenDisplay/KitchenDisplayAssistant.tsx`, K11-D6): se abre al aprobar con éxito una
+   solicitud `device_kind: 'kitchen'` (`DevicesPage.tsx:300`, `onApproved`) y con «Configurar qué recibe» en la fila de
+   la pantalla (`:1476`) y en «Ver configuración» (`:782`). Tres pasos con su indicador; «Siguiente», «Saltar este
+   paso», «Anterior», «Saltar el asistente» y «Terminar»:
+   - **Estaciones** (`StationsStep`, `:199`): las que mostrará la pantalla. Sin ninguna que reciba en pantalla ofrece
+     **crear «Cocina»** (`CreateStation`, `:369`): con una impresora activa la usa («Impresora y pantalla»), con varias
+     hay que elegir (o «Sin impresora: solo pantalla») y sin ninguna es «Solo pantalla». Si ya existe una «Cocina» que
+     solo imprime o está desactivada, ofrece **usarla** (la activa y la pasa a recibir en pantalla). Las estaciones que
+     solo imprimen ofrecen «Recibir también en pantalla» (`PATCH kitchen/stations/{id}` con la estación completa, su
+     revisión y su misma impresora). En una pantalla ya emparejada se eligen además sus estaciones
+     (`DisplayStationsChoice`, `:439`, `PUT kitchen/access` con lo que se leyó de `device_configuration`).
+   - **Categorías** (`CategoriesStep`, `:537`): las de la cobertura; las que ya llegan salen marcadas y no se desmarcan
+     ahí; marcar una sin ruta la crea (`POST kitchen/routes`) y una con ruta la cambia a la estación de la pantalla
+     (`PATCH kitchen/routes/{id}` con su revisión), con el aviso «X dejará de ir a Barra.»; con varias estaciones en la
+     pantalla, cada categoría elige a cuál va (por omisión, la primera). «Guardar y seguir».
+   - **Resumen** (`SummaryStep`, `:684`): la cobertura recién leída y los avisos de la pantalla.
+   - Cada escritura va por `useRestaurantMutation` (su `operation_id`; un resultado incierto se recupera con el
+     mismo); cada paso pide su permiso (`kitchen.stations.manage`, `kitchen.routing.manage`) y sin él se ve en solo
+     lectura con «Pide a quien administra Cocina que lo configure.».
+4. **Diagnóstico** en «Ver configuración» de una pantalla (además, «Estaciones que muestra» dice «Cocina
+   (desactivada)» cuando la elegida se desactivó, `kitchenStationsText`, para que no contradiga el aviso «Esta pantalla
+   no tiene estaciones.») (`pages/kitchenDisplay/KitchenDisplayDiagnostics.tsx`): por
+   estación, su recepción, «Categorías: Desayunos (12 productos)», los productos con ruta propia y si recibe lo que no
+   tiene ruta; los avisos de Go con su botón (`warningFix`, `:26`): `display_*` → asistente en el paso 1
+   («Configurar qué recibe»), `station_without_routes` → asistente en el paso 2 («Elegir sus categorías»),
+   `route_station_inactive` y `unrouted_station_inactive` → Cocina › Enrutamiento, `station_printer_inactive` → Cocina ›
+   Impresoras. Para abrir una pestaña de Cocina se deja la petición en `pages/kitchen/kitchenViewRequest.ts` y se navega
+   con el único `requestScreen` (como «Configurar impresora» con Cobros); `KitchenPage` la toma al abrirse
+   (`KitchenPage.tsx:34`). El botón solo aparece si la persona puede abrir esa pestaña.
+5. **Enrutamiento** (`pages/kitchen/UnroutedProducts.tsx`, dentro de `RoutingAdmin`): «Productos sin ruta» con «No
+   necesitan preparación» / «Enviar a una estación» y su estación (solo activas; la guardada, si se desactivó, se ve
+   sin poder elegirla), `PUT kitchen/unrouted` con `expected_station_id` = lo leído; un 409
+   `KITCHEN_UNROUTED_CHANGED` vuelve a leer y lo dice en su lugar («Alguien más cambió este ajuste…»). La lista «Lo que
+   no va a ninguna estación»: «Sin ruta: Refrescos, Extras (no necesitan preparación).» o «(van a Cocina).»; los avisos
+   de rutas a estaciones desactivadas y del ajuste, con «Cambiar la ruta», que abre esa ruta en el editor.
+6. **Estaciones** (K11-D7): «Terminales de cocina» → «Computadoras en modo Cocina» con «Las pantallas de cocina
+   (tabletas) se configuran en Sistema › Terminales.» (`TerminalStations.tsx:45`) y las dos referencias de
+   `DevicesPage.tsx`; el resumen dice «Estaciones que muestra cada computadora y aviso sonoro»; la recepción en pantalla dice «Las pantallas de cocina muestran estos pedidos al momento. En
+   Comandas se ve si la pantalla ya los recibió.» (`StationsAdmin.tsx:183`).
+7. **El panel «Por enviar a cocina»** (`pages/kitchen/PendingKitchen.tsx`, K11-D8; `PreparationBoard.tsx:147` lo elige
+   con la capacidad y conserva el de siempre sin ella). Resumen «N pedidos · N avisos». Por caso (`releaseCase`,
+   `:33`): programado automático «Programado: se envía solo a su hora» + «Se envía a cocina solo el 13/11/26 a la 1:45
+   p.m.»; manual «Programado: espera a que lo envíes» + la hora programada; pendiente por quitarle la hora (K11-D9)
+   «Espera a que lo envíes a cocina» + «La cocina no lo recibe hasta que toques «Enviar a cocina ahora».»; bloqueado
+   viejo «La cocina no recibió este pedido» + «Se envió con la versión anterior, que lo detenía por un producto sin
+   ruta o una estación desactivada.» (sin los renglones «Sin ruta de preparación»); aviso para una estación
+   desactivada «La cocina no recibió una modificación/cancelación» + «No se pudo avisar a Barra: está desactivada.» +
+   «Actívala en Cocina › Estaciones y vuelve a avisar.», con `pending_changes[].inactive_stations` (contrato §6); sin
+   ese dato muestra las advertencias de Go tal cual (`pendingChangeLines`), sin interpretar su texto. Botones con su texto debajo: «Enviar a cocina ahora» («La
+   cocina lo recibe al momento.», «…, antes de su hora.» o, sin `kitchen.release_early`, por qué no se puede),
+   «Cambiar la hora» (solo en programados: «Cambia cuándo llega a cocina. No cambia el pedido ni su precio.») y
+   «Volver a avisar» («Manda el cambio a la estación si ya está activa.»). El éxito de «Enviar a cocina ahora» solo se
+   dice con `state: 'released'` en la respuesta; los 409 (`KITCHEN_RELEASE_NOT_PENDING`, `KITCHEN_CHANGE_NOT_PENDING`)
+   los avisa el controlador común con el mensaje de Go y el panel se vuelve a leer. «Volver a avisar» vuelve a leer el
+   tablero para decir si el aviso salió o la estación sigue desactivada.
+8. **Detalle de la cuenta**: una liberación `cancelled` dice «No se envió a cocina» (`AccountKitchen.tsx:22`) con «Sus
+   productos se cancelaron o la cuenta se cerró antes de enviarlo.» en lugar de sus advertencias viejas.
+9. **Historial**: Cocina › Historial nombra `release.dismissed` («Pedido sin enviar dado por terminado»),
+   `change.dismissed` («Aviso sin entregar dado por terminado») y `unrouted.saved` («Productos sin ruta actualizado»),
+   y dice el motivo en palabras (`historyReason`, `KitchenPage.tsx:261`: `account_not_open`, `account_closed`,
+   `account_cancelled`); el Registro de movimientos (`services/auditActions.ts`) tiene `kitchen.release.dismissed`,
+   `kitchen.change.dismissed` y `kitchen.unrouted.saved`.
+10. **Playwright**: `workflow-stagez-k11-assistant.spec.ts` (la tableta pide su código como pantalla de cocina, se
+    aprueba en Terminales, el asistente crea «Cocina» de solo pantalla, se marcan dos categorías nuevas, el resumen las
+    dice; Go confirma en la cobertura «Cocina» con las dos categorías y la tableta, al conectarse, muestra Cocina),
+    `workflow-stagez-k11-diagnostics.spec.ts` (cada aviso del diagnóstico con su botón: sin categorías → asistente en el
+    paso 2; impresora desactivada → Cocina › Impresoras; ninguna recibe en pantalla → asistente, «Recibir también en
+    pantalla»; sin estaciones; «Sin ruta» con «no necesitan preparación» y «van a Barra», el ajuste guardado y vuelto a
+    «No necesitan preparación», los avisos de la ruta y del ajuste con la estación desactivada y «Cambiar la ruta»;
+    Estaciones; «Por enviar a cocina» con un programado y uno sin hora, y «Enviar a cocina ahora»), con
+    `e2e/kitchen-coverage-flow.ts`, y el cambio de `workflow-stage9d-accounts.spec.ts` (K11-D13).
+
+### Decisiones propuestas
+
+1. **Una pantalla recién aprobada muestra «todas» en el asistente.** Al aprobar todavía no existe su dispositivo (se
+   crea cuando la tableta reclama la credencial), así que el paso 1 muestra las estaciones activas que reciben en
+   pantalla (lo que Go hará por omisión) y dice que después se pueden elegir algunas con «Configurar qué recibe». _Por
+   qué_: no hay `device_id` que mandar a `PUT kitchen/access` (avance de la Fase 0, decisión 6).
+2. **«Cocina» nueva**: con impresoras activas se ofrece también «Sin impresora: solo pantalla» (la configuración del
+   propietario); con una sola, viene elegida. _Por qué_: K11-D6 pide preguntar con varias; con una, dejar elegir
+   solo pantalla evita imprimir sin quererlo.
+3. **El aviso de la impresora desactivada lleva a Cocina › Impresoras** (el encargo nombra el asistente, Estaciones y
+   Enrutamiento). _Por qué_: lo que hay que corregir es la impresora («La impresora X de Y está desactivada»).
+4. **Enrutamiento solo muestra los avisos de rutas a estaciones desactivadas y del ajuste** (`route_station_inactive`,
+   `unrouted_station_inactive`); los de pantallas y estaciones van al diagnóstico de cada pantalla.
+5. **«Cambiar la hora» solo en los pedidos programados**, como la decisión propuesta 8 del avance; un pedido al que le
+   quitaron la hora se envía con «Enviar a cocina ahora».
+6. **Sin la capacidad, el panel de Preparación es el de siempre** (otro componente), como pide el contrato; los
+   cambios de texto de Estaciones y el detalle de la cuenta no dependen de la capacidad.
+7. **La especificación de la 9D** (K11-D13): «Enviado · sin confirmar en cocina» se provoca con un pedido para llevar
+   programado al que se le quita la hora (K11-D9); la Mesa D3 con el producto sin ruta ahora se envía y se comprueba
+   que no queda pendiente (`released` o `ready`).
+8. **El asistente de Playwright pausa las estaciones ajenas.** La base es compartida: las estaciones activas que
+   reciben en pantalla de las especificaciones anteriores se desactivan al empezar y se vuelven a activar al terminar
+   (también si la prueba falla), para emparejar «sin estaciones».
+
+### Contrato: lo que planteó la B y cómo quedó (§6 del contrato)
+
+- **«por ahora»** en el texto de `unrouted_station_inactive` lo prohíben las pruebas de lenguaje sencillo de Go y del
+  escritorio: el coordinador fijó «Los productos sin ruta iban a {estación}, que está desactivada. Mientras siga así, no
+  necesitan preparación.». El escritorio muestra el texto de Go tal cual; Playwright solo comprueba el principio, así
+  que pasa con los dos textos. Con `0766f71` la A todavía dice «por ahora» (se ve en la captura de Enrutamiento).
+- **`pending_changes[].inactive_stations`** (opcional) para «No se pudo avisar a X: está desactivada.»: el escritorio lo
+  usa y, sin él, muestra las advertencias de Go tal cual. Con `0766f71` la A todavía no lo manda; Playwright no
+  depende de él (no provoca un aviso pendiente) y Vitest prueba los dos casos.
+- **Motivos** de `release.dismissed` y `change.dismissed`: `account_not_open`, `account_closed` y
+  `account_cancelled`, los que ya entendía el escritorio.
+
+### Archivos
+
+- Rust y servicios: `desktop/src-tauri/src/api.rs`, `desktop/src/services/{api,serverCapabilities,kitchenCoverage,
+kitchen,auditActions}.ts`.
+- Terminales: `desktop/src/pages/DevicesPage.tsx`, `desktop/src/pages/kitchenDisplay/{KitchenDisplayAssistant,
+KitchenDisplayDiagnostics}.tsx`.
+- Cocina: `desktop/src/pages/kitchen/{PendingKitchen,UnroutedProducts,RoutingAdmin,PreparationBoard,KitchenPage,
+ScheduleEditor,StationsAdmin,TerminalStations}.tsx`, `kitchenViewRequest.ts`.
+- Cuenta: `desktop/src/pages/restaurant/AccountKitchen.tsx`, `capture/BillLines.tsx` (comentario).
+- Estilos: `desktop/src/styles.css` (solo tokens: `kitchen-pending-*`, `kitchen-coverage-warnings`,
+  `kitchen-unrouted-list`, `kitchen-assistant-*`, `kitchen-diagnostics*`).
+- Pruebas: `services/kitchenCoverage.test.ts`, `testing/kitchenCoverage.ts` (coberturas simuladas),
+  `pages/stageK11Terminals.test.tsx`, `pages/kitchen/stageK11Routing.test.tsx`, y las que cambian:
+  `kitchenMessages.test.tsx`, `preparationBoard.test.tsx`, `terminalStations.test.tsx`, `stageA3Terminals.test.tsx`,
+  `stage9dAccounts.test.tsx`, `auditActions.test.ts`; Playwright `e2e/workflow-stagez-k11-{assistant,diagnostics}.spec.ts`,
+  `e2e/kitchen-coverage-flow.ts`, `e2e/workflow-stage9d-accounts.spec.ts` y `e2e/workflow-stage9f-kitchen-stations.spec.ts`
+  («Computadoras en modo Cocina»).
+
+### Pruebas realmente ejecutadas
+
+| Prueba                                                                                                                                                                           | Resultado                                                                                                                                                                    |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `iso.sh … cargo` (`cargo test --locked --offline`)                                                                                                                               | 122 aprobadas, 4 ignoradas (incluida `kitchen_routes_are_closed_and_keep_write_methods`)                                                                                     |
+| `npx tsc --noEmit`                                                                                                                                                               | Sin errores                                                                                                                                                                  |
+| `iso.sh … vitest` (tsc + `npm test`), con la A fusionada (la prueba de `auditActions` lee su Go)                                                                                 | 110 archivos, 1049 pruebas aprobadas                                                                                                                                         |
+| `iso.sh … build` (`npm run build`)                                                                                                                                               | Aprobado (el aviso de tamaño de un bloque ya existía)                                                                                                                        |
+| `iso.sh … format` + `fmt-check` antes de cada commit                                                                                                                             | Sin cambios pendientes                                                                                                                                                       |
+| md5 de `docs/etapas/ETAPA_K1_1_COCINA_AJUSTES.md`                                                                                                                                | `9363961a…` igual antes y después                                                                                                                                            |
+| Playwright Chromium, las dos nuevas solas (`workflow-stagez-k11`, Go temporal 8221/1451 con `ISO_LICENSE_TRUST`)                                                                 | 2 de 2 aprobadas (34 s)                                                                                                                                                      |
+| Playwright WebKit, las dos nuevas solas                                                                                                                                          | 2 de 2 aprobadas (30 s)                                                                                                                                                      |
+| Playwright Chromium juntas: `workflow-stage9d-accounts`, `workflow-stage9d-cancel-account`, `workflow-stage9f-kitchen-stations`, `workflow-stagez-k1-terminals` y las dos nuevas | 6 de 6 aprobadas (2,1 min)                                                                                                                                                   |
+| Playwright WebKit, las mismas seis juntas                                                                                                                                        | 6 de 6 aprobadas (2,3 min)                                                                                                                                                   |
+| Capturas en tema claro (`$SP/k11/capturas-B/`, Chromium y WebKit)                                                                                                                | 8 por motor: `k11-asistente-{estaciones,categorias,resumen}`, `k11-diagnostico-{sin-categorias,sin-estaciones}`, `k11-enrutamiento-sin-ruta`, `k11-estaciones` y `k11-panel` |
+
+Registros en `$SP/k11/B-pw/` (`k11-*.log` y `conjunta-*.log`), con el guion `run.sh`.
+
+**No verificado**: con un servidor que ya mande `inactive_stations` y el texto nuevo de `unrouted_station_inactive` (la
+A todavía no los tiene; solo Vitest prueba `inactive_stations`); un aviso pendiente real para una estación desactivada
+en Playwright; la ventana nativa (Tauri) y Windows, como en las etapas anteriores.
+
+## Decisiones del coordinador al cerrar las fases A y B
+
+Las fases A y B se fusionaron en `etapa-k1-1`: la A con avance rápido (`e4184da`) y la B con una fusión sin conflictos
+(`ab9771d`). La B corrió Playwright contra la A hasta `0766f71`. Lo que la A agregó después (los ajustes de la §6 del
+contrato, «Quitar datos de prueba» y las pruebas) lo comprueba la regresión completa de la Fase D.
+
+- **K11-D15. Rutas congeladas a una estación desactivada** (Fase A, aceptada): en una modificación, de la ruta congelada
+  solo reciben las estaciones activas y nunca se aplica el ajuste.
+- **K11-D16. Combo con componentes cuya ruta solo va a estaciones desactivadas** (Fase A, aceptada): se congela con
+  `station_ids: []` y `omitted_station_ids`, sin parte propia; sus componentes se resuelven solos.
+- **K11-D17. «Combo vacío» en la cobertura** (Fase A, aceptada): un combo cuyos componentes empiezan todos en cero; en el
+  envío manda el pedido real.
+- **K11-D18. Qué pendientes se dan por terminados** (Fase A, aceptada): los de la cuenta que se cierra o se cancela y los
+  de las cuentas que se combinaron en ella. Un aviso cuyas unidades siguen en una cuenta abierta se conserva.
+- **K11-D19. «Quitar datos de prueba»** (Fase A, aceptada): desvincula el ajuste también cuando la estación de prueba
+  se conserva desactivada, como sus rutas y sus terminales.
+- **K11-D20. El historial de lo terminado lleva `operation_id` vacío** (Fase A, aceptada). Se guardan el actor y el
+  dispositivo. `kitchen_history.operation_id` es una llave foránea diferida, y `Integrate` no recibe la operación.
+- **K11-D21. Las tareas de una cuenta cancelada con su aviso pendiente quedan como estaban** (Fase A, aceptada sin
+  cambio). Son de unidades ya canceladas: Preparación no las muestra y la pantalla las trata como canceladas. La estación
+  desactivada no recibe el aviso de cancelación, que se da por terminado (K11-D2 y K11-D4). Cancelarlas también sin papel
+  no cambiaría lo que ve nadie.
+- **K11-D22. Decisiones propuestas 1 a 8 de la Fase B** (aceptadas):
+  - una pantalla recién aprobada muestra en el asistente las estaciones con recepción en pantalla;
+  - la «Cocina» nueva ofrece también «Sin impresora: solo pantalla»;
+  - el aviso de impresora desactivada lleva a Cocina › Impresoras;
+  - Enrutamiento muestra solo los avisos de rutas y del ajuste;
+  - «Cambiar la hora» solo aparece en los pedidos programados;
+  - sin la capacidad, el panel es el de siempre;
+  - la especificación de la 9D se adaptó a K11-D9 y K11-D13;
+  - la especificación del asistente pausa las estaciones ajenas de la base compartida y las reactiva al terminar.
+- **K11-D23. `TestDatabaseTrustedTimeCopy` (`licensing`) es una prueba con fecha fija que caducó.** Fija su reloj en el
+  25/11/2026, y la base ya tiene actividad del día en curso. La Fase A comprobó que falla igual en `e73b921`, así que no
+  viene de esta etapa. La Fase D corrige **solo la prueba**, con fechas relativas a la hora actual, sin tocar el código
+  de la licencia.
