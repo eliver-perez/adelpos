@@ -44,6 +44,7 @@ func kitchenTasks(t *testing.T, fixture *restaurantFixture) []kitchen.Task {
 	}](t, fixture.adminCall(t, "GET", "kitchen/board?state=all", nil, 200))
 	return result.Tasks
 }
+
 // accountUnitReleases cuenta las liberaciones canónicas de las unidades de la cuenta. Desde la etapa K1.1 (K11-D1) los
 // pedidos sin ruta de las pruebas anteriores del mismo recorrido también se liberan (sin tarea, «No necesitan
 // preparación»), así que ya no se cuentan las de toda la base.
