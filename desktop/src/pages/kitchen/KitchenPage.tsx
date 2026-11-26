@@ -15,6 +15,7 @@ import { PrintersAdmin } from './PrintersAdmin';
 import { RoutingAdmin } from './RoutingAdmin';
 import { StationsAdmin } from './StationsAdmin';
 import { PreparationSeat } from './PreparationSeat';
+import { takeKitchenViewRequest } from './kitchenViewRequest';
 
 export function KitchenPage({
   can,
@@ -29,7 +30,8 @@ export function KitchenPage({
   connectionLost?: boolean;
   onRetryConnection?: () => void;
 }) {
-  const [view, setView] = useState('preparation');
+  // Etapa K1.1 (§4.2): el diagnóstico de una pantalla de cocina en Terminales puede pedir abrir otra pestaña.
+  const [view, setView] = useState<string>(() => takeKitchenViewRequest() ?? 'preparation');
   const [queueVersion, setQueueVersion] = useState(0);
   // El pendiente de cocina vive en el almacén global (clave kitchen): cambiar de pantalla y volver
   // conserva el mismo operation_id para recuperar el resultado.
@@ -145,7 +147,7 @@ export function KitchenPage({
         />
       )}
       {selected === 'stations' && <StationsAdmin can={can} execute={execute} busy={busy} />}
-      {selected === 'routing' && <RoutingAdmin execute={execute} busy={busy} />}
+      {selected === 'routing' && <RoutingAdmin can={can} execute={execute} busy={busy} />}
       {selected === 'printers' && <PrintersAdmin can={can} execute={execute} busy={busy} />}
       {selected === 'settings' && <KitchenSettingsForm can={can} execute={execute} busy={busy} />}
       {selected === 'history' && <KitchenHistory timezone={timezone} />}
@@ -184,7 +186,9 @@ function KitchenHistory({ timezone }: { timezone: string }) {
           summary={`${serverDateTime(event.created_at, timezone)} · ${event.actor_name}`}
         >
           <p>Terminal: {event.device_name}</p>
-          {event.after_value?.reason && <p>Motivo: {event.after_value.reason}</p>}
+          {event.after_value?.reason && (
+            <p>Motivo: {historyReason(event.kind, event.after_value.reason)}</p>
+          )}
           {event.after_value?.state && (
             <p>
               Estado:{' '}
@@ -239,4 +243,24 @@ const historyLabels: Record<string, string> = {
   'print.retry': 'Reintento de impresión autorizado',
   'print.resolve': 'Resultado de impresión resuelto',
   'print.reprinted': 'Copia adicional solicitada',
+  // Etapa K1.1 (K11-D3 y K11-D4): lo que quedó sin enviar de una cuenta que ya no está abierta se da por terminado
+  // (por la actualización a la 0.17.0, al cobrar y cerrar o al cancelar la cuenta) y el ajuste «Productos sin ruta».
+  'release.dismissed': 'Pedido sin enviar dado por terminado',
+  'change.dismissed': 'Aviso sin entregar dado por terminado',
+  'unrouted.saved': 'Productos sin ruta actualizado',
 };
+
+// Motivos que escribe Go al dar por terminado un envío o un aviso de una cuenta que ya no está abierta (K11-D4). Los
+// demás motivos los escribe una persona (por ejemplo, al reimprimir) y se muestran como están.
+const dismissedReasons: Record<string, string> = {
+  account_not_open: 'La cuenta ya no estaba abierta.',
+  account_closed: 'La cuenta se cobró y se cerró.',
+  account_cancelled: 'La cuenta se canceló.',
+};
+
+export function historyReason(kind: string, reason: string) {
+  if (kind === 'release.dismissed' || kind === 'change.dismissed') {
+    return dismissedReasons[reason] ?? 'La cuenta ya no estaba abierta.';
+  }
+  return reason;
+}
