@@ -113,6 +113,9 @@ func TestClassifyOperation(t *testing.T) {
 		{"PUT", "payments/settings", RowAdministration, true},
 		{"POST", "payments/cash/drawers/" + id + "/test", RowAdministration, true},
 		{"PUT", "kitchen/settings", RowAdministration, true},
+		// Etapa K1.1: «Productos sin ruta» es configuración de cocina; la cobertura, una lectura.
+		{"PUT", "kitchen/unrouted", RowAdministration, true},
+		{"GET", "kitchen/coverage", RowRecords, false},
 		{"POST", "kitchen/printers/" + id + "/width-test", RowAdministration, true},
 		{"POST", "pairing/requests", RowAdministration, true},
 		{"GET", "pairing/requests/" + id, RowRecords, false},
