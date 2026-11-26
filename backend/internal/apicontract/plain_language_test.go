@@ -65,6 +65,13 @@ var allowedDevelopmentPhrases = []struct {
 			"estimado de inventario",
 	},
 	{
+		file:   "kitchen/coverage.go",
+		phrase: "«por ahora»",
+		reason: "aviso unrouted_station_inactive de la cobertura, con el texto fijado en el contrato de la etapa K1.1 " +
+			"(«…que está desactivada: por ahora no necesitan preparación.»): dice qué pasa mientras la estación de " +
+			"«Productos sin ruta» siga desactivada, no es una nota de desarrollo",
+	},
+	{
 		file:   "standalone/adopt.go",
 		phrase: "«en desarrollo»",
 		reason: "mensaje de la orden adopt-legacy en la terminal de la Mac, que nunca llega a la interfaz; «en " +

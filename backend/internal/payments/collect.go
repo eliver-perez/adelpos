@@ -8,6 +8,7 @@ import (
 	"github.com/shopspring/decimal"
 	"local/ad-el-pos/server/internal/events"
 	"local/ad-el-pos/server/internal/features"
+	"local/ad-el-pos/server/internal/kitchen"
 )
 
 type Selection struct {
@@ -651,6 +652,15 @@ func (handler *service) closeIfSettled(accountID string) (bool, error) {
 	}
 	if tag.RowsAffected() == 0 {
 		return false, nil
+	}
+	// Etapa K1.1 (K11-D4): una cuenta cerrada no deja nada por enviar a cocina. Lo pendiente de la cuenta se da por
+	// terminado en esta misma transacción (con el lock 7820148305 que ya tomó la operación de cobro, sin otro), con su
+	// historial y el actor del cobro; nunca toca ventas, pagos ni inventario. Un pedido para llevar sin entregar no llega
+	// aquí: sigue abierto y su pedido programado sigue llegando a la cocina.
+	actor := kitchen.Actor{UserID: handler.request.Actor.UserID, DeviceID: handler.request.Actor.DeviceID,
+		Permissions: handler.request.Actor.Permissions}
+	if err := kitchen.AccountClosed(handler.ctx, handler.tx, accountID, actor); err != nil {
+		return false, err
 	}
 	// Etapa 9A: la venta cuenta al cerrarse la cuenta. El reconocimiento se escribe en esta misma
 	// transacción (recognition.go); si el cierre se revierte, también se revierte.

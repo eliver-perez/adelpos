@@ -68,6 +68,8 @@ func (handler *service) read(parts []string) (any, error) {
 			WHERE u.account_id::text=$1 AND u.id=ANY(r.unit_ids))) ORDER BY created_at DESC LIMIT 100`, accountID)
 	case "board":
 		return handler.board()
+	case "coverage":
+		return handler.coverage()
 	case "tickets":
 		return handler.readTickets(parts)
 	case "jobs":
@@ -160,14 +162,19 @@ func (handler *service) board() (any, error) {
 	releases := []map[string]any{}
 	pendingChanges := []map[string]any{}
 	if all {
+		// Etapa K1.1 (K11-D4): solo lo que sigue esperando de una cuenta abierta (por la pertenencia actual de sus
+		// unidades); una cuenta cobrada, cerrada o cancelada no deja nada. Desde la 0.17.0 ningún envío queda «blocked»:
+		// ese estado solo lo tienen las liberaciones anteriores de cuentas todavía abiertas.
 		releases, err = many[map[string]any](handler.ctx, handler.tx, `SELECT (to_jsonb(r)-'unit_ids'-'routing_snapshot'-'station_snapshot')||
             jsonb_build_object('folio',a.folio,'account_name',a.name) FROM app.kitchen_releases r
             JOIN app.restaurant_accounts a ON a.id=r.account_id WHERE r.state IN ('pending','scheduled','blocked')
+            AND `+releaseOpenSQL+`
             ORDER BY coalesce(r.due_at,r.created_at),r.id LIMIT 100`)
 		if err != nil {
 			return nil, err
 		}
-		pendingChanges, err = many[map[string]any](handler.ctx, handler.tx, `SELECT to_jsonb(c)-'payload' FROM app.kitchen_pending_changes c ORDER BY created_at LIMIT 100`)
+		pendingChanges, err = many[map[string]any](handler.ctx, handler.tx, `SELECT to_jsonb(c)-'payload'-'dismissed_at'-'dismissed_reason'
+            FROM app.kitchen_pending_changes c WHERE c.dismissed_at IS NULL ORDER BY created_at LIMIT 100`)
 		if err != nil {
 			return nil, err
 		}

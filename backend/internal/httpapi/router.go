@@ -74,6 +74,11 @@ var capabilities = []string{
 	// y la contraseña del administrador para los ajustes), su canal de eventos filtrado por estación y la configuración
 	// de la pantalla en PATCH devices/{id} y PUT kitchen/timing. El escritorio muestra lo de las pantallas solo con ella.
 	"kitchen-display-v1",
+	// Etapa K1.1 (Fase A, servidor 0.17.0; K11-D3 a K11-D5): la configuración guiada de cocina: GET kitchen/coverage (lo
+	// que llega a cada estación y pantalla, lo sin ruta y sus avisos, resuelto en Go), PUT kitchen/unrouted («Productos
+	// sin ruta»), el 409 KITCHEN_RELEASE_NOT_PENDING de «Enviar a cocina ahora» y el 409 KITCHEN_CHANGE_NOT_PENDING de
+	// «Volver a avisar». El escritorio muestra el asistente, el diagnóstico y «Productos sin ruta» solo con ella.
+	"kitchen-coverage-v1",
 }
 
 type ErrorBody struct {

@@ -3474,6 +3474,251 @@
           }
         ]
       }
+    },
+    "/kitchen/coverage": {
+      "get": {
+        "operationId": "getKitchenCoverage",
+        "summary": "Cobertura del enrutamiento de cocina",
+        "description": "Etapa K1.1 (capacidad kitchen-coverage-v1, K11-D5): qué categorías y productos llegan a cada estación y pantalla de cocina, lo que no tiene ruta (y qué hace con ello el ajuste «Productos sin ruta»), las rutas «Sin preparación», las categorías con su ruta y los avisos de lo que falta, con su texto listo y los identificadores de lo que hay que corregir. Go resuelve cada producto activo con la misma función que el envío; el cliente no calcula rutas. Solo lectura. Requiere kitchen.stations.read (sin él, 403 PERMISSION_DENIED).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "La cobertura.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KitchenCoverage"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Cocina"]
+      }
+    },
+    "/kitchen/unrouted": {
+      "put": {
+        "operationId": "saveKitchenUnrouted",
+        "summary": "Guardar «Productos sin ruta»",
+        "description": "Etapa K1.1 (capacidad kitchen-coverage-v1, K11-D3): station_id null es «No necesitan preparación» (el valor de siempre); una estación es «Enviar a una estación». expected_station_id es lo que se leyó: si lo guardado es otro, 409 KITCHEN_UNROUTED_CHANGED (otra persona lo cambió: volver a leer). La estación debe existir y estar activa (si no, 400 KITCHEN_VALIDATION «Elige una estación activa.»). Requiere kitchen.routing.manage. Idempotente con operation_id. Deja unrouted.saved en el historial de cocina y publica kitchen.unrouted.changed (ámbito configuration). GET kitchen/settings lo trae como unrouted_station_id y PUT kitchen/settings no lo cambia.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "operation_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "station_id": {
+                    "type": ["string", "null"],
+                    "format": "uuid"
+                  },
+                  "expected_station_id": {
+                    "type": ["string", "null"],
+                    "format": "uuid"
+                  }
+                },
+                "required": ["operation_id", "station_id", "expected_station_id"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "El ajuste guardado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KitchenUnrouted"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Otra persona cambió el ajuste (KITCHEN_UNROUTED_CHANGED) o la clave es de otra operación (IDEMPOTENCY_CONFLICT).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Cocina"]
+      }
+    },
+    "/kitchen/releases/{id}/release": {
+      "post": {
+        "operationId": "releaseKitchenOrder",
+        "summary": "Enviar a cocina ahora un pedido pendiente",
+        "description": "«Enviar a cocina ahora» del panel «Por enviar a cocina» (ya existía; la etapa K1.1 lo agrega al contrato). Manda a la cocina lo que todavía no recibió el pedido, con la configuración de ahora: lo que tiene ruta llega a sus estaciones y lo demás sigue «Productos sin ruta» (K11-D1: nunca queda bloqueado). Requiere kitchen.release y kitchen.stations.all (sin él, 403 STATION_SCOPE_DENIED); antes de su hora, también kitchen.release_early. Etapa K1.1 (capacidad kitchen-coverage-v1, K11-D4): con un pedido ya enviado, cancelado o de una cuenta que ya no está abierta, 409 KITCHEN_RELEASE_NOT_PENDING («Este pedido ya no está pendiente.»). Una revisión vieja, 409 REVISION_CONFLICT. Repetir con el mismo operation_id devuelve la respuesta guardada.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "operation_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "revision": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                },
+                "required": ["operation_id", "revision"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "La liberación, ya released.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KitchenRelease"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Ya no está pendiente (KITCHEN_RELEASE_NOT_PENDING), cambió (REVISION_CONFLICT) o la clave es de otra operación (IDEMPOTENCY_CONFLICT).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Cocina"]
+      }
+    },
+    "/kitchen/changes/{event_id}/retry": {
+      "post": {
+        "operationId": "retryKitchenChange",
+        "summary": "Volver a avisar a cocina un cambio pendiente",
+        "description": "«Volver a avisar» del panel «Por enviar a cocina» (ya existía; la etapa K1.1 lo agrega al contrato): vuelve a procesar el aviso de una modificación o cancelación que no se pudo mandar porque la estación que tenía la comanda estaba desactivada. Si ya se puede, aplica el cambio, manda el aviso y el pendiente desaparece; si no, sigue pendiente con su revisión siguiente. Requiere kitchen.release y kitchen.stations.all. Etapa K1.1 (capacidad kitchen-coverage-v1, K11-D4): un aviso que se dio por terminado (su cuenta se cerró o se canceló), 409 KITCHEN_CHANGE_NOT_PENDING («Este aviso ya no está pendiente.»). Una revisión vieja, 409 REVISION_CONFLICT.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          },
+          {
+            "name": "event_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "operation_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "revision": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                },
+                "required": ["operation_id", "revision"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Se revisó el aviso.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "reviewed": {
+                      "const": true
+                    }
+                  },
+                  "required": ["reviewed"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Ya no está pendiente (KITCHEN_CHANGE_NOT_PENDING), cambió (REVISION_CONFLICT) o la clave es de otra operación (IDEMPOTENCY_CONFLICT).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Cocina"]
+      }
     }
   },
   "components": {
@@ -7767,6 +8012,407 @@
         },
         "required": ["recovered", "skipped"],
         "description": "Etapa K1 (K1-D8): resultado de recuperar."
+      },
+      "KitchenUnrouted": {
+        "type": "object",
+        "properties": {
+          "station_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "station_name": {
+            "type": ["string", "null"]
+          },
+          "station_active": {
+            "type": ["boolean", "null"]
+          },
+          "effective": {
+            "enum": ["none", "station"],
+            "description": "none: no necesitan preparación (sin estación elegida o con la estación del ajuste desactivada); station: van a esa estación, activa."
+          }
+        },
+        "required": ["station_id", "station_name", "station_active", "effective"],
+        "description": "Etapa K1.1 (K11-D3): el ajuste «Productos sin ruta» de Cocina › Enrutamiento: a dónde va lo que no tiene ruta de preparación (o lo que solo iba a estaciones desactivadas). station_* son null sin estación elegida."
+      },
+      "KitchenCoverageWarning": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "enum": [
+              "display_without_stations",
+              "display_no_screen_stations",
+              "station_without_routes",
+              "route_station_inactive",
+              "unrouted_station_inactive",
+              "station_printer_inactive"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "description": "Texto listo para la pantalla, en español sencillo."
+          },
+          "device_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "station_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "category_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "product_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          }
+        },
+        "required": ["code", "message", "device_id", "station_id", "category_id", "product_id"],
+        "description": "Etapa K1.1 (K11-D5): un aviso de la cobertura con los identificadores de lo que hay que corregir (null lo que no aplica). Los de pantalla llevan device_id; los de estación, station_id; los de ruta, category_id o product_id y station_id."
+      },
+      "KitchenCoverage": {
+        "type": "object",
+        "properties": {
+          "unrouted": {
+            "$ref": "#/components/schemas/KitchenUnrouted"
+          },
+          "stations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "active": {
+                  "type": "boolean"
+                },
+                "reception": {
+                  "enum": ["printer", "kds", "both"]
+                },
+                "printer": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "active": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": ["id", "name", "active"]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "categories": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "products": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    },
+                    "required": ["id", "name", "products"]
+                  },
+                  "description": "Las categorías cuya ruta de categoría llega a la estación (activa), con cuántos de sus productos activos llegan por ella (sin los que tienen ruta propia)."
+                },
+                "products": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "category_id": {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      "category_name": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["id", "name", "category_id", "category_name"]
+                  },
+                  "description": "Las excepciones por producto que llegan a la estación (activa)."
+                },
+                "receives_unrouted": {
+                  "type": "boolean",
+                  "description": "Es la estación de «Productos sin ruta» y está activa."
+                },
+                "display_ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "description": "Las pantallas de cocina que la muestran (las de displays cuya station_ids la incluye)."
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "active",
+                "reception",
+                "printer",
+                "categories",
+                "products",
+                "receives_unrouted",
+                "display_ids"
+              ]
+            },
+            "description": "Todas las estaciones, activas e inactivas, en el orden de Estaciones."
+          },
+          "no_preparation": {
+            "type": "object",
+            "properties": {
+              "categories": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "category_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "category_name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["id", "name"]
+                }
+              },
+              "products": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "category_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "category_name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["id", "name", "category_id", "category_name"]
+                }
+              }
+            },
+            "required": ["categories", "products"],
+            "description": "Categorías y productos activos con ruta «Sin preparación»."
+          },
+          "unrouted_items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "category_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "category_name": {
+                  "type": "string"
+                },
+                "whole_category": {
+                  "type": "boolean"
+                },
+                "products": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "reason": {
+                        "enum": ["no_route", "inactive_station"]
+                      }
+                    },
+                    "required": ["id", "name", "reason"]
+                  }
+                }
+              },
+              "required": ["category_id", "category_name", "whole_category", "products"]
+            },
+            "description": "Lo que no va a ninguna estación por una ruta, por categoría; sigue el ajuste (unrouted). Un combo con componentes y sin ruta propia no se lista (sus componentes se resuelven solos); un combo vacío sí."
+          },
+          "categories": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "route_id": {
+                  "type": ["string", "null"],
+                  "format": "uuid"
+                },
+                "route_revision": {
+                  "type": ["integer", "null"],
+                  "minimum": 1
+                },
+                "route_mode": {
+                  "enum": ["prepare", "none", null]
+                },
+                "station_ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                }
+              },
+              "required": ["id", "name", "route_id", "route_revision", "route_mode", "station_ids"]
+            },
+            "description": "Todas las categorías activas del catálogo con su ruta de categoría, si tiene (para crearla con POST kitchen/routes o cambiarla con PATCH kitchen/routes/{id} y su revisión)."
+          },
+          "displays": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "device_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "all_stations": {
+                  "type": "boolean"
+                },
+                "station_ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                }
+              },
+              "required": ["device_id", "name", "all_stations", "station_ids"]
+            },
+            "description": "Las pantallas de cocina no revocadas con las estaciones que muestran (solo las activas de recepción kds o both, de su selección o de todas)."
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KitchenCoverageWarning"
+            }
+          }
+        },
+        "required": [
+          "unrouted",
+          "stations",
+          "no_preparation",
+          "unrouted_items",
+          "categories",
+          "displays",
+          "warnings"
+        ],
+        "description": "Etapa K1.1 (K11-D5): la cobertura del enrutamiento, resuelta en Go con la misma función que el envío y con la configuración vigente."
+      },
+      "KitchenRelease": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "account_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "order_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "enum": ["pending", "scheduled", "blocked", "released", "cancelled"]
+          },
+          "automatic": {
+            "type": "boolean"
+          },
+          "lead_minutes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1440
+          },
+          "scheduled_at": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "due_at": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "released_at": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": ["id", "account_id", "order_id", "state", "released_at", "revision"],
+        "description": "Una liberación a cocina (un envío). Desde la 0.17.0 un envío nunca queda blocked: ese estado solo lo tienen las liberaciones anteriores."
       }
     }
   }

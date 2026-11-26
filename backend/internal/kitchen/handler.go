@@ -175,20 +175,24 @@ func routePermission(method string, parts []string) string {
 			"jobs": "kitchen.queue.read", "history": "kitchen.history.read",
 			"access": "kitchen.stations.manage", "outputs": "kitchen.stations.manage",
 			"terminal-printers": "kitchen.printers.manage",
+			// Etapa K1.1 (K11-D5): la cobertura del enrutamiento, para quien ve la configuración de cocina.
+			"coverage": "kitchen.stations.read",
 		}[resource]
 	}
 	if len(parts) == 1 {
-		if (resource == "settings" || resource == "access" || resource == "timing") && method != "PUT" {
+		// settings, access, timing y unrouted (etapa K1.1, «Productos sin ruta») se reemplazan completos con PUT.
+		replaced := resource == "settings" || resource == "access" || resource == "timing" || resource == "unrouted"
+		if replaced && method != "PUT" {
 			return ""
 		}
-		if resource != "settings" && resource != "access" && resource != "timing" && method != "POST" {
+		if !replaced && method != "POST" {
 			return ""
 		}
 		return map[string]string{
 			"stations": "kitchen.stations.manage", "printers": "kitchen.printers.manage",
 			"routes": "kitchen.routing.manage", "settings": "kitchen.formats.manage",
 			"states": "kitchen.states.manage", "access": "kitchen.stations.manage", "timing": "kitchen.timing.manage",
-			"test-print": "kitchen.printers.test", "reprint": "kitchen.reprint",
+			"test-print": "kitchen.printers.test", "reprint": "kitchen.reprint", "unrouted": "kitchen.routing.manage",
 		}[resource]
 	}
 	if isRerenderRoute(parts) && method == "POST" {
@@ -241,6 +245,8 @@ func (handler *service) write(parts []string) (any, error) {
 		return handler.saveTiming()
 	case "access":
 		return handler.saveAccess()
+	case "unrouted":
+		return handler.saveUnrouted()
 	case "changes":
 		return handler.retryChange(parts[1])
 	case "releases":

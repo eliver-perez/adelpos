@@ -13,6 +13,9 @@ func (handler *service) saveTiming() (any, error) {
 		// ellos se conservan, así que el escritorio anterior sigue guardando los tiempos sin tocarlos.
 		DisplayWarningMinutes *int `json:"display_warning_minutes"`
 		DisplayLateMinutes    *int `json:"display_late_minutes"`
+		// Etapa K1.1 (K11-D3): se acepta y no se usa, como en PUT kitchen/settings: «Productos sin ruta» solo se guarda
+		// con PUT kitchen/unrouted.
+		UnroutedStationID *string `json:"unrouted_station_id"`
 	}
 	if err := decode(handler.request.Body, &input); err != nil {
 		return nil, err
@@ -64,17 +67,20 @@ type SettingsView struct {
 	Settings
 	DisplayWarningMinutes int `json:"display_warning_minutes"`
 	DisplayLateMinutes    int `json:"display_late_minutes"`
+	// UnroutedStationID es la estación del ajuste «Productos sin ruta» (etapa K1.1, K11-D3); null con «No necesitan
+	// preparación». Solo se lee aquí: se guarda con PUT kitchen/unrouted.
+	UnroutedStationID *string `json:"unrouted_station_id"`
 }
 
-// timingView lee la configuración con los límites de las pantallas.
+// timingView lee la configuración con los límites de las pantallas y la estación de «Productos sin ruta».
 func (handler *service) timingView() (*SettingsView, error) {
 	settings, err := handler.settings()
 	if err != nil {
 		return nil, err
 	}
 	view := &SettingsView{Settings: *settings}
-	err = handler.tx.QueryRow(handler.ctx, "SELECT display_warning_minutes,display_late_minutes FROM app.kitchen_settings").
-		Scan(&view.DisplayWarningMinutes, &view.DisplayLateMinutes)
+	err = handler.tx.QueryRow(handler.ctx, `SELECT display_warning_minutes,display_late_minutes,unrouted_station_id::text
+        FROM app.kitchen_settings`).Scan(&view.DisplayWarningMinutes, &view.DisplayLateMinutes, &view.UnroutedStationID)
 	return view, err
 }
 
@@ -87,6 +93,10 @@ func (handler *service) saveSettings() (any, error) {
 		// kitchen.timing.manage, como los demás tiempos.
 		DisplayWarningMinutes *int `json:"display_warning_minutes"`
 		DisplayLateMinutes    *int `json:"display_late_minutes"`
+		// Etapa K1.1 (K11-D3): el escritorio guarda la configuración con todo lo que leyó de GET kitchen/settings, que
+		// desde la 0.17.0 trae la estación de «Productos sin ruta». Se acepta y no se usa: PUT kitchen/settings no la
+		// toca (se guarda con PUT kitchen/unrouted, con su propio valor esperado).
+		UnroutedStationID *string `json:"unrouted_station_id"`
 	}
 	if err := decode(handler.request.Body, &input); err != nil {
 		return nil, err
@@ -138,4 +148,80 @@ func (handler *service) saveSettings() (any, error) {
 		return nil, err
 	}
 	return saved, handler.history("settings.saved", nil, view, saved)
+}
+
+// UnroutedView es el ajuste «Productos sin ruta» (etapa K1.1, K11-D3) tal como lo leen GET kitchen/coverage y
+// PUT kitchen/unrouted. Effective es «none» (no necesitan preparación: sin estación elegida o con la del ajuste
+// desactivada) o «station» (van a esa estación, activa). Los datos de la estación son null sin estación elegida.
+type UnroutedView struct {
+	StationID     *string `json:"station_id"`
+	StationName   *string `json:"station_name"`
+	StationActive *bool   `json:"station_active"`
+	Effective     string  `json:"effective"`
+}
+
+func (handler *service) unroutedView() (*UnroutedView, error) {
+	view := &UnroutedView{Effective: "none"}
+	err := handler.tx.QueryRow(handler.ctx, `SELECT s.id::text,s.name,s.active FROM app.kitchen_settings k
+        LEFT JOIN app.kitchen_stations s ON s.id=k.unrouted_station_id`).Scan(&view.StationID, &view.StationName, &view.StationActive)
+	if err != nil {
+		return nil, err
+	}
+	if view.StationActive != nil && *view.StationActive {
+		view.Effective = "station"
+	}
+	return view, nil
+}
+
+// saveUnrouted guarda «Productos sin ruta» (PUT kitchen/unrouted, kitchen.routing.manage): station_id null es «No
+// necesitan preparación» (el valor de siempre) y una estación es «Enviar a una estación». Como PUT kitchen/access, usa
+// el valor esperado en lugar de la revisión de kitchen_settings, para no chocar con quien guarda «Comandas y tiempos».
+// La estación debe existir y estar activa, con cualquier recepción; si después se desactiva, lo sin ruta no necesita
+// preparación mientras tanto (decideRoute) y la cobertura lo avisa.
+func (handler *service) saveUnrouted() (any, error) {
+	var input struct {
+		OperationID       string  `json:"operation_id"`
+		StationID         *string `json:"station_id"`
+		ExpectedStationID *string `json:"expected_station_id"`
+	}
+	if err := decode(handler.request.Body, &input); err != nil {
+		return nil, err
+	}
+	before, err := handler.unroutedView()
+	if err != nil {
+		return nil, err
+	}
+	if !sameStation(before.StationID, input.ExpectedStationID) {
+		return nil, &Error{Status: 409, Code: "KITCHEN_UNROUTED_CHANGED",
+			Message: "Alguien más cambió «Productos sin ruta». Revisa el ajuste actual antes de guardar."}
+	}
+	if input.StationID != nil {
+		active := false
+		if identifierPattern.MatchString(*input.StationID) {
+			err := handler.tx.QueryRow(handler.ctx, "SELECT coalesce((SELECT active FROM app.kitchen_stations WHERE id=$1),false)",
+				*input.StationID).Scan(&active)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if !active {
+			return nil, invalid("Elige una estación activa.")
+		}
+	}
+	if _, err := handler.tx.Exec(handler.ctx, "UPDATE app.kitchen_settings SET unrouted_station_id=$1", input.StationID); err != nil {
+		return nil, err
+	}
+	saved, err := handler.unroutedView()
+	if err != nil {
+		return nil, err
+	}
+	return saved, handler.history("unrouted.saved", nil, before, saved)
+}
+
+// sameStation compara dos estaciones opcionales (dos ausencias son iguales).
+func sameStation(first, second *string) bool {
+	if first == nil || second == nil {
+		return first == nil && second == nil
+	}
+	return *first == *second
 }
