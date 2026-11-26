@@ -113,19 +113,22 @@ export function kitchenSeatText(device: Device): string {
 
 // Las estaciones que muestra una pantalla de cocina: todas las que reciben comandas en pantalla o su selección (solo
 // las de recepción en pantalla cuentan, K1-D11).
+// Etapa K1.1 (§4.2): una estación desactivada se dice como tal, para que no parezca que la pantalla la muestra.
 export function kitchenStationsText(configuration: DeviceConfiguration): string {
   const options = configuration.kitchen_display_station_options ?? [];
+  const label = (station: { name: string; active: boolean }) =>
+    station.active ? station.name : `${station.name} (desactivada)`;
   if (options.length === 0) {
     return 'Ninguna: no hay estaciones que reciban comandas en pantalla';
   }
   if (configuration.kitchen_all_stations || configuration.kitchen_stations.length === 0) {
-    return `Todas las que reciben comandas en pantalla (${options.map((station) => station.name).join(', ')})`;
+    return `Todas las que reciben comandas en pantalla (${options.map(label).join(', ')})`;
   }
   const shown = configuration.kitchen_stations.filter((station) =>
     options.some((option) => option.id === station.id),
   );
   return shown.length > 0
-    ? shown.map((station) => station.name).join(', ')
+    ? shown.map(label).join(', ')
     : 'Ninguna de las elegidas recibe comandas en pantalla';
 }
 

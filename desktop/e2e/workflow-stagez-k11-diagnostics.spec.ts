@@ -1,8 +1,8 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { expect, test } from '@playwright/test';
-import type { Page } from '@playwright/test';
+import type { Page, TestInfo } from '@playwright/test';
 import { installDriver } from './native-driver';
-import { admin, call, lightTheme, login, shot } from './license-flow';
+import { admin, call, dismissNotices, lightTheme, login, shot } from './license-flow';
 import type { Driver } from './license-flow';
 import { openAdministration, openSection } from './navigation';
 import { notice } from './notices';
@@ -31,6 +31,14 @@ import type { Display } from './kitchen-coverage-flow';
 //   4. Preparación: «Por enviar a cocina» con un pedido programado y uno al que se le quitó la hora, y «Enviar a cocina
 //      ahora».
 // Los datos llevan un sufijo propio para convivir con la base compartida de las especificaciones anteriores.
+
+// Captura en una ventana alta: la barra de «Guardar» queda fija al pie del área con desplazamiento y, en una captura de
+// página completa, se dibuja a media imagen encima de los campos (como en la K1).
+async function tallShot(page: Page, testInfo: TestInfo, name: string) {
+  await page.setViewportSize({ width: 1280, height: 1600 });
+  await shot(page, testInfo, name, { fullPage: false });
+  await page.setViewportSize({ width: 1280, height: 900 });
+}
 
 function deviceRow(page: Page, name: string) {
   return page.locator('tr').filter({ hasText: name });
@@ -167,6 +175,7 @@ test('diagnóstico de una pantalla de cocina, «Sin ruta» y «Productos sin rut
     await expect(diagnostics.getByRole('article', { name: `Estación ${kitchen}` })).toContainText(
       'No le llega ningún producto.',
     );
+    await dismissNotices(page);
     await shot(page, testInfo, 'k11-diagnostico-sin-categorias');
     await warnings.getByRole('button', { name: 'Elegir sus categorías', exact: true }).click();
     const steps = page.getByRole('region', { name: `Qué recibe ${name}` });
@@ -246,6 +255,11 @@ test('diagnóstico de una pantalla de cocina, «Sin ruta» y «Productos sin rut
         .getByRole('list', { name: 'Avisos de la pantalla' })
         .getByRole('button', { name: 'Configurar qué recibe', exact: true }),
     ).toBeVisible();
+    // «Estaciones que muestra» dice que la elegida está desactivada.
+    await expect(page.getByRole('region', { name: `Configuración de ${name}` })).toContainText(
+      `${kitchen} (desactivada)`,
+    );
+    await dismissNotices(page);
     await shot(page, testInfo, 'k11-diagnostico-sin-estaciones');
     await patchStation(driver, cocina.id, { active: true });
 
@@ -276,6 +290,7 @@ test('diagnóstico de una pantalla de cocina, «Sin ruta» y «Productos sin rut
     );
     await expect(list).toContainText(`Extras ${suffix} (su estación está desactivada)`);
     await expect(list).toContainText('(no necesitan preparación).');
+    await dismissNotices(page);
     await shot(page, testInfo, 'k11-enrutamiento-sin-ruta');
     await routing
       .locator('li')
@@ -302,7 +317,8 @@ test('diagnóstico de una pantalla de cocina, «Sin ruta» y «Productos sin rut
         'Las pantallas de cocina muestran estos pedidos al momento. En Comandas se ve si la pantalla ya los recibió.',
       ),
     ).toBeVisible();
-    await shot(page, testInfo, 'k11-estaciones');
+    await dismissNotices(page);
+    await tallShot(page, testInfo, 'k11-estaciones');
 
     // La tableta deja su cupo de pantalla de cocina antes de abrir Preparación en esta computadora.
     await call(driver, 'POST', `devices/${display.device_id}/revoke`, {});
@@ -339,6 +355,7 @@ test('diagnóstico de una pantalla de cocina, «Sin ruta» y «Productos sin rut
     await expect(waitingCard).toContainText('Espera a que lo envíes a cocina');
     await expect(waitingCard).toContainText('La cocina lo recibe al momento.');
     await expect(waitingCard.getByRole('button', { name: 'Cambiar la hora' })).toHaveCount(0);
+    await dismissNotices(page);
     await shot(page, testInfo, 'k11-panel');
     await waitingCard.getByRole('button', { name: 'Enviar a cocina ahora', exact: true }).click();
     await expect(notice(page, `Pedido #${waiting.folio} enviado a cocina.`)).toBeVisible();

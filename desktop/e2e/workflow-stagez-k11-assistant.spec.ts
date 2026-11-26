@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import { installDriver } from './native-driver';
-import { admin, call, lightTheme, login, shot } from './license-flow';
+import { admin, call, dismissNotices, lightTheme, login, shot } from './license-flow';
 import { openAdministration } from './navigation';
 import { notice } from './notices';
 import { claimPairing } from './pairing';
@@ -84,6 +84,7 @@ test('el asistente al aprobar una pantalla de cocina sin estaciones termina con 
     if (await printer.isVisible()) {
       await chooseOption(printer, 'Sin impresora: solo pantalla');
     }
+    await dismissNotices(page);
     await shot(page, testInfo, 'k11-asistente-estaciones');
     await create.click();
     await expect(notice(page, 'Estación Cocina creada.')).toBeVisible();
@@ -100,6 +101,7 @@ test('el asistente al aprobar una pantalla de cocina sin estaciones termina con 
     );
     await breakfastBox.check();
     await burgersBox.check();
+    await dismissNotices(page);
     await shot(page, testInfo, 'k11-asistente-categorias');
     await steps.getByRole('button', { name: 'Guardar y seguir', exact: true }).click();
     await expect(notice(page, '2 categorías guardadas.')).toBeVisible();
@@ -110,6 +112,7 @@ test('el asistente al aprobar una pantalla de cocina sin estaciones termina con 
     await expect(summary).toContainText(`Desayunos ${suffix}`);
     await expect(summary).toContainText(`Hamburguesas ${suffix}`);
     await expect(summary).toContainText(/^Esta pantalla recibirá: /);
+    await dismissNotices(page);
     await shot(page, testInfo, 'k11-asistente-resumen');
     await steps.getByRole('button', { name: 'Terminar', exact: true }).click();
     await expect(steps).toHaveCount(0);

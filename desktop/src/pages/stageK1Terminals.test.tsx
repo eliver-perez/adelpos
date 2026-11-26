@@ -142,6 +142,17 @@ describe('pantalla de cocina en Terminales', () => {
     expect(kitchenStationsText({ ...configuration, kitchen_all_stations: true })).toBe(
       'Todas las que reciben comandas en pantalla (Cocina, Barra)',
     );
+    // Etapa K1.1: una estación elegida que se desactivó lo dice.
+    expect(
+      kitchenStationsText({
+        ...configuration,
+        kitchen_stations: [{ id: 's1', name: 'Cocina', active: false }],
+        kitchen_display_station_options: [
+          { id: 's1', name: 'Cocina', active: false, reception: 'kds' },
+          { id: 's2', name: 'Barra', active: true, reception: 'both' },
+        ],
+      }),
+    ).toBe('Cocina (desactivada)');
     expect(displayLimitsProblem(10, 20)).toBe('');
     expect(displayLimitsProblem(10, 10)).not.toBe('');
     expect(displayLimitsProblem(0, 20)).not.toBe('');

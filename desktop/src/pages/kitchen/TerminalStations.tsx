@@ -43,7 +43,7 @@ export function TerminalStations({
   return (
     <Accordion
       title="Computadoras en modo Cocina"
-      summary="Estaciones que muestra cada terminal y aviso sonoro"
+      summary="Estaciones que muestra cada computadora y aviso sonoro"
     >
       <p className="muted text-sm">
         Las pantallas de cocina (tabletas) se configuran en Sistema › Terminales.
