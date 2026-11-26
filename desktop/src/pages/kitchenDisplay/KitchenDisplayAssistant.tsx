@@ -61,6 +61,14 @@ type Run = <T>(
   success?: string,
 ) => Promise<T | null>;
 
+// Sin conexión o un error ≥ 500: Go pudo haber guardado la operación; se recupera con el mismo operation_id en lugar
+// de mostrarla como rechazada (como en Cocina).
+function uncertainResult(problem: unknown) {
+  return (
+    problem instanceof APIError && (problem.code === 'CONNECTION_ERROR' || problem.status >= 500)
+  );
+}
+
 export function KitchenDisplayAssistant({
   target,
   can,
@@ -86,10 +94,7 @@ export function KitchenDisplayAssistant({
       await coverage.reload();
       return result as never;
     } catch (problem) {
-      const uncertain =
-        problem instanceof APIError &&
-        (problem.code === 'CONNECTION_ERROR' || problem.status >= 500);
-      if (!uncertain) {
+      if (!uncertainResult(problem)) {
         notifyError(problem, 'No se pudo guardar la configuración de cocina.');
       }
       await coverage.reload();
@@ -101,10 +106,7 @@ export function KitchenDisplayAssistant({
     const problem = await mutation.retry();
     if (!problem) {
       notifySuccess('Configuración de cocina recuperada.');
-    } else if (!(
-      problem instanceof APIError &&
-      (problem.code === 'CONNECTION_ERROR' || problem.status >= 500)
-    )) {
+    } else if (!uncertainResult(problem)) {
       notifyError(problem, 'No se pudo recuperar la operación.');
     }
     await coverage.reload();
