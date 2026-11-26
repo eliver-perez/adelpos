@@ -1087,7 +1087,7 @@ func contractKitchenDisplay(t *testing.T, client *contractClient, data contractW
 }
 
 // contractKitchenCoverage recorre la configuración guiada de cocina (etapa K1.1, Fase A; K11-D3 a K11-D5): la cobertura
-// del enrutamiento con un producto sin ruta, «Productos sin ruta» con su valor esperado (409 KITCHEN_UNROUTED_CHANGED y
+// del enrutamiento con un producto sin ruta, el tablero con las estaciones desactivadas de un aviso pendiente, «Productos sin ruta» con su valor esperado (409 KITCHEN_UNROUTED_CHANGED y
 // 400 con una estación que no existe), «Enviar a cocina ahora» de un pedido programado (y su 409
 // KITCHEN_RELEASE_NOT_PENDING) y «Volver a avisar» de un aviso para una estación desactivada (y el 409
 // KITCHEN_CHANGE_NOT_PENDING de un aviso que se dio por terminado al cancelar su cuenta). Usa la estación «Cocina
@@ -1214,6 +1214,22 @@ func contractKitchenCoverage(t *testing.T, client *contractClient, data contract
 		"revision": bill["account"].(map[string]any)["revision"], "version_id": line["version_id"], "quantity": 1,
 		"reason": "El cliente ya no lo quiso"}, 200)
 	eventID, changeRevision := pendingChange(modified)
+	// El panel «Por enviar a cocina» dice a qué estación desactivada no se pudo avisar.
+	board := decodeContract[map[string]any](t, client.call("GET", "/kitchen/board", nil, nil, 200).Body.Bytes())
+	inactive := []string{}
+	for _, entry := range board["pending_changes"].([]any) {
+		change := entry.(map[string]any)
+		if change["event_id"] != eventID {
+			continue
+		}
+		stations, _ := change["inactive_stations"].([]any)
+		for _, station := range stations {
+			inactive = append(inactive, fmt.Sprint(station.(map[string]any)["name"]))
+		}
+	}
+	if !slices.Equal(inactive, []string{"Cocina contrato"}) {
+		t.Fatalf("estaciones desactivadas del aviso pendiente: %v (%v)", inactive, board["pending_changes"])
+	}
 	setActive(true)
 	client.call("POST", "/kitchen/changes/"+eventID+"/retry", map[string]any{"operation_id": contractID(), "revision": changeRevision}, nil, 200)
 	// Cancelar la cuenta da por terminado su aviso pendiente.

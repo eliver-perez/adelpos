@@ -3719,6 +3719,77 @@
         },
         "tags": ["Cocina"]
       }
+    },
+    "/kitchen/board": {
+      "get": {
+        "operationId": "getKitchenBoard",
+        "summary": "Tablero de Preparación y «Por enviar a cocina»",
+        "description": "Ya existía; la etapa K1.1 lo agrega al contrato. Requiere kitchen.states.read. Las tareas son las de las estaciones visibles en la terminal para el usuario. releases y pending_changes (el panel «Por enviar a cocina») solo llegan con kitchen.stations.all. Etapa K1.1 (K11-D4): releases solo trae lo de cuentas abiertas y pending_changes solo los avisos no terminados; cada aviso lleva inactive_stations, las estaciones desactivadas a las que no se pudo avisar.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          },
+          {
+            "name": "station_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Solo las tareas de esa estación."
+          },
+          {
+            "name": "account_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Solo las tareas de esa cuenta."
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": ["", "ready", "all"]
+            },
+            "description": "Vacío: lo pendiente; ready: lo listo; all: todo."
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000
+            },
+            "description": "Página de tareas (250 por página)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "El tablero.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KitchenBoard"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Cocina"]
+      }
     }
   },
   "components": {
@@ -8413,6 +8484,171 @@
         },
         "required": ["id", "account_id", "order_id", "state", "released_at", "revision"],
         "description": "Una liberación a cocina (un envío). Desde la 0.17.0 un envío nunca queda blocked: ese estado solo lo tienen las liberaciones anteriores."
+      },
+      "KitchenBoard": {
+        "type": "object",
+        "properties": {
+          "tasks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "station_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "state": {
+                  "type": "string"
+                }
+              },
+              "required": ["id", "station_id", "state"]
+            },
+            "description": "Las tareas de las estaciones visibles en la terminal (Preparación)."
+          },
+          "releases": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "account_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "order_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "state": {
+                  "enum": ["pending", "scheduled", "blocked"]
+                },
+                "automatic": {
+                  "type": "boolean"
+                },
+                "lead_minutes": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1440
+                },
+                "scheduled_at": {
+                  "type": ["string", "null"],
+                  "format": "date-time"
+                },
+                "due_at": {
+                  "type": ["string", "null"],
+                  "format": "date-time"
+                },
+                "warnings": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "revision": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "folio": {
+                  "type": "integer"
+                },
+                "account_name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "account_id",
+                "state",
+                "warnings",
+                "revision",
+                "folio",
+                "account_name"
+              ]
+            },
+            "description": "«Por enviar a cocina»: los pedidos que todavía esperan, solo de cuentas abiertas (por la pertenencia actual de sus unidades). blocked solo lo tienen los de antes de la 0.17.0. Vacío sin kitchen.stations.all."
+          },
+          "pending_changes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "event_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "account_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "warnings": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "revision": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "created_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "inactive_stations": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      "name": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["id", "name"]
+                  },
+                  "description": "Etapa K1.1: las estaciones desactivadas que tienen la comanda y a las que no se pudo avisar (vacío si no aplica). Opcional: un servidor anterior no lo manda."
+                }
+              },
+              "required": ["event_id", "account_id", "kind", "warnings", "revision"]
+            },
+            "description": "Los avisos de cambios que no se pudieron mandar, sin los que se dieron por terminados (su cuenta se cerró o se canceló). Vacío sin kitchen.stations.all."
+          },
+          "stations": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "timezone": {
+            "type": "string"
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "sound_alert": {
+            "type": "boolean"
+          }
+        },
+        "required": ["tasks", "releases", "pending_changes", "stations", "server_time", "timezone"],
+        "description": "El tablero de Cocina › Preparación con el panel «Por enviar a cocina»."
       }
     }
   }

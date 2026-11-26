@@ -141,6 +141,7 @@ cocina»).
 | `saveKitchenUnrouted`               | `PUT /kitchen/unrouted`                        | Guardar «Productos sin ruta» (etapa K1.1).                                     |
 | `releaseKitchenOrder`               | `POST /kitchen/releases/{id}/release`          | «Enviar a cocina ahora» un pedido pendiente (etapa K1.1 en el contrato).       |
 | `retryKitchenChange`                | `POST /kitchen/changes/{event_id}/retry`       | «Volver a avisar» un cambio pendiente (etapa K1.1 en el contrato).             |
+| `getKitchenBoard`                   | `GET /kitchen/board`                           | Preparación y «Por enviar a cocina» (etapa K1.1 en el contrato).               |
 
 ## Encontrar el servidor y emparejarse (fases B y C)
 
@@ -1029,7 +1030,9 @@ el panel de cocina como antes. Decisiones K11-D1 a K11-D14 en [ETAPA_K1_1_AVANCE
     («Esta pantalla no tiene estaciones.»), `display_no_screen_stations` («Ninguna de sus estaciones recibe comandas en
     pantalla.»), `station_without_routes` («La estación Cocina no tiene categorías ni productos asignados.»),
     `route_station_inactive` («Extras va a Barra, que está desactivada: sus productos se tratan como productos sin
-    ruta.»), `unrouted_station_inactive` y `station_printer_inactive`.
+    ruta.»), `unrouted_station_inactive` («Los productos sin ruta iban a Barra, que está desactivada. Mientras siga así,
+    no necesitan preparación.») y `station_printer_inactive` («La impresora Comandas de Cocina está desactivada: sus
+    comandas esperan en la cola.»).
 - **`saveKitchenUnrouted`** (`PUT /kitchen/unrouted`, `kitchen.routing.manage`):
   `{operation_id, station_id: uuid|null, expected_station_id: uuid|null}`. Responde el mismo `KitchenUnrouted`. Si lo
   guardado no es `expected_station_id`, **409 `KITCHEN_UNROUTED_CHANGED`** (volver a leer); una estación que no existe o
@@ -1042,8 +1045,14 @@ kitchen/settings` y `PUT kitchen/timing` lo aceptan en el cuerpo y no lo cambian
   actor de la operación, y publica `kitchen.releases.changed`. La pertenencia es la actual de las unidades: lo combinado,
   dividido o transferido a una cuenta abierta sigue pendiente, y un pedido para llevar cobrado y sin entregar sigue
   abierto (su pedido programado llega a la cocina a su hora). Reabrir una cuenta no revive lo terminado. La 0030 aplica
-  lo mismo a lo que ya existía (`reason: account_not_open`). `GET kitchen/board` trae en `releases` solo lo de cuentas
-  abiertas y en `pending_changes` solo los avisos no terminados.
+  lo mismo a lo que ya existía. Los motivos (`after_value.reason` del historial y `dismissed_reason`) son una lista
+  cerrada: `account_not_open` (la 0030), `account_closed` (al cerrar) y `account_cancelled` (al cancelar).
+- **`getKitchenBoard`** (`GET /kitchen/board`, `kitchen.states.read`; ya existía, la etapa K1.1 lo agrega al
+  contrato): las tareas de Preparación y, con `kitchen.stations.all`, el panel «Por enviar a cocina». `releases` trae
+  solo lo que sigue esperando de cuentas abiertas (`pending`, `scheduled` o, solo de antes de la 0.17.0, `blocked`) con
+  `folio` y `account_name`; `pending_changes`, solo los avisos no terminados, cada uno con **`inactive_stations`**
+  (`[{id, name}]`, opcional): las estaciones desactivadas que tienen la comanda y a las que no se pudo avisar. Sin ese
+  campo (un servidor anterior), el escritorio muestra las advertencias de Go tal cual.
 - **`releaseKitchenOrder`** (`POST /kitchen/releases/{id}/release`, `{operation_id, revision}`; `kitchen.release` y
   `kitchen.stations.all`, y `kitchen.release_early` antes de su hora): «Enviar a cocina ahora». Responde la liberación
   (`KitchenRelease`), ya `released` (o `cancelled` si no le queda nada). Con una ya enviada, cancelada o de una cuenta que

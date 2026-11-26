@@ -121,8 +121,8 @@ const (
 	warningStationPrinterInactive  = "station_printer_inactive"
 )
 
-// coverageProduct es un producto activo del catálogo; Leaf dice que no tiene componentes (un producto simple o un
-// combo sin opciones).
+// coverageProduct es un producto activo del catálogo; Leaf dice que no lleva componentes: un producto simple o un combo
+// que por omisión va vacío (todos sus componentes empiezan en cero), que en el envío se trata como un producto simple.
 type coverageProduct struct {
 	ID           string `json:"id"`
 	Name         string `json:"name"`
@@ -195,7 +195,8 @@ func (handler *service) coverage() (any, error) {
 	}
 	products, err := many[coverageProduct](handler.ctx, handler.tx, `SELECT jsonb_build_object('id',p.id,'name',p.name,
             'category_id',c.id,'category_name',c.name,
-            'leaf',NOT (p.kind='combo' AND EXISTS(SELECT FROM app.catalog_combo_slots slot WHERE slot.combo_id=p.id)))
+            'leaf',NOT (p.kind='combo' AND EXISTS(SELECT FROM app.catalog_combo_slots slot
+                WHERE slot.combo_id=p.id AND slot.default_quantity>0)))
         FROM app.catalog_products p JOIN app.catalog_categories c ON c.id=p.category_id
         WHERE p.active AND NOT p.archived AND c.active ORDER BY c.sort_order,c.name,c.id,p.sort_order,p.name,p.id`)
 	if err != nil {
@@ -425,7 +426,7 @@ func (builder *coverageBuilder) addStationWarnings() {
 	if builder.unrouted.StationID != nil && builder.unrouted.Effective == "none" {
 		stationID := *builder.unrouted.StationID
 		builder.warn(CoverageWarning{Code: warningUnroutedStationInactive, StationID: &stationID,
-			Message: fmt.Sprintf("Los productos sin ruta iban a %s, que está desactivada: por ahora no necesitan preparación.",
+			Message: fmt.Sprintf("Los productos sin ruta iban a %s, que está desactivada. Mientras siga así, no necesitan preparación.",
 				*builder.unrouted.StationName)})
 	}
 	for _, station := range builder.result.Stations {

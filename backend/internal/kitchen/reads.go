@@ -173,7 +173,13 @@ func (handler *service) board() (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		pendingChanges, err = many[map[string]any](handler.ctx, handler.tx, `SELECT to_jsonb(c)-'payload'-'dismissed_at'-'dismissed_reason'
+		// Cada aviso pendiente dice además a qué estaciones desactivadas no se pudo avisar (las que tienen la comanda de
+		// sus unidades y hoy están desactivadas), para que el panel lo explique con sus nombres.
+		pendingChanges, err = many[map[string]any](handler.ctx, handler.tx, `SELECT (to_jsonb(c)-'payload'-'dismissed_at'-'dismissed_reason')||
+            jsonb_build_object('inactive_stations',coalesce((SELECT jsonb_agg(jsonb_build_object('id',s.id,'name',s.name)
+                ORDER BY s.sort_order,s.name,s.id) FROM app.kitchen_stations s WHERE NOT s.active AND EXISTS(
+                SELECT FROM app.kitchen_tasks t WHERE t.station_id=s.id AND t.state<>'cancelled'
+                AND t.unit_id::text IN (SELECT jsonb_array_elements_text(`+changeUnitsSQL+`)))),'[]'))
             FROM app.kitchen_pending_changes c WHERE c.dismissed_at IS NULL ORDER BY created_at LIMIT 100`)
 		if err != nil {
 			return nil, err
