@@ -66,15 +66,24 @@ export function releaseCase(release: Release, timezone: string) {
   };
 }
 
-// El aviso de un cambio que no llegó a la estación que tenía la comanda porque está desactivada (K11-D2). Go lo
-// informa como «Aviso pendiente para estación inactiva: X»; se dice en lenguaje sencillo y lo demás se muestra igual.
-const inactiveStationWarning = 'Aviso pendiente para estación inactiva: ';
-
-export function pendingChangeWarningText(warning: string) {
-  if (warning.startsWith(inactiveStationWarning)) {
-    return `No se pudo avisar a ${warning.slice(inactiveStationWarning.length)}: está desactivada.`;
+// Qué dice el aviso de un cambio que no llegó a la cocina (K11-D2). Con las estaciones desactivadas que informa Go
+// (inactive_stations, contrato §6): «No se pudo avisar a X: está desactivada.» y cómo corregirlo. Sin ese dato (un
+// servidor que no lo trae), las advertencias de Go tal cual: el escritorio no interpreta su texto.
+export function pendingChangeLines(change: PendingChange) {
+  const stations = change.inactive_stations ?? [];
+  if (stations.length > 0) {
+    return {
+      lines: stations.map((station) => `No se pudo avisar a ${station.name}: está desactivada.`),
+      help:
+        stations.length === 1
+          ? 'Actívala en Cocina › Estaciones y vuelve a avisar.'
+          : 'Actívalas en Cocina › Estaciones y vuelve a avisar.',
+    };
   }
-  return warning;
+  return {
+    lines: change.warnings.filter((warning, index, all) => all.indexOf(warning) === index),
+    help: 'Revisa la configuración de cocina y vuelve a avisar.',
+  };
 }
 
 export function pendingChangeTitle(change: PendingChange) {
@@ -228,16 +237,10 @@ export function PendingKitchen({
             aria-label={pendingChangeTitle(change)}
           >
             <p className="kitchen-pending-title">{pendingChangeTitle(change)}</p>
-            {change.warnings
-              .filter((warning, index, all) => all.indexOf(warning) === index)
-              .map((warning) => (
-                <p key={warning}>{pendingChangeWarningText(warning)}</p>
-              ))}
-            <p className="muted">
-              {change.warnings.some((warning) => warning.startsWith(inactiveStationWarning))
-                ? 'Actívala en Cocina › Estaciones y vuelve a avisar.'
-                : 'Revisa la configuración de cocina y vuelve a avisar.'}
-            </p>
+            {pendingChangeLines(change).lines.map((line) => (
+              <p key={line}>{line}</p>
+            ))}
+            <p className="muted">{pendingChangeLines(change).help}</p>
             {can('kitchen.release') && manage && (
               <div className="kitchen-pending-action">
                 <button

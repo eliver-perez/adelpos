@@ -196,6 +196,7 @@ describe('avisos de cocina', () => {
       warnings: ['Aviso pendiente para estación inactiva: Barra'],
       revision: 1,
       created_at: '2026-11-09T18:00:00Z',
+      inactive_stations: [{ id: 's-barra', name: 'Barra' }],
     };
     board = { ...board, releases: [], pending_changes: [change] };
     retryReplies = [
@@ -215,6 +216,7 @@ describe('avisos de cocina', () => {
       name: 'La cocina no recibió una modificación',
     });
     expect(card.textContent).toContain('No se pudo avisar a Barra: está desactivada.');
+    expect(card.textContent).not.toContain('Aviso pendiente para estación inactiva');
     expect(card.textContent).toContain('Actívala en Cocina › Estaciones y vuelve a avisar.');
     expect(card.textContent).toContain('Manda el cambio a la estación si ya está activa.');
     fireEvent.click(within(card).getByRole('button', { name: 'Volver a avisar' }));
@@ -235,5 +237,27 @@ describe('avisos de cocina', () => {
     expect(notice.textContent).toContain('Pedido #12 liberado a preparación');
     expect(screen.getByText('Pendientes de liberación y avisos')).toBeTruthy();
     expect(screen.queryByText('Por enviar a cocina')).toBeNull();
+  });
+
+  it('sin las estaciones desactivadas como dato, el aviso muestra las advertencias de Go tal cual', async () => {
+    board = {
+      ...board,
+      releases: [],
+      pending_changes: [
+        {
+          event_id: '00000000-0000-0000-0000-0000000000e2',
+          kind: 'item.cancelled',
+          warnings: ['Aviso pendiente para estación inactiva: Barra'],
+          revision: 1,
+          created_at: '2026-11-09T18:00:00Z',
+        },
+      ],
+    };
+    renderKitchen();
+    const card = await screen.findByRole('article', {
+      name: 'La cocina no recibió una cancelación',
+    });
+    expect(card.textContent).toContain('Aviso pendiente para estación inactiva: Barra');
+    expect(card.textContent).toContain('Revisa la configuración de cocina y vuelve a avisar.');
   });
 });

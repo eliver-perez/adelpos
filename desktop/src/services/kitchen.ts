@@ -218,6 +218,9 @@ export interface Board {
     warnings: string[];
     revision: number;
     created_at: string;
+    // Etapa K1.1 (contrato §6): las estaciones desactivadas a las que no se pudo avisar. Un servidor anterior no lo
+    // informa.
+    inactive_stations?: { id: string; name: string }[];
   }[];
   stations: Station[];
   server_time: string;
