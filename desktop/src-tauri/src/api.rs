@@ -87,6 +87,10 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         "kitchen_rerender" => Some((Method::POST, "kitchen/print-jobs/rerender")),
         // Etapa L1 (Fase E): Preparación avisa al entrar y al salir; ocupa o libera el cupo de pantalla de cocina.
         "kitchen_display_mode" => Some((Method::POST, "kitchen/display-mode")),
+        // Etapa K1.1 (capacidad kitchen-coverage-v1): qué recibe cada estación según Go (solo lectura, la usan el
+        // asistente y el diagnóstico de Terminales y Enrutamiento) y el ajuste «Productos sin ruta».
+        "kitchen_coverage" => Some((Method::GET, "kitchen/coverage")),
+        "kitchen_save_unrouted" => Some((Method::PUT, "kitchen/unrouted")),
 
         "setup_status" => Some((Method::GET, "setup/status")),
         // Etapa 9G (§5.1): versión del servidor para avisar si es más viejo de lo que necesita la aplicación.
@@ -1437,6 +1441,21 @@ mod tests {
             route("kitchen_terminal_printers", None).unwrap(),
             (Method::GET, "kitchen/terminal-printers".to_string())
         );
+        // Etapa K1.1: la cobertura es solo lectura y «Productos sin ruta» se guarda con PUT, las dos sin identificador
+        // (un identificador no cambia la ruta: nunca llegan a otra parte de kitchen/).
+        assert_eq!(
+            route("kitchen_coverage", None).unwrap(),
+            (Method::GET, "kitchen/coverage".to_string())
+        );
+        assert_eq!(
+            route("kitchen_save_unrouted", None).unwrap(),
+            (Method::PUT, "kitchen/unrouted".to_string())
+        );
+        assert_eq!(
+            route("kitchen_save_unrouted", Some("../../settings")).unwrap(),
+            (Method::PUT, "kitchen/unrouted".to_string())
+        );
+        assert!(route("kitchen_unrouted", None).is_err());
         let source = include_str!("api.rs");
         let operations = &source
             [source.find("fn route(").unwrap()..source.find("pub struct LocalState").unwrap()];

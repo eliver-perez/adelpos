@@ -41,6 +41,9 @@ export type Operation =
   | 'kitchen_resolve_job'
   // Etapa L1 (Fase E): Preparación avisa al entrar y al salir (cupo de pantalla de cocina).
   | 'kitchen_display_mode'
+  // Etapa K1.1 (kitchen-coverage-v1): qué recibe cada estación según Go y el ajuste «Productos sin ruta».
+  | 'kitchen_coverage'
+  | 'kitchen_save_unrouted'
   // Etapa L1 (Fase E): licencia del servidor principal (services/licenseOperations.ts). La solicitud sin internet y
   // los archivos (.lic y la respuesta de soporte) son operaciones propias de Rust (license_files.rs), no rutas.
   | 'license_status'

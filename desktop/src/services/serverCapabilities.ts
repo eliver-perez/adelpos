@@ -24,6 +24,12 @@ export const permissionGroupsCapability = 'permission-groups-v1';
 // límites de color de las pantallas. Con un servidor anterior no se muestra nada de eso.
 export const kitchenDisplayCapability = 'kitchen-display-v1';
 
+// Etapa K1.1 (§4, K11-D5, servidor 0.17.0): GET kitchen/coverage, PUT kitchen/unrouted y los 409 de «Enviar a cocina
+// ahora» y «Volver a avisar». Sin ella no se muestran el asistente ni el diagnóstico de una pantalla de cocina en
+// Terminales, ni «Productos sin ruta» ni la lista «Sin ruta» en Cocina › Enrutamiento; el panel de Preparación queda
+// como antes.
+export const kitchenCoverageCapability = 'kitchen-coverage-v1';
+
 let announced: ReadonlySet<string> = new Set();
 
 // rememberServerCapabilities guarda lo que informó el servidor al conectar (useSession lo llama con la respuesta de
