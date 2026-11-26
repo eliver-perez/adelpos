@@ -49,7 +49,8 @@ Con solo permisos de cocina, la barra superior de ese usuario muestra únicament
 
 1. En **Administración › Sistema › Terminales › Editar**, elige **Cocina** como **pantalla inicial**: la terminal
    abrirá directo en **Cocina › Preparación**.
-2. En **Cocina › Estaciones › Terminales de cocina**, elige la terminal y sus **estaciones que muestra**: todas
+2. En **Cocina › Estaciones › Computadoras en modo Cocina** (hasta la versión 0.16.0 se llamaba «Terminales de
+   cocina»), elige la terminal y sus **estaciones que muestra**: todas
    (la opción predeterminada) o solo las de esa área.
 3. En el mismo lugar puedes activar el **aviso sonoro al llegar una comanda nueva** (desactivado por omisión).
    Suena una vez por pedido nuevo de las estaciones que se ven; no suena al abrir la pantalla. La pantalla no puede

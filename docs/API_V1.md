@@ -995,7 +995,7 @@ por tiempo con `server_time`, los límites y su reloj monotónico. Decisiones K1
   `kitchen_display_theme`, `kitchen_display_sound` y `kitchen_display_volume` (solo en una pantalla de cocina); las
   estaciones se eligen con `PUT kitchen/access` (solo las de recepción «pantalla» o «impresora y pantalla»); los límites
   de color con `PUT kitchen/timing` (`display_warning_minutes`, `display_late_minutes`, con `kitchen.timing.manage`).
-  Cada cambio llega a la pantalla al momento. `GET kitchen/access` (Cocina › Estaciones › Terminales de cocina) ya no
+  Cada cambio llega a la pantalla al momento. `GET kitchen/access` (Cocina › Estaciones › Computadoras en modo Cocina; hasta la K1.1, «Terminales de cocina») ya no
   lista las pantallas: sus estaciones se eligen en Terminales. «Liberar cupo» (`POST devices/{id}/seat/release`) **no
   es definitivo** (K1-D30): la pantalla lo puede pedir otra vez con «Usar esta pantalla» (`take_seat: true`); para que
   deje de usarse, «Revocar» (`POST devices/{id}/revoke`).

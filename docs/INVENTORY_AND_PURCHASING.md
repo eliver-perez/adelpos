@@ -475,7 +475,9 @@ Detalle en [CATALOG.md](CATALOG.md) («Indicaciones con efecto · etapa 8») y [
   `INSERT … SELECT … ON CONFLICT DO NOTHING` de solicitudes `release` con la versión y `released_at` de la fila canónica y
   la modalidad congelada de la liberación; sin lock 7820148308 ni lectura de recetas. Cubre los cuatro caminos que liberan
   (confirmación inmediata, planificador de programados, liberación manual y reintento de un cambio pendiente). Una
-  liberación bloqueada por advertencias no crea filas canónicas ni solicitudes hasta resolverse.
+  liberación bloqueada por advertencias no crea filas canónicas ni solicitudes hasta resolverse. Desde la etapa K1.1
+  (0.17.0) ningún envío nuevo queda bloqueado: toda unidad activa se libera una vez, con tarea o sin ella. Las bloqueadas
+  de antes que se dan por terminadas (cuenta cerrada o cancelada, o la `0030`) no registran consumo (K11-D11).
 - **Al cambiar**: `kitchen.Integrate` llama a `inventory.RecordChange` para `item.modified` e `item.cancelled` **antes** de
   procesar cocina (también cuando el cambio de cocina queda pendiente): `amend` para las unidades modificadas y `cancel` para
   las canceladas o sobrantes de una reducción, solo si la unidad tiene fila canónica **y** solicitud de liberación.

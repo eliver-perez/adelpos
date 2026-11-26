@@ -1,6 +1,7 @@
 # Pantalla de cocina en una tableta Android
 
-Guía corta para usar la aplicación **AD-EL POS Cocina** en una tableta de la cocina (etapa K1). Con ella, la cocina:
+Guía corta para usar la aplicación **AD-EL POS Cocina** en una tableta de la cocina (etapa K1; desde la etapa K1.1,
+también qué recibe cada pantalla, en la sección 4). Con ella, la cocina:
 
 - Ve los pedidos en tarjetas, del más antiguo al más nuevo, apenas los manda un mesero o la caja, sin tocar nada.
 - Marca listo cada platillo o el pedido completo, y el mesero recibe su aviso de **platillos listos** en su teléfono
@@ -20,8 +21,8 @@ captura pedidos ni cobra.**
 - Una tableta con **Android 8.0 o posterior**, de preferencia de 10 pulgadas o más. La aplicación se usa siempre en
   horizontal.
 - La **computadora principal con AD-EL POS 0.16.0 o posterior**. Con una versión anterior, la tableta dice **«Actualiza
-  el servidor del restaurante»**.
-- La **licencia activada** en la computadora principal, con **cupo de pantallas de cocina** (sección 6).
+  el servidor del restaurante»**. El asistente y los avisos de la sección 4 llegaron con la **0.17.0**.
+- La **licencia activada** en la computadora principal, con **cupo de pantallas de cocina** (sección 7).
 - La tableta en la **misma red wifi del restaurante** que la computadora principal (la red principal, no la de
   invitados).
 - Un usuario con permiso para administrar terminales (el administrador lo tiene).
@@ -58,11 +59,107 @@ instalación.
 5. En la **computadora principal**, abre **Administración › Sistema › Terminales**. En **«Terminales nuevas»** aparece
    la solicitud como **«Pantalla de cocina»**. Escribe el código de la tableta y toca **«Aprobar»**.
 6. La tableta pasa sola a la pantalla de **Pedidos**. Si dice «No hay pedidos», ya está lista.
+7. En la computadora principal se abre el asistente **«Configurar qué recibe»**, para que los pedidos lleguen a esa
+   pantalla (sección 4).
 
 Desde ese momento la tableta **abre directo en Pedidos**: al cerrarla y abrirla otra vez, al forzar su cierre o al
 reiniciar la tableta, no hay que hacer nada más.
 
-## 4. Qué muestra cada pantalla: estaciones, letra, tema y sonido
+## 4. Que los pedidos lleguen a la pantalla
+
+Para que un pedido aparezca en la tableta, en la computadora principal tienen que estar bien **tres cosas**:
+
+- una **estación** activa que reciba sus comandas en pantalla;
+- las **categorías** (o los productos) que prepara esa estación, en el **enrutamiento**;
+- la **pantalla** mostrando esa estación.
+
+Desde la versión **0.17.0**, un asistente lo hace contigo al aprobar la tableta, y Terminales avisa si falta algo.
+
+### Con el asistente (lo más fácil)
+
+Al tocar **«Aprobar»** (sección 3, paso 5) se abre **«Configurar qué recibe»**, con tres pasos:
+
+1. **Estaciones de esta pantalla**: las que reciben comandas en pantalla («Solo pantalla de cocina» o «Impresora y
+   pantalla de cocina»).
+   - Si no hay ninguna, ofrece **crear «Cocina»**. Si tienes impresoras de cocina, eliges en cuál se imprime también la
+     comanda (con una sola, ya viene elegida) o **«Sin impresora: solo pantalla»**; sin impresoras, la crea de solo
+     pantalla.
+   - Si ya tienes una estación «Cocina» que solo imprime o está desactivada, ofrece **usarla**.
+   - Una estación que solo imprime tiene **«Recibir también en pantalla»**: se sigue imprimiendo y además se ve en la
+     pantalla.
+
+   Toca **«Siguiente»**.
+
+2. **Qué categorías llegan**: marca las que se preparan en esa estación (por ejemplo, Desayunos y Hamburguesas) y toca
+   **«Guardar y seguir»**.
+   - Las que ya llegan salen marcadas. Para quitar una, cambia su ruta en **Cocina › Enrutamiento**.
+   - Si una categoría iba a otra estación, el asistente lo dice antes de guardar («Desayunos dejará de ir a Barra.»).
+   - No marques los refrescos ni lo que se sirve sin preparar: ver «Productos sin ruta», abajo.
+3. **Resumen**: qué recibirá la pantalla y qué no, por ejemplo «Esta pantalla recibirá: Desayunos, Hamburguesas.» y «No
+   recibirá: Refrescos, Extras (no necesitan preparación).». Toca **«Terminar»**.
+
+Cada paso se puede saltar (**«Saltar este paso»** o **«Saltar el asistente»**). Para abrirlo otra vez, en
+**Administración › Sistema › Terminales**, toca **«Configurar qué recibe»** en la fila de la pantalla (también está en
+«Ver configuración»). En una pantalla que ya se conectó, el primer paso además deja elegir qué estaciones muestra.
+
+Cada paso necesita su permiso: sin él se ve sin poder cambiarlo, con «Pide a quien administra Cocina que lo configure.».
+El administrador los tiene todos.
+
+### Sin el asistente: los pasos en orden
+
+1. **Cocina › Estaciones**: crea la estación (por ejemplo, «Cocina») o abre la que ya tienes. Debe estar **activa** y, en
+   **«Recepción de comandas»**, en **«Solo pantalla de cocina»** o **«Impresora y pantalla de cocina»**.
+2. **Cocina › Enrutamiento**: manda a esa estación las categorías que se preparan ahí y, si hace falta, algún producto
+   suelto. Lo que no tenga ruta sigue el ajuste **«Productos sin ruta»** (abajo).
+3. **Administración › Sistema › Terminales**: en la pantalla, toca **«Editar»** y deja **«Mostrar todas las estaciones
+   que reciben comandas en pantalla»** o elige esa estación (sección 5).
+4. **Prueba con un pedido**: manda desde la caja o desde un teléfono de meseros un platillo de esas categorías. Llega a
+   la tableta en unos segundos.
+
+### «Productos sin ruta»
+
+Un producto **sin ruta** es el que no tiene ruta propia ni la de su categoría en Cocina › Enrutamiento: por ejemplo,
+la Coca Cola o las papas si nadie les puso estación.
+
+**Desde la 0.17.0, un producto sin ruta nunca detiene el pedido**: lo que sí tiene ruta llega a su estación igual. Con
+la 0.16.0, un pedido con un machacado y una Coca Cola no llegaba a la pantalla.
+
+Qué pasa con lo que no tiene ruta se elige en **Cocina › Enrutamiento**, en **«Productos sin ruta»**:
+
+- **«No necesitan preparación»** (así viene): no van a ninguna estación. Es lo normal para refrescos y extras que se
+  sirven sin preparar. No salen en la tableta ni hacen esperar al pedido: la tarjeta se quita cuando está listo lo que
+  sí se prepara, y el mesero recibe su aviso de platillos listos.
+- **«Enviar a una estación»**: todo lo que no tenga ruta llega a la estación que elijas (por ejemplo, Cocina), a su
+  pantalla o a su impresora.
+
+Debajo, **«Lo que no va a ninguna estación»** dice qué no tiene ruta, por ejemplo «Sin ruta: Refrescos, Extras (no
+necesitan preparación).». Si algo de esa lista sí se prepara, ponle su ruta en Enrutamiento.
+
+Una ruta que va a una estación **desactivada** tampoco detiene nada: esos productos llegan a las otras estaciones de
+su ruta o, si no le queda ninguna, se tratan como productos sin ruta. Enrutamiento lo avisa (abajo).
+
+### Revisar qué recibe una pantalla
+
+En **Administración › Sistema › Terminales**, **«Ver configuración»** de la pantalla tiene **«Qué recibe esta
+pantalla»**: por cada estación, cómo recibe sus comandas, sus categorías (con cuántos productos) y los productos sueltos
+que le llegan. Si algo falta, sale un aviso con un botón que lleva a corregirlo:
+
+| Aviso                                                                                 | Qué significa                                                                                                     | Qué hacer                                                                                                    |
+| ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| «Esta pantalla no tiene estaciones.»                                                  | No muestra ninguna estación activa que reciba en pantalla (por ejemplo, la que tenía elegida se desactivó).       | **«Configurar qué recibe»**: elige o crea su estación.                                                       |
+| «Ninguna de sus estaciones recibe comandas en pantalla.»                              | Sus estaciones existen, pero están en «Solo impresora».                                                           | **«Configurar qué recibe»** y, en la estación, **«Recibir también en pantalla»**.                            |
+| «La estación Cocina no tiene categorías ni productos asignados.»                      | La estación recibe en pantalla, pero ninguna ruta le manda nada.                                                  | **«Elegir sus categorías»** abre el asistente en el paso de las categorías.                                  |
+| «La impresora Cocina 80 de Cocina está desactivada: sus comandas esperan en la cola.» | Sus comandas no se imprimen hasta activar la impresora. Con «Impresora y pantalla de cocina», la pantalla las ve. | **«Ir a Cocina › Impresoras»** y actívala; lo que no salió, en Cocina › Cola de impresión, con «Reintentar». |
+
+En **Cocina › Enrutamiento**, debajo de «Productos sin ruta», salen los avisos de las rutas (los de una ruta, con
+**«Cambiar la ruta»**, que la abre para corregirla):
+
+| Aviso                                                                                                     | Qué significa                                                                                      | Qué hacer                                                                         |
+| --------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| «Extras va a Barra, que está desactivada: sus productos se tratan como productos sin ruta.»               | La ruta va a una estación desactivada. Mientras tanto, esos productos siguen «Productos sin ruta». | Cambia la ruta a una estación activa o activa la estación en Cocina › Estaciones. |
+| «Los productos sin ruta iban a Barra, que está desactivada. Mientras siga así, no necesitan preparación.» | El ajuste «Productos sin ruta» apunta a una estación desactivada.                                  | Elige otra estación o «No necesitan preparación», o activa la estación.           |
+
+## 5. Qué muestra cada pantalla: estaciones, letra, tema y sonido
 
 **Las estaciones.** Cada estación de cocina (Cocina, Barra, Parrilla…) elige cómo recibe sus comandas, en la computadora
 principal, en **Cocina › Estaciones**, en **«Recepción de comandas»**:
@@ -85,7 +182,7 @@ Los cambios **llegan a la tableta al momento**, sin tocarla.
 tiempos**, en **«Colores de las pantallas de cocina»**: el color de atención desde 10 minutos de espera y el de retraso
 desde 20, si no los cambias. El modo Cocina de la computadora sigue con los tiempos de cada estación.
 
-## 5. Usar la pantalla de pedidos
+## 6. Usar la pantalla de pedidos
 
 - **Cada tarjeta es un pedido**: la mesa (o «Para llevar» con el nombre del cliente), el mesero, la hora en que se
   envió y cuánto lleva esperando. La tarjeta cambia de color cuando el pedido lleva tiempo esperando y cuando ya está
@@ -105,7 +202,7 @@ desde 20, si no los cambias. El modo Cocina de la computadora sigue con los tiem
 - **Con muchos pedidos**, las tarjetas se acomodan en columnas; abajo se ve cuántos pedidos más hay y se desliza para
   verlos.
 
-## 6. El cupo de pantallas de cocina
+## 7. El cupo de pantallas de cocina
 
 La licencia de la computadora principal dice **cuántas pantallas de cocina** se pueden usar a la vez
 (**Configuración › Licencia**, y **Administración › Sistema › Terminales**, en «Cupos de la licencia»). Cada tableta
@@ -118,13 +215,13 @@ ocupa un cupo al conectarse, y lo **sigue ocupando aunque se corte la red** o se
   pantalla»** en ella, lo pide otra vez (si hay cupo).
 - **«Revocar»** (en Terminales) **sí es definitivo**: la tableta deja de estar emparejada, vuelve a «Buscar el servidor»
   y su cupo queda libre. Para usarla otra vez hay que emparejarla con un código nuevo.
-- **«Volver a emparejar»** (desde la misma tableta, sección 7) hace lo mismo que «Revocar»: suelta su cupo y la deja
+- **«Volver a emparejar»** (desde la misma tableta, sección 8) hace lo mismo que «Revocar»: suelta su cupo y la deja
   lista para emparejarla de nuevo.
 
 Con la **licencia vencida o revocada**, la cocina sigue mostrando y marcando pedidos, con un aviso arriba. **Sin
 activar**, no muestra pedidos.
 
-## 7. Ajustes en la tableta
+## 8. Ajustes en la tableta
 
 Están escondidos para que el personal no los cambie por error:
 
@@ -141,7 +238,7 @@ dice: entonces **revócala en Terminales** para soltar su cupo.
 La contraseña no se guarda en la tableta: se olvida al cerrar los ajustes, y los ajustes **se cierran solos** si nadie
 los toca en dos minutos.
 
-## 8. Dejar la tableta lista para la cocina
+## 9. Dejar la tableta lista para la cocina
 
 ### Que la pantalla no se apague
 
@@ -188,7 +285,7 @@ Los sonidos de la pantalla de cocina salen por el **volumen de notificaciones** 
 - **No actives «No molestar»** en la tableta de la cocina: silencia los sonidos de la pantalla de cocina, como cualquier
   notificación.
 
-## 9. Si no conecta
+## 10. Si no conecta
 
 - Un corte corto de la red (de unos segundos) **no muestra nada**: la tableta sigue mostrando los pedidos, y lo que se
   marque en ese momento se manda solo cuando vuelve la conexión.
@@ -201,7 +298,7 @@ Si el aviso no se quita:
 1. Revisa que la **computadora principal esté encendida** y con AD-EL POS abierto.
 2. Revisa que la tableta esté conectada a la **wifi del restaurante** (la misma de la computadora principal) y no a la
    de invitados ni a datos móviles.
-3. Abre los **ajustes de la tableta** (sección 7): muestran la dirección que usa. Si la computadora principal cambió de
+3. Abre los **ajustes de la tableta** (sección 8): muestran la dirección que usa. Si la computadora principal cambió de
    dirección, la tableta la vuelve a encontrar sola en la red; para que no cambie, ver «Asigna una dirección fija a la
    computadora principal» en [INSTALAR_EN_RED.md](INSTALAR_EN_RED.md).
 
@@ -212,14 +309,22 @@ Otros avisos:
 - **«Actualiza el servidor del restaurante»**: la computadora principal tiene una versión anterior a la 0.16.0.
 - **«Empareja de nuevo»** o **«Buscar el servidor»**: la pantalla se revocó en Terminales o se perdió su emparejamiento.
   Emparéjala otra vez con un código (sección 3).
-- **«No hay cupo de pantalla de cocina libre…»**: sección 6.
+- **«No hay cupo de pantalla de cocina libre…»**: sección 7.
 
-## 10. Lo que todavía no hace esta versión de prueba
+Si la tableta está conectada pero **un pedido no le llega**:
+
+1. Revisa **«Ver configuración»** de la pantalla en Terminales: sus avisos dicen qué falta (sección 4).
+2. Un **pedido para llevar con hora** todavía no llega a la cocina. Se ve en la computadora principal, en **Cocina ›
+   Preparación**, en **«Por enviar a cocina»**, que dice si se envía solo a su hora o si espera a que lo envíes. Para
+   mandarlo antes, **«Enviar a cocina ahora»**.
+3. Si a un pedido con hora le quitaron la hora, también espera ahí a que alguien toque **«Enviar a cocina ahora»**.
+
+## 11. Lo que todavía no hace esta versión de prueba
 
 - No captura pedidos, no cobra y no imprime: eso sigue en la caja, los teléfonos de los meseros y las impresoras de
   cocina.
 - No marca «En preparación»: solo listo (lo que se ponga «En preparación» en la computadora se ve igual como pendiente).
-- No se abre sola al encender la tableta (sección 8).
+- No se abre sola al encender la tableta (sección 9).
 - No suena con la aplicación cerrada: los sonidos son de la pantalla abierta.
 - «Recientes» llega solo hasta 30 minutos atrás, y la pantalla muestra como mucho 200 pedidos a la vez.
 - No viene de la tienda de Google y no se ha probado en una tableta real.

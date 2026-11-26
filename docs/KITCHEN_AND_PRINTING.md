@@ -2,15 +2,20 @@
 
 Versión 0.9.3, esquema 21 (la migración `0021_account_cancellation.sql` de la etapa 9D no cambia tablas de cocina y se aplicó a la instalación real el 12 de noviembre de 2026; la cancelación de cuentas completas llega a cocina como las cancelaciones de partidas, ver «Cancelar cuenta y «Enviado · sin confirmar en cocina» · etapa 9D»; la migración `0020_terminal_home_and_printer_columns.sql` de la etapa 9C agrega las columnas de texto por impresora y se aplicó a la instalación real el 11 de noviembre de 2026 con la autorización previa del propietario; ver «Columnas por impresora y prueba de ancho · etapa 9C»; la migración 0009 de la etapa 7.1 se aplicó a la instalación real el 9 de noviembre de 2026; ver «Cajón por CUPS en modo raw · etapa 7.1»; las 0010–0014 de la etapa 8 y las 0015–0017 de la etapa 9A se aplicaron el 10 de noviembre de 2026; las 0018 y 0019 de la etapa 9B se aplicaron a la instalación real el 11 de noviembre de 2026 con autorización del propietario). Desde la etapa 9B todos los documentos impresos salen de un renderizador único con plantillas por bloques, versiones e identidad del establecimiento, sin cambiar enrutamiento, cola ni reglas de resultado (ver «Plantillas, formato y logotipo · etapa 9B» y [DOCUMENT_DESIGNER.md](DOCUMENT_DESIGNER.md)). La etapa 9A no cambia la cocina: los reportes de demanda por producto y por hora y de preparación por estación leen las liberaciones canónicas con su fecha de liberación, en una transacción de solo lectura y sin el lock operativo ([REPORTS.md](REPORTS.md)). Go es la autoridad de preparación y ejecuta los trabajadores sin depender de una ventana Tauri. No existe aplicación KDS independiente. Desde la etapa 8 la liberación canónica es el origen del consumo de inventario (ver «Consumo de inventario · etapa 8»). La preparación lista no significa pagado o entregado: pago y entrega pertenecen a `payments` (etapa 6).
 
+**Desde la etapa K1.1 (servidor 0.17.0, esquema 30) un producto sin ruta nunca detiene el pedido**: lo que tiene ruta
+llega a su estación y lo demás sigue el ajuste «Productos sin ruta» de Enrutamiento. Lo que este documento dice de las
+liberaciones bloqueadas es historia de las versiones anteriores, salvo donde se indica; la regla vigente está en
+«Pedidos mixtos y productos sin ruta · etapa K1.1», al final.
+
 ## Configuración inicial
 
 Abrir **Cocina y preparación** con permisos administrativos. No se crean estaciones, rutas, impresoras ni pedidos ficticios en la instalación real.
 
 1. En **Impresoras**, descubrir las colas CUPS del servidor o registrar un destino manual. Seleccionar ancho 58/80 mm, 1–3 copias y capacidad de corte real. El destino corresponde al equipo donde corre Go.
 2. En **Estaciones**, crear nombre, descripción, orden, estado, tiempos objetivo/advertencia/atraso y recepción por impresora, KDS o ambos. Varias estaciones pueden seleccionar la misma impresora.
-3. En **Enrutamiento**, asignar categoría y, si procede, una excepción por producto. Un producto puede llegar a varias estaciones. Seleccionar explícitamente **Sin preparación** para artículos que no deban generar trabajo.
+3. En **Enrutamiento**, asignar categoría y, si procede, una excepción por producto. Un producto puede llegar a varias estaciones. **Sin preparación** sigue disponible para marcar explícitamente artículos que no deban generar trabajo; desde la etapa K1.1 lo que no tiene ruta ya no detiene nada y sigue el ajuste **«Productos sin ruta»** de la misma pestaña («No necesitan preparación», el valor inicial, o «Enviar a una estación»), y la lista «Lo que no va a ninguna estación» dice qué queda sin ruta.
 4. En **Comandas y tiempos**, elegir documentos independientes o unificados, seguimiento por partida o pedido, formato y política de programación. Una estación puede sobrescribir agrupación y seguimiento.
-5. En Estaciones › Terminales de cocina, elegir las estaciones que muestra cada terminal (todas por omisión) y su aviso sonoro; en Personal › Usuarios › Estaciones de cocina, las que atiende cada usuario (todas por omisión). Desde la etapa 9F en Preparación se ve la intersección (ver «Cocina por estaciones y terminal de cocina · etapa 9F»); además cada usuario necesita cada permiso funcional. El listado administrativo de configuración conserva su propio permiso.
+5. En Estaciones › Computadoras en modo Cocina (hasta la etapa K1.1, «Terminales de cocina»), elegir las estaciones que muestra cada computadora (todas por omisión) y su aviso sonoro; las pantallas de cocina Android (etapa K1) se configuran en Sistema › Terminales, con el asistente «Configurar qué recibe» desde la K1.1 ([COCINA_INSTALAR.md](COCINA_INSTALAR.md), sección 4); en Personal › Usuarios › Estaciones de cocina, las que atiende cada usuario (todas por omisión). Desde la etapa 9F en Preparación se ve la intersección (ver «Cocina por estaciones y terminal de cocina · etapa 9F»); además cada usuario necesita cada permiso funcional. El listado administrativo de configuración conserva su propio permiso.
 
 La primera configuración no altera contraseñas, catálogo, cuentas históricas ni credenciales del Llavero. Los veinte permisos nuevos se conceden inicialmente al rol administrador. Los otros roles necesitan asignación explícita. La identidad reservada `sa` conserva su política anterior.
 
@@ -37,9 +42,9 @@ prueba de humo conserva su turno y sus ventas: para dejarla limpia hay que reins
 
 ## Enrutamiento y liberación
 
-La ruta de producto prevalece sobre categoría. Los componentes elegidos de un combo se resuelven recursivamente con sus identidades de catálogo; no se duplican productos ni unidades comerciales. La expansión conserva variantes, porciones, ingredientes, grupos y observaciones. Una ruta ausente, una estación inactiva o un destino inválido produce advertencias visibles y una liberación bloqueada; nunca un envío aparente. Un combo vacío sin ruta tampoco se interpreta como exención implícita.
+La ruta de producto prevalece sobre categoría. Los componentes elegidos de un combo se resuelven recursivamente con sus identidades de catálogo; no se duplican productos ni unidades comerciales. La expansión conserva variantes, porciones, ingredientes, grupos y observaciones. Hasta la 0.16.0, una ruta ausente, una estación inactiva o un destino inválido producía advertencias visibles y una liberación bloqueada (nunca un envío aparente), y bastaba **un** producto así para que no se liberara nada del envío. **Desde la etapa K1.1 un envío nunca se bloquea** (K11-D1): un producto sin componentes (simple o combo vacío) sin ruta propia, de su categoría ni heredada sigue «Productos sin ruta»; de una ruta solo reciben las estaciones activas y, si no queda ninguna, el producto se trata como sin ruta; una impresora desactivada deja su trabajo en «Requiere intervención» sin detener las tareas ni la pantalla. Un combo con componentes y sin ruta propia sigue sin parte propia: cada componente se resuelve solo (nunca se trata un combo como «Sin preparación»). La decisión de cada producto es una sola función de Go (`decideRoute`, `kitchen/routing.go`), la misma que usa la cobertura de Enrutamiento y Terminales.
 
-Guardar o previsualizar un borrador no crea comandas. Confirmar registra el pedido y su intención durable de preparación en la misma transacción. Un pedido inmediato intenta liberarse; la ausencia de configuración conserva el pedido y muestra qué corregir. Después de corregir, usar **Liberar** con la revisión actual.
+Guardar o previsualizar un borrador no crea comandas. Confirmar registra el pedido y su intención durable de preparación en la misma transacción. Un pedido inmediato se libera al confirmarse: desde la K1.1 **toda unidad activa del envío se libera una vez** (fila canónica e inventario), con tarea o sin ella, como siempre lo hizo «Sin preparación». Hasta la 0.16.0 la ausencia de configuración conservaba el pedido bloqueado y había que usar **Liberar** después de corregir; los bloqueados que quedaron de antes se envían con «Enviar a cocina ahora» (ver la sección de la K1.1).
 
 `kitchen_unit_releases` es el punto canónico de liberación para inventario: una fila por UUID de unidad comercial, con versión y liberación. Las tareas por estación y las copias de impresión no representan ventas o consumos adicionales. La etapa 5 no descontaba existencias; desde la etapa 8 cada fila canónica origina, con el control de inventario activado, una sola solicitud de consumo (ver «Consumo de inventario · etapa 8»).
 
@@ -62,7 +67,7 @@ Cada comanda tiene UUID, fecha/hora, cuenta/folio, pedido, empleado y contexto d
 - Una cancelación genera **CANCELACIÓN**, identifica cantidad/motivo y cancela las tareas correspondientes.
 - Una reimpresión conserva la presentación histórica, sin leyenda REIMPRESIÓN y sin modificar preparación.
 
-Las modificaciones antes de la primera liberación se integran en el documento inicial. Después de liberar, se utilizan las rutas históricas; un componente nuevo explícito puede necesitar una ruta actual adicional. Si una estación histórica está inactiva, se conserva el cambio en `kitchen_pending_changes` y se muestra **Modificación pendiente**. No se permite avanzar tareas con una versión anterior. Reactivar/corregir y usar **Revisar cambio pendiente**. El lote afectado se conserva completo hasta poder resolver sus destinos; no se envían avisos parciales silenciosos.
+Las modificaciones antes de la primera liberación se integran en el documento inicial. Después de liberar, se utilizan las rutas históricas (de ellas solo reciben las estaciones activas, K11-D15); un componente nuevo explícito se resuelve con la configuración actual y, desde la K1.1, sigue la misma regla del envío, sin dejar aviso pendiente (K11-D2). Si una estación histórica que ya tenía la comanda está inactiva, se conserva el cambio en `kitchen_pending_changes` y se muestra como aviso pendiente (hasta la K1.1, **Modificación pendiente**). No se permite avanzar tareas con una versión anterior. Reactivar la estación y usar **Volver a avisar** (hasta la K1.1, «Revisar cambio pendiente» o «Revisar destinos y generar aviso»). El lote afectado se conserva completo hasta poder resolver sus destinos; no se envían avisos parciales silenciosos. Desde la K1.1, ese aviso se da por terminado cuando la cuenta ya no está abierta (se cobra y se cierra, o se cancela), con su registro en el historial.
 
 Documentos independientes: una comanda por estación aunque compartan impresora. Unificación: estaciones compatibles que seleccionan la misma impresora y agrupación unificada comparten documento, manteniendo secciones. Las estaciones KDS conservan su propia tarea y requisito de recepción, aunque compartan papel con otras.
 
@@ -310,10 +315,14 @@ lo procesa en la misma transacción exactamente como una cancelación de partida
 - lo que todavía no se liberó (liberación pendiente, programada o bloqueada) se cancela **sin papel**;
 - lo ya liberado cancela sus tareas y genera el **aviso de cancelación** para cada estación que lo recibió, por la cola
   durable de siempre (un aviso por liberación y estación, con el mismo documento de cancelación de las partidas);
-- con una estación inactiva o un destino inválido, el cambio queda **pendiente y durable**: la respuesta de la
-  cancelación ya dice `change_pending` y Cocina → «Pendientes de liberación y avisos» lo muestra como «Aviso de
+- con una estación inactiva o un destino inválido, el cambio quedaba **pendiente y durable**: la respuesta de la
+  cancelación decía `change_pending` y Cocina → «Pendientes de liberación y avisos» lo mostraba como «Aviso de
   cancelación pendiente» (antes de la 9D solo `item.cancelled` se llamaba así); su reintento no duplica avisos ni
-  liberaciones;
+  liberaciones. **Desde la etapa K1.1** una cuenta cancelada no deja nada pendiente (K11-D4 y K11-D21): lo no enviado
+  se cancela sin papel **antes** de mirar el aviso (hasta la 0.16.0 el aviso pendiente salía antes y dejaba también el
+  envío bloqueado), y el aviso para la estación desactivada se da por terminado en la misma transacción
+  (`change.dismissed` con `account_cancelled`); la respuesta, su reintento y la lectura dicen `cancelled`, y «Volver a
+  avisar» responde 409 `KITCHEN_CHANGE_NOT_PENDING` sin imprimir;
 - como siempre, `submitted` significa que CUPS o el puerto TCP aceptaron el trabajo, no que salió el papel. **La impresión
   real del aviso de cancelación de una cuenta no se verificó** (solo el transporte controlado de la cola).
 
@@ -328,7 +337,10 @@ a «Listo», por eso la marca vive en el motivo y no en el estado de la tarea.
 encabezado de la cuenta, a «Pendiente de liberación · revisar cocina» (`preparation_state: "pending_release"`, que
 `kitchen.VersionPreparation` devuelve cuando una versión tiene unidades activas sin liberación canónica en
 `kitchen_unit_releases` y ninguna liberación programada); en la tarjeta de la cuenta, «Sin confirmar en cocina». Significa que el pedido se confirmó, pero
-**su liberación quedó bloqueada**:
+**la cocina todavía no lo recibió**. **Desde la etapa K1.1 casi nunca aparece**: un envío ya no se bloquea, así que solo
+la dicen un pedido al que se le quitó la hora de su programación (espera en «Por enviar a cocina» a que alguien lo
+envíe, K11-D9) y un bloqueado de antes de la 0.17.0 de una cuenta todavía abierta. Lo que sigue es cómo era hasta la
+0.16.0, cuando **su liberación quedaba bloqueada**:
 
 - al confirmar, `prepareRelease` no encuentra ruta («Sin ruta de preparación: producto»), estación activa o destino válido
   y deja la liberación `blocked` sin unidades liberadas, con una advertencia por unidad: no se imprime nada, no se crean
@@ -342,8 +354,9 @@ encabezado de la cuenta, a «Pendiente de liberación · revisar cocina» (`prep
   (`kitchen.release` + `kitchen.stations.all`). Un pedido nuevo con la configuración completa se libera solo. Para
   productos que no van a cocina, la ruta **Sin preparación** (`mode='none'`) evita la liberación bloqueada (quedan como
   «Listo»);
-- las liberaciones bloqueadas de cuentas ya cerradas siguen en esa lista (limitación observada en la Fase 0, sin
-  cambio);
+- las liberaciones bloqueadas de cuentas ya cerradas seguían en esa lista (limitación observada en la Fase 0 de la 9D;
+  **corregida en la etapa K1.1**: la `0030` las da por terminadas y, desde la 0.17.0, cobrar y cerrar o cancelar la
+  cuenta también);
 - «Preparación y comandas» (detalle de la cuenta) muestra cada advertencia distinta una sola vez, con «(×N)» si se
   registró por varias unidades (Go sigue registrando una por unidad).
 
@@ -399,7 +412,8 @@ a Administración › Cobros con «Políticas de cobro» desplegada; solo si el 
 aviso dice a quién pedirlo) y **«Reintentar»** en el mismo aviso. El ticket de pago nunca hace fallar el pago: el
 resultado del cobro dice por qué no se imprimió y ofrece los mismos dos botones («Reintentar» imprime el ticket de ese
 pago; desde la revisión B1, solo el de un pago cuyo ticket quedó pendiente por esa razón y sin devoluciones). Las
-comandas no cambian: una impresora inactiva bloquea la liberación y una de otra terminal deja la comanda en
+comandas no cambian (hasta la etapa K1.1, una impresora inactiva bloqueaba la liberación; desde la 0.17.0 su trabajo
+queda en «Requiere intervención» con «La impresora X está desactivada.», K11-D1) y una de otra terminal deja la comanda en
 «Requiere intervención», ahora con «Esta impresora no se puede usar para imprimir.» (hasta la etapa A3, «Esta
 impresora todavía no puede usarse para imprimir.»).
 
@@ -488,7 +502,7 @@ Fase C de la etapa 9F (§5, decisiones D6 y D7 del coordinador). Guía para el p
 - **Estaciones que muestra esta terminal** (`kitchen_device_stations`, antes ámbito de autorización): marca
   `devices.kitchen_all_stations` («todas», la predeterminada, incluidas las estaciones que se creen después) o una
   selección de 1 a 100 estaciones existentes. La 0022 dejó con su selección (marca en falso) a las terminales que ya
-  tenían filas y en «todas» a las demás. Se configura en **Cocina › Estaciones › Terminales de cocina**
+  tenían filas y en «todas» a las demás. Se configura en **Cocina › Estaciones › Computadoras en modo Cocina** (hasta la etapa K1.1, «Terminales de cocina»)
   (`PUT kitchen/access`, `kitchen.stations.manage`, historial auditado `station.access.saved`), junto a las
   estaciones; la pantalla de inicio sigue en Sistema › Terminales, que remite allí. Se eligió ese lugar porque la
   ruta, el permiso y la auditoría ya existían y porque elegir estaciones exige consultarlas.
@@ -525,7 +539,7 @@ Fase C de la etapa 9F (§5, decisiones D6 y D7 del coordinador). Guía para el p
   las estaciones visibles; no suena al abrir la pantalla, al cambiar de filtro o página ni por cambios de estado.
   WebKit (la ventana de macOS) y WebView2 solo dejan sonar el audio que se preparó durante un toque o una tecla:
   desde la revisión independiente (parte 3, B2), con el aviso activado, el primer toque o tecla en Preparación (y
-  activar la casilla en Terminales de cocina) crea o reanuda el contexto de audio, y si al llegar una comanda el equipo
+  activar la casilla en Computadoras en modo Cocina) crea o reanuda el contexto de audio, y si al llegar una comanda el equipo
   todavía no permite reproducir, se avisa una sola vez «Toca la pantalla para activar el aviso sonoro.» en lugar de
   callar el fallo.
 - **Terminal y lista vacía** (revisión independiente, parte 3, B1): hasta la 9E una terminal sin estaciones no mostraba
@@ -605,3 +619,169 @@ ejecutor simulado (argumentos separados, `lpstat`, reintentos sin duplicar), Vit
 `maintenance/signatures.go`). **Pendiente en hardware**:
 papel, logotipo, corte y cajón reales por la impresora USB de otra terminal y la terminal Windows (Fase W). Para el
 propietario: [INSTALAR_EN_RED.md](INSTALAR_EN_RED.md), «Impresora USB conectada a una caja».
+
+## Pedidos mixtos y productos sin ruta · etapa K1.1
+
+Etapa K1.1 (servidor 0.17.0, esquema 30; especificación
+[etapas/ETAPA_K1_1_COCINA_AJUSTES.md](etapas/ETAPA_K1_1_COCINA_AJUSTES.md) y decisiones K11-D1 a K11-D23 en
+[ETAPA_K1_1_AVANCE.md](ETAPA_K1_1_AVANCE.md)). Migración `0030_productos_sin_ruta.sql`, sección «Fase A». Rutas en
+[API_V1.md](API_V1.md), «Configuración guiada de cocina (etapa K1.1)». Guía para el propietario:
+[COCINA_INSTALAR.md](COCINA_INSTALAR.md), sección 4.
+
+**La causa** (Fase 0). `prepareRelease` juntaba las advertencias de todas las unidades del envío y, con una sola, dejaba
+la liberación `blocked` sin liberar ninguna unidad. Un machacado con una Coca Cola sin ruta no llegaba a la pantalla de
+cocina, la cuenta decía «Enviado · sin confirmar en cocina» y el pedido seguía en el panel de Preparación aunque la cuenta
+se cobrara y se cerrara (cerrar no llamaba a cocina y el panel no miraba el estado de la cuenta).
+
+### Un envío nunca se bloquea (K11-D1 y K11-D2)
+
+- **Un producto sin componentes** (simple o combo vacío) sin ruta propia, sin la de su categoría y sin estaciones
+  heredadas de su combo sigue el ajuste **«Productos sin ruta»**: «No necesitan preparación» (sin parte ni tarea) o
+  «Enviar a una estación» (su parte va a esa estación si está activa; si no, como «No necesitan preparación»).
+- **De una ruta solo reciben las estaciones activas**; las desactivadas se omiten y, si no queda ninguna, el producto se
+  trata como sin ruta. Un combo con componentes cuya ruta solo iba a estaciones desactivadas queda sin parte propia y sus
+  componentes se resuelven solos (K11-D16).
+- **Una impresora desactivada** de una estación «Solo impresora» o «Impresora y pantalla» no detiene nada: las tareas y la
+  comanda se crean, el trabajo queda en «Requiere intervención» con «La impresora X está desactivada.» y, con «Impresora
+  y pantalla», la pantalla de cocina lo recibe igual.
+- **Toda unidad activa del envío se libera una vez** (fila canónica de `kitchen_unit_releases` e inventario), con tarea o
+  sin ella, como siempre lo hizo «Sin preparación». Un combo con componentes y sin ruta propia nunca se trata como «Sin
+  preparación» (dejaría de visitar sus componentes).
+- **La decisión se congela** en `routing_snapshot`, con dos campos opcionales de `Route`: `unrouted: true` (vino del
+  ajuste) y `omitted_station_ids` (estaciones desactivadas que no recibieron). Una modificación posterior sigue la ruta
+  congelada, de la que solo reciben las estaciones activas, y nunca aplica el ajuste (K11-D15). `POST/PATCH
+kitchen/routes` rechazan esos dos campos.
+- **Lo que no necesita preparación no cuenta** para la tarjeta de la pantalla de cocina (K1-D5) ni para el aviso de
+  platillos listos (A2): una unidad sin tarea no está en la tarjeta y nunca avisa. La tarjeta de «machacado + Coca Cola +
+  papas» sigue abierta hasta marcar el machacado; entonces se cierra, el mesero recibe **un** aviso y la cuenta queda
+  lista.
+- **Cambios de algo ya enviado**: un componente nuevo sigue la misma regla y ya no deja aviso pendiente. El único aviso
+  pendiente que queda es el de una estación desactivada que **ya tenía** la comanda (regla de la etapa 5 y de la 9D).
+- `prepareRelease` ya no escribe `blocked`: ese valor queda solo en las liberaciones anteriores a la 0.17.0 (el `CHECK`
+  lo conserva). La función que decide cada producto es una sola (`decideRoute`, `kitchen/routing.go`), la misma del
+  envío y de la cobertura.
+
+### «Productos sin ruta» (K11-D3)
+
+- Ajuste general en **Cocina › Enrutamiento**: «No necesitan preparación» (el valor al actualizar) o «Enviar a una
+  estación», con la estación (solo las activas; la guardada, si se desactivó, se ve sin poder elegirla). Debajo, «Lo que
+  no va a ninguna estación» («Sin ruta: Refrescos, Extras (no necesitan preparación).» o «(van a Cocina).») y los avisos
+  de las rutas a estaciones desactivadas y del ajuste, con «Cambiar la ruta».
+- Se guarda en `kitchen_settings.unrouted_station_id` (`NULL` = «No necesitan preparación»), **fuera** de la
+  configuración que viaja en cada comanda, con `PUT kitchen/unrouted` (`kitchen.routing.manage`, `operation_id`,
+  `expected_station_id`; 409 `KITCHEN_UNROUTED_CHANGED` si otro lo cambió, 400 «Elige una estación activa.»), historial
+  `unrouted.saved` y el evento `kitchen.unrouted.changed`. `GET kitchen/settings` trae `unrouted_station_id`; `PUT
+kitchen/settings` y `PUT kitchen/timing` lo aceptan en el cuerpo y no lo cambian.
+- Si la estación elegida se desactiva, lo que no tiene ruta no necesita preparación mientras tanto (con su aviso).
+  «Quitar datos de prueba» lo vuelve a «No necesitan preparación» antes de quitar o desactivar una estación de prueba
+  (K11-D19), con su renglón en la vista previa.
+
+### La cobertura del enrutamiento (K11-D5)
+
+`GET kitchen/coverage` (`kitchen.stations.read`, capacidad `kitchen-coverage-v1`, solo lectura) resuelve **en Go** cada
+producto activo con la misma función del envío (`kitchen/coverage.go`): las estaciones con sus categorías (y cuántos de
+sus productos llegan de verdad) y sus excepciones por producto, lo que tiene «Sin preparación», lo que no va a ninguna
+estación por una ruta (`no_route` o `inactive_station`), cada categoría con su ruta, las pantallas de cocina con las
+estaciones que muestran y los avisos, con el texto listo para la pantalla:
+
+| Código                       | Texto                                                                                                     |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `display_without_stations`   | «Esta pantalla no tiene estaciones.»                                                                      |
+| `display_no_screen_stations` | «Ninguna de sus estaciones recibe comandas en pantalla.»                                                  |
+| `station_without_routes`     | «La estación Cocina no tiene categorías ni productos asignados.»                                          |
+| `route_station_inactive`     | «Extras va a Barra, que está desactivada: sus productos se tratan como productos sin ruta.»               |
+| `unrouted_station_inactive`  | «Los productos sin ruta iban a Barra, que está desactivada. Mientras siga así, no necesitan preparación.» |
+| `station_printer_inactive`   | «La impresora Cocina 80 de Cocina está desactivada: sus comandas esperan en la cola.»                     |
+
+Un combo vacío en la cobertura es el que tiene todos sus componentes en cero por omisión (K11-D17); en el envío manda el
+pedido real. React no calcula rutas: solo agrupa lo que Go resolvió.
+
+### Lo pendiente de una cuenta que ya no está abierta (K11-D4, K11-D18 y K11-D20)
+
+- **La regla**: una liberación sigue pendiente si alguna de sus unidades activas está en una cuenta abierta (por la
+  pertenencia actual de las unidades: lo combinado, dividido o transferido a una cuenta abierta sigue pendiente); un
+  aviso, si alguna de sus unidades activas está en una cuenta abierta o su cuenta (o aquella en que terminó combinada)
+  sigue abierta. Un pedido para llevar cobrado y todavía no entregado sigue abierto: su pedido programado llega a la
+  cocina a su hora.
+- **Al cerrar** (`payments.closeIfSettled`, en su transacción y con el 7820148305 que ya tomó el cobro, sin lock nuevo) y
+  **al cancelar** (`account.cancelled`), `dismissAccountPending` (`kitchen/pending.go`) toma la cuenta y las combinadas
+  en ella: las liberaciones `pending`, `scheduled` o `blocked` pasan a `cancelled` (`release.dismissed`) y los avisos
+  reciben `dismissed_at` y `dismissed_reason` (`change.dismissed`), con el motivo (`account_closed` o
+  `account_cancelled`) y el actor y el dispositivo de la operación (sin `operation_id`, K11-D20), y publica
+  `kitchen.releases.changed`. Reabrir una cuenta cerrada (con una devolución) no revive lo terminado.
+- **Nunca cambian** ventas, pagos, cuentas, partidas, unidades, cortes, inventario ni `kitchen_unit_releases`: solo el
+  estado de esos pendientes y su historial. Las tareas de unidades ya canceladas quedan como estaban (K11-D21).
+- **Lecturas**: `GET kitchen/board` solo trae liberaciones `pending`, `scheduled` o `blocked` de cuentas abiertas y los
+  avisos no terminados, cada uno con `inactive_stations` (las estaciones desactivadas a las que no se pudo avisar);
+  `VersionPreparation` y el reintento ignoran los avisos terminados.
+- **«Enviar a cocina ahora»** (`POST kitchen/releases/{id}/release`) responde 409 `KITCHEN_RELEASE_NOT_PENDING` («Este
+  pedido ya no está pendiente.») con una liberación ya enviada, cancelada o de una cuenta que ya no está abierta (hasta la
+  0.16.0 respondía 200 sin hacer nada, o mandaba a la cocina el pedido de una cuenta ya cobrada); **«Volver a avisar»**
+  (`POST kitchen/changes/{event_id}/retry`), 409 `KITCHEN_CHANGE_NOT_PENDING` con un aviso terminado.
+
+### El panel «Por enviar a cocina» (K11-D8 y K11-D9)
+
+En **Cocina › Preparación**, para quien tiene `kitchen.stations.all` (`pages/kitchen/PendingKitchen.tsx`; hasta la
+0.16.0, «Pendientes de liberación y avisos»), con el resumen «N pedidos · N avisos». Lo que queda con la regla nueva:
+
+| Caso                                                     | Título                                                  | Texto                                                                                                   | Botones                                     |
+| -------------------------------------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| Programado que se envía solo                             | «Programado: se envía solo a su hora»                   | «Se envía a cocina solo el {día} a las {hora}.»                                                         | «Enviar a cocina ahora» y «Cambiar la hora» |
+| Programado manual                                        | «Programado: espera a que lo envíes»                    | «Programado para el {día} a las {hora}. Espera a que lo envíes a cocina.»                               | «Enviar a cocina ahora» y «Cambiar la hora» |
+| Programado al que se le quitó la hora (K11-D9)           | «Espera a que lo envíes a cocina»                       | «La cocina no lo recibe hasta que toques «Enviar a cocina ahora».»                                      | «Enviar a cocina ahora»                     |
+| Bloqueado de antes de la 0.17.0, de una cuenta abierta   | «La cocina no recibió este pedido»                      | «Se envió con la versión anterior, que lo detenía por un producto sin ruta o una estación desactivada.» | «Enviar a cocina ahora»                     |
+| Aviso para una estación desactivada que tenía la comanda | «La cocina no recibió una modificación» (o cancelación) | «No se pudo avisar a Barra: está desactivada.» y «Actívala en Cocina › Estaciones y vuelve a avisar.»   | «Volver a avisar»                           |
+
+- Debajo de cada botón, su texto: «La cocina lo recibe al momento.» («…, antes de su hora.» antes de tiempo, o por qué
+  no se puede sin `kitchen.release_early`); «Cambia cuándo llega a cocina. No cambia el pedido ni su precio.»; «Manda el
+  cambio a la estación si ya está activa.». «Enviar a cocina ahora» solo dice que lo envió con `state: 'released'` en la
+  respuesta; los dos 409 se avisan con el mensaje de Go y el panel se vuelve a leer.
+- **Ya no pueden ocurrir**: «Bloqueado por configuración» de un envío nuevo (sus renglones «Sin ruta de preparación» no
+  se muestran ni en los viejos) y los avisos pendientes por componentes nuevos sin ruta.
+- **Fuera del panel**: el detalle de la cuenta dice «No se envió a cocina» para una liberación cancelada («Sus productos
+  se cancelaron o la cuenta se cerró antes de enviarlo.»), y Cocina › Historial nombra «Pedido sin enviar dado por
+  terminado», «Aviso sin entregar dado por terminado» y «Productos sin ruta actualizado», con el motivo en palabras.
+- Sin la capacidad `kitchen-coverage-v1` (un servidor 0.16.0), el panel es el de siempre.
+
+### Configuración guiada en el escritorio (K11-D6, K11-D7 y K11-D22)
+
+- **Asistente «Configurar qué recibe»** (`pages/kitchenDisplay/KitchenDisplayAssistant.tsx`): al aprobar una pantalla de
+  cocina en Sistema › Terminales y desde su fila o «Ver configuración». Tres pasos con las rutas de siempre, cada una con
+  su `operation_id` y su permiso: las estaciones de la pantalla (crear «Cocina» con `POST kitchen/stations`, usar una
+  «Cocina» que ya existe o pasar una estación que solo imprime a «Impresora y pantalla de cocina» con `PATCH
+kitchen/stations/{id}`, y, en una pantalla ya emparejada, cuáles muestra con `PUT kitchen/access`), las categorías
+  (`POST kitchen/routes` o `PATCH kitchen/routes/{id}`; marcar una que va a otra estación la **cambia**, con el aviso
+  «Desayunos dejará de ir a Barra.») y el resumen, leído otra vez de la cobertura.
+- **Diagnóstico** en «Ver configuración» (`KitchenDisplayDiagnostics.tsx`): por estación, su recepción, sus categorías
+  con cuántos productos, sus productos y si recibe lo que no tiene ruta; los avisos de Go con un botón por aviso (el
+  asistente en el paso 1 o 2, Cocina › Enrutamiento o Cocina › Impresoras).
+- **Estaciones**: «Terminales de cocina» pasa a **«Computadoras en modo Cocina»** («Las pantallas de cocina (tabletas)
+  se configuran en Sistema › Terminales.»), y la recepción en pantalla dice «Las pantallas de cocina muestran estos
+  pedidos al momento. En Comandas se ve si la pantalla ya los recibió.».
+- Todo se esconde con un servidor sin `kitchen-coverage-v1`.
+
+### La `0030` en una instalación con datos
+
+En la misma transacción del migrador (el `host` respalda antes de migrar):
+
+- agrega `kitchen_settings.unrouted_station_id` (`NULL`: «No necesitan preparación») y `dismissed_at` y
+  `dismissed_reason` en `kitchen_pending_changes` (con su `CHECK`);
+- pasa a `cancelled` (con su revisión siguiente) las liberaciones `pending`, `scheduled` o `blocked` cuyas unidades
+  activas ya no están en ninguna cuenta abierta, cada una con `release.dismissed` (`account_not_open`, `migration:
+'0030'`, sin actor), y da por terminados con `change.dismissed` los avisos pendientes de cuentas que ya no están
+  abiertas. Sus advertencias y sus fotografías quedan como estaban;
+- **no cambia ninguna otra tabla** (lo comprueba `TestStageK11Upgrade` con sumas de comprobación de todas las tablas del
+  esquema 29). Los bloqueados de cuentas todavía abiertas siguen en el panel hasta enviarlos o cerrar la cuenta.
+
+### Limitaciones
+
+- **Quitar la hora a un pedido programado no lo envía** (K11-D9): queda «Espera a que lo envíes a cocina» hasta que
+  alguien toca «Enviar a cocina ahora».
+- **Inventario de los pendientes viejos** (K11-D11): lo que quedó bloqueado nunca consumió existencias, y darlo por
+  terminado no registra ese consumo.
+
+**Verificación**: integración PostgreSQL (`TestStageK11UnroutedProducts` en `operations`, `TestStageK11Upgrade` en
+`database`, `contractKitchenCoverage` en `TestContractV1` y la subprueba de «Quitar datos de prueba» en
+`administration`), Vitest y `workflow-stagez-k11-assistant.spec.ts` y `workflow-stagez-k11-diagnostics.spec.ts`
+(Chromium y WebKit); regresión en [VERIFICATION_STAGEK1_1.md](VERIFICATION_STAGEK1_1.md). **Pendiente**: la comanda en
+papel, una tableta real y la ventana nativa.

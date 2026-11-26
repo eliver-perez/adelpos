@@ -4109,7 +4109,7 @@ home_screen IN ('tables', 'takeaway'))`. Ninguna otra fila cambia (`TestStageA3U
   responde `400 VALIDATION_ERROR` «En un teléfono o tableta de meseros la pantalla inicial es Mesas o Para llevar.» sin
   escribir ni auditar. Sin el campo se conserva lo guardado, como siempre; los demás campos no cambian (Go sigue
   aceptando `register_id` y `keyboard_mode` en un `android`: el escritorio 0.14.0 envía los guardados sin cambio).
-- **`GET kitchen/access`** (`kitchen.stations.manage`, Cocina › Estaciones › Terminales de cocina): ya no lista los
+- **`GET kitchen/access`** (`kitchen.stations.manage`, Cocina › Estaciones › Terminales de cocina, desde la K1.1 «Computadoras en modo Cocina»): ya no lista los
   dispositivos `android`, que no tienen modo cocina (§5.1: cada tipo solo ve lo que le aplica). `PUT kitchen/access` no
   cambia.
 - **Contrato v1** (A3-D8, sin cambiar el comportamiento): `discardAccount` (`POST restaurant/accounts/{id}/discard`) y
@@ -4288,3 +4288,30 @@ locks nuevos: las escrituras de la pantalla toman 7820148305 exclusivo y el cupo
   `kitchen.kds.acknowledged`), sin usuario y con el dispositivo.
 - **Escritorio**: Terminales y la configuración de cocina son de la Fase E, escondidas por la capacidad
   `kitchen-display-v1`. El modo Cocina del escritorio no cambia.
+
+## Etapa K1.1 · pedidos mixtos, productos sin ruta y configuración guiada de cocina (Fase A, esquema 30; servidor 0.17.0)
+
+Decisiones K11-D1 a K11-D23 en `docs/ETAPA_K1_1_AVANCE.md`; la forma de cada respuesta, los errores y el contrato están
+en `docs/API_V1.md`, «Configuración guiada de cocina (etapa K1.1)», y en `openapi.json` (`getKitchenCoverage`,
+`saveKitchenUnrouted`, `releaseKitchenOrder`, `retryKitchenChange` y `getKitchenBoard`). Migración
+`0030_productos_sin_ruta.sql`, sección «Fase A». Capacidad `kitchen-coverage-v1`. Sin locks nuevos. Regla de negocio en
+`docs/KITCHEN_AND_PRINTING.md`, «Pedidos mixtos y productos sin ruta · etapa K1.1».
+
+- **`GET kitchen/coverage`** (`kitchen.stations.read`, solo lectura): qué recibe cada estación y cada pantalla de cocina,
+  lo que tiene «Sin preparación», lo que no va a ninguna estación por una ruta, cada categoría con su ruta y los avisos
+  (`warnings[]` con `code`, `message` en español y los ids de lo que hay que corregir), resuelto en Go con la misma
+  función del envío (`kitchen/coverage.go`).
+- **`PUT kitchen/unrouted`** (`kitchen.routing.manage`): `{operation_id, station_id, expected_station_id}`
+  («Productos sin ruta»: `null` = «No necesitan preparación»). 409 `KITCHEN_UNROUTED_CHANGED` si lo guardado no es lo
+  esperado, 400 `KITCHEN_VALIDATION` con una estación inexistente o desactivada; historial `unrouted.saved` y evento
+  `kitchen.unrouted.changed`. `GET kitchen/settings` agrega `unrouted_station_id`; `PUT kitchen/settings` y `PUT
+kitchen/timing` lo aceptan y no lo cambian.
+- **`POST kitchen/releases/{id}/release`**: 409 `KITCHEN_RELEASE_NOT_PENDING` con una liberación ya enviada, cancelada o
+  de una cuenta que ya no está abierta. **`POST kitchen/changes/{event_id}/retry`**: 409 `KITCHEN_CHANGE_NOT_PENDING` con
+  un aviso terminado.
+- **`GET kitchen/board`**: `releases` solo de cuentas abiertas (sin liberaciones nuevas `blocked`) y `pending_changes`
+  solo los no terminados, cada uno con `inactive_stations` (opcional).
+- **Historial de cocina**: `release.dismissed`, `change.dismissed` (motivos `account_not_open`, `account_closed` y
+  `account_cancelled`) y `unrouted.saved`.
+- **Sin cambios**: `POST/PATCH kitchen/routes` (rechazan `unrouted` y `omitted_station_ids`, que solo viven en el
+  `routing_snapshot`), `kitchen/stations`, `kitchen/outputs`, `kitchen/access`, el emparejamiento y `kitchen-display/*`.
