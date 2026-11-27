@@ -21,6 +21,9 @@ import type { PairingSession } from './pairing';
 // ejecutar dos aceptaciones aisladas a la vez con servidores temporales en otros puertos locales.
 const defaultServerURL = process.env.ADEL_BROWSER_SERVER_URL ?? 'http://127.0.0.1:8183';
 
+// Zona horaria del establecimiento que el puente configura en cada base temporal nueva (POST setup).
+export const acceptanceTimezone = 'America/Monterrey';
+
 // Etapa 9G (§5.1): el puente se identifica como lo hace Rust (with_client_headers de api.rs): la versión de la
 // aplicación (la de config/product.json, que sync-metadata copia a Cargo.toml) y el tipo de cliente.
 const clientHeaders = {
@@ -32,12 +35,55 @@ const clientHeaders = {
   'X-Client-Kind': 'desktop',
 };
 
-// Terminal temporal que este mismo proceso de Playwright configuró, por token de aprovisionamiento.
-// La aceptación corre con un solo worker: cuando varias especificaciones comparten la base temporal
-// (por ejemplo restaurant.spec.ts e inventory.spec.ts en la corrida completa), la primera configura
-// el establecimiento y el catálogo mínimo, y las siguientes reutilizan esa terminal en lugar de
-// rechazar la base. Una base configurada por otro proceso se sigue rechazando.
-const preparedTerminals = new Map<string, { deviceID: string; deviceToken: string }>();
+// Terminal temporal que esta misma corrida de Playwright configuró, una por Go temporal (por su token de
+// aprovisionamiento). La aceptación corre con un solo worker: cuando varias especificaciones comparten la base temporal
+// (por ejemplo restaurant.spec.ts e inventory.spec.ts en la corrida completa), la primera configura el establecimiento
+// y el catálogo mínimo, y las siguientes reutilizan esa terminal en lugar de rechazar la base. Una base configurada por
+// otra corrida se sigue rechazando.
+//
+// Etapa M1 (Fase E, §5.8): la terminal se guarda en un archivo junto al token de aprovisionamiento del Go temporal
+// (en la carpeta de esa corrida, que el arranque de las pruebas borra al terminar), con el PID del proceso principal de
+// Playwright. Cuando una prueba falla, Playwright descarta su proceso de trabajo y abre otro, hijo del mismo proceso
+// principal: con la terminal solo en memoria, el proceso nuevo no la conocía y todas las especificaciones siguientes
+// fallaban en cascada con «La aceptación debe comenzar con una base sin configurar», aunque no tuvieran nada mal.
+// `ready` dice si la primera especificación terminó de preparar la base (la licencia de prueba y el catálogo mínimo).
+interface PreparedTerminal {
+  runner: number;
+  device_id: string;
+  device_token: string;
+  ready: boolean;
+}
+
+function preparedTerminalFile(provisioningFile: string) {
+  return join(dirname(provisioningFile), 'terminal-aceptacion.json');
+}
+
+function savedTerminal(provisioningFile: string): PreparedTerminal | undefined {
+  let saved: PreparedTerminal;
+  try {
+    saved = JSON.parse(
+      readFileSync(preparedTerminalFile(provisioningFile), 'utf8'),
+    ) as PreparedTerminal;
+  } catch {
+    return undefined;
+  }
+  // Solo la terminal de esta corrida: el proceso de trabajo es hijo del proceso principal de Playwright.
+  return saved.runner === process.ppid && saved.device_id && saved.device_token ? saved : undefined;
+}
+
+function saveTerminal(
+  provisioningFile: string,
+  terminal: { deviceID: string; deviceToken: string },
+  ready: boolean,
+) {
+  const saved: PreparedTerminal = {
+    runner: process.ppid,
+    device_id: terminal.deviceID,
+    device_token: terminal.deviceToken,
+    ready,
+  };
+  writeFileSync(preparedTerminalFile(provisioningFile), JSON.stringify(saved), { mode: 0o600 });
+}
 
 // Exportación de reportes (etapa 9A, parte C1): simulación de la operación cerrada export_report de
 // src-tauri/src/export.rs. Usa la misma lista cerrada de reportes (leída de export.rs) y la misma
@@ -633,21 +679,32 @@ export async function installDriver(page: Page, options: DriverOptions = {}) {
     }
   }
   const setup = await request('GET', 'setup/status');
-  const prepared = setup.body.configured
-    ? (options.terminal ?? preparedTerminals.get(provisioning))
-    : undefined;
+  let prepared: { deviceID: string; deviceToken: string } | undefined = undefined;
+  if (setup.body.configured && options.terminal) {
+    prepared = options.terminal;
+  } else if (setup.body.configured) {
+    const saved = savedTerminal(provisioningFile);
+    if (saved && !saved.ready) {
+      throw new Error(
+        'La preparación de la base temporal (la licencia de prueba o el catálogo mínimo) falló en una especificación anterior de esta corrida: revisa la primera falla.',
+      );
+    }
+    if (saved) {
+      prepared = { deviceID: saved.device_id, deviceToken: saved.device_token };
+    }
+  }
   if (!setup.body.configured) {
     if (options.terminal) {
       throw new Error('La segunda terminal necesita una base ya configurada');
     }
     await request('POST', 'setup', {
       name: 'Aceptación temporal',
-      timezone: 'America/Monterrey',
+      timezone: acceptanceTimezone,
       currency: 'MXN',
       theme: 'light',
       terminal_name: 'WebView temporal',
     });
-    preparedTerminals.set(provisioning, { deviceID, deviceToken });
+    saveTerminal(provisioningFile, { deviceID, deviceToken }, false);
     // Etapa L1: activar va antes de administrar (tabla de la §6 del contrato de licencias).
     if (options.license !== false && (await serverLicensed())) {
       await activateTestLicense();
@@ -656,7 +713,9 @@ export async function installDriver(page: Page, options: DriverOptions = {}) {
     deviceID = prepared.deviceID;
     deviceToken = prepared.deviceToken;
   } else {
-    throw new Error('La aceptación debe comenzar con una base sin configurar');
+    throw new Error(
+      'La aceptación debe comenzar con una base sin configurar (esta base la configuró otra corrida de Playwright o algo que no es la aceptación).',
+    );
   }
   // Catálogo mínimo, solo al configurar la base: una especificación posterior lo encuentra hecho.
   async function prepareCatalog() {
@@ -739,6 +798,9 @@ export async function installDriver(page: Page, options: DriverOptions = {}) {
   }
   if (!prepared && options.catalog !== false) {
     await prepareCatalog();
+  }
+  if (!prepared) {
+    saveTerminal(provisioningFile, { deviceID, deviceToken }, true);
   }
 
   // Canal de eventos con las mismas reglas que Rust (src-tauri/src/realtime.rs, etapa K1, K1-D10): el fin normal de un
