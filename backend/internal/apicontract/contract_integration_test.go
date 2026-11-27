@@ -429,6 +429,8 @@ func contractScenario(t *testing.T, client *contractClient) {
 	contractKitchenDisplay(t, client, waiterData)
 	// Etapa K1.1 (Fase A): la cobertura del enrutamiento, «Productos sin ruta» y los dos 409 del panel de cocina.
 	contractKitchenCoverage(t, client, waiterData)
+	// Etapa M1 (Fase A): uniones de mesas y mesas divisibles.
+	contractTableUnions(t, client, waiterData)
 	// Etapa L1 (Fase D): el modo Cocina y el rechazo por cupo de la licencia.
 	contractSeats(t, client, phone, waiterData)
 	client.call("POST", "/auth/logout", nil, nil, 200)
@@ -1251,4 +1253,75 @@ func contractKitchenCoverage(t *testing.T, client *contractClient, data contract
 		t.Fatalf("aviso de una cuenta cancelada: %v", finished)
 	}
 	setActive(true)
+}
+
+// contractTableUnions recorre las uniones de mesas y las mesas divisibles (etapa M1, Fase A): la vista previa, unir con
+// todas libres (409 TABLE_UNION_DEFERRED) y la unión que nace con el primer producto (openAccount con union_table_ids),
+// la unión con su historial, agregar y quitar mesas, unir desde una mesa ocupada y crear, cambiar y quitar un grupo. Las
+// lecturas con unions, groups, union_id, group_id, table_union y preparation_required se validan en los pasos de siempre
+// (overview y restaurant/state) y aquí.
+func contractTableUnions(t *testing.T, client *contractClient, data contractWaiterData) {
+	area := decodeContract[map[string]any](t, client.setup("POST", "/restaurant/areas",
+		map[string]any{"operation_id": contractID(), "name": "Uniones contrato", "active": true}, 200))
+	tables := []string{}
+	for index := range 5 {
+		created := decodeContract[map[string]any](t, client.setup("POST", "/restaurant/tables", map[string]any{
+			"operation_id": contractID(), "area_id": area["id"], "name": fmt.Sprintf("Mesa U%d", index+1), "shape": "rectangle",
+			"x": 20 + index*140, "y": 30, "width": 100, "height": 72, "seats": 4, "active": true,
+		}, 200))
+		tables = append(tables, fmt.Sprint(created["id"]))
+	}
+	item := func() []map[string]any {
+		return []map[string]any{{"id": contractID(), "product_id": data.fries, "variant_id": nil, "quantity": 1,
+			"customization": data.customization}}
+	}
+	preview := decodeContract[map[string]any](t, client.call("POST", "/restaurant/table-unions/preview",
+		map[string]any{"table_ids": []string{tables[1], tables[0]}}, nil, 200).Body.Bytes())
+	if preview["name"] != "Mesa U1 + U2" || len(preview["problems"].([]any)) != 0 {
+		t.Fatalf("vista previa: %v", preview)
+	}
+	deferred := decodeContract[map[string]any](t, client.call("POST", "/restaurant/table-unions", map[string]any{
+		"operation_id": contractID(), "start_table_id": tables[0], "table_ids": []string{tables[1]}}, nil, 409).Body.Bytes())
+	if deferred["error"].(map[string]any)["code"] != "TABLE_UNION_DEFERRED" {
+		t.Fatalf("unir libres: %v", deferred)
+	}
+	opened := decodeContract[map[string]any](t, client.call("POST", "/restaurant/accounts", map[string]any{
+		"operation_id": contractID(), "mode": "dine_in", "table_id": tables[0], "union_table_ids": []string{tables[1]},
+		"seen_union_id": nil, "seen_account_ids": []string{}, "items": item()}, nil, 200).Body.Bytes())
+	union := opened["account"].(map[string]any)["table_union"].(map[string]any)
+	unionID := fmt.Sprint(union["id"])
+	detail := decodeContract[map[string]any](t, client.call("GET", "/restaurant/table-unions/"+unionID, nil, nil, 200).Body.Bytes())
+	revision := detail["union"].(map[string]any)["revision"]
+	added := decodeContract[map[string]any](t, client.call("POST", "/restaurant/table-unions/"+unionID+"/tables", map[string]any{
+		"operation_id": contractID(), "revision": revision, "table_id": tables[2]}, nil, 200).Body.Bytes())
+	removed := decodeContract[map[string]any](t, client.call("POST",
+		"/restaurant/table-unions/"+unionID+"/tables/"+tables[1]+"/remove", map[string]any{"operation_id": contractID(),
+			"revision": added["union"].(map[string]any)["revision"]}, nil, 200).Body.Bytes())
+	if removed["dissolved"] != false || removed["union"].(map[string]any)["name"] != "Mesa U1 + U3" {
+		t.Fatalf("quitar una mesa: %v", removed)
+	}
+	// Unir desde una mesa ocupada.
+	occupied := decodeContract[map[string]any](t, client.setup("POST", "/restaurant/accounts", map[string]any{
+		"operation_id": contractID(), "mode": "dine_in", "table_id": tables[3], "items": item()}, 200))
+	grown := decodeContract[map[string]any](t, client.call("POST", "/restaurant/table-unions", map[string]any{
+		"operation_id": contractID(), "start_table_id": tables[3], "table_ids": []string{tables[4]}}, nil, 200).Body.Bytes())
+	if grown["union"].(map[string]any)["name"] != "Mesa U4 + U5" {
+		t.Fatalf("crecer una mesa ocupada: %v", grown)
+	}
+	client.call("GET", "/restaurant/overview", nil, nil, 200)
+	client.call("GET", "/restaurant/state", nil, nil, 200)
+	// Las cuentas se descartan (solo tienen borrador): las uniones se deshacen solas.
+	for _, account := range []map[string]any{opened["account"].(map[string]any), occupied["account"].(map[string]any)} {
+		current := decodeContract[map[string]any](t, client.setup("GET", "/restaurant/accounts/"+fmt.Sprint(account["id"]), nil, 200))
+		client.setup("POST", "/restaurant/accounts/"+fmt.Sprint(account["id"])+"/discard", map[string]any{
+			"operation_id": contractID(), "revision": current["account"].(map[string]any)["revision"]}, 200)
+	}
+	// Mesas divisibles.
+	group := decodeContract[map[string]any](t, client.call("POST", "/restaurant/table-groups", map[string]any{
+		"operation_id": contractID(), "area_id": area["id"], "name": "Mesa U", "table_ids": []string{tables[0], tables[1], tables[2]},
+	}, nil, 200).Body.Bytes())["group"].(map[string]any)
+	changed := decodeContract[map[string]any](t, client.call("PATCH", "/restaurant/table-groups/"+fmt.Sprint(group["id"]), map[string]any{
+		"operation_id": contractID(), "revision": group["revision"], "name": "Mesa en U"}, nil, 200).Body.Bytes())["group"].(map[string]any)
+	client.call("PATCH", "/restaurant/table-groups/"+fmt.Sprint(group["id"]), map[string]any{
+		"operation_id": contractID(), "revision": changed["revision"], "active": false}, nil, 200)
 }
