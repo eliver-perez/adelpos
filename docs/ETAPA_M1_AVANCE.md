@@ -1791,3 +1791,264 @@ Fase A con las pruebas del revisor (`$SP/m1/revisor/`):
     `TABLE_GROUP_NAME_TAKEN`, cuyo texto («Ya hay una mesa o un grupo con ese nombre en esta área.») ya cubre los dos
     casos.
   - Un choque con otra mesa sigue como hoy.
+
+## Fase C · Aplicación de meseros: tarjeta única, ajustes de Android y unir mesas
+
+Árbol `$SP/wt/m1-c`, rama `etapa-m1-c` (desde `etapa-m1` `8166b86a`; con la Fase A fusionada en `d5db25fd`),
+`ISO_TAG=C`, Go temporal en 8241/8501 con la confianza de prueba de licencias. Emulador: **solo `ADEL_A1_Tablet_API26`
+(5572)**; la copia de `Pixel_Tablet` (5570) no arranca mientras el `Pixel_Tablet` del propietario (5556) esté abierto sin
+`-read-only` («Another emulator instance is running. Please close it or run all emulators with -read-only flag.»). No se
+tocó el del propietario.
+
+### Commits (rama `etapa-m1-c`)
+
+| Commit     | Qué                                                                                               |
+| ---------- | ------------------------------------------------------------------------------------------------- |
+| `ceb6206d` | §5.5 una tarjeta por cuenta con «Tu cuenta» y §5.2 sin etiqueta de cocina sin preparación         |
+| `e0d7f126` | §5.6 Mesas ve al momento la cuenta que responde Go («$0.00 · Borrador») y la suite `unions` u1–u4 |
+| `57fd8918` | §5.6 textos cortados y contraste de las teclas del PIN; `StageM1ScreensTest`                      |
+| `d5db25fd` | fusión de `etapa-m1` (Fase A)                                                                     |
+| `cfcf09e0` | unir mesas (contrato §10), M1-D13, `seen_union_id`, Room v7                                       |
+| `4376e95f` | suite `unions` u5–u10 y lo que encontraron                                                        |
+| `09cfc12e` | meseros 0.5.0 (versionCode 6)                                                                     |
+| `d5d84b2b` | §5.7 el teclado ya no tapa la lista de Para llevar en Android 8                                   |
+| `415fea47` | `TABLE_UNION_CONFLICT` (M1-D32) y `TABLE_IN_UNION` con pruebas de JVM                             |
+
+### Qué se hizo
+
+1. **§5.5 · Una tarjeta por cuenta con «Tu cuenta»** (M1-D16). `TableCards` (`core:domain`, regla pura) arma el panel:
+   - una tarjeta por cuenta abierta de Go con folio, total, el envío de lo del mesero en ella (el más urgente:
+     «Requiere tu revisión», «Enviando», «Por enviar», una captura con productos sin enviar, o «Recibido por el
+     restaurante») y la etiqueta de cocina, con «Imprimir precuenta» como antes;
+   - «Tu cuenta» arriba a la derecha cuando `assigned_user_id` es el mesero activo (se lee del DTO de la cuenta);
+   - lo que no tiene una cuenta abierta (un pedido de la cola o una captura de cuenta nueva con productos) es su propia
+     tarjeta: el pedido con su estado («Por enviar»…) y la captura con «Por enviar» en el tono gris del borrador (nunca
+     se envía sola, regla 18);
+   - un pedido ya recibido va **dentro** de la tarjeta de su cuenta (antes salía dos veces); si su cuenta ya no está
+     abierta, no se muestra;
+   - se quitó «Lo tuyo en esta mesa»; las etiquetas de prueba `table-capture-…` y `table-order-…` siguen en el lugar que
+     se toca (las suites existentes las usan).
+2. **§5.2 · Sin etiqueta de cocina sin preparación** (M1-D15). `preparation_required` en `ConfirmedLine` y `Account`
+   (ausente = `true`): sin etiqueta en el renglón de la captura, en la tarjeta del panel y en la lista de Para llevar.
+   `released` dice «En cocina», como el escritorio (contrato §4; antes «Liberado a preparación»).
+3. **§5.6 · Textos cortados, retraso y contraste** (causas abajo).
+4. **Unir mesas** (§1, §3, contrato §10, M1-D13), con la capacidad `table-unions-v1` (en `AccessRepository`, de `GET
+version`) y el permiso «Unir mesas» (`WaiterAction.JOIN_TABLES`, solo si Go lo dio):
+   - **«Unir con…»** en el panel de una mesa: elegir mesas del área (las ocupadas, unidas o fuera de servicio,
+     deshabilitadas con su motivo); la vista previa de Go da nombre, capacidad y problemas, tal cual. Desde una mesa
+     ocupada, `createTableUnion` al momento; desde una libre, **la unión vive en la pantalla** (título, capacidad, «La
+     unión se guarda con el primer producto…» y «Deshacer la unión») y nace con `union_table_ids`/`union_group_id` en
+     `openAccount`. Salir sin capturar no guarda nada.
+   - **Atajo del grupo** («Unir Mesa 3») en el panel de una sección y al tocar el nombre del marco en el mapa.
+   - **Panel de la unión**: el nombre de Go como título, la capacidad, las cuentas de todas sus mesas (una tarjeta por
+     cuenta) y «Agregar mesa» / «Quitar mesa» (con su nota: quitar no saca cuentas; con una sola mesa se deshace).
+   - **Mapa**: el contorno sólido del rectángulo de sus mesas con `TableMapFit` (`UnionOutline`) con «Mesa 5 + 6 · 8
+     lugares»; el grupo con un marco tenue y su nombre; las mesas se siguen tocando y abren la unión. **Lista**: una sola
+     entrada por unión (`RestaurantView.entriesIn`).
+   - **Errores de Go tal cual** en el diálogo.
+   - **M1-D13 sin conexión**: unir pide conexión (los botones deshabilitados con «Para unir mesas necesitas conexión con
+     la computadora principal.»). Una captura con una unión en pantalla que no se pudo guardar **nunca entra en la cola**:
+     «Enviar a cocina» abre «Sin conexión no se pueden unir mesas. Puedes enviar el pedido solo a la Mesa 5 o esperar a
+     tener conexión.» con «Enviar solo a la Mesa 5» y «Esperar» (si Go la rechazó, su mensaje y los mismos botones).
+   - **`seen_union_id`** en `openAccount` y en `destination` de la cola: la unión que veía el mesero (`null` si ninguna);
+     sin el dato (lo guardado por la 0.4.1, o un servidor sin la capacidad) no se manda. `TABLE_IN_UNION` se ofrece como
+     `TABLE_HAS_ACCOUNT` con las cuentas de la unión (se leen su folio y su nombre).
+   - **Room v7**: `captures.union_view` (JSON con la unión vista y la unión en pantalla), migración 6 → 7 con `ALTER
+TABLE` y su caso en `AppDatabaseMigrationTest`. La cola no cambia de esquema (el destino JSON agrega
+     `seen_union_known`/`seen_union_id` con valores por omisión).
+5. **Versión 0.5.0** (versionCode 6) en `android/gradle.properties`.
+
+### §5.6 · Causas y cifras
+
+| Punto                                                 | Causa                                                                                                                                                                                                                                                                                                                                    | Arreglo                                                                                                                                                                                                                                                                                                                          |
+| ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| «Enviado · sin confirmar en coci…» (tableta vertical) | Todas las etiquetas de estado (`StateBadge`, `WaiterBadges.kt`) eran de un renglón con puntos suspensivos; en el panel de 42 % de 800 dp quedan ≈ 237 dp para el texto y la etiqueta necesita ≈ 240                                                                                                                                      | La etiqueta baja a un segundo renglón por palabras (`maxLines = 2`); en la tarjeta, envío y cocina van en un `FlowRow`                                                                                                                                                                                                           |
+| «Nuevo pe…» (teléfono vertical)                       | La barra común de `android-core` mide primero las acciones (mesero con su nombre y «En línea») y el título se queda con lo que sobra (≈ 124 dp para 264)                                                                                                                                                                                 | En el teléfono vertical (`currentTopBarHasRoom` falso) el título es «Nuevo pedido» y el mesero va solo con su inicial                                                                                                                                                                                                            |
+| «Terraz…» (tableta vertical)                          | Las áreas iban en la misma fila que «Lista \| Mapa» y «Pendientes» con desplazamiento: con ≈ 160 dp, la segunda pestaña quedaba cortada en la orilla (visto en la captura de la API 26, «Terra:»)                                                                                                                                        | `TablesBar` (un `Layout` propio): si las pestañas no caben completas (`maxIntrinsicWidth`), bajan a su propia fila de todo el ancho; si caben, una sola fila como en la A3                                                                                                                                                       |
+| «2 pedidos por en…» (teléfono)                        | Es la insignia de la barra (`ConnectionIndicator` de `android-core`), no la de Pendientes: el menú del mesero con su nombre, «En línea» y la insignia de un renglón no caben en 360–411 dp                                                                                                                                               | Sin tocar `android-core` (cocina queda en 0.1.0): en el teléfono vertical la raíz pasa 0 pedidos a la barra común y dibuja `PendingOrdersCompact` (el mismo texto, en dos renglones) y el mesero con su inicial                                                                                                                  |
+| «$0.00 · Borrador» después de «Enviar a cocina»       | El panel pintaba la cuenta de la última lectura (la del primer producto: solo borrador, total $0.00 y `preparation_state: draft`); la respuesta de `confirmDraft` traía la cuenta nueva pero solo la usaba la cola; el panel esperaba la relectura que dispara el canal (400 ms después del evento, más `restaurant/state` y `overview`) | La cuenta de las respuestas de `openAccount`, `saveDraft` y `confirmDraft` se aplica al momento (`RestaurantRepository.applyAccount`, solo si su revisión no es más vieja)                                                                                                                                                       |
+| Teclas de «Vuelve a escribir tu PIN» (tema claro)     | Las teclas eran `FilledTonalButton` (`secondaryContainer` = `graySoft` #EEF1F5) sobre el diálogo (`surfaceContainerHigh` = `banner` #EEF2F7): **1.01:1**, la tecla no se distinguía                                                                                                                                                      | Teclas del color del panel con borde gris del tema (`gray`): el borde contra el diálogo da **5.07:1** en el claro y **7.06:1** en el oscuro (AA pide 3:1 para el contorno de un control); el número sobre la tecla, **14.22:1**. «Borrar» con el mismo borde (el de Material daba 2.84:1). En la entrada (fondo #F6F7F9), 5.31:1 |
+
+**El retraso, medido** (suite `unions` u2 en `ADEL_A1_Tablet_API26`, Go temporal local; el mesero espera a que Mesas ya
+haya leído la cuenta con el borrador, como en la vida real, y la prueba mira la tarjeta cada 16 ms desde el toque de
+«Enviar a cocina»; registro `AdelOnGo` «M1 · retraso», guardado en `$SP/m1/c-logs/retraso-antes-logcat.txt` y
+`retraso-despues-logcat.txt`):
+
+|                                            | Mesa 5  | Mesa 7  | Terraza 1 |
+| ------------------------------------------ | ------- | ------- | --------- |
+| Respuesta de Go («Recibido»)               | +46 ms  | +24 ms  | +25 ms    |
+| **Antes**: la tarjeta con el total de Go   | +630 ms | +672 ms | +648 ms   |
+| **Antes**: con «$0.00» a la vista          | 584 ms  | 648 ms  | 623 ms    |
+| **Después**: la tarjeta con el total de Go | +15 ms  | +40 ms  | +12 ms    |
+| **Después**: con «$0.00» a la vista        | 0 ms    | 0 ms    | 0 ms      |
+
+### §5.7 · `takeaway t6` en Android 8
+
+**Causa: de la aplicación (y solo en Android 8).** Reproducido en `ADEL_A1_Tablet_API26` (t1–t5 aprueban, t6 falla, tres
+veces). Con un registro con hora de todo lo que pasa en t6 (canal, lecturas de Go, ediciones por enviar) se vio que **el
+dato sí se pone al día**: la edición sale a los ≈ 0.9 s, Go la confirma, llega el evento `restaurant.account.updated` del
+ámbito `takeaway` y la lectura de Go dice «Luisa Martínez» a los ≈ 1.5 s. Lo que no se veía era el pedido: la captura
+de la pantalla al fallar (`capturas-C/api26-t6-antes-teclado-abierto.png`) muestra **el teclado abierto** después de
+cerrar «Nombre y teléfono» (`WindowInsets` del teclado: 426 px; el método de entrada activo sin texto) y la lista en una
+franja arriba de él con solo «Nuevo pedido» y el folio 1; el pedido editado quedaba debajo, fuera de la vista, y la
+prueba (que no desliza) no lo encontraba. En Android 8, al cerrar el diálogo el teclado pasa a la ventana de la
+actividad y se queda abierto; en Android 11+ se cierra solo (por eso aprobaba en los otros emuladores). Un mesero real
+veía lo mismo: el teclado tapando la lista.
+
+**Arreglo** (`core/capture/.../Takeaway.kt`, `CustomerDialog`, que usan Para llevar y la captura): al guardar o cancelar
+se suelta el foco y se esconde el teclado, y al salir el diálogo de la composición se esconde también desde la ventana
+de la actividad (150 ms después, cuando Android ya quitó la ventana del diálogo). Con eso `takeaway` t1–t9 aprueban en
+Android 8. **Descartado**: el canal de eventos (abierto, entrega el evento a ≈ 1 s), la relectura (llega a ≈ 1.5 s) y la
+regla de la lista (`TakeawayBoard`).
+
+Los otros diálogos con campos de texto (el motivo de modificar o cancelar lo enviado) podrían dejar el teclado abierto
+igual en Android 8; no se cambiaron porque nada lo reportó y su pantalla no queda tapada de la misma forma (no
+verificado).
+
+### Decisiones propuestas
+
+1. **La captura sin cuenta dice «Por enviar» con el tono del borrador** (gris y lápiz), no el ámbar del pedido en la
+   cola. _Porqué_: M1-D16 pide la misma etiqueta «Por enviar»; con el mismo color, el mesero creería que una captura
+   saldrá sola, y la regla 18 dice que un borrador nunca se envía solo. El texto es el mismo; el tono y el ícono, no.
+2. **En la tarjeta, el envío muestra lo más urgente de lo del mesero** (revisión, enviando, por enviar, captura, recibido)
+   y se toca para abrir ese pedido o esa captura; la tarjeta entera abre la cuenta, como antes.
+3. **`released` dice «En cocina» en Android** (contrato §4, M1-D18), igual que el escritorio en las vistas de la cuenta.
+4. **Un renglón cancelado conserva «Cancelado»** aunque `preparation_required` sea `false` (anotado en
+   `contrato-dudas.md`, Fase C).
+5. **La barra del teléfono vertical sin tocar `android-core`**: el mesero solo con su inicial y «N pedidos por enviar»
+   de meseros en dos renglones; «Nuevo pedido» como título. _Porqué_: cambiar `AdelTopBar` o `ConnectionIndicator`
+   cambia el código de la aplicación de cocina, que M1-D14 deja en 0.1.0. **Para la Fase F**: con pedidos por enviar el
+   título del teléfono sigue quedando corto (no cabe todo en 360–411 dp); verificar con `Pixel_8`.
+6. **Las áreas bajan a su propia fila solo cuando no caben** (A3 pedía una fila; así ninguna pestaña queda cortada).
+7. **Teclas del PIN con fondo del panel y borde gris** en la entrada y en «Vuelve a escribir tu PIN», en los dos temas.
+8. **Unir pide conexión y sesión**: «Unir con…», el atajo, «Agregar mesa» y «Quitar mesa» se ven deshabilitados sin
+   conexión con su motivo (necesitan la vista previa y la escritura de Go); «Deshacer la unión» en pantalla siempre se
+   puede (no hay nada en Go).
+9. **Una unión en pantalla vive en la pantalla** (`SavedStateHandle`): sobrevive a la rotación; elegir otra mesa la
+   quita. La captura guarda la unión (Room v7) y no la pierde al reabrirse; solo «Enviar solo a la mesa» la quita.
+10. **El título de la captura en una unión es el nombre de la unión** («Mesa 5 + 6»); el pedido guarda ese nombre.
+11. **`TABLE_IN_UNION` y `TABLE_UNION_CONFLICT`** al abrir la cuenta: el primero se ofrece como «otra cuenta en la
+    mesa» con las cuentas de la unión; el segundo (M1-D32) dice el texto de Go, vuelve a leer Mesas, conserva lo
+    capturado y olvida la unión vista para el reintento.
+12. **§5.7**: el arreglo del teclado está en `CustomerDialog` (Para llevar y la captura).
+13. **Room v7** para la unión de la captura (columna nueva), con su migración probada y la actualización 0.4.1 → 0.5.0.
+
+### Archivos
+
+- **Dominio** (`android/core/domain/.../waiter/`): `TableCards.kt` (§5.5), `TableUnions.kt` (servicio, vista previa,
+  `PendingUnion`, `UnionChoices`, `UnionOutline`, `TableContext`), `Restaurant.kt` (`TableUnion`, `TableGroup`,
+  `entriesIn`, `unionOf`), `Accounts.kt` (`assignedUserId`, `preparationRequired`, `tableUnion`, `showsPreparation`),
+  `Capture.kt` (`SeenUnion`, `UnionJoin`, `waitsForUnion`), `OrderQueue.kt`, `OrderFactory.kt`,
+  `WaiterPermissions.kt` (`JOIN_TABLES`), `WaiterServices.kt` (`SendRequest.UnionPending`, `open`, `dropUnion`),
+  `TakeawayBoard.kt`.
+- **Datos** (`android/core/data/.../`): `waiter/TableUnionRepository.kt` (nuevo), `WaiterApi.kt` (4 rutas),
+  `WaiterDtos.kt`, `WaiterMapper.kt` (`union`, `group`, `openBody`, `seenUnionJson`), `RestaurantRepository.kt`
+  (`applyAccount`, uniones y grupos), `CaptureRepository.kt` (unión de la captura, `TABLE_IN_UNION`,
+  `TABLE_UNION_CONFLICT`, `dropUnion`, `accountAnswered`, `placesChanged`), `OrderSender.kt`, `WaiterServer.kt`
+  (`capabilities`), `access/AccessRepository.kt` (`serverCapabilities`), `db/AppDatabase.kt` (v7, `MIGRATION_6_7`),
+  `waiter/db/WaiterEntities.kt` (`union_view`), `waiter/db/WaiterStorage.kt`, `schemas/…/7.json`.
+- **Pantallas**: `feature/waiter/.../tables/TablesScreen.kt` (tarjetas, `TablesBar`, lista con uniones, panel de la
+  unión, `JoinTablesDialog`), `TablesViewModel.kt` (unión en pantalla, diálogo), `TablesMap.kt` (contorno y marco),
+  `WaiterDependencies.kt`; `core/capture/.../CaptureScreen.kt` (diálogo M1-D13, título corto), `CaptureViewModel.kt`,
+  `Takeaway.kt` (§5.7), `OrderPanel.kt` (§5.2); `core/ui/.../waiter/WaiterBadges.kt` (dos renglones,
+  `CaptureUnsentBadge`, `MineBadge`), `components/PinPad.kt` (contraste), `components/WaiterBadge.kt` (mesero compacto,
+  `PendingOrdersCompact`); `feature/takeaway/.../TakeawayScreen.kt` (§5.2); `app/.../navigation/AdelPosApp.kt` (barra
+  del teléfono), `AppContainer.kt`, `WaiterModeContainer.kt`; textos en `strings.xml` de `feature/waiter`,
+  `core/capture` y `core/ui` (`strings_waiter.xml`).
+- **Versión**: `android/gradle.properties` (0.5.0, 6).
+- **Pruebas**: JVM `StageM1TableCardsTest`, `StageM1UnionsTest` (dominio), `StageM1UnionBodiesTest`,
+  `TablePanelAccountsTest` (`applyAccount`), `CaptureSyncTest` (dos casos nuevos), `AppDatabaseTest` (v7);
+  instrumentadas `StageM1ScreensTest`, `AppDatabaseMigrationTest` (6 → 7); de punta a punta `UnionsOnGoTest` (suite
+  `unions`, u1–u10, en `scripts/android-e2e.sh`) y `TakeawayOnGoTest` t6 con su registro.
+
+### Pruebas realmente ejecutadas
+
+Todas en `ADEL_A1_Tablet_API26` (copia de solo lectura, consola 5572), contra el Go temporal `ISO_TAG=C` de este
+árbol (desde `d5db25fd`, con la Fase A; antes, el de `etapa-m1` sin ella), base nueva por corrida. La instalación por
+Gradle (`ddmlib`) se colgó en Android 8 (como en A3-D33): se instaló con `adb install` (`$SP/m1/c-install.sh`) y las
+suites corrieron con `--no-install`.
+
+| Prueba                                                                                                                                                                              | Dónde | Resultado                                                                                                                      |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------ |
+| JVM `:core:domain:test` (con `StageM1TableCardsTest` 10, `StageM1UnionsTest` 6)                                                                                                     | Mac   | aprobada, 0 fallas                                                                                                             |
+| JVM `testDebugUnitTest` de todos los módulos (con `StageM1UnionBodiesTest` 4, `TablePanelAccountsTest` 2, `CaptureSyncTest` 12, `AppDatabaseTest`)                                  | Mac   | aprobada, 0 fallas                                                                                                             |
+| `android-core :ui:testDebugUnitTest --rerun` (`PlainLanguageTest`, `ColorsOnlyInPaletteTest`, `PaletteContrastTest`)                                                                | Mac   | 7 de 7                                                                                                                         |
+| `ktfmtCheck`, `iso.sh format` + `fmt-check`; md5 de la especificación antes y después                                                                                               | Mac   | sin cambios pendientes; `4750ae46…`                                                                                            |
+| `unions` u1–u4 con Go sin la Fase A (tarjeta única, retraso antes y después, pedido sin conexión)                                                                                   | 5572  | 4 de 4                                                                                                                         |
+| `unions` u1–u10 con la Fase A                                                                                                                                                       | 5572  | 10 de 10 (u7 falló una vez por la prueba: la lista del diálogo no se deslizaba; se agregó su etiqueta y se repitió solo u7)    |
+| `takeaway` t1–t9 (con el arreglo de §5.7)                                                                                                                                           | 5572  | 9 de 9 (antes: t6 FALLA tres veces)                                                                                            |
+| `adjustments` a1–a7                                                                                                                                                                 | 5572  | 7 de 7                                                                                                                         |
+| `waiter` w1–w13c                                                                                                                                                                    | 5572  | 19 de 19                                                                                                                       |
+| Actualización 0.4.1 → 0.5.0 (`$SP/m1/c-upgrade.sh`): 0.4.1 debug de una copia `git archive` de `main`, `waiter` w1 y w3 (pedido «Por enviar»), `adb install -r -t` de la 0.5.0 y w4 | 5572  | aprobada: mismo `firstInstallTime`, versionCode 5 → 6, sin volver a emparejar, el pedido sale una vez (Room 6 → 7 con la cola) |
+| Firma: 0.4.1 de entrega y encima la 0.5.0 de entrega, sin abrirla; `apksigner verify --print-certs`                                                                                 | 5572  | mismo `firstInstallTime`; las dos con `fb6a4bac…7c86`                                                                          |
+| Instrumentadas `StageM1ScreensTest` (4), `StageA3ScreensTest`, `WaiterScreensTest`, `TakeawayScreensTest`, `AppNavigationTest`, `ServerLinkScreensTest`                             | 5572  | 26 de 26                                                                                                                       |
+| Instrumentada `AppDatabaseMigrationTest` (con 6 → 7)                                                                                                                                | 5572  | 8 de 8                                                                                                                         |
+
+**Capturas** (tema claro, `$SP/m1/capturas-C/`): la tarjeta única en vertical y horizontal, el pedido «Por enviar», el
+diálogo «Unir con…», el panel de la unión, el contorno en el mapa en las dos orientaciones, «Quitar mesa», la unión en
+pantalla, el aviso de M1-D13, el atajo del grupo rechazado, «Mesa 3» unida, el refresco sin etiqueta, «Vuelve a escribir
+tu PIN», las de `adjustments` a2 y a7 y la pantalla de t6 antes del arreglo (el teclado tapando la lista).
+
+### Pendiente o no verificado
+
+- **`Pixel_Tablet` (Android 17)**: no se corrió nada; su copia no arranca con el del propietario abierto. Lo cubre la
+  Fase F o una corrida con el emulador del propietario cerrado.
+- **Teléfono** (`Pixel_8`): la barra compacta, «Nuevo pedido» y la insignia en dos renglones solo se probaron con
+  anchos fijos en la tableta (`StageM1ScreensTest`); lo verifica la Fase F.
+- **M1-D29 a M1-D33**: la Fase A los está implementando; falta volver a fusionar `etapa-m1` y repetir `unions` contra
+  ese Go. M1-D32 ya está en Android con prueba de JVM; M1-D29 no pide nada (se muestra el nombre que manda Go).
+- **Suites no corridas** que tocan pantallas cambiadas: `field` (f4 usa `table-capture-…`), `precheck` (p1 toca la
+  cuenta del panel), `alerts`, `license`, `access`, `catalog`: para la regresión de la Fase F.
+- **Los otros diálogos con texto en Android 8** (motivo de modificar o cancelar): pueden dejar el teclado abierto igual
+  que el del cliente; no se probaron.
+- **La 0.4.1 frente a una unión** (riesgo de la Fase 0): no se probó con la 0.4.1 instalada.
+
+### Para el coordinador
+
+- Decidir si la copia de `Pixel_Tablet` se corre con el emulador del propietario cerrado, o si la Fase F lo cubre.
+- Confirmar las decisiones propuestas 1, 4, 5 y 6 (son de presentación y no cambian reglas de Go).
+- Avisar cuando M1-D29 a M1-D33 estén en `etapa-m1` para fusionar y repetir `unions` contra Go.
+
+### Lecturas del contrato de la Fase C
+
+Ninguna bloquea; Android implementó la lectura indicada.
+
+1. **Renglón cancelado con `preparation_required: false`** (la Fase A lo manda `false` para un renglón cancelado que nunca
+   necesitó preparación, decisión propuesta 10). Android sigue mostrando «Cancelado» en un renglón cancelado aunque Go
+   diga `false`: es el estado del renglón, no una etiqueta de cocina, y sin él el mesero no distingue lo cancelado. Si el
+   escritorio (Fase B) decide otra cosa, que coincidan.
+2. **`seen_union_id` solo con la capacidad**: Android lo manda (id o `null`) solo si el servidor tiene `table-unions-v1`
+   y la captura sabe qué unión veía; con un servidor sin la capacidad o lo guardado por la 0.4.1, el campo no va.
+3. **`TABLE_IN_UNION` al abrir la cuenta**: como `details.accounts` son solo identificadores (M1-D25), Android lee cada
+   cuenta (`GET restaurant/accounts/{id}`, hasta 6) para ofrecer «Agregar a «…»» con su folio y su nombre, igual que
+   `TABLE_HAS_ACCOUNT`.
+4. **`addTableToUnion` es de una mesa**: «Agregar mesa» y «Quitar mesa» eligen una mesa a la vez; la vista previa de
+   agregar usa `{union_id, table_ids: [esa]}`.
+
+### Decisiones del coordinador al cerrar la Fase C
+
+Se fusiona `etapa-m1-c` en `etapa-m1`. La fase no cambió `android-core`, `cocina`, `backend` ni `desktop`.
+
+- **M1-D34.** Se aceptan las decisiones propuestas 1 a 4 y 7 a 13 de la Fase C, y sus cuatro lecturas del contrato.
+  Para el escritorio (Fase B) queda que un renglón cancelado conserva «Cancelado» aunque `preparation_required` sea
+  `false`.
+- **M1-D35. Las pestañas de área (propuesta 6).** Bajan a su propia fila solo cuando no caben; cuando caben, todo sigue
+  en una fila como pidió la A3 (§4.7). La especificación M1 (§5.6) marca la pestaña cortada como defecto, y es la regla
+  más reciente del propietario.
+- **M1-D36. La barra del teléfono (propuesta 5).** La §5.6 pide que el título no se corte, así que no se deja para la
+  Fase F. Lo termina la Fase C en los teléfonos de prueba.
+  - Si se puede, solo en meseros.
+  - Si hace falta cambiar `android-core`, el cambio no cambia lo que ve la aplicación de cocina. En ese caso cocina
+    sube a **0.1.1**, como permite la especificación, con sus pruebas.
+- **M1-D37. Emuladores de la etapa.** Mientras el propietario tiene abiertos sus `Pixel_Tablet` y `Pixel_8` sin
+  `-read-only`, sus copias no arrancan. El coordinador creó dos AVD propios de la etapa con el mismo perfil y la misma
+  imagen (Android 37, `google_apis_playstore`, 2 GiB, 10 GB), como los de la A1:
+  - `ADEL_M1_Tablet_API37` (`pixel_tablet`, 2560×1600, 320 dpi), en lugar de la copia de `Pixel_Tablet`;
+  - `ADEL_M1_Phone_API37` (`pixel_8`, 1080×2400, 420 dpi), en lugar de la copia de `Pixel_8` en la regresión.
+- **Lo que le queda a la Fase C**, que se retoma al fusionar las correcciones de la Fase A:
+  - repetir `unions` contra Go con M1-D29 a M1-D33 en las dos tabletas;
+  - las suites de punta a punta en `ADEL_M1_Tablet_API37`;
+  - M1-D36 en los teléfonos;
+  - los otros diálogos con texto en Android 8;
+  - la 0.4.1 frente a una unión;
+  - `field` y `precheck`.
