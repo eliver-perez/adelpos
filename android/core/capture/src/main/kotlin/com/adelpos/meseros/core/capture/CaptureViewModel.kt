@@ -67,6 +67,12 @@ sealed interface CaptureNotice {
      * se avisa antes de volver a Mesas.
      */
     data object DiscardPending : CaptureNotice
+
+    /**
+     * Etapa M1 (M1-D13): la captura lleva una unión en pantalla que no se pudo guardar (sin
+     * conexión o Go la rechazó): «Enviar solo a la mesa» o «Esperar».
+     */
+    data object UnionPending : CaptureNotice
 }
 
 /**
@@ -390,10 +396,22 @@ class CaptureViewModel(
                         SendRequest.NothingToSend -> CaptureNotice.NothingToSend
                         SendRequest.TooManyLines -> CaptureNotice.TooManyLines
                         SendRequest.StillSaving -> CaptureNotice.StillSaving
+                        SendRequest.UnionPending -> CaptureNotice.UnionPending
                     }
             } finally {
                 sending = false
             }
+        }
+    }
+
+    /**
+     * Etapa M1 (M1-D13): «Enviar solo a la Mesa 5»: la captura deja la unión en pantalla y el
+     * pedido se envía a la mesa de inicio (sin conexión, a la cola como siempre).
+     */
+    fun onSendWithoutUnion() {
+        viewModelScope.launch {
+            dependencies.captures.dropUnion(captureId)
+            onSendToKitchen()
         }
     }
 

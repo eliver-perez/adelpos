@@ -288,6 +288,50 @@ class AppDatabaseMigrationTest {
         }
     }
 
+    /**
+     * Etapa M1: 6 → 7 agrega `captures.union_view` (null en lo que ya había) y no toca la cola: un
+     * pedido «Por enviar» de la 0.4.1 sigue igual y sale sin `seen_union_id`.
+     */
+    @Test
+    fun de6a7ConservaLaColaYLasCapturasYAgregaLaUnion() {
+        helper.createDatabase(testDatabase, 6).use { database ->
+            database.execSQL(
+                "INSERT INTO pending_orders (operation_id, waiter_user_id, waiter_name, state, " +
+                    "destination, lines, replaces, catalog_version, catalog_epoch, captured_at, " +
+                    "confirmation, review, attempts, last_error, credential_rejected, " +
+                    "online_confirm, received_account_id, received_at, updated_at, " +
+                    "unresolved_save, clock_corrected) VALUES " +
+                    "('op-7', 'ana', 'Ana', 'queued', '{\"table_id\":\"mesa\"}', '[]', '[]', " +
+                    "41, NULL, 1, NULL, NULL, 0, NULL, 0, NULL, NULL, NULL, 1, NULL, 1)",
+            )
+            database.execSQL(
+                "INSERT INTO captures (id, waiter_user_id, table_id, table_name, account_id, " +
+                    "account_name, seen_account_ids, base, base_revision, operations, " +
+                    "own_item_ids, seen_prices, sync, sync_message, table_accounts, " +
+                    "pending_operation_id, in_flight_count, created_at, updated_at, " +
+                    "created_account, mode, customer_name, customer_phone) VALUES " +
+                    "('c-7', 'ana', 'mesa', 'Mesa 5', NULL, NULL, '[]', '[]', 0, '[]', '[]', " +
+                    "'{}', 'PENDING', NULL, '[]', NULL, 0, 7, 8, 0, 'dine_in', '', '')",
+            )
+        }
+        helper.runMigrationsAndValidate(testDatabase, 7, true, AppDatabase.MIGRATION_6_7).use {
+            database ->
+            database.query("SELECT table_name, union_view FROM captures WHERE id = 'c-7'").use {
+                cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("Mesa 5", cursor.getString(0))
+                assertTrue(cursor.isNull(1))
+            }
+            database
+                .query("SELECT state, destination FROM pending_orders WHERE operation_id = 'op-7'")
+                .use { cursor ->
+                    assertTrue(cursor.moveToFirst())
+                    assertEquals("queued", cursor.getString(0))
+                    assertEquals("{\"table_id\":\"mesa\"}", cursor.getString(1))
+                }
+        }
+    }
+
     @Test
     fun todasLasMigracionesLlevanALaVersionActual() = runBlocking {
         helper.createDatabase(testDatabase, 1).close()
@@ -315,7 +359,7 @@ class AppDatabaseMigrationTest {
                 ),
             )
             assertArrayEquals(byteArrayOf(1, 2, 3), access.pairedServer()?.sealedDeviceToken)
-            assertEquals(6, database.openHelper.readableDatabase.version)
+            assertEquals(7, database.openHelper.readableDatabase.version)
         } finally {
             database.close()
         }

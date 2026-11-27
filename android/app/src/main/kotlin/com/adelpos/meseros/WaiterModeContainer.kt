@@ -14,6 +14,7 @@ import com.adelpos.meseros.core.data.waiter.PrecheckRepository
 import com.adelpos.meseros.core.data.waiter.RestaurantRepository
 import com.adelpos.meseros.core.data.waiter.SentLineRepository
 import com.adelpos.meseros.core.data.waiter.ServerClock
+import com.adelpos.meseros.core.data.waiter.TableUnionRepository
 import com.adelpos.meseros.core.data.waiter.TakeawayRepository
 import com.adelpos.meseros.core.data.waiter.WaiterApi
 import com.adelpos.meseros.core.data.waiter.WaiterServer
@@ -110,6 +111,10 @@ class WaiterModeContainer(
         )
 
     val sentLines: SentLineRepository = SentLineRepository(server, api)
+
+    /** Etapa M1: unir mesas (con conexión y la sesión del mesero, nunca en la cola). */
+    val unions: TableUnionRepository =
+        TableUnionRepository(server = server, api = api, restaurant = restaurant, scope = scope)
 
     /** Para llevar (etapa A2): la lista, el nombre y el teléfono, y «Entregado». */
     val takeaway: TakeawayRepository =

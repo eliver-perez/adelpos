@@ -95,6 +95,14 @@ class AccessRepository(
     private val mutableStatus = MutableStateFlow<DeviceStatus>(DeviceStatus.Starting)
     private val mutableActive = MutableStateFlow<ActiveWaiter?>(null)
     override val status: StateFlow<DeviceStatus> = mutableStatus.asStateFlow()
+
+    private val mutableCapabilities = MutableStateFlow<Set<String>>(emptySet())
+
+    /**
+     * Etapa M1: las capacidades del servidor en la última comprobación de versión (por ejemplo
+     * `table-unions-v1`, que esconde o muestra «Unir con…»).
+     */
+    val serverCapabilities: StateFlow<Set<String>> = mutableCapabilities.asStateFlow()
     override val activeWaiter: StateFlow<ActiveWaiter?> = mutableActive.asStateFlow()
 
     // Un cambio de estado a la vez (comprobar, entrar, retirar, emparejar).
@@ -385,6 +393,7 @@ class AccessRepository(
         when (val version = current.version()) {
             is ApiOutcome.Success -> {
                 val info = version.value
+                mutableCapabilities.value = info.capabilities.toSet()
                 val verdict =
                     ServerCompatibility.check(
                         appVersion = identity.version,

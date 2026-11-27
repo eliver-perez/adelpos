@@ -357,6 +357,8 @@ class RestaurantRepository(
             tables = dto.tables.mapNotNull(WaiterMapper::table),
             settings = dto.settings?.let(WaiterMapper::settings),
             readAtElapsedMillis = readAtElapsed,
+            unions = dto.unions.orEmpty().mapNotNull(WaiterMapper::union),
+            groups = dto.groups.orEmpty().map(WaiterMapper::group),
         )
 
     private fun openDineIn(accounts: List<AccountDto>): List<AccountSummary> =

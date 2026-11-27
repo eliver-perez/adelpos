@@ -5,6 +5,7 @@ import com.adelpos.core.network.session.ServerTransport
 import com.adelpos.meseros.core.data.access.AccessRepository
 import com.adelpos.meseros.core.domain.access.ActiveWaiter
 import com.adelpos.meseros.core.domain.access.DeviceStatus
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import okhttp3.Headers
 
@@ -47,7 +48,16 @@ interface WaiterServer {
      * credencial no válida, versión vieja), con el mesero dueño de la operación.
      */
     fun report(error: AppError, userId: String)
+
+    /**
+     * Etapa M1: las capacidades del servidor en su última comprobación de versión (`GET version`);
+     * vacía si todavía no se comprobó.
+     */
+    val capabilities: StateFlow<Set<String>>
+        get() = NO_CAPABILITIES
 }
+
+private val NO_CAPABILITIES: StateFlow<Set<String>> = MutableStateFlow(emptySet())
 
 /**
  * [WaiterServer] sobre [AccessRepository]: la sesión de cada mesero vive solo en memoria y la
@@ -83,6 +93,8 @@ class DeviceWaiterServer(private val access: AccessRepository) : WaiterServer {
     override fun report(error: AppError, userId: String) {
         access.report(error, userId)
     }
+
+    override val capabilities: StateFlow<Set<String>> = access.serverCapabilities
 
     companion object {
         /** Cabecera de la credencial de envío (solo en `POST restaurant/offline-orders`). */

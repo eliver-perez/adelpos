@@ -26,8 +26,10 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -73,12 +75,17 @@ import com.adelpos.meseros.core.domain.waiter.ElapsedTime
 import com.adelpos.meseros.core.domain.waiter.OfflineOrderPlan
 import com.adelpos.meseros.core.domain.waiter.OrderState
 import com.adelpos.meseros.core.domain.waiter.PendingOrder
+import com.adelpos.meseros.core.domain.waiter.PendingUnion
 import com.adelpos.meseros.core.domain.waiter.PrecheckPrintState
 import com.adelpos.meseros.core.domain.waiter.PrecheckSetup
 import com.adelpos.meseros.core.domain.waiter.RestaurantStatus
 import com.adelpos.meseros.core.domain.waiter.RestaurantView
 import com.adelpos.meseros.core.domain.waiter.TableCard
 import com.adelpos.meseros.core.domain.waiter.TableCards
+import com.adelpos.meseros.core.domain.waiter.TableGroup
+import com.adelpos.meseros.core.domain.waiter.TableUnion
+import com.adelpos.meseros.core.domain.waiter.TablesEntry
+import com.adelpos.meseros.core.domain.waiter.UnionChoices
 import com.adelpos.meseros.core.domain.waiter.WaiterAction
 import com.adelpos.meseros.core.domain.waiter.WaiterPermissions
 import com.adelpos.meseros.core.ui.components.TableStateBadge
@@ -116,7 +123,13 @@ fun TablesRoute(
     val precheckState by viewModel.precheckState.collectAsState()
     val canWriteNow by viewModel.canWriteNow.collectAsState()
     var confirmingDiscard by remember { mutableStateOf<AccountSummary?>(null) }
+    val unionsAvailable by viewModel.unionsAvailable.collectAsState()
     val selected = viewModel.selectedTableId?.let(view::table)
+    // Etapa M1: la mesa elegida puede estar en una unión (sus cuentas son las de todas sus mesas)
+    // o ser la de inicio de una unión en pantalla.
+    val union = selected?.let { view.unionOf(it.id) }
+    val pending = viewModel.pendingUnion?.takeIf { it.startTableId == selected?.id }
+    val placeTables = union?.tableIds?.toSet() ?: setOfNotNull(selected?.id)
     TablesScreen(
         layout = layout,
         state =
@@ -131,11 +144,18 @@ fun TablesRoute(
             ),
         selected = selected,
         selectedAccounts = selected?.let { viewModel.accountsOf(it.id, accounts) }.orEmpty(),
-        captures = captures.filter { it.tableId == selected?.id },
-        orders = orders.filter { it.destination.tableId == selected?.id },
+        captures = captures.filter { it.tableId in placeTables },
+        orders = orders.filter { it.destination.tableId in placeTables },
         showingTable = viewModel.showingAccount,
         opening = viewModel.opening,
         userId = viewModel.userId,
+        union = union,
+        pendingUnion = pending,
+        unionTools =
+            UnionTools(
+                available = unionsAvailable && permissions.grants(WaiterAction.JOIN_TABLES),
+                online = canWriteNow,
+            ),
         tools =
             AccountTools(
                 precheckSetup = precheckSetup,
@@ -161,8 +181,22 @@ fun TablesRoute(
                 onPrintPrecheck = viewModel::onPrintPrecheck,
                 onRetryPrecheck = viewModel::onRetryPrecheck,
                 onDiscardEmpty = { account -> confirmingDiscard = account },
+                onJoinStart = viewModel::onJoinStart,
+                onGroupJoin = viewModel::onGroupJoin,
+                onAddTable = viewModel::onAddStart,
+                onRemoveTable = viewModel::onRemoveStart,
+                onPendingUnionCancel = viewModel::onPendingUnionCancel,
             ),
     )
+    viewModel.joinDialog?.let { dialog ->
+        JoinTablesDialog(
+            dialog = dialog,
+            view = view,
+            onToggle = viewModel::onJoinToggle,
+            onConfirm = viewModel::onJoinConfirm,
+            onDismiss = viewModel::onJoinDismiss,
+        )
+    }
     val discarding = confirmingDiscard
     if (discarding != null) {
         DiscardEmptyDialog(
@@ -235,7 +269,23 @@ class TablesActions(
     val onPrintPrecheck: (AccountSummary) -> Unit = {},
     val onRetryPrecheck: (AccountSummary) -> Unit = {},
     val onDiscardEmpty: (AccountSummary) -> Unit = {},
+    // Etapa M1: unir mesas (contrato §10).
+    val onJoinStart: (DiningTable) -> Unit = {},
+    val onGroupJoin: (TableGroup, DiningTable?) -> Unit = { _, _ -> },
+    val onAddTable: (TableUnion) -> Unit = {},
+    val onRemoveTable: (TableUnion) -> Unit = {},
+    val onPendingUnionCancel: () -> Unit = {},
 )
+
+/**
+ * Etapa M1: si se ofrece unir mesas ([available]: la capacidad `table-unions-v1` de Go y el permiso
+ * «Unir mesas») y si hay conexión con sesión ([online]; unir nunca entra en la cola).
+ */
+data class UnionTools(val available: Boolean, val online: Boolean) {
+    companion object {
+        val NONE = UnionTools(available = false, online = false)
+    }
+}
 
 /**
  * Mesas y la mesa elegida en uno o dos paneles: en la tableta lado a lado; en el teléfono, tocar la
@@ -255,6 +305,9 @@ fun TablesScreen(
     modifier: Modifier = Modifier,
     tools: AccountTools = AccountTools.NONE,
     userId: String? = null,
+    union: TableUnion? = null,
+    pendingUnion: PendingUnion? = null,
+    unionTools: UnionTools = UnionTools.NONE,
 ) {
     AdaptivePanes(
         layout = layout,
@@ -262,7 +315,7 @@ fun TablesScreen(
         onShowSecondaryChange = actions.onShowingTableChange,
         primaryTitle = stringResource(R.string.tables_title),
         openSecondaryLabel = null,
-        primary = { TablesPane(state, actions) },
+        primary = { TablesPane(state, actions, unionTools) },
         secondary = {
             TablePanel(
                 table = selected,
@@ -274,6 +327,8 @@ fun TablesScreen(
                 tools = tools,
                 actions = actions,
                 userId = userId,
+                place = PanelPlace(union, pendingUnion, state.view.group(selected?.groupId ?: "")),
+                unionTools = unionTools,
             )
         },
         modifier = modifier,
@@ -281,7 +336,7 @@ fun TablesScreen(
 }
 
 @Composable
-private fun TablesPane(state: TablesState, actions: TablesActions) {
+private fun TablesPane(state: TablesState, actions: TablesActions, unionTools: UnionTools) {
     Column(
         modifier =
             Modifier.fillMaxSize()
@@ -328,6 +383,14 @@ private fun TablesPane(state: TablesState, actions: TablesActions) {
                     view = state.view,
                     areaId = area.id,
                     onTableSelect = actions.onTableSelect,
+                    // Etapa M1: el atajo del grupo al tocar su nombre (con la capacidad y el
+                    // permiso; sin conexión, el diálogo lo dice).
+                    onGroupJoin =
+                        if (unionTools.available) {
+                            { group -> actions.onGroupJoin(group, null) }
+                        } else {
+                            null
+                        },
                     modifier = Modifier.weight(1f).padding(bottom = 8.dp),
                 )
             else -> TablesList(state, area, actions.onTableSelect, Modifier.weight(1f))
@@ -523,7 +586,11 @@ private fun Message(text: String) {
     )
 }
 
-/** Vista de lista (predeterminada): las mesas del área elegida, en su orden. */
+/**
+ * Vista de lista (predeterminada): las mesas del área elegida, en su orden. Etapa M1 (§1.2): una
+ * unión es **una sola entrada** («Mesa 5 + 6», con la capacidad sumada); sus mesas no salen por
+ * separado y tocarla abre la unión.
+ */
 @Composable
 private fun TablesList(
     state: TablesState,
@@ -531,8 +598,8 @@ private fun TablesList(
     onTableSelect: (DiningTable) -> Unit,
     modifier: Modifier,
 ) {
-    val tables = state.view.tablesIn(area.id)
-    if (tables.isEmpty()) {
+    val entries = state.view.entriesIn(area.id)
+    if (entries.isEmpty()) {
         Message(stringResource(R.string.tables_area_empty))
         return
     }
@@ -540,31 +607,80 @@ private fun TablesList(
         modifier = modifier.fillMaxWidth().testTag(TAG_TABLES_LIST),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        items(tables, key = { it.id }) { table ->
-            TableRow(
-                table = table,
-                seconds =
-                    ElapsedTime.secondsNow(
-                        table.occupiedSeconds,
-                        state.view.readAtElapsedMillis,
-                        state.now,
-                    ),
-                longOpenHours = state.view.settings?.longOpenHours,
-                onClick = { onTableSelect(table) },
-            )
+        items(entries, key = { it.key }) { entry ->
+            when (entry) {
+                is TablesEntry.Single -> {
+                    val table = entry.table
+                    TableRow(
+                        place =
+                            RowPlace(
+                                name = table.name,
+                                state = table.state,
+                                seats = table.seats,
+                                accountCount = table.accountCount,
+                                balance = table.balance,
+                                longOpen = table.longOpen,
+                            ),
+                        seconds =
+                            ElapsedTime.secondsNow(
+                                table.occupiedSeconds,
+                                state.view.readAtElapsedMillis,
+                                state.now,
+                            ),
+                        longOpenHours = state.view.settings?.longOpenHours,
+                        onClick = { onTableSelect(table) },
+                        tag = "$TAG_TABLE_PREFIX${table.id}",
+                    )
+                }
+                is TablesEntry.Joined -> {
+                    val union = entry.union
+                    val first = entry.tables.firstOrNull() ?: return@items
+                    TableRow(
+                        place =
+                            RowPlace(
+                                name = union.name,
+                                state = union.state ?: first.state,
+                                seats = union.seats,
+                                accountCount = union.accountCount,
+                                balance = union.balance,
+                                longOpen = union.longOpen,
+                            ),
+                        seconds =
+                            ElapsedTime.secondsNow(
+                                union.occupiedSeconds,
+                                state.view.readAtElapsedMillis,
+                                state.now,
+                            ),
+                        longOpenHours = state.view.settings?.longOpenHours,
+                        onClick = { onTableSelect(first) },
+                        tag = "$TAG_UNION_PREFIX${union.id}",
+                    )
+                }
+            }
         }
         item(key = "fin") { Spacer(Modifier.heightIn(min = AdelDimens.ScreenPadding)) }
     }
 }
 
+/** Lo que muestra un renglón de la lista: una mesa o una unión (etapa M1), como los da Go. */
+private class RowPlace(
+    val name: String,
+    val state: TableState,
+    val seats: Int,
+    val accountCount: Int,
+    val balance: com.adelpos.meseros.core.domain.money.Money,
+    val longOpen: Boolean,
+)
+
 @Composable
 private fun TableRow(
-    table: DiningTable,
+    place: RowPlace,
     seconds: Long,
     longOpenHours: Int?,
     onClick: () -> Unit,
+    tag: String,
 ) {
-    val colors = tableStateColors(table.state)
+    val colors = tableStateColors(place.state)
     Surface(
         shape = MaterialTheme.shapes.medium,
         border = BorderStroke(1.dp, colors.border),
@@ -572,7 +688,7 @@ private fun TableRow(
             Modifier.fillMaxWidth()
                 .heightIn(min = AdelDimens.PrimaryActionHeight)
                 .clickable(onClick = onClick)
-                .testTag("$TAG_TABLE_PREFIX${table.id}"),
+                .testTag(tag),
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
@@ -581,26 +697,26 @@ private fun TableRow(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    table.name,
+                    place.name,
                     style = MaterialTheme.typography.titleMedium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 val details = buildList {
-                    if (table.accountCount > 1) {
+                    if (place.accountCount > 1) {
                         add(
                             pluralStringResource(
                                 R.plurals.tables_accounts,
-                                table.accountCount,
-                                table.accountCount,
+                                place.accountCount,
+                                place.accountCount,
                             ),
                         )
                     }
-                    if (table.state == TableState.PARTIAL_PAYMENT) {
-                        add(stringResource(R.string.tables_balance, table.balance.display()))
+                    if (place.state == TableState.PARTIAL_PAYMENT) {
+                        add(stringResource(R.string.tables_balance, place.balance.display()))
                     }
-                    if (table.state != TableState.OUT_OF_SERVICE) {
-                        add(stringResource(R.string.tables_seats, table.seats))
+                    if (place.state != TableState.OUT_OF_SERVICE) {
+                        add(stringResource(R.string.tables_seats, place.seats))
                     }
                 }
                 if (details.isNotEmpty()) {
@@ -611,14 +727,14 @@ private fun TableRow(
                     )
                 }
             }
-            if (table.accountCount > 0) {
+            if (place.accountCount > 0) {
                 ElapsedLabel(
                     seconds = seconds,
-                    longOpen = table.longOpen,
+                    longOpen = place.longOpen,
                     longOpenHours = longOpenHours,
                 )
             }
-            TableStateBadge(table.state)
+            TableStateBadge(place.state)
         }
     }
 }
@@ -643,6 +759,8 @@ private fun TablePanel(
     tools: AccountTools,
     actions: TablesActions,
     userId: String?,
+    place: PanelPlace = PanelPlace.NONE,
+    unionTools: UnionTools = UnionTools.NONE,
 ) {
     LazyColumn(
         modifier =
@@ -653,24 +771,41 @@ private fun TablePanel(
             item { Message(stringResource(R.string.table_panel_choose)) }
             return@LazyColumn
         }
+        val union = place.union
+        val pending = place.pending
         item {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                // Etapa M1: el título de una unión es su nombre de Go («Mesa 5 + 6»).
                 Text(
-                    table.name,
+                    union?.name ?: pending?.name ?: table.name,
                     style = MaterialTheme.typography.headlineSmall,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f).testTag(TAG_TABLE_PANEL_TITLE),
                 )
-                TableStateBadge(table.state)
+                TableStateBadge(union?.state ?: table.state)
             }
+        }
+        val seats = union?.seats ?: pending?.seats
+        if (seats != null) {
+            item {
+                Text(
+                    stringResource(R.string.tables_seats, seats),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.testTag(TAG_UNION_SEATS),
+                )
+            }
+        }
+        if (unionTools.available) {
+            item { UnionActions(table, place, unionTools, actions) }
         }
         val cards =
             TableCards.of(
-                tableId = table.id,
+                tableIds = union?.tableIds?.toSet() ?: setOf(table.id),
                 accounts = accounts,
                 captures = captures,
                 orders = orders,
@@ -742,6 +877,294 @@ private fun TablePanel(
         }
     }
 }
+
+/**
+ * Lo que es la mesa elegida además de una mesa (etapa M1): su unión, la de la pantalla o su grupo.
+ */
+data class PanelPlace(
+    val union: TableUnion?,
+    val pending: PendingUnion?,
+    val group: TableGroup?,
+) {
+    companion object {
+        val NONE = PanelPlace(null, null, null)
+    }
+}
+
+/**
+ * Etapa M1 (contrato §10): «Unir con…» y el atajo del grupo en una mesa; «Agregar mesa» y «Quitar
+ * mesa» en una unión; en una unión de la pantalla, cuándo se guarda y «Deshacer la unión». Unir
+ * necesita conexión (M1-D13): sin ella, los botones se ven deshabilitados con su motivo.
+ */
+@Composable
+private fun UnionActions(
+    table: DiningTable,
+    place: PanelPlace,
+    tools: UnionTools,
+    actions: TablesActions,
+) {
+    val union = place.union
+    val pending = place.pending
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            when {
+                union != null -> {
+                    SecondaryButton(
+                        text = stringResource(R.string.table_panel_add_table),
+                        onClick = { actions.onAddTable(union) },
+                        enabled = tools.online,
+                        modifier = Modifier.testTag(TAG_UNION_ADD),
+                    )
+                    SecondaryButton(
+                        text = stringResource(R.string.table_panel_remove_table),
+                        onClick = { actions.onRemoveTable(union) },
+                        enabled = tools.online,
+                        modifier = Modifier.testTag(TAG_UNION_REMOVE),
+                    )
+                }
+                pending != null ->
+                    SecondaryButton(
+                        text = stringResource(R.string.table_panel_union_cancel),
+                        onClick = actions.onPendingUnionCancel,
+                        modifier = Modifier.testTag(TAG_UNION_CANCEL),
+                    )
+                table.state != TableState.OUT_OF_SERVICE -> {
+                    SecondaryButton(
+                        text = stringResource(R.string.table_panel_join),
+                        onClick = { actions.onJoinStart(table) },
+                        enabled = tools.online,
+                        modifier = Modifier.testTag(TAG_UNION_JOIN),
+                    )
+                    val group = place.group
+                    if (group != null) {
+                        SecondaryButton(
+                            text = stringResource(R.string.table_panel_join_group, group.name),
+                            onClick = { actions.onGroupJoin(group, table) },
+                            enabled = tools.online,
+                            modifier = Modifier.testTag(TAG_UNION_GROUP),
+                        )
+                    }
+                }
+            }
+        }
+        val note =
+            when {
+                pending != null -> stringResource(R.string.table_panel_union_pending)
+                !tools.online -> stringResource(R.string.table_panel_join_offline)
+                else -> null
+            }
+        if (note != null) {
+            Text(
+                note,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.testTag(TAG_UNION_NOTE),
+            )
+        }
+    }
+}
+
+/**
+ * Etapa M1 (contrato §10): elegir las mesas del área para unir (varias), agregar (una) o quitar
+ * (una). Las ocupadas, unidas o fuera de servicio se ven deshabilitadas con su motivo; la vista
+ * previa de Go dice el nombre, la capacidad y los problemas, tal cual. Go decide todo.
+ */
+@Composable
+fun JoinTablesDialog(
+    dialog: JoinDialog,
+    view: RestaurantView,
+    onToggle: (String) -> Unit,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val start = view.table(dialog.startTableId)
+    val union = dialog.unionId?.let { id -> view.unions.firstOrNull { it.id == id } }
+    val group = dialog.groupId?.let(view::group)
+    val title =
+        when (dialog.mode) {
+            JoinMode.JOIN -> stringResource(R.string.join_title, start?.name.orEmpty())
+            JoinMode.GROUP -> stringResource(R.string.join_group_title, group?.name.orEmpty())
+            JoinMode.ADD -> stringResource(R.string.join_add_title, union?.name.orEmpty())
+            JoinMode.REMOVE -> stringResource(R.string.join_remove_title, union?.name.orEmpty())
+        }
+    val choices =
+        when (dialog.mode) {
+            JoinMode.JOIN ->
+                UnionChoices.of(view, dialog.areaId, exclude = setOf(dialog.startTableId))
+            JoinMode.ADD ->
+                UnionChoices.of(view, dialog.areaId, exclude = union?.tableIds.orEmpty().toSet())
+            JoinMode.REMOVE ->
+                union?.tableIds.orEmpty().mapNotNull(view::table).map {
+                    UnionChoices.Choice(it, null)
+                }
+            JoinMode.GROUP -> emptyList()
+        }
+    val preview = dialog.preview
+    val ready =
+        !dialog.busy &&
+            when (dialog.mode) {
+                JoinMode.REMOVE -> dialog.selected.isNotEmpty()
+                JoinMode.GROUP -> preview?.allowed == true
+                else -> dialog.selected.isNotEmpty() && preview?.allowed == true
+            }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.heightIn(max = JOIN_LIST_MAX_HEIGHT).testTag(TAG_JOIN_DIALOG),
+            ) {
+                items(choices, key = { it.table.id }) { choice ->
+                    JoinChoiceRow(
+                        choice = choice,
+                        selected = choice.table.id in dialog.selected,
+                        single = dialog.mode != JoinMode.JOIN,
+                        onToggle = { onToggle(choice.table.id) },
+                    )
+                }
+                if (dialog.mode == JoinMode.REMOVE) {
+                    item {
+                        Text(
+                            stringResource(R.string.join_remove_note),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                item { JoinPreviewText(dialog) }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onConfirm,
+                enabled = ready,
+                modifier =
+                    Modifier.heightIn(min = AdelDimens.MinTouchTarget).testTag(TAG_JOIN_CONFIRM),
+            ) {
+                Text(
+                    stringResource(
+                        when (dialog.mode) {
+                            JoinMode.ADD -> R.string.join_add_confirm
+                            JoinMode.REMOVE -> R.string.join_remove_confirm
+                            else -> R.string.join_confirm
+                        },
+                    ),
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                modifier =
+                    Modifier.heightIn(min = AdelDimens.MinTouchTarget).testTag(TAG_JOIN_CANCEL),
+            ) {
+                Text(stringResource(R.string.join_cancel))
+            }
+        },
+        modifier = Modifier.reportsUserActivity(LocalUserActivity.current),
+    )
+}
+
+@Composable
+private fun JoinChoiceRow(
+    choice: UnionChoices.Choice,
+    selected: Boolean,
+    single: Boolean,
+    onToggle: () -> Unit,
+) {
+    val enabled = choice.unavailable == null
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier =
+            Modifier.fillMaxWidth()
+                .heightIn(min = AdelDimens.MinTouchTarget)
+                .selectable(
+                    selected = selected,
+                    enabled = enabled,
+                    onClick = onToggle,
+                    role = if (single) Role.RadioButton else Role.Checkbox,
+                )
+                .testTag("$TAG_JOIN_TABLE_PREFIX${choice.table.id}"),
+    ) {
+        if (single) {
+            RadioButton(selected = selected, onClick = null, enabled = enabled)
+        } else {
+            Checkbox(checked = selected, onCheckedChange = null, enabled = enabled)
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                choice.table.name,
+                style = MaterialTheme.typography.bodyLarge,
+                color =
+                    if (enabled) {
+                        MaterialTheme.colorScheme.onSurface
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+            )
+            val reason =
+                when (choice.unavailable) {
+                    UnionChoices.Unavailable.OCCUPIED -> R.string.join_unavailable_occupied
+                    UnionChoices.Unavailable.IN_UNION -> R.string.join_unavailable_union
+                    UnionChoices.Unavailable.OUT_OF_SERVICE -> R.string.join_unavailable_out
+                    null -> null
+                }
+            if (reason != null) {
+                Text(
+                    stringResource(reason),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+/** La vista previa de Go (nombre y capacidad) o sus problemas, tal cual; o lo que pasó. */
+@Composable
+private fun JoinPreviewText(dialog: JoinDialog) {
+    val preview = dialog.preview
+    val texts = buildList {
+        when {
+            dialog.busy -> add(stringResource(R.string.join_checking) to false)
+            preview != null -> {
+                add(stringResource(R.string.join_preview, preview.name, preview.seats) to false)
+                preview.problems.forEach { add(it.message to true) }
+            }
+        }
+        when (val note = dialog.message) {
+            is JoinNote.FromGo -> add(note.message to true)
+            JoinNote.NoConnection -> add(stringResource(R.string.table_panel_join_offline) to true)
+            JoinNote.Failed -> add(stringResource(R.string.join_failed) to true)
+            null -> Unit
+        }
+    }
+    Column(
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+        modifier = Modifier.padding(top = 8.dp).testTag(TAG_JOIN_PREVIEW),
+    ) {
+        for ((text, problem) in texts) {
+            Text(
+                text,
+                style = MaterialTheme.typography.bodyMedium,
+                color =
+                    if (problem) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    },
+            )
+        }
+    }
+}
+
+/** Alto máximo de la lista de mesas del diálogo (se desliza si hay muchas). */
+private val JOIN_LIST_MAX_HEIGHT = 420.dp
 
 /**
  * Una captura de una cuenta nueva (o de una cuenta que ya no está abierta) con productos sin enviar
@@ -1097,6 +1520,19 @@ const val TAG_TABLES_STATUS = "tables-status"
 const val TAG_TABLES_MESSAGE = "tables-message"
 const val TAG_OPEN_PENDING = "open-pending"
 const val TAG_TABLE_PREFIX = "table-"
+const val TAG_UNION_PREFIX = "union-"
+const val TAG_UNION_SEATS = "union-seats"
+const val TAG_UNION_JOIN = "union-join"
+const val TAG_UNION_GROUP = "union-group"
+const val TAG_UNION_ADD = "union-add"
+const val TAG_UNION_REMOVE = "union-remove"
+const val TAG_UNION_CANCEL = "union-cancel"
+const val TAG_UNION_NOTE = "union-note"
+const val TAG_JOIN_DIALOG = "join-dialog"
+const val TAG_JOIN_TABLE_PREFIX = "join-table-"
+const val TAG_JOIN_PREVIEW = "join-preview"
+const val TAG_JOIN_CONFIRM = "join-confirm"
+const val TAG_JOIN_CANCEL = "join-cancel"
 const val TAG_TABLE_PANEL_TITLE = "table-panel-title"
 const val TAG_ACCOUNT_PREFIX = "account-"
 const val TAG_ACCOUNT_TITLE_PREFIX = "account-title-"

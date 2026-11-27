@@ -7,6 +7,7 @@ import com.adelpos.meseros.core.data.catalog.LineRequestDto
 import com.adelpos.meseros.core.domain.money.Money
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
 
 /*
  * Formas del contrato v1 que usa el modo Mesero (`backend/internal/apicontract/openapi.json`,
@@ -24,7 +25,81 @@ data class RestaurantOverviewDto(
     val tables: List<TableDto>,
     val settings: RestaurantSettingsDto? = null,
     val timezone: String? = null,
+    // Etapa M1: las uniones abiertas y los grupos activos (un servidor anterior no los manda).
+    val unions: List<TableUnionDto>? = null,
+    val groups: List<TableGroupDto>? = null,
 )
+
+/** `TableUnion` (etapa M1, contrato §2): lo calcula Go; la aplicación lo muestra tal cual. */
+@Serializable
+data class TableUnionDto(
+    val id: String,
+    val name: String = "",
+    @SerialName("area_id") val areaId: String = "",
+    @SerialName("group_id") val groupId: String? = null,
+    @SerialName("table_ids") val tableIds: List<String> = emptyList(),
+    val seats: Int = 0,
+    val state: String = "",
+    @SerialName("account_count") val accountCount: Int = 0,
+    @Serializable(with = MoneySerializer::class) val balance: Money = Money("0.00"),
+    @SerialName("occupied_seconds") val occupiedSeconds: Long = 0,
+    @SerialName("long_open") val longOpen: Boolean = false,
+    val revision: Int = 0,
+)
+
+/** `TableGroup` (etapa M1, mesas divisibles). */
+@Serializable
+data class TableGroupDto(
+    val id: String,
+    @SerialName("area_id") val areaId: String = "",
+    val name: String = "",
+    @SerialName("table_ids") val tableIds: List<String> = emptyList(),
+    val seats: Int = 0,
+    val revision: Int = 0,
+)
+
+/** `previewTableUnion` (etapa M1): `{table_ids}`, `{group_id}` o `{union_id, table_ids}`. */
+@Serializable
+data class UnionPreviewBody(
+    @SerialName("table_ids") val tableIds: List<String>? = null,
+    @SerialName("group_id") val groupId: String? = null,
+    @SerialName("union_id") val unionId: String? = null,
+)
+
+@Serializable
+data class UnionProblemDto(
+    val code: String = "",
+    val message: String = "",
+    @SerialName("table_id") val tableId: String? = null,
+)
+
+@Serializable
+data class UnionPreviewDto(
+    val name: String = "",
+    val seats: Int = 0,
+    @SerialName("table_ids") val tableIds: List<String> = emptyList(),
+    val problems: List<UnionProblemDto> = emptyList(),
+)
+
+/** `createTableUnion` (etapa M1): desde una mesa ocupada, con las demás mesas o el grupo. */
+@Serializable
+data class CreateUnionBody(
+    @SerialName("operation_id") val operationId: String,
+    @SerialName("start_table_id") val startTableId: String,
+    @SerialName("table_ids") val tableIds: List<String>? = null,
+    @SerialName("group_id") val groupId: String? = null,
+)
+
+/** `addTableToUnion` (etapa M1). */
+@Serializable
+data class AddUnionTableBody(
+    @SerialName("operation_id") val operationId: String,
+    val revision: Int,
+    @SerialName("table_id") val tableId: String,
+)
+
+/** Respuesta de las escrituras de uniones: `{union}` y, al quitar una mesa, `dissolved`. */
+@Serializable data class UnionAnswerDto(val union: TableUnionDto, val dissolved: Boolean = false)
 
 @Serializable
 data class AreaDto(
@@ -52,6 +127,9 @@ data class TableDto(
     @SerialName("occupied_seconds") val occupiedSeconds: Long = 0,
     @Serializable(with = MoneySerializer::class) val balance: Money = Money("0.00"),
     @SerialName("long_open") val longOpen: Boolean = false,
+    // Etapa M1: la unión abierta de la mesa y su grupo predefinido.
+    @SerialName("union_id") val unionId: String? = null,
+    @SerialName("group_id") val groupId: String? = null,
 )
 
 @Serializable
@@ -209,6 +287,15 @@ data class OpenAccountBody(
     val origin: String? = null,
     @SerialName("customer_name") val customerName: String? = null,
     val phone: String? = null,
+    /**
+     * Etapa M1 (M1-D9): la unión que veía el mesero en la mesa. Sin valor no se escribe (lo de la
+     * 0.4.1); `JsonNull` dice «ninguna».
+     */
+    @SerialName("seen_union_id") val seenUnionId: JsonElement? = null,
+    /** Etapa M1 (creación diferida): las otras mesas de la unión que nace con la cuenta. */
+    @SerialName("union_table_ids") val unionTableIds: List<String>? = null,
+    /** Etapa M1: o el grupo completo (el atajo «Mesa 3»). */
+    @SerialName("union_group_id") val unionGroupId: String? = null,
 )
 
 @Serializable
@@ -267,6 +354,8 @@ data class OfflineDestinationDto(
     @SerialName("seen_account_ids") val seenAccountIds: List<String>? = null,
     /** Un pedido para llevar nuevo (etapa A2): exclusivo con [accountId] y [tableId]. */
     val takeaway: OfflineTakeawayDto? = null,
+    /** Etapa M1 (M1-D13): la unión que veía el mesero en la mesa (`JsonNull`: ninguna). */
+    @SerialName("seen_union_id") val seenUnionId: JsonElement? = null,
 )
 
 /** `destination.takeaway`: el nombre y el teléfono del cliente (opcionales; Go los recorta). */
@@ -348,6 +437,13 @@ data class OfflineRejectionDetailsDto(
 data class AlreadyAcceptedDetailsDto(
     val origin: String? = null,
     val result: OfflineOrderResultDto? = null,
+)
+
+/** `details` de `TABLE_IN_UNION` (etapa M1): la unión y sus cuentas abiertas (identificadores). */
+@Serializable
+data class TableInUnionDetailsDto(
+    val union: TableUnionDto? = null,
+    val accounts: List<String> = emptyList(),
 )
 
 /** `details` de `TABLE_HAS_ACCOUNT` (`openAccount`). */

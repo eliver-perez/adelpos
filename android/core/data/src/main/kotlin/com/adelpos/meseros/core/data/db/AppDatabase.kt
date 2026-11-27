@@ -37,6 +37,8 @@ import com.adelpos.meseros.core.data.waiter.db.WaiterPermissionsEntity
  *   (`takeaway_customer_edits`); aviso de platillos listos (Fase D): el cursor y lo último que dijo
  *   Go (`ready_alerts_state`) y los avisos ya mostrados del día (`ready_alerts_seen`). Las fases
  *   que falten agregan sus tablas a esta misma versión antes de la entrega.
+ * - Versión 7 (etapa M1): `captures.union_view`, la unión de mesas que veía el mesero y la unión en
+ *   pantalla que nace con el primer producto.
  *
  * Reglas para las fases siguientes: cada cambio sube [version][Database.version] en uno, agrega su
  * `Migration` a [MIGRATIONS] y una prueba con `MigrationTestHelper` (`AppDatabaseMigrationTest`).
@@ -58,7 +60,7 @@ import com.adelpos.meseros.core.data.waiter.db.WaiterPermissionsEntity
             ReadyAlertsStateEntity::class,
             ReadyAlertSeenEntity::class,
         ],
-    version = 6,
+    version = 7,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -201,9 +203,28 @@ abstract class AppDatabase : RoomDatabase() {
                 }
             }
 
+        /**
+         * 6 → 7 (etapa M1): la columna `captures.union_view` (la unión que veía el mesero y la
+         * unión en pantalla de una captura), null en las capturas que ya había. La cola no cambia
+         * de esquema: el destino guardado (JSON) agrega `seen_union_id` con su valor por omisión.
+         */
+        val MIGRATION_6_7: Migration =
+            object : Migration(6, 7) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    db.execSQL("ALTER TABLE `captures` ADD COLUMN `union_view` TEXT")
+                }
+            }
+
         /** Migraciones de todas las versiones, en orden. */
         val MIGRATIONS: Array<Migration> =
-            arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+            arrayOf(
+                MIGRATION_1_2,
+                MIGRATION_2_3,
+                MIGRATION_3_4,
+                MIGRATION_4_5,
+                MIGRATION_5_6,
+                MIGRATION_6_7,
+            )
 
         fun open(context: Context): AppDatabase =
             Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, FILE_NAME)

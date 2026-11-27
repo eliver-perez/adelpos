@@ -48,6 +48,11 @@ data class CaptureEntity(
     @ColumnInfo(name = "customer_name", defaultValue = "''") val customerName: String = "",
     /** v6: el teléfono, igual que [customerName]. */
     @ColumnInfo(name = "customer_phone", defaultValue = "''") val customerPhone: String = "",
+    /**
+     * v7 (etapa M1): la unión que veía el mesero y la unión en pantalla que nace con el primer
+     * producto (JSON); null en lo guardado antes.
+     */
+    @ColumnInfo(name = "union_view") val unionView: String? = null,
 )
 
 /**

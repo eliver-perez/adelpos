@@ -387,6 +387,7 @@ class AppContainer(context: Context, private val settings: Settings = Settings()
             capture = captureDependencies,
             tablesView = devicePreferences,
             elapsedClock = SystemClock::elapsedRealtime,
+            unions = waiterMode.unions,
         )
     }
 

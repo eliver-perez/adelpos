@@ -115,6 +115,8 @@ class FakeWaiter(catalog: Catalog = Catalog.EMPTY) {
                 tableName: String,
                 account: AccountSummary?,
                 seenAccountIds: List<String>,
+                seenUnion: com.adelpos.meseros.core.domain.waiter.SeenUnion?,
+                unionJoin: com.adelpos.meseros.core.domain.waiter.UnionJoin?,
             ): Capture {
                 opened.add(Triple(tableId, account, seenAccountIds))
                 val capture = emptyCapture("captura-${opened.size}", tableId)
