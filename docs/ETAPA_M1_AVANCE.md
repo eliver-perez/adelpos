@@ -1002,3 +1002,215 @@ lecturas; `table-groups` → administración (como `tables` y `layout`); `openAc
 - **Panel de la unión**: el nombre de la unión como título, sus cuentas como las de una mesa, «Agregar mesa» y «Quitar
   mesa».
 - Los textos de error son los de Go, tal cual.
+
+## Fase E · Pruebas frágiles (§5.8)
+
+Rama `etapa-m1-e` desde `etapa-m1` (`72ecadd`). Solo cambian especificaciones y ayudas de `desktop/e2e/`, y el arnés
+aislado (`$SP/iso.sh`, fuera del repositorio). Nada del producto. `scripts/browser-tests.py` y
+`scripts/windows/dev.mjs` no necesitaron cambios (ver «La cascada»).
+
+| Commit     | Tema                                                                                                     |
+| ---------- | -------------------------------------------------------------------------------------------------------- |
+| `2b54627`  | La terminal preparada de la aceptación sobrevive al reinicio del proceso de Playwright (la cascada).     |
+| `92264cd`  | `workflow-stage9d-accounts` entra por la API antes que la página; el mismo patrón en otras dos; guardia. |
+| `8bc4d437` | `workflow-stagel1-notices` no depende de la hora real (reloj del navegador de la prueba).                |
+
+### 1. `workflow-stage9d-accounts`: la sesión reemplazada (K1-D39, K11-D24)
+
+**Causa.** En el puente (`desktop/e2e/native-driver.ts`) la página y la prueba comparten **una sola** sesión de la
+terminal (la variable `sessionToken` de `installDriver`): la página entra por la orden `api_request` y la prueba por
+`driver.request`, y las dos usan y actualizan el mismo token, igual que la aplicación real comparte la de Rust. Go
+tiene una sola sesión por terminal. La 9D hacía: entrar por la API (datos), salir, entrar por la página y, en cuanto se
+veía la barra superior, **otra vez `auth/login` por la API** (`workflow-stage9d-accounts.spec.ts:332` en `72ecadd`).
+Ese segundo inicio de sesión reemplaza la sesión de la página; una petición de la página que ya iba en camino con el
+token anterior recibe `SESSION_REPLACED` («Tu sesión se cerró porque el usuario inició sesión de nuevo en esta
+terminal.», `backend/internal/administration/service.go:571`), la página vuelve a «Inicia sesión» y la prueba falla.
+Pasa más en WebKit, que es más lento al cargar la primera pantalla. No es de la aplicación: la aplicación no tiene ese
+segundo inicio de sesión.
+
+**Corrección** (`92264cd`). La prueba entra por la API **antes** que la página (paso 1, como ya lo hacía) y, después de
+entrar por la página, usa la sesión de la página, que el puente ya comparte: se quitó el segundo `auth/login`
+(`workflow-stage9d-accounts.spec.ts:332`, con su comentario).
+
+**El mismo patrón en otras especificaciones** (se buscaron todos los `auth/login` de `desktop/e2e/` y se revisó si la
+página tenía la sesión abierta con la misma terminal en ese momento):
+
+| Especificación                                    | Qué hacía                                                                                | Qué se hizo                          |
+| ------------------------------------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------ |
+| `workflow-stage9b-designer.spec.ts` (paso 9)      | Con la página dentro (Documentos), `auth/login` por la API justo después de un clic      | Se quitó: usa la sesión de la página |
+| `workflow-stage9d-cancel-account.spec.ts` (final) | Con la página dentro (Funciones, recién guardado el umbral), `auth/login` por la API     | Se quitó: usa la sesión de la página |
+| `workflow-stage9h-adjustments.spec.ts:452`        | Vuelve a entrar **a propósito** con la misma terminal: prueba que la sesión se reemplaza | Se deja; lo cubre la guardia (abajo) |
+
+Las demás entran por la API antes que la página, o cuando la página está en «Inicia sesión», o con otra terminal (las
+de la L1 cambian la licencia con `otherTerminal` y las de la K1 abren `terminalPage`, cada una con su propia
+credencial): no tienen la carrera.
+
+**Guardia en el puente** (para el caso a propósito de la 9H y para especificaciones futuras):
+`native-driver.ts:663-703`. Un `auth/login` de la prueba (`driver.request`, ahora `testRequest`) espera a que terminen
+las peticiones de la página en camino (como mucho 15 s) y detiene las nuevas (`pageRequest`) hasta tener la sesión
+nueva; después la página sigue con la sesión nueva, como antes. Las demás peticiones de la prueba y todas las de la
+página no cambian. El canal de eventos y la exportación no pasan por ahí (no hacía falta).
+
+### 2. `workflow-stagel1-notices`: la medianoche
+
+**Causa.** El cierre de un aviso diario («Entendido») se recuerda en la computadora por usuario y por día, con la fecha
+**del navegador** en la zona horaria del restaurante (`desktop/src/pages/license/LicenseNotices.tsx:17-27`,
+`localStorage` con la clave `adel-license-notice:<tipo>:<usuario>:<AAAA-MM-DD>`). Go no interviene en ese día. La prueba
+cierra el aviso y comprueba que al volver a entrar **ese mismo día** no sale; si cerró a las 23:59:58 y volvió a entrar
+a las 00:00:05, ya era otro día y el aviso salía otra vez, como debe (K1-D39).
+
+**Corrección** (`8bc4d437`). El reloj del navegador de la prueba (`page.clock.install` de Playwright,
+`workflow-stagel1-notices.spec.ts:102`) empieza a las **12:00 de hoy en la zona del restaurante** (`middayToday`,
+`:38`, con la zona de `acceptanceTimezone`, `native-driver.ts:25`, la misma que el puente configura en cada base) y de
+ahí corre normal. La prueba dura unos segundos, así que nunca cruza la medianoche, sea la hora real que sea. Go sigue con
+su propia hora (los días que faltan para el vencimiento los calcula Go, con su licencia de prueba), la aplicación no
+cambia y la hora de la Mac no se toca. No se usó el reloj simulado de Go (`ADEL_BROWSER_CLOCK_FILE`): no mueve la
+fecha que usa el aviso, que es la del navegador.
+
+**Demostración** (cambio temporal, nunca confirmado): con la corrección y un salto del reloj del navegador a las
+00:00:05 del día siguiente justo después de «Entendido», la prueba falla exactamente como en K1-D39
+(`workflow-stagel1-notices.spec.ts:127`, «Aviso de la licencia» visible al volver a entrar). Sin el salto aprueba.
+
+**Otras especificaciones que dependen del día real** (no se corrigieron: no es igual de sencillo):
+
+- `workflow-reports-9a`: crea ventas y las busca en «Hoy» (`period=today`) y en «Semana actual» (`current_week`);
+  fallaría si el día comercial de Go (corte a las 05:00, `backend/internal/businessday/day.go`) o la semana cambia en
+  medio de la prueba (unos segundos cerca de las 05:00, o del lunes a las 05:00).
+- Los reportes en pantalla con su periodo por omisión, «Hoy», en `workflow-stage9d-cancel-account` («Cuentas
+  canceladas», «Cancelaciones por motivo») y `workflow-stage9h-adjustments` («Modificaciones de cantidades», «Productos
+  cancelados»): lo mismo, solo si se cruza las 05:00 entre la cancelación y el reporte.
+- Corregirlas pediría mover el reloj simulado de Go del servidor compartido, y la protección de la hora de la L1 bloquea
+  la captura si después la hora regresa (la última actividad quedaría «en el futuro»). Se quedan anotadas; en la
+  regresión basta con no empezar la suite cerca de las 05:00 (y ya no hace falta evitar las 00:00).
+- Sin riesgo: `tomorrowAtOne` de la 9D y de `workflow-stagez-k11-diagnostics` (mañana a la 1 p. m., siempre en el
+  futuro), el reporte de cuentas descartadas de la 9D con `current_year` (solo comprueba que no aparecen) y el año del
+  historial importado de la 9H (sale del paquete sintético).
+
+### 3. La cascada «La aceptación debe comenzar con una base sin configurar»
+
+**Causa.** No hay una base por especificación: la suite completa comparte **un** Go temporal. La primera
+especificación que llama a `installDriver` (en orden alfabético, `inventory.spec.ts`) lo configura por la API (`POST
+setup`, la licencia de prueba y el catálogo mínimo) y guardaba la terminal que creó en un `Map` **en memoria**
+(`preparedTerminals`, `native-driver.ts:40` en `72ecadd`); las siguientes la reutilizaban. Playwright corre con un solo
+proceso de trabajo y, **cuando una prueba falla, descarta ese proceso y abre otro**: el `Map` se perdía y la siguiente
+especificación encontraba la base configurada sin conocer su terminal, así que lanzaba «La aceptación debe comenzar con
+una base sin configurar» (`native-driver.ts:659` en `72ecadd`). Por eso, después de cualquier falla, todas las
+siguientes caían en unos 0,2 s sin haber probado nada (33 en la K1.1, 25 en la A1, 5 en la K1).
+
+**¿Qué especificaciones necesitan una base sin configurar?** Ninguna de las que usan la base compartida: necesitan la
+base **configurada por la aceptación** y la credencial de su terminal. Las únicas que necesitan una base limpia ya la
+preparan ellas mismas, con su propio Go temporal:
+
+- `workflow-stage9h-migration` («instalación limpia»: el segundo Go de la 9H, `ADEL_BROWSER_CLEAN_SERVER_URL`);
+- `workflow-stagel1-activation` (el Go sin activar de la L1, `ADEL_BROWSER_UNLICENSED_SERVER_URL`).
+
+**Decisión propuesta: no dar una base limpia a cada especificación; conservar la terminal de la corrida.** Una base por
+especificación pediría unos 43 Go temporales con su base y su licencia (o recrear el estado de cada una), alargaría la
+suite y dejaría de probar lo que hoy prueba la corrida completa: que las especificaciones conviven en una misma base
+(nombres únicos, lo que una deja y la siguiente ajusta, como el teclado virtual que deja `restaurant.spec.ts`). Lo
+razonable es que el reinicio del proceso no pierda la terminal:
+
+- `native-driver.ts:38-85` (`2b54627`): la terminal se guarda también en `terminal-aceptacion.json`, junto al token de
+  aprovisionamiento del Go temporal (en la carpeta de la corrida, donde ya están `identity` y `provisioning-token`;
+  `scripts/browser-tests.py`, `scripts/windows/dev.mjs` y el arnés la crean por corrida y los dos primeros la borran al
+  terminar), con permiso 0600 y el PID del proceso principal de Playwright (`process.ppid` del proceso de trabajo).
+- Solo se reutiliza en **la misma corrida** (el proceso de trabajo nuevo es hijo del mismo proceso principal): una base
+  configurada por otra corrida se sigue rechazando, con el mensaje de siempre más la razón
+  (`native-driver.ts:757-759`).
+- `ready` marca si la primera especificación terminó de preparar la base. Si falló a la mitad (por ejemplo, la licencia
+  de prueba), las siguientes dicen «La preparación de la base temporal (la licencia de prueba o el catálogo mínimo) falló
+  en una especificación anterior de esta corrida: revisa la primera falla.» (`native-driver.ts:728-732`) en lugar de
+  pedir una base sin configurar.
+
+Con eso, después de una falla las siguientes corren de verdad; si alguna cae, es por su propia causa o porque necesitaba
+algo que la especificación fallida no llegó a crear (ver la prueba de la cascada, abajo).
+
+### 4. El arnés: el Go de base limpia de la 9H
+
+`$SP/iso.sh` (fuera del repositorio, reemplazado de forma atómica para no afectar al otro agente) acepta
+`ISO_CLEAN_PORT` en `browser`: arranca el Go temporal con base limpia de la 9H, como `CLEAN_PORT` de
+`scripts/browser-tests.py`, y exporta `ADEL_BROWSER_CLEAN_SERVER_URL`/`_PROVISIONING`. Con `ISO_LICENSE_SIM=1`,
+`ISO_UNLICENSED_PORT` e `ISO_CLEAN_PORT`, una corrida del arnés tiene los mismos cuatro servidores que la suite completa
+(ya no se omiten las 4 pruebas de «instalación limpia»). Envoltorio de la fase: `$SP/m1/e-run.sh <etiqueta> <motor>
+[filtros]` (Go 8211, limpio 8212, sin activar 8213, simulador 8491, vista previa 1431).
+
+### 5. Pruebas realmente corridas
+
+Todas con el arnés (`ISO_TAG=E`) y los cuatro servidores de la suite completa: Go temporal compartido 8211, Go de base
+limpia 8212, Go sin activar 8213, simulador de licencias 8491 (`license-test`, confianza en
+`contracts/licencias/v1/fixtures/vectors.json`) y vista previa 1431. Registros en `$SP/m1/e-logs/`. La pantalla estuvo
+sin bloquear en todas (`CGSSessionScreenIsLocked` ausente), así que ningún resultado de WebKit se debe a ella.
+
+| Prueba                                                                                    | Motor    | Resultado                                                                                                           | Tiempo (Playwright / total) |
+| ----------------------------------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------- | --------------------------- |
+| `workflow-stage9d-accounts` sola                                                          | Chromium | 1 de 1                                                                                                              | 35,3 s / 52 s               |
+| `workflow-stage9d-accounts` sola                                                          | WebKit   | 1 de 1                                                                                                              | 32,7 s / 42 s               |
+| `workflow-stagel1-notices` sola                                                           | Chromium | 1 de 1                                                                                                              | 20,1 s / 29 s               |
+| `workflow-stagel1-notices` sola                                                           | WebKit   | 1 de 1                                                                                                              | 19,6 s / 26 s               |
+| `workflow-stage9b-designer` sola                                                          | Chromium | 1 de 1                                                                                                              | 41,3 s / 48 s               |
+| `workflow-stage9b-designer` sola                                                          | WebKit   | 1 de 1                                                                                                              | 41,5 s / 48 s               |
+| `workflow-stage9d-cancel-account` sola                                                    | Chromium | 1 de 1                                                                                                              | 47,3 s / 54 s               |
+| `workflow-stage9d-cancel-account` sola                                                    | WebKit   | 1 de 1                                                                                                              | 47,5 s / 54 s               |
+| `workflow-stage9h-adjustments` sola                                                       | Chromium | 3 de 3                                                                                                              | 43,0 s / 51 s               |
+| `workflow-stage9h-adjustments` sola                                                       | WebKit   | 3 de 3                                                                                                              | 39,0 s / 46 s               |
+| Medianoche (temporal: el reloj del navegador salta a las 00:00:05 después de «Entendido») | Chromium | Falla en `workflow-stagel1-notices.spec.ts:127`, igual que K1-D39 (esperado)                                        | 31 s                        |
+| Cascada antes (temporal: puente de `72ecadd` y falla provocada en `inventory.spec.ts`)    | Chromium | 2 fallidas: la provocada y `workflow-reports-export-9a` con «…base sin configurar» (esperado)                       | 20 s                        |
+| Cascada después (la misma falla provocada, puente corregido)                              | Chromium | 1 fallida (la provocada) y `workflow-reports-export-9a` aprobada                                                    | 22 s                        |
+| Preparación fallida (temporal: el catálogo mínimo falla a propósito)                      | Chromium | 2 fallidas: la provocada y la siguiente con «La preparación de la base temporal … falló …» (esperado)               | 24 s                        |
+| **Suite completa con la falla provocada** en `inventory.spec.ts` (la primera)             | Chromium | **54 aprobadas y 1 fallida (la provocada)**; ninguna «base sin configurar»; las 4 de «instalación limpia» corrieron | 26,7 min (12:13–12:40)      |
+| **Suite completa**                                                                        | Chromium | **55 de 55** (43 especificaciones, con las 4 de «instalación limpia»)                                               | 27,3 min (12:40–13:08)      |
+| **Suite completa**                                                                        | WebKit   | **55 de 55** (43 especificaciones, con las 4 de «instalación limpia»)                                               | 26,9 min (13:08–13:35)      |
+
+**La cascada, en detalle.** Con la falla provocada en la primera especificación (la que prepara la base, después de
+prepararla), antes caían las 54 siguientes; ahora **ninguna cae**: ninguna especificación depende de lo que
+`inventory.spec.ts` crea después de entrar. Si la falla fuera en otra especificación, solo caería lo que dependa de sus
+datos; en las corridas solas sobre una base nueva de las cinco corregidas no apareció ninguna dependencia así.
+
+Los cambios temporales (la falla provocada, el puente de `72ecadd`, el salto a medianoche y la preparación fallida) se
+quitaron al terminar cada prueba y nunca se confirmaron; el árbol queda sin cambios sin confirmar.
+
+Además: `fmt-check` (Prettier) y `tsc --noEmit` del escritorio (incluye `e2e/`) aprobados antes de cada commit; md5 de
+`docs/etapas/ETAPA_M1_MESAS.md` sin cambio (`4750ae46956590f208bf486477bb0bbf`). No se corrió Vitest, `cargo` ni Go
+(no cambió nada de eso). No verificado: Windows (`dev.mjs` no cambió, y `process.ppid` funciona igual en Windows).
+
+### 6. Para el coordinador
+
+- **Decisiones propuestas** (para numerar `M1-Dn`):
+  1. La cascada se corrige conservando la terminal de la corrida en un archivo (no con una base limpia por
+     especificación), por lo de la §3.
+  2. La 9D (y la 9B y la 9D de cancelar cuenta) usan la sesión de la página después de entrar por ella; el reingreso a
+     propósito de la 9H queda protegido por la guardia del puente (`testRequest`).
+  3. Los avisos de la L1 usan el reloj del navegador de la prueba (`page.clock`), no el reloj simulado de Go, porque el
+     día del aviso lo decide el navegador.
+  4. Las dependencias del día comercial (05:00) de los reportes quedan anotadas sin corregir (§2).
+- **Aviso para las fases A y B (no es de esta fase):** §5.3 («quitar la hora lo envía») y §5.2 («sin etiqueta para lo
+  que no necesita preparación») cambian lo que comprueban `workflow-stage9d-accounts` (quitarle la hora a un para
+  llevar programado lo deja en `pending_release` y muestra «Enviado · sin confirmar en cocina» / «Sin confirmar en
+  cocina» en un producto sin ruta, líneas 314–319, 392 y 414) y `workflow-stagez-k11-diagnostics` (`unschedule`, línea
+  340, «lo deja esperando», K11-D9). Esas especificaciones tendrán que actualizarse con esos cambios.
+- **Para la regresión de la Fase F**: el arnés ya corre la suite completa con los mismos servidores que
+  `scripts/browser-tests.py` (`ISO_LICENSE_SIM=1`, `ISO_UNLICENSED_PORT`, `ISO_CLEAN_PORT`; ejemplo en
+  `$SP/m1/e-run.sh`). Ya no hace falta evitar la medianoche; sí no empezar cerca de las 05:00 (§2). Si una
+  especificación falla, las siguientes ya no caen en cascada: hay que revisar cada falla.
+- Ninguna decisión de la especificación ni de negocio cambió. No se tocó la instalación real, la hora de la Mac ni
+  `licensing.sicrat.com`; no se usaron emuladores.
+
+### Decisiones del coordinador al cerrar la Fase E
+
+Se fusiona `etapa-m1-e` en `etapa-m1`. Se aceptan las cuatro decisiones propuestas:
+
+- **M1-D20. La cascada.** La terminal de la corrida se guarda en `terminal-aceptacion.json`, junto al token del Go
+  temporal y con el PID del proceso principal de Playwright. No se da una base limpia a cada especificación: la suite
+  sigue probando que las especificaciones conviven en una misma base.
+- **M1-D21. La sesión compartida.** Después de entrar por la página, la prueba usa la sesión de la página. Un
+  `auth/login` de la prueba espera a que terminen las peticiones de la página (`testRequest`), lo que cubre el reingreso
+  a propósito de la 9H y las especificaciones nuevas.
+- **M1-D22. Los avisos de la licencia.** La prueba usa el reloj del navegador (`page.clock`), porque el día del aviso lo
+  decide el navegador. La hora de la Mac no se toca.
+- **M1-D23. El día comercial.** Las dependencias del corte de las 05:00 quedan anotadas sin corregir. La regresión de la
+  Fase F no empieza cerca de las 05:00; la medianoche ya no importa.
+- **Las especificaciones que cambian por §5.2 y §5.3** las actualiza la **Fase B**, que es la que corre Playwright, en
+  cuanto la Fase A esté en `etapa-m1`:
+  - `workflow-stage9d-accounts`, líneas 314–319 (quitar la hora ahora envía a cocina) y 392 y 414 (un producto sin ruta
+    ya no lleva etiqueta de cocina);
+  - `workflow-stagez-k11-diagnostics`, línea 340 (`unschedule` ya no deja el pedido esperando, M1-D17).
