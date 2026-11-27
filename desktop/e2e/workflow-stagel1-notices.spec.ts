@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { expect, test } from '@playwright/test';
-import { installDriver } from './native-driver';
+import { acceptanceTimezone, installDriver } from './native-driver';
 import {
   admin,
   call,
@@ -25,6 +25,36 @@ import { topBar } from './navigation';
 // 2. En tolerancia: un aviso diario para todos, con los días que quedan antes de que se bloquee la captura; cerrarlo es
 //    por usuario.
 // 3. Vencida: un aviso fijo (sin «Entendido») que explica qué se puede hacer y qué no.
+//
+// Etapa M1 (§5.8): el cierre de un aviso diario se recuerda en la computadora por usuario y por día, con la fecha del
+// navegador en la zona horaria del restaurante (LicenseNotices.tsx). Con la hora real, la prueba fallaba si cruzaba la
+// medianoche: cerraba el aviso a las 23:59:58, volvía a entrar a las 00:00:05 y, como ya era otro día, el aviso salía
+// otra vez, como debe (K1-D39). Por eso el reloj del navegador de la prueba (page.clock) empieza a las 12:00 del día de
+// hoy en la zona del restaurante y de ahí corre normal: la prueba dura unos minutos y nunca cruza la medianoche, sea la
+// hora que sea. Go sigue con su propia hora (los días que faltan los calcula él), la aplicación no cambia y la hora de
+// la Mac no se toca.
+
+// Las 12:00 de hoy en `timezone`, como instante.
+function middayToday(timezone: string) {
+  const day = new Intl.DateTimeFormat('en-CA', { timeZone: timezone }).format(new Date());
+  const noonUTC = new Date(`${day}T12:00:00Z`);
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      hourCycle: 'h23',
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: 'numeric',
+    })
+      .formatToParts(noonUTC)
+      .map((part) => [part.type, Number(part.value)]),
+  ) as Record<string, number>;
+  // Desfase de la zona en ese instante: la hora de pared leída como UTC menos el instante.
+  const wall = Date.UTC(parts.year!, parts.month! - 1, parts.day!, parts.hour!, parts.minute!);
+  return new Date(noonUTC.getTime() - (wall - noonUTC.getTime()));
+}
 
 test('avisos de la licencia: 7 días antes del vencimiento, tolerancia y vencida', async ({
   page,
@@ -68,6 +98,8 @@ test('avisos de la licencia: 7 días antes del vencimiento, tolerancia y vencida
   const licenseNotice = page.getByRole('status', { name: 'Aviso de la licencia' });
   const fixedNotice = page.getByRole('alert', { name: 'Aviso de la licencia' });
   const understood = licenseNotice.getByRole('button', { name: 'Entendido', exact: true });
+
+  await page.clock.install({ time: middayToday(acceptanceTimezone) });
 
   try {
     // 1. La suscripción vence en 5 días.
