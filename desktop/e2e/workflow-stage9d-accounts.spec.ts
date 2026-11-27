@@ -10,8 +10,8 @@ import { notice } from './notices';
 // Etapa 9D, fase D (§4): Para llevar y «Cuenta sin mesa» con creación diferida (salir sin productos
 // no deja nada; con el primer producto la cuenta nace), «Descartar cuenta vacía» sin motivo en Mesas,
 // Cuentas y Para llevar (no es cancelación ni aparece en «Cuentas canceladas»), tarjetas compactas,
-// «Enviado · sin confirmar en cocina» una sola vez por producto y el menú por producto con
-// «Cancelar unidades» en rojo. Mismo transporte que las demás especificaciones (Go temporal y base
+// la etiqueta de cocina una sola vez por producto y nunca en el encabezado (desde la etapa M1, §5.2, un producto
+// sin preparación no lleva ninguna) y el menú por producto con «Cancelar unidades» en rojo. Mismo transporte que las demás especificaciones (Go temporal y base
 // adel_pos_test_*), datos reales por la API. Capturas en tema claro y oscuro a 1280 × 720 y
 // 1920 × 1080 (copia opcional en ADEL_SHOTS_DIR).
 
@@ -30,6 +30,8 @@ interface ServerAccount {
   state: string;
   table_id: string | null;
   preparation_state: string;
+  // Etapa M1 (§5.2): false si nada de la cuenta necesita preparación.
+  preparation_required?: boolean;
   discardable: boolean;
 }
 
@@ -68,9 +70,9 @@ async function openWith(
   return account;
 }
 
-// Etapa K1.1 (K11-D9 y K11-D13): quitarle la hora a un pedido para llevar programado lo deja pendiente hasta que
-// alguien lo envíe a cocina: es la forma que queda de ver «Enviado · sin confirmar en cocina» (un producto sin ruta ya no
-// detiene el envío, K11-D1). Se cambia la cuenta con todos sus datos y sin programación.
+// Etapa K1.1 (K11-D13): se le quita la hora a un pedido para llevar programado, cambiando la cuenta con todos sus datos
+// y sin programación. Desde la etapa M1 (§5.3, M1-D17) eso lo envía a cocina en ese momento, como un pedido sin hora
+// (antes, K11-D9, quedaba «Enviado · sin confirmar en cocina» hasta que alguien lo enviara).
 async function unschedule(driver: Driver, id: string) {
   const current = (await call(driver, 'GET', `restaurant/accounts/${id}`)).account as Record<
     string,
@@ -234,7 +236,7 @@ test('cuentas y Para llevar: creación diferida, descartar, tarjetas y menú por
 
   // 1. Datos por la API. Un producto sin ruta de preparación. Hasta la etapa K1.1 su liberación quedaba bloqueada y la
   // cuenta mostraba «Enviado · sin confirmar en cocina»; desde la K1.1 (K11-D1) se envía igual y no necesita
-  // preparación, así que esa etiqueta se ve con un pedido para llevar programado al que se le quita la hora (K11-D9).
+  // preparación, y desde la etapa M1 (§5.2) no lleva etiqueta de cocina.
   const category = await call(driver, 'POST', 'catalog/categories', {
     name: 'Platillos D',
     active: true,
@@ -285,7 +287,8 @@ test('cuentas y Para llevar: creación diferida, descartar, tarjetas y menú por
     true,
   );
   // Para llevar: un pedido vacío (como los #5, #8, #9 y #10) y siete enviados para ver cuántas
-  // tarjetas caben. El primero va programado y después se le quita la hora: queda pendiente de enviar a cocina.
+  // tarjetas caben. El primero va programado y después se le quita la hora: desde la etapa M1 (M1-D17) se envía a
+  // cocina en ese momento.
   const emptyTakeaway = (
     await call(driver, 'POST', 'restaurant/accounts', {
       operation_id: randomUUID(),
@@ -312,11 +315,17 @@ test('cuentas y Para llevar: creación diferida, descartar, tarjetas y menú por
     );
   }
   await unschedule(driver, takeaways[0]!.id);
+  // Etapa M1 (§5.3, M1-D17): sin hora ya no espera ni queda programado; es un producto sin ruta, así que Go lo marca
+  // sin preparación (§5.2, preparation_required: false).
   await expect
-    .poll(async () => (await readAccount(driver, takeaways[0]!.id)).preparation_state, {
-      timeout: 20000,
-    })
-    .toBe('pending_release');
+    .poll(
+      async () => {
+        const unscheduled = await readAccount(driver, takeaways[0]!.id);
+        return `${unscheduled.preparation_state} ${unscheduled.preparation_required}`;
+      },
+      { timeout: 20000 },
+    )
+    .toMatch(/^(released|ready) false$/);
   // Lo sin ruta ya no se detiene (K11-D1): Mesa D3 se envía y, sin nada que preparar, no queda pendiente.
   await expect
     .poll(async () => (await readAccount(driver, sent.id)).preparation_state, { timeout: 20000 })
@@ -389,7 +398,9 @@ test('cuentas y Para llevar: creación diferida, descartar, tarjetas y menú por
   await expect(firstSent).toHaveAttribute('aria-pressed', 'true');
   await expect(firstSent.locator(':scope > span')).toHaveCount(2);
   await expect(firstSent.locator('.account-card-line')).toContainText('$95.00');
-  await expect(firstSent.locator('.account-card-tags')).toContainText('Sin confirmar en cocina');
+  // Etapa M1 (§5.2, M1-D15): un pedido cuyos productos no necesitan preparación no lleva etiqueta de cocina.
+  await expect(firstSent.locator('.account-card-preparation')).toHaveCount(0);
+  await expect(firstSent.locator('.account-card-tags')).not.toContainText('cocina');
   await expect(firstSent.locator('.account-card-tags')).toContainText('1 unidad');
   // La tarjeta de la 9C medía unos 157 px (cabían dos y media debajo de los filtros a 1280 × 720);
   // la compacta mide menos de 64 px y caben al menos cinco en ese mismo espacio.
@@ -407,11 +418,12 @@ test('cuentas y Para llevar: creación diferida, descartar, tarjetas y menú por
     expect(await computed(firstSent, 'border-top-color')).toBe(await token(page, '--accent'));
   });
 
-  // 5. «Enviado · sin confirmar en cocina» una sola vez por producto (no en el encabezado) y menú
-  // por producto: tocar el renglón abre «Modificar» y «Cancelar unidades» en rojo.
+  // 5. Nada de cocina en el encabezado ni etiqueta en un producto que no necesita preparación (etapa M1, §5.2; antes
+  // «Enviado · sin confirmar en cocina» una sola vez por producto) y menú por producto: tocar el renglón abre
+  // «Modificar» y «Cancelar unidades» en rojo.
   await expect(bill.locator('.capture-bill-header')).not.toContainText('cocina');
   const line = bill.getByRole('article', { name: '1 × Guiso D' });
-  await expect(line.locator('.capture-tag')).toHaveText('Enviado · sin confirmar en cocina');
+  await expect(line.locator('.capture-tag')).toHaveCount(0);
   await expect(page.getByText(/revisar cocina/)).toHaveCount(0);
   await expect(line.getByRole('button', { name: 'Cancelar unidades', exact: true })).toHaveCount(0);
   await line.locator('.capture-line-row').click();
