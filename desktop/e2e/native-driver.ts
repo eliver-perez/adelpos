@@ -660,6 +660,47 @@ export async function installDriver(page: Page, options: DriverOptions = {}) {
     delete result.session_token;
     return { status: response.status, body: result };
   }
+  // Etapa M1 (Fase E, §5.8): la página y la prueba comparten la única sesión de esta terminal (sessionToken), y Go
+  // tiene una sola sesión por terminal. Si la prueba vuelve a entrar (auth/login con driver.request) mientras una
+  // petición de la página va en camino con la sesión anterior, Go le responde SESSION_REPLACED y la página cierra su
+  // sesión («…inició sesión de nuevo en esta terminal»): una carrera de la prueba (K1-D39, K11-D24), no de la
+  // aplicación. Lo correcto es entrar por la API antes de entrar por la página (después, la prueba ya usa la sesión de
+  // la página); cuando la prueba vuelve a entrar a propósito, ese inicio de sesión espera a que terminen las peticiones
+  // de la página en camino y detiene las nuevas hasta tener la sesión nueva.
+  const pageRequests = new Set<Promise<unknown>>();
+  let sessionChange: Promise<unknown> | null = null;
+  async function pageRequest(method: string, route: string, body?: unknown) {
+    while (sessionChange) await sessionChange;
+    const pending = request(method, route, body);
+    pageRequests.add(pending);
+    try {
+      return await pending;
+    } finally {
+      pageRequests.delete(pending);
+    }
+  }
+  async function testRequest(method: string, route: string, body?: unknown) {
+    if (method !== 'POST' || route !== 'auth/login') return request(method, route, body);
+    while (sessionChange) await sessionChange;
+    const change = (async () => {
+      // Con un límite, por si la página tiene una operación larga en camino (por ejemplo un respaldo).
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([
+        Promise.allSettled([...pageRequests]),
+        new Promise((resolve) => {
+          timer = setTimeout(resolve, 15000);
+        }),
+      ]);
+      clearTimeout(timer);
+      return request(method, route, body);
+    })();
+    sessionChange = change.catch(() => undefined);
+    try {
+      return await change;
+    } finally {
+      sessionChange = null;
+    }
+  }
   // Etapa L1: el servidor aplica la licencia (capacidad license-v1).
   async function serverLicensed() {
     const version = await request('GET', 'version');
@@ -1511,7 +1552,7 @@ export async function installDriver(page: Page, options: DriverOptions = {}) {
       if (!entry) throw new Error(`Ruta nativa no reconocida: ${operation}`);
       let route = entry.path.replace('{identifier}', String(args.resourceId));
       if (args.query) route += `?${new URLSearchParams(args.query as Record<string, string>)}`;
-      return request(entry.method, route, args.body ?? undefined);
+      return pageRequest(entry.method, route, args.body ?? undefined);
     },
   );
   await page.addInitScript(() => {
@@ -1671,7 +1712,8 @@ export async function installDriver(page: Page, options: DriverOptions = {}) {
     return processed;
   }
   return {
-    request,
+    // La prueba entra por aquí (driver.request): un auth/login espera a las peticiones de la página (testRequest).
+    request: testRequest,
     nextSaveDialog,
     nextBackupFolder,
     exports,

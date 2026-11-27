@@ -329,7 +329,9 @@ test('cuentas y Para llevar: creación diferida, descartar, tarjetas y menú por
   await page.getByLabel('Contraseña', { exact: true }).fill('admin');
   await page.getByRole('button', { name: 'Entrar', exact: true }).click();
   await expect(page.locator('.app-topbar')).toBeVisible();
-  await call(driver, 'POST', 'auth/login', { username: 'admin', password: 'admin' });
+  // Etapa M1 (§5.8, K1-D39 y K11-D24): la prueba ya entró por la API antes que la página (paso 1). Desde aquí usa la
+  // sesión de la página, que el puente comparte: volver a entrar por la API con la misma terminal reemplazaba la sesión
+  // de la página, y una petición suya en camino recibía SESSION_REPLACED.
 
   // 2. «Nuevo pedido» entra a la captura sin crear nada; salir sin productos no deja nada.
   const takeawayBefore = (await allAccounts(driver, 'takeaway')).length;
