@@ -154,6 +154,8 @@ func buildSummary(plan *Plan, expected Expected, sizeBytes int64, sha256 string)
 	}
 	summary.Counts["option_groups"] = int64(len(plan.Catalog.Groups))
 	summary.Counts["areas"] = int64(len(plan.Catalog.Areas))
+	// Etapa M1 (M1-D5): las mesas divisibles que se arman con las mesas del anterior.
+	summary.Counts["table_groups"] = int64(len(plan.Catalog.TableGroups))
 	inactive := int64(0)
 	for _, product := range plan.Catalog.Products {
 		summary.TaxRates[strconv.Itoa(product.TaxRate)]++
