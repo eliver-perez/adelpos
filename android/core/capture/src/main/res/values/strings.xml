@@ -6,8 +6,6 @@
     <!-- Etapa A3, §4.2: la barra dice dónde se está. -->
     <string name="capture_title_takeaway">Para llevar #%1$d</string>
     <string name="capture_title_takeaway_new">Nuevo pedido para llevar</string>
-    <!-- Etapa M1, §5.6: el mismo título en el teléfono vertical, donde el largo no cabía. -->
-    <string name="capture_title_takeaway_new_short">Nuevo pedido</string>
     <!-- Etapa A3, §4.4: sin número; con productos nuevos sin enviar, cuántos. -->
     <string name="capture_open_order">Ver la cuenta</string>
     <plurals name="capture_open_order_unsent">

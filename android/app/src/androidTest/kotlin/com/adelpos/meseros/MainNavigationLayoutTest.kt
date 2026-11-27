@@ -23,6 +23,7 @@ import com.adelpos.meseros.core.ui.layout.NavigationPlacement
 import com.adelpos.meseros.core.ui.layout.navigationPlacementFor
 import com.adelpos.meseros.feature.takeaway.TAG_TAKEAWAY_NEW
 import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_SCREEN
+import com.adelpos.meseros.navigation.TAG_APP_TITLE
 import com.adelpos.meseros.navigation.TAG_MAIN_NAVIGATION
 import com.adelpos.meseros.navigation.TAG_NAVIGATION_RAIL
 import com.adelpos.meseros.navigation.TAG_NAV_TABLES
@@ -187,7 +188,12 @@ class MainNavigationLayoutTest {
     private fun waitForTitle(title: String) {
         compose.waitUntil(timeoutMillis = 30_000) {
             compose
-                .onAllNodes(hasText(title).and(hasAnyAncestor(hasTestTag(TAG_TOP_BAR))))
+                .onAllNodes(
+                    hasText(title)
+                        .and(
+                            (hasAnyAncestor(hasTestTag(TAG_TOP_BAR)) or hasTestTag(TAG_APP_TITLE)),
+                        ),
+                )
                 .fetchSemanticsNodes()
                 .isNotEmpty()
         }
