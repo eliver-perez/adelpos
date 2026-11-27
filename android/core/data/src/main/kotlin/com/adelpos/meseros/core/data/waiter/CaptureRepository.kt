@@ -151,14 +151,18 @@ class CaptureRepository(
                         capture.sync != DraftSync.DISCARDING
                 }
             // Etapa M1: una captura de cuenta nueva que todavía no salió toma la unión que ve
-            // ahora el mesero (por ejemplo, unió la mesa en pantalla después de empezarla).
+            // ahora el mesero (por ejemplo, unió la mesa en pantalla después de empezarla). Una
+            // unión en pantalla que ya tenía no se quita en silencio (M1-D13): solo «Enviar solo a
+            // la mesa» la quita.
             if (found != null && found.accountId == null && found.pendingOperationId == null) {
+                val join = unionJoin ?: found.unionJoin
                 val updated =
                     found.copy(
-                        tableName = tableName,
+                        tableName =
+                            if (unionJoin == null && join != null) found.tableName else tableName,
                         seenAccountIds = seenAccountIds,
                         seenUnion = seenUnion ?: found.seenUnion,
-                        unionJoin = unionJoin,
+                        unionJoin = join,
                     )
                 if (updated != found) {
                     save(updated)

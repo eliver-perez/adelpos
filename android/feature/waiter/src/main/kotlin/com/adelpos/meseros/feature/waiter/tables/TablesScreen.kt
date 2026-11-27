@@ -1014,28 +1014,31 @@ fun JoinTablesDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
-            LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-                modifier = Modifier.heightIn(max = JOIN_LIST_MAX_HEIGHT).testTag(TAG_JOIN_DIALOG),
-            ) {
-                items(choices, key = { it.table.id }) { choice ->
-                    JoinChoiceRow(
-                        choice = choice,
-                        selected = choice.table.id in dialog.selected,
-                        single = dialog.mode != JoinMode.JOIN,
-                        onToggle = { onToggle(choice.table.id) },
-                    )
-                }
-                if (dialog.mode == JoinMode.REMOVE) {
-                    item {
-                        Text(
-                            stringResource(R.string.join_remove_note),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            // La lista se desliza si hay muchas mesas; la vista previa de Go queda siempre a la
+            // vista debajo.
+            Column(modifier = Modifier.testTag(TAG_JOIN_DIALOG)) {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.heightIn(max = JOIN_LIST_MAX_HEIGHT).testTag(TAG_JOIN_LIST),
+                ) {
+                    items(choices, key = { it.table.id }) { choice ->
+                        JoinChoiceRow(
+                            choice = choice,
+                            selected = choice.table.id in dialog.selected,
+                            single = dialog.mode != JoinMode.JOIN,
+                            onToggle = { onToggle(choice.table.id) },
                         )
                     }
                 }
-                item { JoinPreviewText(dialog) }
+                if (dialog.mode == JoinMode.REMOVE) {
+                    Text(
+                        stringResource(R.string.join_remove_note),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
+                JoinPreviewText(dialog)
             }
         },
         confirmButton = {
@@ -1164,7 +1167,7 @@ private fun JoinPreviewText(dialog: JoinDialog) {
 }
 
 /** Alto máximo de la lista de mesas del diálogo (se desliza si hay muchas). */
-private val JOIN_LIST_MAX_HEIGHT = 420.dp
+private val JOIN_LIST_MAX_HEIGHT = 320.dp
 
 /**
  * Una captura de una cuenta nueva (o de una cuenta que ya no está abierta) con productos sin enviar
@@ -1260,7 +1263,8 @@ fun AccountCard(
                                 account.totals.total.display(),
                             ),
                         style = MaterialTheme.typography.titleSmall,
-                        maxLines = 1,
+                        // Con «Tu cuenta» al lado, el total no se corta: baja al segundo renglón.
+                        maxLines = if (mine) 2 else 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier =
                             Modifier.weight(1f).testTag("$TAG_ACCOUNT_TITLE_PREFIX${account.id}"),
@@ -1529,6 +1533,7 @@ const val TAG_UNION_REMOVE = "union-remove"
 const val TAG_UNION_CANCEL = "union-cancel"
 const val TAG_UNION_NOTE = "union-note"
 const val TAG_JOIN_DIALOG = "join-dialog"
+const val TAG_JOIN_LIST = "join-list"
 const val TAG_JOIN_TABLE_PREFIX = "join-table-"
 const val TAG_JOIN_PREVIEW = "join-preview"
 const val TAG_JOIN_CONFIRM = "join-confirm"

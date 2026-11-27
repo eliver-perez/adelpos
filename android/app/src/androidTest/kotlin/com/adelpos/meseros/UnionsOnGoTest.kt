@@ -7,6 +7,7 @@ import android.os.SystemClock
 import android.util.Log
 import android.view.KeyEvent
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
@@ -31,10 +32,20 @@ import com.adelpos.core.ui.access.findserver.TAG_PAIRING_CODE
 import com.adelpos.meseros.core.capture.TAG_ORDER_PANEL
 import com.adelpos.meseros.core.capture.TAG_SEND_TO_KITCHEN
 import com.adelpos.meseros.core.capture.TAG_SYNC_PREFIX
+import com.adelpos.meseros.core.capture.TAG_UNION_PENDING_TEXT
+import com.adelpos.meseros.core.capture.TAG_UNION_SEND_ALONE
+import com.adelpos.meseros.core.capture.TAG_UNION_WAIT
 import com.adelpos.meseros.core.capture.pending.TAG_PENDING
 import com.adelpos.meseros.core.data.waiter.db.WaiterStorage
+import com.adelpos.meseros.core.domain.catalog.Customization
+import com.adelpos.meseros.core.domain.catalog.LineSelection
+import com.adelpos.meseros.core.domain.waiter.DraftLine
+import com.adelpos.meseros.core.domain.waiter.DraftOperation
 import com.adelpos.meseros.core.domain.waiter.OrderState
 import com.adelpos.meseros.core.domain.waiter.PendingOrder
+import com.adelpos.meseros.core.domain.waiter.SeenUnion
+import com.adelpos.meseros.core.domain.waiter.UnionJoin
+import com.adelpos.meseros.core.ui.catalog.TAG_CATALOG_SEARCH
 import com.adelpos.meseros.core.ui.catalog.TAG_CUSTOMIZER_ADD
 import com.adelpos.meseros.core.ui.catalog.TAG_PRODUCT_GRID
 import com.adelpos.meseros.core.ui.catalog.productTag
@@ -44,17 +55,32 @@ import com.adelpos.meseros.core.ui.layout.TAG_PANE_BACK
 import com.adelpos.meseros.core.ui.layout.TAG_PANE_OPEN_SECONDARY
 import com.adelpos.meseros.core.ui.waiter.TAG_ACCOUNT_MINE
 import com.adelpos.meseros.core.ui.waiter.TAG_ORDER_STATE_PREFIX
+import com.adelpos.meseros.core.ui.waiter.TAG_PREPARATION_PREFIX
 import com.adelpos.meseros.feature.access.pin.TAG_ENTRY
 import com.adelpos.meseros.feature.access.pin.TAG_WAITER_PREFIX
 import com.adelpos.meseros.feature.waiter.tables.TAG_ACCOUNT_CARD_PREFIX
 import com.adelpos.meseros.feature.waiter.tables.TAG_ACCOUNT_PANE
 import com.adelpos.meseros.feature.waiter.tables.TAG_ACCOUNT_TITLE_PREFIX
+import com.adelpos.meseros.feature.waiter.tables.TAG_JOIN_CANCEL
+import com.adelpos.meseros.feature.waiter.tables.TAG_JOIN_CONFIRM
+import com.adelpos.meseros.feature.waiter.tables.TAG_JOIN_DIALOG
+import com.adelpos.meseros.feature.waiter.tables.TAG_JOIN_LIST
+import com.adelpos.meseros.feature.waiter.tables.TAG_JOIN_TABLE_PREFIX
+import com.adelpos.meseros.feature.waiter.tables.TAG_MAP_UNION_PREFIX
 import com.adelpos.meseros.feature.waiter.tables.TAG_NEW_ACCOUNT
 import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_AREA_PREFIX
 import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_LIST
 import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_SCREEN
+import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_VIEW
+import com.adelpos.meseros.feature.waiter.tables.TAG_TABLE_CAPTURE_PREFIX
 import com.adelpos.meseros.feature.waiter.tables.TAG_TABLE_ORDER_PREFIX
+import com.adelpos.meseros.feature.waiter.tables.TAG_TABLE_PANEL_TITLE
 import com.adelpos.meseros.feature.waiter.tables.TAG_TABLE_PREFIX
+import com.adelpos.meseros.feature.waiter.tables.TAG_UNION_CANCEL
+import com.adelpos.meseros.feature.waiter.tables.TAG_UNION_GROUP
+import com.adelpos.meseros.feature.waiter.tables.TAG_UNION_JOIN
+import com.adelpos.meseros.feature.waiter.tables.TAG_UNION_PREFIX
+import com.adelpos.meseros.feature.waiter.tables.TAG_UNION_REMOVE
 import java.io.File
 import java.io.FileOutputStream
 import java.util.UUID
@@ -86,6 +112,13 @@ import org.junit.runner.RunWith
  *   después de «Enviar a cocina» (tres medidas, en el registro `AdelOnGo` con «M1 · retraso»).
  * - `u3` (SIN red) un pedido sin conexión en la Mesa 10 es su propia tarjeta «Por enviar».
  * - `u4` (con red) el pedido sale y su tarjeta pasa a ser la de la cuenta, con «Tu cuenta».
+ * - Uniones (con `table-unions-v1`; sin ella, omitidos): `u5` «Unir con…» desde la Mesa 5 ocupada,
+ *   el panel, una sola entrada en la lista y el contorno en el mapa; `u6` la unión que hace la
+ *   principal (otra terminal) se ve y «Quitar mesa» la deshace; `u7` desde una mesa libre la unión
+ *   vive en pantalla y nace con el primer producto; `u8` (SIN red) una unión en pantalla nunca va a
+ *   la cola: «Esperar» y «Enviar solo a la Mesa 3a» (M1-D13); `u9` (con red) el pedido llega solo a
+ *   la mesa, el atajo «Unir Mesa 3» con una sección ocupada dice el mensaje de Go y desde la
+ *   ocupada se crece a «Mesa 3»; `u10` §5.2, un refresco sin preparación sin etiqueta de cocina.
  *
  * Argumentos: `local`, `address`, `pin`, `mainDevice` y `mainToken` (los arma el guion).
  */
@@ -236,6 +269,227 @@ class UnionsOnGoTest {
         assertFalse(present("$TAG_TABLE_ORDER_PREFIX${ids.getValue("order10")}"))
     }
 
+    // --- Unir mesas (§1 y §3, contrato §10; con la Fase A en Go) ---
+
+    @Test
+    fun u5_unirDesdeUnaMesaOcupadaContornoYUnaSolaEntrada() {
+        val ids = loadIds()
+        assumeTrue("Go sin table-unions-v1", hasUnions())
+        prepareUnions(ids)
+        launch()
+        enterAna()
+        portrait()
+        waitUntil("la capacidad de uniones") { container.waiterMode.unions.available.value }
+        openTable(ids.getValue("table5"))
+        tap(TAG_UNION_JOIN)
+        waitFor(TAG_JOIN_DIALOG)
+        // Las ocupadas se ven deshabilitadas con su motivo (Go decide; aquí solo se muestran).
+        compose
+            .onNodeWithTag("$TAG_JOIN_TABLE_PREFIX${ids.getValue("table7")}")
+            .assertIsNotEnabled()
+        tap("$TAG_JOIN_TABLE_PREFIX${ids.getValue("table6")}")
+        waitForText("Mesa 5 + 6 · 8 lugares")
+        screenshot("u5-unir-con-vertical")
+        tap(TAG_JOIN_CONFIRM)
+        val union = waitForUnion(ids.getValue("table5"))
+        assertEquals("Mesa 5 + 6", union.getValue("name").jsonPrimitive.content)
+        waitUntil("el panel de la unión") { textOf(TAG_TABLE_PANEL_TITLE) == "Mesa 5 + 6" }
+        val unionId = union.text("id")
+        // La cuenta de la Mesa 5 queda en la unión, con «Tu cuenta».
+        val card = "$TAG_ACCOUNT_CARD_PREFIX${ids.getValue("account-table5")}"
+        waitFor(card)
+        assertTrue(inside(card, TAG_ACCOUNT_MINE))
+        screenshot("u5-panel-union-vertical")
+        // Una sola entrada en la lista y el contorno en el mapa.
+        pressBackIfPanel()
+        waitFor("$TAG_UNION_PREFIX$unionId")
+        assertFalse(present("$TAG_TABLE_PREFIX${ids.getValue("table6")}"))
+        tap("$TAG_TABLES_VIEW-map")
+        waitFor("$TAG_MAP_UNION_PREFIX$unionId")
+        screenshot("u5-mapa-union-vertical")
+        landscape()
+        waitFor("$TAG_MAP_UNION_PREFIX$unionId")
+        screenshot("u5-mapa-union-horizontal")
+        tap("$TAG_TABLES_VIEW-list")
+        portrait()
+        saveIds(loadIds() + ("union56" to unionId))
+    }
+
+    @Test
+    fun u6_laUnionDeOtraTerminalSeVeYQuitarMesaLaDeshace() {
+        val ids = loadIds()
+        assumeTrue("Go sin table-unions-v1", hasUnions())
+        launch()
+        enterAna()
+        portrait()
+        // La computadora principal une la Mesa 7 (ocupada) con la 8.
+        val created =
+            main.call(
+                "POST",
+                "restaurant/table-unions",
+                """{"operation_id":"${UUID.randomUUID()}","start_table_id":"${ids.getValue("table7")}",""" +
+                    """"table_ids":["${ids.getValue("table8")}"]}""",
+            )
+        assertEquals(created.body.toString(), 200, created.status)
+        val unionId = created.obj.getValue("union").jsonObject.text("id")
+        waitFor("$TAG_UNION_PREFIX$unionId")
+        assertFalse(present("$TAG_TABLE_PREFIX${ids.getValue("table8")}"))
+        tap("$TAG_UNION_PREFIX$unionId")
+        waitUntil("el panel de la unión") { textOf(TAG_TABLE_PANEL_TITLE) == "Mesa 7 + 8" }
+        // «Quitar mesa» la 8: queda una sola mesa y la unión se deshace (Go lo decide).
+        tap(TAG_UNION_REMOVE)
+        tap("$TAG_JOIN_TABLE_PREFIX${ids.getValue("table8")}")
+        screenshot("u6-quitar-mesa-vertical")
+        tap(TAG_JOIN_CONFIRM)
+        waitUntil("la unión deshecha en Go") { unionOf(ids.getValue("table7")) == null }
+        pressBackIfPanel()
+        waitFor("$TAG_TABLE_PREFIX${ids.getValue("table8")}")
+        waitFor("$TAG_TABLE_PREFIX${ids.getValue("table7")}")
+    }
+
+    @Test
+    fun u7_unionEnPantallaNaceConElPrimerProducto() {
+        val ids = loadIds()
+        assumeTrue("Go sin table-unions-v1", hasUnions())
+        launch()
+        enterAna()
+        portrait()
+        openTable(ids.getValue("table8"))
+        tap(TAG_UNION_JOIN)
+        tap("$TAG_JOIN_TABLE_PREFIX${ids.getValue("table9")}")
+        waitForText("Mesa 8 + 9 · 8 lugares")
+        tap(TAG_JOIN_CONFIRM)
+        // Desde una mesa libre: la unión vive en la pantalla; en Go no hay nada.
+        waitUntil("la unión en pantalla") { textOf(TAG_TABLE_PANEL_TITLE) == "Mesa 8 + 9" }
+        waitFor(TAG_UNION_CANCEL)
+        assertEquals(null, unionOf(ids.getValue("table8")))
+        screenshot("u7-union-en-pantalla-vertical")
+        tap(TAG_NEW_ACCOUNT)
+        addProduct(ids.getValue("burger"))
+        showOrder()
+        waitFor("${TAG_SYNC_PREFIX}saved")
+        // Con el primer producto nacen la unión y la cuenta en la misma operación.
+        val union = waitForUnion(ids.getValue("table8"))
+        assertEquals("Mesa 8 + 9", union.text("name"))
+        tap(TAG_SEND_TO_KITCHEN)
+        waitForTables()
+    }
+
+    @Test
+    fun u8_sinConexionLaUnionEnPantallaNoVaALaCola() {
+        val ids = loadIds()
+        // Sin red no se pregunta a Go: u5 dejó el grupo si el servidor tiene uniones.
+        assumeTrue("Go sin table-unions-v1", ids.containsKey("group3"))
+        launch()
+        enterAna(offline = true)
+        portrait()
+        // La unión en pantalla del grupo «Mesa 3» con una captura que no alcanzó a guardarse (se
+        // perdió la conexión después de unir): se arma como lo haría Mesas.
+        val ana = ids.getValue("ana")
+        val capture = runBlocking {
+            container.waiterMode.captures.open(
+                userId = ana,
+                tableId = ids.getValue("table3a"),
+                tableName = "Mesa 3",
+                account = null,
+                seenAccountIds = emptyList(),
+                seenUnion = SeenUnion(null),
+                unionJoin = UnionJoin(emptyList(), ids.getValue("group3"), "Mesa 3", "Mesa 3a"),
+            )
+        }
+        runBlocking {
+            container.waiterMode.captures.stage(
+                capture.id,
+                DraftOperation.Add(
+                    DraftLine(
+                        UUID.randomUUID().toString(),
+                        LineSelection(ids.getValue("burger"), null, 1, Customization()),
+                    ),
+                ),
+                null,
+            )
+        }
+        openTable(ids.getValue("table3a"))
+        // Su propia tarjeta «Por enviar» (todavía sin cuenta).
+        tap("$TAG_TABLE_CAPTURE_PREFIX${capture.id}")
+        showOrder()
+        tap(TAG_SEND_TO_KITCHEN)
+        waitFor(TAG_UNION_PENDING_TEXT)
+        waitForText("Sin conexión no se pueden unir mesas.")
+        waitForText("Enviar solo a la Mesa 3a")
+        screenshot("u8-sin-conexion-union-vertical")
+        tap(TAG_UNION_WAIT)
+        // «Esperar»: nada en la cola y lo capturado sigue.
+        assertTrue(
+            runBlocking { container.database.waiter().ordersOf(ana) }
+                .none { it.operationId == capture.id },
+        )
+        tap(TAG_SEND_TO_KITCHEN)
+        tap(TAG_UNION_SEND_ALONE)
+        val order = waitForOrder(ids.getValue("table3a")) { it.state == OrderState.QUEUED }
+        assertEquals("Mesa 3a", order.destination.tableName)
+        assertEquals(SeenUnion(null), order.destination.seenUnion)
+        saveIds(ids + ("order3a" to order.operationId))
+    }
+
+    @Test
+    fun u9_alVolverLaRedVaSoloALaMesaYElAtajoDelGrupoLoDiceGo() {
+        val ids = loadIds()
+        assumeTrue("Go sin table-unions-v1", hasUnions())
+        launch()
+        enterAna()
+        portrait()
+        val received = waitForOrder(ids.getValue("table3a")) { it.state == OrderState.RECEIVED }
+        assertEquals(null, unionOf(ids.getValue("table3a")))
+        assertTrue(received.receivedAccountId != null)
+        // El atajo «Unir Mesa 3» con la 3a ocupada: Go lo rechaza y su mensaje se ve tal cual.
+        openTable(ids.getValue("table3b"))
+        tap(TAG_UNION_GROUP)
+        waitForText("está ocupada. Únela con las secciones libres para crecer.")
+        screenshot("u9-atajo-grupo-rechazado-vertical")
+        tap(TAG_JOIN_CANCEL)
+        // Desde la sección ocupada se crece con las libres: se llama como el grupo.
+        openTable(ids.getValue("table3a"))
+        tap(TAG_UNION_JOIN)
+        tap("$TAG_JOIN_TABLE_PREFIX${ids.getValue("table3b")}")
+        tap("$TAG_JOIN_TABLE_PREFIX${ids.getValue("table3c")}")
+        waitForText("Mesa 3 · 12 lugares")
+        tap(TAG_JOIN_CONFIRM)
+        val union = waitForUnion(ids.getValue("table3a"))
+        assertEquals("Mesa 3", union.text("name"))
+        pressBackIfPanel()
+        tap("$TAG_TABLES_VIEW-map")
+        waitFor("$TAG_MAP_UNION_PREFIX${union.text("id")}")
+        screenshot("u9-mapa-mesa-3-vertical")
+        tap("$TAG_TABLES_VIEW-list")
+    }
+
+    @Test
+    fun u10_loQueNoNecesitaPreparacionNoLlevaEtiqueta() {
+        val ids = loadIds()
+        assumeTrue("Go sin table-unions-v1", hasUnions())
+        launch()
+        enterAna()
+        portrait()
+        newAccountOn(ids.getValue("table11"))
+        // El refresco está en otra categoría: se busca.
+        compose.onNodeWithTag(TAG_CATALOG_SEARCH).performTextReplacement("Coca Cola M1")
+        addProduct(ids.getValue("soda"))
+        showOrder()
+        waitFor("${TAG_SYNC_PREFIX}saved")
+        val accountId = waitForAccountOf(ids.getValue("table11"))
+        tap(TAG_SEND_TO_KITCHEN)
+        waitForTables()
+        val card = "$TAG_ACCOUNT_CARD_PREFIX$accountId"
+        waitFor(card)
+        waitUntil("la tarjeta sin etiqueta de cocina") {
+            !inside(card, "${TAG_PREPARATION_PREFIX}ready") &&
+                !inside(card, "${TAG_PREPARATION_PREFIX}released")
+        }
+        assertTrue(inside(card, "$TAG_ORDER_STATE_PREFIX${OrderState.RECEIVED.storedName}"))
+        screenshot("u10-sin-preparacion-vertical")
+    }
+
     // --- §5.6: el retraso después de «Enviar a cocina» ---
 
     /**
@@ -299,6 +553,101 @@ class UnionsOnGoTest {
             ?.config
             ?.getOrElseNullable(SemanticsProperties.Text) { null }
             ?.joinToString("") { it.text }
+
+    // --- Ayudantes de uniones ---
+
+    private fun hasUnions(): Boolean {
+        val version = main.call("GET", "version").obj
+        return version.getValue("capabilities").jsonArray.any {
+            it.jsonPrimitive.content == "table-unions-v1"
+        }
+    }
+
+    /**
+     * Una vez: «Unir mesas» para el rol, el grupo «Mesa 3» (3a, 3b y 3c) y la Mesa 11 en el Salón
+     * M1.
+     */
+    private fun prepareUnions(ids: Map<String, String>) {
+        if (ids.containsKey("group3")) {
+            return
+        }
+        grantWaiterPermissions(WAITER_PERMISSIONS + "restaurant.tables.join")
+        val salon = ids.getValue("areaSalon")
+        fun table(name: String, x: Int, y: Int): String {
+            val answer =
+                main.call(
+                    "POST",
+                    "restaurant/tables",
+                    """{"operation_id":"${UUID.randomUUID()}","area_id":"$salon",""" +
+                        """"name":"$name","shape":"rectangle","x":$x,"y":$y,"width":100,""" +
+                        """"height":72,"seats":4,"active":true}""",
+                )
+            assertEquals(answer.body.toString(), 200, answer.status)
+            return answer.obj.text("id")
+        }
+        val sections =
+            listOf(
+                table("Mesa 3a", 40, 300),
+                table("Mesa 3b", 145, 300),
+                table("Mesa 3c", 250, 300),
+            )
+        val group =
+            main.call(
+                "POST",
+                "restaurant/table-groups",
+                """{"operation_id":"${UUID.randomUUID()}","area_id":"$salon","name":"Mesa 3",""" +
+                    """"table_ids":[${sections.joinToString(",") { "\"$it\"" }}]}""",
+            )
+        assertEquals(group.body.toString(), 200, group.status)
+        saveIds(
+            ids +
+                mapOf(
+                    "table3a" to sections[0],
+                    "table3b" to sections[1],
+                    "table3c" to sections[2],
+                    "group3" to group.obj.getValue("group").jsonObject.text("id"),
+                    "table11" to table("Mesa 11", 520, 150),
+                ),
+        )
+    }
+
+    /** La unión abierta en que está la mesa según Go (la lectura de la principal), o null. */
+    private fun unionOf(tableId: String): JsonObject? =
+        main
+            .call("GET", "restaurant/overview")
+            .obj
+            .getValue("unions")
+            .jsonArray
+            .map { it.jsonObject }
+            .firstOrNull { union ->
+                union.getValue("table_ids").jsonArray.any { it.jsonPrimitive.content == tableId }
+            }
+
+    private fun waitForUnion(tableId: String): JsonObject {
+        var found: JsonObject? = null
+        waitUntil("la unión en Go") {
+            found = unionOf(tableId)
+            found != null
+        }
+        return found!!
+    }
+
+    /** En el teléfono, el panel de la mesa se cierra para ver la lista. */
+    private fun pressBackIfPanel() {
+        if (present(TAG_ACCOUNT_PANE) && present(TAG_PANE_BACK)) {
+            pressBack()
+        }
+        waitFor(TAG_TABLES_SCREEN)
+    }
+
+    private fun waitForText(text: String, timeout: Long = 40_000) {
+        try {
+            compose.waitUntil(timeoutMillis = timeout) { hasText(text) }
+        } catch (failure: Throwable) {
+            compose.onRoot(useUnmergedTree = true).printToLog(TAG)
+            throw failure
+        }
+    }
 
     // --- Pantallas ---
 
@@ -673,6 +1022,7 @@ class UnionsOnGoTest {
         /** Las listas perezosas en las que se busca desplazando. */
         val LAZY_LISTS =
             listOf(
+                TAG_JOIN_LIST,
                 TAG_ACCOUNT_PANE,
                 TAG_TABLES_LIST,
                 TAG_PENDING,
@@ -680,7 +1030,9 @@ class UnionsOnGoTest {
                 TAG_PRODUCT_GRID,
             )
 
-        /** Lo que usa un mesero en Mesas (sin «Unir mesas»: la Fase A todavía no lo tiene). */
+        /**
+         * Lo que usa un mesero en Mesas; «Unir mesas» se agrega en u5 (solo con la Fase A en Go).
+         */
         val WAITER_PERMISSIONS =
             listOf(
                 "waiter_devices.use",
