@@ -2,6 +2,7 @@ import { accountNeedsPreparation, preparationLabel } from '../../services/kitche
 import { Field, Notice } from '../../components/Forms';
 import {
   accountLabel,
+  accountPlace,
   defaultTakeawayOrigin,
   elapsedTime,
   serverDateTime,
@@ -52,7 +53,8 @@ function placeText(account: Account, takeaway: boolean) {
   if (takeaway || account.mode === 'takeaway') {
     return account.origin && account.origin !== defaultTakeawayOrigin ? account.origin : '';
   }
-  return account.table_name ?? 'Sin mesa';
+  // Etapa M1: una cuenta de una unión de mesas se ve con el nombre de la unión («Mesa 5 + 6»).
+  return accountPlace(account) ?? 'Sin mesa';
 }
 
 // Pago y entrega se muestran separados de la preparación, con los estados que calcula Go.

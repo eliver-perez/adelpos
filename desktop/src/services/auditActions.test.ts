@@ -114,6 +114,13 @@ const dynamicActions: { file: string; expression: string; actions: string[]; rea
     reason: 'pasar productos a otra cuenta o dividirla (kind de transferItems)',
   },
   {
+    file: 'operations/table_unions.go',
+    expression: 'tableunions.AccountKind',
+    actions: ['restaurant.account.table_union'],
+    reason:
+      'etapa M1: el historial de cada cuenta abierta de una unión (unir, agregar, quitar o deshacer, unionAccountEvent)',
+  },
+  {
     file: 'operations/accounts_write.go',
     expression: '"account."+action',
     actions: ['restaurant.account.move', 'restaurant.account.assign'],

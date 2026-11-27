@@ -5,7 +5,12 @@ import { IntegerField, ReferenceField, TextField } from '../../components/catalo
 import { useLiveResource } from '../../hooks/useLiveResource';
 import { formatMoney } from '../../services/money';
 import { pluralWord } from '../../services/plural';
-import { accountCustomName, accountLabel } from '../../services/restaurant';
+import {
+  accountCustomName,
+  accountLabel,
+  accountPlace,
+  unionOfTable,
+} from '../../services/restaurant';
 import type { AccountPage, Bill, Overview } from '../../services/restaurant';
 import type { ExecuteMutation } from './OperationsAdmin';
 
@@ -154,7 +159,7 @@ export function AccountActions({
               value={targetID}
               options={targets.map((account) => ({
                 id: account.id,
-                name: `${accountLabel(account)} · ${account.table_name ?? 'sin mesa'} · ${formatMoney(account.totals.total)}`,
+                name: `${accountLabel(account)} · ${accountPlace(account) ?? 'sin mesa'} · ${formatMoney(account.totals.total)}`,
               }))}
               onChange={setTargetID}
             />
@@ -171,9 +176,13 @@ export function AccountActions({
             optional
             label="Mesa de destino (vacío: sin mesa)"
             value={tableID}
-            options={
+            // Etapa M1: una mesa unida dice en qué unión está (la cuenta queda en esa unión).
+            options={(
               overview?.tables.filter((table) => table.active && !table.out_of_service) ?? []
-            }
+            ).map((table) => {
+              const union = unionOfTable(overview, table.id);
+              return union ? { ...table, name: `${table.name} · unida en ${union.name}` } : table;
+            })}
             onChange={setTableID}
           />
         )}
