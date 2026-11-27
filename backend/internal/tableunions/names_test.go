@@ -1,6 +1,9 @@
 package tableunions
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // Etapa M1 (M1-D2): el nombre de la unión en orden natural, con la palabra «Mesa» una sola vez cuando todas la llevan.
 func TestUnionName(t *testing.T) {
@@ -46,5 +49,31 @@ func TestNaturalCompare(t *testing.T) {
 	}
 	if NaturalCompare("Mesa 3", "mesa 3") != 0 {
 		t.Error("el orden no distingue mayúsculas")
+	}
+}
+
+// Etapa M1 (M1-D29): la referencia de una cuenta en una unión de nombre largo se recorta en el último « + » que quepa.
+func TestAccountReference(t *testing.T) {
+	short := "Mesa 5 + 6"
+	if AccountReference(short) != short {
+		t.Fatalf("un nombre corto no se recorta: %q", AccountReference(short))
+	}
+	names := []NamedTable{}
+	for index := 1; index <= 9; index++ {
+		names = append(names, NamedTable{ID: string(rune('a' + index)), Name: "Terraza " + string(rune('0'+index))})
+	}
+	long := UnionName(names)
+	reference := AccountReference(long)
+	if len(long) <= AccountNameLimit || len(reference) > AccountNameLimit ||
+		reference != "Terraza 1 + Terraza 2 + Terraza 3 + Terraza 4 + Terraza 5 + Terraza 6 + Terraza 7 + Terraza 8 + …" {
+		t.Fatalf("recorte de %q (%d): %q (%d)", long, len(long), reference, len(reference))
+	}
+	exact := strings.Repeat("x", AccountNameLimit)
+	if AccountReference(exact) != exact {
+		t.Fatal("un nombre de exactamente 100 no se recorta")
+	}
+	single := strings.Repeat("ñ", 80)
+	if got := AccountReference(single); len(got) > AccountNameLimit || !strings.HasSuffix(got, "…") {
+		t.Fatalf("sin « + »: %q", got)
 	}
 }

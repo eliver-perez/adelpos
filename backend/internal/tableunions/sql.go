@@ -17,10 +17,13 @@ func UnionIDSQL(tableExpression string) string {
         WHERE tum.table_id=` + tableExpression + ` AND tum.left_at IS NULL)`
 }
 
-// UnionNameAtSQL es el nombre que tenía la unión de la mesa en un instante (atExpression, por ejemplo la hora de una
-// cancelación o del cierre): la unión de la que la mesa era miembro en ese instante, con el nombre de su último cambio
-// hasta entonces. Una unión que se deshizo en la misma transacción que el cambio (now() igual) sigue contando, porque
-// left_at y la hora del cambio son el mismo now(). NULL si la mesa no estaba unida.
+// UnionNameAtSQL es el nombre que tenía la unión de la mesa en un instante (atExpression): la unión de la que la mesa era
+// miembro en ese instante, con el nombre de su último cambio hasta entonces. NULL si la mesa no estaba unida.
+//
+// Etapa M1 (M1-D30): solo se usa donde no hay instantánea («Modificaciones de cantidades», con la hora del evento de la
+// cuenta). Las horas de la unión siguen el orden del lock (clock_timestamp), pero la del evento es la del inicio de su
+// transacción: con dos terminales a la vez sobre la misma unión, ese renglón puede decir la mesa sola. Una cuenta
+// cobrada lee el lugar de su venta (sales_recognitions) y una cancelada, el que guardó su cancelación.
 func UnionNameAtSQL(tableExpression, atExpression string) string {
 	return `(SELECT tue.union_name FROM app.table_union_members tum
         JOIN app.table_union_events tue ON tue.union_id=tum.union_id AND tue.created_at<=` + atExpression + `

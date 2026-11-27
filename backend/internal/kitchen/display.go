@@ -627,7 +627,9 @@ func cardHeader(header displayHeader, sender string) DisplayCardHeader {
 		// Etapa M1 (M1-D14): la mesa unida se titula con su unión («Mesa 5 + 6»), sin repetir el nombre de una cuenta que
 		// se llama como la unión.
 		result.Title = documents.TableContext(*header.UnionName)
-		if !sameDisplayName(header.Name, *header.UnionName) && !sameDisplayName(header.Name, result.Title) {
+		// Tampoco la referencia recortada de una cuenta sin nombre en una unión de nombre largo (M1-D29).
+		if !sameDisplayName(header.Name, *header.UnionName) && !sameDisplayName(header.Name, result.Title) &&
+			!sameDisplayName(header.Name, tableunions.AccountReference(*header.UnionName)) {
 			result.Subtitle = header.Name
 		}
 	case header.TableName != nil && strings.TrimSpace(*header.TableName) != "":

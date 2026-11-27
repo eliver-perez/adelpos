@@ -19,7 +19,8 @@ import (
 // Etapa M1 (Fase A): actualización desde el esquema 30 con lo que dejó la 0.17.0 (los datos de la prueba de la K1.1:
 // cuentas abiertas, cobradas, canceladas y combinadas, pedidos, unidades, eventos y cocina), una venta reconocida en
 // una mesa y los roles del propietario. La sección «Fase A» de la 0031 agrega las tablas de uniones y grupos (vacías),
-// las tres columnas de la unión en sales_recognitions (NULL en las filas que ya existían) y el permiso «Unir mesas»,
+// las tres columnas de la unión en sales_recognitions y las dos de account_cancellations (M1-D30; NULL en las filas que
+// ya existían) y el permiso «Unir mesas»,
 // que concede solo a los roles Administrador, Mesero, Cajero y Supervisor que ya abren cuentas y ven las mesas (M1-D8).
 // Ninguna otra fila cambia: cuentas, ventas, roles ni lo demás. Es repetible y deja la base vacía.
 func TestStageM1Upgrade(t *testing.T) {
@@ -96,14 +97,16 @@ func TestStageM1Upgrade(t *testing.T) {
 		description != "Unir mesas" {
 		t.Fatalf("el permiso: %q %v", description, err)
 	}
-	var unions, groups, snapshots int
+	var unions, groups, snapshots, cancellations int
 	if err := pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM app.table_unions), (SELECT count(*) FROM app.table_groups),
             (SELECT count(*) FROM app.sales_recognitions WHERE table_union_id IS NOT NULL OR table_union_name IS NOT NULL
-                OR table_union_tables IS NOT NULL)`).Scan(&unions, &groups, &snapshots); err != nil {
+                OR table_union_tables IS NOT NULL),
+            (SELECT count(*) FROM app.account_cancellations WHERE table_union_id IS NOT NULL OR table_union_name IS NOT NULL)`).
+		Scan(&unions, &groups, &snapshots, &cancellations); err != nil {
 		t.Fatal(err)
 	}
-	if unions != 0 || groups != 0 || snapshots != 0 {
-		t.Fatalf("la 0031 escribió uniones, grupos o instantáneas: %d %d %d", unions, groups, snapshots)
+	if unions != 0 || groups != 0 || snapshots != 0 || cancellations != 0 {
+		t.Fatalf("la 0031 escribió uniones, grupos o instantáneas: %d %d %d %d", unions, groups, snapshots, cancellations)
 	}
 	// La defensa en la base: una mesa en dos uniones abiertas se rechaza.
 	if _, err := pool.Exec(ctx, stageM1TwoUnions); !stageK1Violates("23505", err) {

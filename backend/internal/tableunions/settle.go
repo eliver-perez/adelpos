@@ -100,16 +100,21 @@ func SettleEmpty(ctx context.Context, tx pgx.Tx, actor Actor, operationID string
 
 // Dissolve deshace una unión abierta: su historial («dissolved» con el nombre que tenía), left_at en sus mesas y el
 // estado dissolved con quién, la terminal y el motivo. No toca las cuentas: quien llama ya les devolvió su nombre.
+//
+// Las horas de una unión (apertura, entrada y salida de mesas, deshacerse y su historial) son clock_timestamp(), la hora
+// real del momento, y no now(), la hora en que empezó la transacción (M1-D30). Quien escribe ya tiene 7820148305
+// exclusivo, así que esas horas siguen el orden del lock: una petición que empezó antes y esperó el lock no deja una hora
+// anterior a la de cambios que ya se confirmaron antes que ella. El historial se ordena además por su secuencia.
 func Dissolve(ctx context.Context, tx pgx.Tx, unionID, reason string, actor Actor, operationID string) error {
 	if err := AppendHistory(ctx, tx, unionID, "dissolved", nil, nil, actor, operationID); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `UPDATE app.table_union_members SET left_at=now(),left_by=$2
+	if _, err := tx.Exec(ctx, `UPDATE app.table_union_members SET left_at=clock_timestamp(),left_by=$2
         WHERE union_id=$1 AND left_at IS NULL`, unionID, actor.UserID); err != nil {
 		return err
 	}
-	_, err := tx.Exec(ctx, `UPDATE app.table_unions SET state='dissolved',dissolved_at=now(),dissolved_by=$2,
-        dissolved_device_id=$3,dissolve_reason=$4,revision=revision+1,updated_at=now()
+	_, err := tx.Exec(ctx, `UPDATE app.table_unions SET state='dissolved',dissolved_at=clock_timestamp(),dissolved_by=$2,
+        dissolved_device_id=$3,dissolve_reason=$4,revision=revision+1,updated_at=clock_timestamp()
         WHERE id=$1 AND state='open'`, unionID, actor.UserID, actor.DeviceID, reason)
 	return err
 }
@@ -123,22 +128,27 @@ func AppendHistory(ctx context.Context, tx pgx.Tx, unionID, kind string, tableID
 		operation = &operationID
 	}
 	_, err := tx.Exec(ctx, `INSERT INTO app.table_union_events(id,union_id,kind,table_id,table_name,union_name,operation_id,
-            author_id,device_id)
-        SELECT $1,u.id,$2,$3,$4,u.name,$5,$6,$7 FROM app.table_unions u WHERE u.id=$8`,
+            author_id,device_id,created_at)
+        SELECT $1,u.id,$2,$3,$4,u.name,$5,$6,$7,clock_timestamp() FROM app.table_unions u WHERE u.id=$8`,
 		events.NewID(), kind, tableID, tableName, operation, actor.UserID, actor.DeviceID, unionID)
 	return err
 }
 
 // RestoreAccountNames devuelve el nombre de su mesa a las cuentas abiertas de la unión que se llamaban como ella (la
-// referencia neutra de una cuenta sin nombre propio, M1-D14), como movedAccountName al mover una cuenta. Devuelve las
-// cuentas que cambiaron. No sube la revisión de la cuenta: un cambio de la unión no es una edición de la cuenta, y así
-// la terminal que está capturando en ella no recibe un conflicto por algo que hizo otra con las mesas.
+// referencia neutra de una cuenta sin nombre propio, M1-D14, recortada con AccountReference si la unión tiene un nombre
+// largo), como movedAccountName al mover una cuenta. Devuelve las cuentas que cambiaron. No sube la revisión de la
+// cuenta: un cambio de la unión no es una edición de la cuenta, y así la terminal que está capturando en ella no recibe
+// un conflicto por algo que hizo otra con las mesas.
 func RestoreAccountNames(ctx context.Context, tx pgx.Tx, unionID string) ([]string, error) {
+	var unionName string
+	if err := tx.QueryRow(ctx, "SELECT name FROM app.table_unions WHERE id=$1", unionID).Scan(&unionName); err != nil {
+		return nil, err
+	}
 	rows, err := tx.Query(ctx, `UPDATE app.restaurant_accounts a SET name=t.name,updated_at=now()
-        FROM app.table_union_members m, app.table_unions u, app.restaurant_tables t
-        WHERE m.union_id=$1 AND m.left_at IS NULL AND u.id=m.union_id AND t.id=m.table_id
-            AND a.table_id=m.table_id AND a.state='open' AND a.name=u.name
-        RETURNING a.id::text`, unionID)
+        FROM app.table_union_members m, app.restaurant_tables t
+        WHERE m.union_id=$1 AND m.left_at IS NULL AND t.id=m.table_id
+            AND a.table_id=m.table_id AND a.state='open' AND a.name=$2
+        RETURNING a.id::text`, unionID, AccountReference(unionName))
 	if err != nil {
 		return nil, err
 	}

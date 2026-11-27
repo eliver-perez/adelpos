@@ -31,11 +31,17 @@ func (handler *service) neutralAccountName(mode string, tableID *string) (string
 	if err := validateID(*tableID); err != nil {
 		return neutralDineInName, nil
 	}
+	var union *string
 	var name string
-	err := handler.tx.QueryRow(handler.ctx, `SELECT coalesce(`+tableunions.UnionNameSQL("$1::uuid")+`,
-        (SELECT name FROM app.restaurant_tables WHERE id=$1),'')`, *tableID).Scan(&name)
+	err := handler.tx.QueryRow(handler.ctx, `SELECT `+tableunions.UnionNameSQL("$1::uuid")+`,
+        coalesce((SELECT name FROM app.restaurant_tables WHERE id=$1),'')`, *tableID).Scan(&union, &name)
 	if err != nil {
 		return "", err
+	}
+	// Etapa M1 (M1-D29): la referencia de una cuenta en una unión de nombre largo va recortada (el nombre de una cuenta
+	// admite hasta 100 caracteres); la unión conserva su nombre completo.
+	if union != nil {
+		return tableunions.AccountReference(*union), nil
 	}
 	if name == "" {
 		return neutralDineInName, nil

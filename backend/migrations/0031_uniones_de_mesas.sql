@@ -47,14 +47,15 @@ CREATE TABLE app.table_group_sections (
 --    como una sola mesa. Una cuenta es de la unión porque su table_id es una mesa miembro: restaurant_accounts no
 --    cambia. name es el nombre vigente que calcula Go («Mesa 5 + 6», o el del grupo si une todas sus secciones), con su
 --    group_id. La unión se deshace sola cuando ya no le quedan cuentas abiertas (no_accounts) o cuando le queda una sola
---    mesa (single_table); nunca se borra.
+--    mesa (single_table); nunca se borra. Sus horas son clock_timestamp() (M1-D30): Go las escribe con 7820148305
+--    exclusivo ya tomado, así que siguen el orden del lock y no el del inicio de cada transacción.
 CREATE TABLE app.table_unions (
     id uuid PRIMARY KEY,
     area_id uuid NOT NULL REFERENCES app.restaurant_areas(id),
     group_id uuid REFERENCES app.table_groups(id),
     name text NOT NULL CHECK (char_length(name) BETWEEN 1 AND 4000),
     state text NOT NULL DEFAULT 'open' CHECK (state IN ('open', 'dissolved')),
-    opened_at timestamptz NOT NULL DEFAULT now(),
+    opened_at timestamptz NOT NULL DEFAULT clock_timestamp(),
     opened_by uuid NOT NULL REFERENCES app.users(id),
     opened_device_id uuid NOT NULL REFERENCES app.devices(id),
     dissolved_at timestamptz,
@@ -62,7 +63,7 @@ CREATE TABLE app.table_unions (
     dissolved_device_id uuid REFERENCES app.devices(id),
     dissolve_reason text CHECK (dissolve_reason IN ('no_accounts', 'single_table')),
     revision integer NOT NULL DEFAULT 1 CHECK (revision > 0),
-    updated_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
     CHECK ((state = 'dissolved') = (dissolved_at IS NOT NULL)),
     CHECK ((state = 'dissolved') = (dissolve_reason IS NOT NULL))
 );
@@ -74,7 +75,7 @@ CREATE TABLE app.table_union_members (
     id uuid PRIMARY KEY,
     union_id uuid NOT NULL REFERENCES app.table_unions(id),
     table_id uuid NOT NULL REFERENCES app.restaurant_tables(id),
-    joined_at timestamptz NOT NULL DEFAULT now(),
+    joined_at timestamptz NOT NULL DEFAULT clock_timestamp(),
     joined_by uuid NOT NULL REFERENCES app.users(id),
     left_at timestamptz,
     left_by uuid REFERENCES app.users(id),
@@ -100,7 +101,7 @@ CREATE TABLE app.table_union_events (
     operation_id uuid,
     author_id uuid NOT NULL REFERENCES app.users(id),
     device_id uuid NOT NULL REFERENCES app.devices(id),
-    created_at timestamptz NOT NULL DEFAULT now()
+    created_at timestamptz NOT NULL DEFAULT clock_timestamp()
 );
 CREATE INDEX table_union_events_union_idx ON app.table_union_events (union_id, sequence);
 
@@ -117,6 +118,16 @@ ALTER TABLE app.sales_recognitions
     ADD COLUMN table_union_name text,
     ADD COLUMN table_union_tables jsonb;
 SET CONSTRAINTS app.sales_recognitions_operation_id_fkey DEFERRED;
+
+-- 3b. La cancelación guarda su unión (M1-D30): la unión abierta de la mesa de la cuenta al cancelarla, leída en la misma
+--     transacción (con 7820148305 exclusivo) antes de que la unión se deshaga. «Cuentas canceladas» y los documentos de
+--     una cuenta cancelada la leen de aquí, sin comparar horas. Las cancelaciones existentes quedan en NULL. Su llave
+--     diferida se resuelve antes de alterar la tabla, como arriba.
+SET CONSTRAINTS app.account_cancellations_operation_id_fkey IMMEDIATE;
+ALTER TABLE app.account_cancellations
+    ADD COLUMN table_union_id uuid,
+    ADD COLUMN table_union_name text;
+SET CONSTRAINTS app.account_cancellations_operation_id_fkey DEFERRED;
 
 -- 4. Permiso «Unir mesas» (§1.3; M1-D8). Lo piden unir, agregar y quitar mesas y la unión que nace con el primer
 --    producto. Se concede a los roles existentes Administrador, Mesero, Cajero y Supervisor que ya tengan lo que el

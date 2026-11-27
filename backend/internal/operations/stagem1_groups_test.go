@@ -52,6 +52,26 @@ func TestStageM1TableGroups(t *testing.T) {
 		"table_ids": fixture.ids("3C", "Mesa 12")}, 409, "TABLE_GROUP_SECTION_TAKEN", "La Mesa 3C ya es parte del grupo Mesa 3.")
 	fixture.reject(t, fixture.admin, "POST", route, map[string]any{"area_id": fixture.salon.ID, "name": "MESA 3",
 		"table_ids": fixture.ids("Mesa 11", "Mesa 12")}, 409, "TABLE_GROUP_NAME_TAKEN", "")
+	// M1-D33: tampoco una mesa toma el nombre del grupo: al crearla, al renombrarla ni al cambiarla de área.
+	fixture.reject(t, fixture.admin, "POST", "restaurant/tables", structMap(t, operations.Table{AreaID: fixture.salon.ID,
+		Name: "mesa 3", Shape: "rectangle", X: 900, Y: 480, Width: 64, Height: 56, Seats: 2, Active: true}), 409,
+		"TABLE_GROUP_NAME_TAKEN", "Ya hay una mesa o un grupo con ese nombre en esta área.")
+	eleven := fixture.table(t, "Mesa 11")
+	renamedTable := eleven
+	renamedTable.Name = "MESA 3"
+	fixture.reject(t, fixture.admin, "PATCH", "restaurant/tables/"+eleven.ID, structMap(t, renamedTable), 409,
+		"TABLE_GROUP_NAME_TAKEN", "")
+	terrace := fixture.addTable(t, fixture.terraza.ID, "Mesa 3", 140, 10, 2)
+	movedTerrace := terrace
+	movedTerrace.AreaID = fixture.salon.ID
+	fixture.reject(t, fixture.admin, "PATCH", "restaurant/tables/"+terrace.ID, structMap(t, movedTerrace), 409,
+		"TABLE_GROUP_NAME_TAKEN", "")
+	// El mismo nombre en otra área y otro nombre en el área del grupo sí se aceptan.
+	renamedTable.Name = "Mesa 11 bis"
+	fixture.mutate(t, "PATCH", "restaurant/tables/"+eleven.ID, renamedTable, 200)
+	eleven = fixture.table(t, "Mesa 11")
+	eleven.Name = "Mesa 11"
+	fixture.mutate(t, "PATCH", "restaurant/tables/"+eleven.ID, eleven, 200)
 	// Una sección no cambia de área.
 	section := fixture.table(t, "3A")
 	moved := section

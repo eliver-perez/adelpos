@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"local/ad-el-pos/server/internal/documents"
 	"local/ad-el-pos/server/internal/tableunions"
@@ -512,13 +513,15 @@ func (handler *service) insertUnion(tables []tableunions.MemberTable, areaID str
 	}
 	id := newID()
 	actor := handler.unionActor()
-	if _, err := handler.tx.Exec(handler.ctx, `INSERT INTO app.table_unions(id,area_id,group_id,name,opened_by,opened_device_id)
-        VALUES ($1,$2,$3,$4,$5,$6)`, id, areaID, description.GroupID, description.Name, actor.UserID, actor.DeviceID); err != nil {
+	// Las horas de la unión son clock_timestamp() (M1-D30, tableunions.Dissolve explica por qué).
+	if _, err := handler.tx.Exec(handler.ctx, `INSERT INTO app.table_unions(id,area_id,group_id,name,opened_by,opened_device_id,
+            opened_at,updated_at)
+        VALUES ($1,$2,$3,$4,$5,$6,clock_timestamp(),clock_timestamp())`, id, areaID, description.GroupID, description.Name,
+		actor.UserID, actor.DeviceID); err != nil {
 		return "", description, err
 	}
-	for _, table := range description.Tables {
-		if _, err := handler.tx.Exec(handler.ctx, `INSERT INTO app.table_union_members(id,union_id,table_id,joined_by)
-            VALUES ($1,$2,$3,$4)`, newID(), id, table.ID, actor.UserID); err != nil {
+	for _, table := range tables {
+		if err := handler.insertMember(id, table); err != nil {
 			return "", description, err
 		}
 	}
@@ -532,13 +535,48 @@ func (handler *service) insertUnion(tables []tableunions.MemberTable, areaID str
 	return id, description, nil
 }
 
+// insertMember agrega la mesa a la unión. Antes se comprobó con el mismo criterio del índice único parcial
+// (table_union_members_open_table_idx) y con 7820148305 exclusivo, así que el índice no debería saltar; si salta (M1-D31,
+// una escritura que se saltara el lock), la respuesta es la del contrato, TABLE_IN_UNION con la unión que ya tiene la
+// mesa, y no el genérico «Ya existe un registro». El punto de guardado deja leer esa unión después del rechazo; la
+// operación se revierte entera de todos modos.
+func (handler *service) insertMember(unionID string, table tableunions.MemberTable) error {
+	savepoint, err := handler.tx.Begin(handler.ctx)
+	if err != nil {
+		return err
+	}
+	_, err = savepoint.Exec(handler.ctx, `INSERT INTO app.table_union_members(id,union_id,table_id,joined_by,joined_at)
+        VALUES ($1,$2,$3,$4,clock_timestamp())`, newID(), unionID, table.ID, handler.request.Actor.UserID)
+	var problem *pgconn.PgError
+	if errors.As(err, &problem) && problem.Code == "23505" && problem.ConstraintName == "table_union_members_open_table_idx" {
+		if rollback := savepoint.Rollback(handler.ctx); rollback != nil {
+			return rollback
+		}
+		union, readErr := handler.unionOfTable(table.ID)
+		if readErr != nil {
+			return readErr
+		}
+		if union == nil {
+			return &Error{Status: 409, Code: codeTableInUnion, Message: "La " + tableReference(table.Name) +
+				" ya está unida con otras mesas.", Details: map[string]any{"table_id": table.ID}}
+		}
+		return handler.tableInUnion(table.ID, table.Name, union)
+	}
+	if err != nil {
+		_ = savepoint.Rollback(handler.ctx)
+		return err
+	}
+	return savepoint.Commit(handler.ctx)
+}
+
 // unionReference es la unión tal como queda en el historial de cada cuenta.
 func unionReference(id, name string, tableIDs []string) map[string]any {
 	return map[string]any{"id": id, "name": name, "table_ids": tableIDs}
 }
 
 // renameUnionAccounts aplica un cambio de la unión a sus cuentas abiertas (M1-D14): las que se llamaban como el lugar
-// anterior (previousName: el nombre de la mesa al unir, el de la unión al agregar o quitar) toman el nombre nuevo, y
+// anterior (previousName: el nombre de la mesa al unir, el de la unión al agregar o quitar) toman el nombre nuevo (la
+// referencia de la cuenta, recortada con tableunions.AccountReference si la unión pasa de 100 caracteres, M1-D29), y
 // cada cuenta abierta de la unión registra el cambio en su historial (account.table_union, con quién y la terminal) y
 // publica su evento, que la pantalla de cocina usa para volver a leer el encabezado. No sube la revisión de la cuenta
 // (tableunions.RestoreAccountNames explica por qué).
@@ -553,10 +591,11 @@ func (handler *service) renameUnionAccounts(unionID, previousName, name, change 
 			return err
 		}
 		current := previous
-		if previous == previousName && previousName != name {
-			current = name
+		previousReference, reference := tableunions.AccountReference(previousName), tableunions.AccountReference(name)
+		if previous == previousReference && previousReference != reference {
+			current = reference
 			if _, err := handler.tx.Exec(handler.ctx, "UPDATE app.restaurant_accounts SET name=$1,updated_at=now() WHERE id=$2",
-				name, accountID); err != nil {
+				reference, accountID); err != nil {
 				return err
 			}
 		}
@@ -710,7 +749,8 @@ func (handler *service) openUnionForChange(unionID string, revision int) (*union
 
 // updateUnionName guarda el nombre y el grupo nuevos de la unión y sube su revisión.
 func (handler *service) updateUnionName(unionID string, description tableunions.Description) error {
-	_, err := handler.tx.Exec(handler.ctx, `UPDATE app.table_unions SET name=$2,group_id=$3,revision=revision+1,updated_at=now()
+	_, err := handler.tx.Exec(handler.ctx, `UPDATE app.table_unions SET name=$2,group_id=$3,revision=revision+1,
+        updated_at=clock_timestamp()
         WHERE id=$1 AND state='open'`, unionID, description.Name, description.GroupID)
 	return err
 }
@@ -755,8 +795,7 @@ func (handler *service) addTableToUnion(unionID string) (any, error) {
 		return nil, err
 	}
 	actor := handler.unionActor()
-	if _, err := handler.tx.Exec(handler.ctx, `INSERT INTO app.table_union_members(id,union_id,table_id,joined_by)
-        VALUES ($1,$2,$3,$4)`, newID(), unionID, added[0].ID, actor.UserID); err != nil {
+	if err := handler.insertMember(unionID, added[0]); err != nil {
 		return nil, err
 	}
 	if err := handler.updateUnionName(unionID, description); err != nil {
@@ -823,7 +862,7 @@ func (handler *service) removeTableFromUnion(unionID, tableID string) (any, erro
 		return nil, err
 	}
 	actor := handler.unionActor()
-	if _, err := handler.tx.Exec(handler.ctx, `UPDATE app.table_union_members SET left_at=now(),left_by=$3
+	if _, err := handler.tx.Exec(handler.ctx, `UPDATE app.table_union_members SET left_at=clock_timestamp(),left_by=$3
         WHERE union_id=$1 AND table_id=$2 AND left_at IS NULL`, unionID, removed.ID, actor.UserID); err != nil {
 		return nil, err
 	}

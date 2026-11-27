@@ -132,6 +132,9 @@ func (handler *service) tables(parts []string) (any, error) {
 		if table.ID != "" || table.Revision != 0 {
 			return nil, invalid("La mesa nueva no debe reutilizar identidad ni revisión.")
 		}
+		if err := handler.requireNameFreeOfGroups(table.AreaID, table.Name); err != nil {
+			return nil, err
+		}
 		table.ID = newID()
 		_, err = handler.tx.Exec(handler.ctx, `INSERT INTO app.restaurant_tables
             (id,area_id,name,shape,x,y,width,height,seats,active,out_of_service)
@@ -162,6 +165,13 @@ func (handler *service) tables(parts []string) (any, error) {
 				return nil, err
 			}
 		}
+		// Etapa M1 (M1-D33): una mesa no toma el nombre de un grupo activo de su área (al renombrarla o al cambiarla de
+		// área), como un grupo no toma el de una mesa.
+		if table.AreaID != old.AreaID || !strings.EqualFold(table.Name, old.Name) {
+			if err := handler.requireNameFreeOfGroups(table.AreaID, table.Name); err != nil {
+				return nil, err
+			}
+		}
 		_, err = handler.tx.Exec(handler.ctx, `UPDATE app.restaurant_tables SET area_id=$1,name=$2,shape=$3,x=$4,y=$5,
             width=$6,height=$7,seats=$8,active=$9,out_of_service=$10,revision=revision+1,updated_at=now()
             WHERE id=$11 AND revision=$12`, table.AreaID, table.Name, table.Shape, table.X, table.Y,
@@ -181,6 +191,21 @@ func (handler *service) tables(parts []string) (any, error) {
 		return nil, err
 	}
 	return saved, handler.audit(handler.ctx, handler.tx, "restaurant.table.saved", "table", &table.ID, before, saved)
+}
+
+// requireNameFreeOfGroups rechaza el nombre de una mesa que es el de un grupo activo del área, sin distinguir
+// mayúsculas (M1-D33, TABLE_GROUP_NAME_TAKEN, el mismo texto que cubre los dos casos). Un choque con otra mesa sigue
+// siendo el de siempre (la llave única del área).
+func (handler *service) requireNameFreeOfGroups(areaID, name string) error {
+	var taken bool
+	if err := handler.tx.QueryRow(handler.ctx, `SELECT EXISTS(SELECT FROM app.table_groups g WHERE g.area_id=$1 AND g.active
+        AND lower(g.name)=lower($2))`, areaID, name).Scan(&taken); err != nil {
+		return err
+	}
+	if taken {
+		return &Error{Status: 409, Code: codeGroupNameTaken, Message: "Ya hay una mesa o un grupo con ese nombre en esta área."}
+	}
+	return nil
 }
 
 // requireAreaChangeAllowed rechaza cambiar de área una mesa unida (TABLE_IN_UNION) o agrupada
