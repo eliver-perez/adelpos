@@ -46,7 +46,10 @@ var liveTables = map[string]liveTable{
 	MapArea: {entity: MapArea, table: "restaurant_areas", nameColumn: "name", maxName: 100,
 		deactivate: "active = false, revision = revision + 1, updated_at = now()"},
 	MapTable: {entity: MapTable, table: "restaurant_tables", nameColumn: "name", maxName: 60,
-		deactivate: "active = false, revision = revision + 1, updated_at = now()"},
+		deactivate: "active = false, revision = revision + 1, updated_at = now()",
+		// Etapa M1: una mesa que se borra deja de ser sección de su grupo (trimManualGroups quita después los grupos del
+		// propietario que se quedan sin dos secciones).
+		cleanup: []string{"DELETE FROM app.table_group_sections WHERE table_id = $1"}},
 	MapUser: {entity: MapUser, table: "users", nameColumn: "username", maxName: 40,
 		deactivate: "active = false, updated_at = now()",
 		cleanup:    []string{"DELETE FROM app.user_preferences WHERE user_id = $1"}},
@@ -122,6 +125,10 @@ func replaceLive(ctx context.Context, tx pgx.Tx, plan *CatalogPlan, ids IDMap, p
 	if err := writeTables(ctx, tx, plan, ids); err != nil {
 		return result, err
 	}
+	// Etapa M1 (M1-D5): las mesas divisibles del anterior, con las mesas ya escritas.
+	if err := writeTableGroups(ctx, tx, plan, ids); err != nil {
+		return result, err
+	}
 	if err := writeUsers(ctx, tx, plan, ids); err != nil {
 		return result, err
 	}
@@ -143,7 +150,7 @@ func replaceLive(ctx context.Context, tx pgx.Tx, plan *CatalogPlan, ids IDMap, p
 			result.Retired = append(result.Retired, RetiredEntry{Entity: entity, Key: key, ID: id})
 		}
 	}
-	return result, nil
+	return result, trimManualGroups(ctx, tx)
 }
 
 // retire borra una fila viva de un lote anterior si nada la usa (en un punto de guardado: un rechazo por llave

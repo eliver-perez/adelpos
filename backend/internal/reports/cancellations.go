@@ -1,6 +1,10 @@
 package reports
 
-import "context"
+import (
+	"context"
+
+	"local/ad-el-pos/server/internal/tableunions"
+)
 
 // Etapa 9C (§5.1), ampliada en la etapa 9D (§5): cuentas canceladas, su total por motivo y
 // modificaciones de cantidades, con los datos que AD-EL POS guarda:
@@ -49,8 +53,12 @@ const unitsAuthorizedDescription = "En una cuenta cancelada, el supervisor que a
 	"el permiso «Cancelar cuentas». Cancelar o reducir unidades no pide autorización, así que en esos renglones queda vacía, salvo " +
 	"en los registros de cuando sí se pedía."
 
-// placeSQL es la mesa (salón) o el origen (para llevar) de una cuenta con la mesa actual.
-const placeSQL = "CASE WHEN a.mode='dine_in' THEN coalesce(place.name,'Sin mesa') ELSE a.origin END"
+// placeAt es la mesa (salón) u origen (para llevar) de la cuenta en un instante (la cancelación). Etapa M1 (M1-D14): si la mesa estaba en una
+// unión en ese momento, el nombre que tenía la unión («Mesa 5 + 6»), aunque después se haya deshecho.
+func placeAt(at string) string {
+	return "CASE WHEN a.mode='dine_in' THEN coalesce(" + tableunions.UnionNameAtSQL("a.table_id", at) +
+		",place.name,'Sin mesa') ELSE a.origin END"
+}
 
 const modeSQL = "CASE a.mode WHEN 'dine_in' THEN 'Salón' ELSE 'Para llevar' END"
 
@@ -166,7 +174,7 @@ func init() {
 				native, err := query.collect(ctx, cancelledAccountsSQL+`
                 SELECT x.cancelled_at,a.folio::text AS folio,x.reason,x.description,x.cancelled_amount,x.cancelled_units,
                     author.display_name AS cancelled_by,coalesce(approver.display_name,'') AS authorized_by,
-                    coalesce(device.name,'') AS terminal,`+modeSQL+` AS mode,`+placeSQL+` AS place,
+                    coalesce(device.name,'') AS terminal,`+modeSQL+` AS mode,`+placeAt("x.cancelled_at")+` AS place,
                     coalesce(area.name,'') AS area,x.kind,a.name AS account,a.created_at AS opened_at,opener.display_name AS opened_by
                 FROM cancelled x
                 JOIN app.restaurant_accounts a ON a.id=x.account_id
@@ -185,7 +193,8 @@ func init() {
 			}
 			notes := []string{
 				"Una cuenta cancelada nunca cuenta como venta. El motivo es el nombre que tenía al cancelar: renombrarlo no cambia el historial.",
-				"Las cuentas vacías liberadas o descartadas no son cancelaciones y no aparecen aquí. La mesa y el área son las actuales de la cuenta.",
+				"Las cuentas vacías liberadas o descartadas no son cancelaciones y no aparecen aquí. La mesa y el área son las actuales de la " +
+					"cuenta; si estaba en una unión de mesas al cancelarse, la mesa es el nombre de la unión.",
 				"Las unidades canceladas también aparecen, una por una, en «Productos cancelados» y en «Modificaciones de cantidades».",
 			}
 			if query.legacy.History {
@@ -415,7 +424,7 @@ func quantityChanges(ctx context.Context, query *Query) (*Dataset, error) {
             author.display_name AS changed_by,coalesce(approver.display_name,'') AS authorized_by,c.reason,
             CASE c.kind WHEN 'item.cancelled' THEN 'Cancelación' WHEN 'account.cancelled' THEN 'Cancelación de la cuenta'
                 ELSE 'Modificación de la partida' END AS action,
-            coalesce(device.name,'') AS terminal,`+modeSQL+` AS mode,`+placeSQL+` AS place,c.released_units::bigint AS released_units
+            coalesce(device.name,'') AS terminal,`+modeSQL+` AS mode,`+placeAt("c.created_at")+` AS place,c.released_units::bigint AS released_units
         FROM measured c
         JOIN app.restaurant_accounts a ON a.id=c.account_id
         JOIN app.users author ON author.id=c.author_id

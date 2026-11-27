@@ -241,3 +241,33 @@ func VersionPreparation(ctx context.Context, tx pgx.Tx, accountID, versionID str
 	}
 	return "released", nil
 }
+
+// VersionPreparationRequired dice si un renglón de la cuenta necesita preparación (etapa M1, §5.2; decisión M1-D15 y
+// contrato §4): false solo si todas sus unidades (las de esa versión y ese estado en la cuenta) ya se liberaron y
+// ninguna generó una tarea de preparación (producto sin ruta con «No necesitan preparación» o ruta «Sin preparación»).
+// Antes de liberarse (programado o pendiente) es true; un combo con algún componente con tarea también (los combos no
+// cambian). El escritorio y Android no ponen ninguna etiqueta de cocina a un renglón con false.
+func VersionPreparationRequired(ctx context.Context, tx pgx.Tx, accountID, versionID, state string) (bool, error) {
+	var required bool
+	err := tx.QueryRow(ctx, `SELECT NOT EXISTS(SELECT FROM app.restaurant_item_units u
+            WHERE u.account_id=$1 AND u.version_id::text=$2 AND u.state=$3)
+        OR EXISTS(SELECT FROM app.restaurant_item_units u
+            WHERE u.account_id=$1 AND u.version_id::text=$2 AND u.state=$3
+                AND (NOT EXISTS(SELECT FROM app.kitchen_unit_releases k WHERE k.unit_id=u.id)
+                    OR EXISTS(SELECT FROM app.kitchen_tasks t WHERE t.unit_id=u.id)))`,
+		accountID, versionID, state).Scan(&required)
+	return required, err
+}
+
+// AccountPreparationRequired dice si la cuenta necesita preparación (contrato §4): true si al menos un renglón vigente
+// (unidades activas) la necesita; una cuenta sin productos enviados vigentes también es true (su etiqueta la decide el
+// borrador o «sin productos», como hoy). Con false, la cuenta no lleva etiqueta de cocina (duda 7 de la Fase 0).
+func AccountPreparationRequired(ctx context.Context, tx pgx.Tx, accountID string) (bool, error) {
+	var required bool
+	err := tx.QueryRow(ctx, `SELECT NOT EXISTS(SELECT FROM app.restaurant_item_units u
+            WHERE u.account_id=$1 AND u.state='active')
+        OR EXISTS(SELECT FROM app.restaurant_item_units u WHERE u.account_id=$1 AND u.state='active'
+            AND (NOT EXISTS(SELECT FROM app.kitchen_unit_releases k WHERE k.unit_id=u.id)
+                OR EXISTS(SELECT FROM app.kitchen_tasks t WHERE t.unit_id=u.id)))`, accountID).Scan(&required)
+	return required, err
+}

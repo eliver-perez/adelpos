@@ -3,6 +3,8 @@ package operations
 import (
 	"reflect"
 	"strings"
+
+	"local/ad-el-pos/server/internal/tableunions"
 )
 
 // Referencias neutras de una cuenta sin nombre capturado (etapa 6.2). La columna
@@ -17,7 +19,8 @@ const (
 
 // neutralAccountName devuelve la referencia neutra para la modalidad y la mesa indicadas. Una mesa
 // con identificador inválido o inexistente usa «Cuenta»: la validación de la mesa de destino
-// (validateTableTarget) es la que rechaza la operación después.
+// (validateTableTarget) es la que rechaza la operación después. Etapa M1 (M1-D14): en una mesa unida, la referencia
+// neutra es el nombre de la unión («Mesa 5 + 6»); así mover una cuenta dentro o fuera de una unión sigue la misma regla.
 func (handler *service) neutralAccountName(mode string, tableID *string) (string, error) {
 	if mode == "takeaway" {
 		return neutralTakeawayName, nil
@@ -29,7 +32,8 @@ func (handler *service) neutralAccountName(mode string, tableID *string) (string
 		return neutralDineInName, nil
 	}
 	var name string
-	err := handler.tx.QueryRow(handler.ctx, "SELECT coalesce((SELECT name FROM app.restaurant_tables WHERE id=$1),'')", *tableID).Scan(&name)
+	err := handler.tx.QueryRow(handler.ctx, `SELECT coalesce(`+tableunions.UnionNameSQL("$1::uuid")+`,
+        (SELECT name FROM app.restaurant_tables WHERE id=$1),'')`, *tableID).Scan(&name)
 	if err != nil {
 		return "", err
 	}

@@ -46,6 +46,11 @@ type Table struct {
 	// LongOpen (etapa 9D, §3.4): la cuenta abierta más antigua de la mesa lleva más de
 	// restaurant_settings.long_open_hours horas abierta. Lo calcula Go en cada lectura.
 	LongOpen bool `json:"long_open"`
+	// UnionID (etapa M1, M1-D10) es la unión abierta de la mesa o null. Una mesa unida tiene el estado, las cuentas, el
+	// saldo y el tiempo de la unión, así que se lee ocupada aunque sus cuentas estén en otra mesa de la unión.
+	UnionID *string `json:"union_id"`
+	// GroupID (etapa M1, M1-D4) es el grupo predefinido activo del que la mesa es sección, o null.
+	GroupID *string `json:"group_id"`
 }
 
 type Settings struct {
@@ -82,10 +87,45 @@ type AccountInput struct {
 // se crea con su primer producto: Items es el borrador inicial (mismo formato y límites que PUT
 // …/draft) y SeenAccountIDs, las cuentas abiertas que la terminal ya veía en la mesa. Sin
 // seen_account_ids no se comprueba la mesa (comportamiento anterior).
+//
+// Etapa M1 (M1-D9, creación diferida de una unión): con UnionTableIDs (las otras mesas) o UnionGroupID (table_id es
+// una sección del grupo), la unión nace en esta misma operación con la cuenta; todas las mesas deben estar libres.
+// SeenUnionID es la unión que la terminal veía en la mesa (null si ninguna); sin el campo, el comportamiento de la
+// 0.4.1 (seen_account_ids contra todas las cuentas de la unión).
 type OpenAccountInput struct {
 	AccountInput
 	Items          []DraftItem `json:"items"`
 	SeenAccountIDs *[]string   `json:"seen_account_ids"`
+	UnionTableIDs  []string    `json:"union_table_ids"`
+	UnionGroupID   *string     `json:"union_group_id"`
+	SeenUnionID    PresentID   `json:"seen_union_id"`
+}
+
+// PresentID es un identificador opcional que distingue «sin el campo» de null (etapa M1, seen_union_id): Set es true si
+// el campo vino en el cuerpo, con un valor o con null.
+type PresentID struct {
+	Set   bool
+	Value *string
+}
+
+// UnmarshalJSON marca el campo como presente; encoding/json también lo llama con null.
+func (id *PresentID) UnmarshalJSON(data []byte) error {
+	id.Set = true
+	id.Value = nil
+	if string(data) == "null" {
+		return nil
+	}
+	var value string
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	id.Value = &value
+	return nil
+}
+
+// MarshalJSON lo escribe como null o como el identificador.
+func (id PresentID) MarshalJSON() ([]byte, error) {
+	return json.Marshal(id.Value)
 }
 
 // TableAccountRef identifica una cuenta abierta que otra terminal creó en la mesa
@@ -142,6 +182,19 @@ type Account struct {
 	CancelBlocker               string `json:"cancel_blocker"`
 	CancelRequiresAuthorization bool   `json:"cancel_requires_authorization"`
 	LongOpen                    bool   `json:"long_open"`
+	// TableUnion (etapa M1, contrato §2) es la unión abierta en la que está la cuenta abierta (por su mesa), o null.
+	// table_id y table_name siguen siendo los de su mesa (para la 0.4.1).
+	TableUnion *AccountTableUnion `json:"table_union"`
+	// PreparationRequired (etapa M1, §5.2 y contrato §4): false si nada de lo enviado y vigente necesita preparación;
+	// entonces la cuenta no lleva etiqueta de cocina. Sin productos enviados vigentes es true.
+	PreparationRequired bool `json:"preparation_required"`
+}
+
+// AccountTableUnion es la unión de una cuenta: su identificador, su nombre y sus mesas en el orden del nombre.
+type AccountTableUnion struct {
+	ID       string   `json:"id"`
+	Name     string   `json:"name"`
+	TableIDs []string `json:"table_ids"`
 }
 
 type Totals struct {
@@ -156,17 +209,20 @@ type DraftItem struct {
 }
 
 type ConfirmedLine struct {
-	PreparationState string              `json:"preparation_state"`
-	VersionID        string              `json:"version_id"`
-	ItemID           string              `json:"item_id"`
-	OriginalOrderID  string              `json:"original_order_id"`
-	Version          int                 `json:"version"`
-	State            string              `json:"state"`
-	Quantity         int                 `json:"quantity"`
-	Request          catalog.LineRequest `json:"request"`
-	QuoteLine        catalog.QuoteLine   `json:"quote_line"`
-	Totals           Totals              `json:"totals"`
-	CreatedAt        time.Time           `json:"created_at"`
+	PreparationState string `json:"preparation_state"`
+	// PreparationRequired (etapa M1, §5.2 y contrato §4): false si el renglón ya se liberó y ninguna de sus unidades
+	// generó tarea de preparación; entonces el renglón no lleva etiqueta de cocina. Antes de liberarse es true.
+	PreparationRequired bool                `json:"preparation_required"`
+	VersionID           string              `json:"version_id"`
+	ItemID              string              `json:"item_id"`
+	OriginalOrderID     string              `json:"original_order_id"`
+	Version             int                 `json:"version"`
+	State               string              `json:"state"`
+	Quantity            int                 `json:"quantity"`
+	Request             catalog.LineRequest `json:"request"`
+	QuoteLine           catalog.QuoteLine   `json:"quote_line"`
+	Totals              Totals              `json:"totals"`
+	CreatedAt           time.Time           `json:"created_at"`
 }
 
 type Bill struct {

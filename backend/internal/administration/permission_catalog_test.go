@@ -132,7 +132,8 @@ func TestPermissionDependenciesAreKnownAndAcyclic(t *testing.T) {
 }
 
 func TestFactoryRolesAreClosedUnderDependencies(t *testing.T) {
-	expectedSizes := map[string]int{"waiter": 14, "cashier": 36, "kitchen": 8, "supervisor": 88, "inventory": 20, "finance": 28}
+	// Etapa M1 (M1-D8): «Unir mesas» (restaurant.tables.join) en Mesero, Cajero y Supervisor: uno más en cada uno.
+	expectedSizes := map[string]int{"waiter": 15, "cashier": 37, "kitchen": 8, "supervisor": 89, "inventory": 20, "finance": 28}
 	if len(factoryRoleCodes) != len(expectedSizes) || len(factoryRolePermissions) != len(expectedSizes) {
 		t.Fatalf("roles de fábrica: %v", factoryRoleCodes)
 	}

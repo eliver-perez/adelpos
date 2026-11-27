@@ -331,7 +331,7 @@
       "post": {
         "operationId": "pinLogin",
         "summary": "Entrar con PIN en un dispositivo de meseros",
-        "description": "Solo un dispositivo android emparejado (403 PIN_DEVICE_NOT_ALLOWED en otro tipo), con su credencial. PIN de 4 a 6 dígitos (400 si no tiene esa forma). PIN incorrecto o usuario que no puede entrar: 401 PIN_INVALID. 5 fallos en 15 minutos, desde cualquier dispositivo, bloquean el PIN de ese usuario 5 minutos: 429 PIN_LOCKED con details.locked_until (RFC 3339) y details.requires_unlock false. Etapa A1 (A1-D16): el tercer bloqueo seguido en 24 horas sin una entrada correcta deja el PIN bloqueado hasta que un administrador lo desbloquee: 429 PIN_LOCKED con details.locked_until null y details.requires_unlock true. Una entrada correcta borra la serie de bloqueos. PIN correcto sin el permiso waiter_devices.use: 403 PERMISSION_DENIED. Pocas entradas con PIN a la vez en el servidor: si no hay turno en unos segundos, 503 PIN_LOGIN_BUSY (reintentar). Responde como login (sesión de 12 horas; reemplaza solo la sesión anterior de ese usuario en ese dispositivo, así que el cambio rápido de mesero no cierra las de los demás) más pin_version y la credencial de envío, que sustituye a la anterior de ese mesero en ese dispositivo. Etapa A1 (A1-D17): la sesión y la credencial de envío solo tienen los permisos del usuario que están en la lista cerrada de permisos de mesero: waiter_devices.use, restaurant.tables.read, restaurant.areas.read, accounts.read, accounts.open, orders.capture, orders.confirm, orders.edit, orders.cancel, catalog.read, catalog.prices.read, events.read y, desde la etapa A2 (Para llevar), takeaway.read, takeaway.manage y takeaway.deliver, y para imprimir la precuenta, payments.tickets.print. Aunque el usuario sea administrador, nada más (getIdentity y getRecoveryState informan ya los permisos acotados).",
+        "description": "Solo un dispositivo android emparejado (403 PIN_DEVICE_NOT_ALLOWED en otro tipo), con su credencial. PIN de 4 a 6 dígitos (400 si no tiene esa forma). PIN incorrecto o usuario que no puede entrar: 401 PIN_INVALID. 5 fallos en 15 minutos, desde cualquier dispositivo, bloquean el PIN de ese usuario 5 minutos: 429 PIN_LOCKED con details.locked_until (RFC 3339) y details.requires_unlock false. Etapa A1 (A1-D16): el tercer bloqueo seguido en 24 horas sin una entrada correcta deja el PIN bloqueado hasta que un administrador lo desbloquee: 429 PIN_LOCKED con details.locked_until null y details.requires_unlock true. Una entrada correcta borra la serie de bloqueos. PIN correcto sin el permiso waiter_devices.use: 403 PERMISSION_DENIED. Pocas entradas con PIN a la vez en el servidor: si no hay turno en unos segundos, 503 PIN_LOGIN_BUSY (reintentar). Responde como login (sesión de 12 horas; reemplaza solo la sesión anterior de ese usuario en ese dispositivo, así que el cambio rápido de mesero no cierra las de los demás) más pin_version y la credencial de envío, que sustituye a la anterior de ese mesero en ese dispositivo. Etapa A1 (A1-D17): la sesión y la credencial de envío solo tienen los permisos del usuario que están en la lista cerrada de permisos de mesero: waiter_devices.use, restaurant.tables.read, restaurant.areas.read, accounts.read, accounts.open, orders.capture, orders.confirm, orders.edit, orders.cancel, catalog.read, catalog.prices.read, events.read y, desde la etapa A2 (Para llevar), takeaway.read, takeaway.manage y takeaway.deliver, y para imprimir la precuenta, payments.tickets.print, y desde la etapa M1, restaurant.tables.join («Unir mesas»). Aunque el usuario sea administrador, nada más (getIdentity y getRecoveryState informan ya los permisos acotados).",
         "parameters": [
           {
             "$ref": "#/components/parameters/ClientVersion"
@@ -1067,7 +1067,7 @@
       "post": {
         "operationId": "openAccount",
         "summary": "Abrir una cuenta con su primer producto",
-        "description": "Crea la cuenta y su borrador inicial en una sola operación idempotente (accounts.open; con items, también orders.capture, catalog.read y catalog.prices.read). Con seen_account_ids responde 409 TABLE_HAS_ACCOUNT si la mesa tiene cuentas abiertas que la terminal no veía. Etapa L1 (Fase D, cupos de la licencia): crear o modificar un pedido ocupa un cupo de la terminal: el de caja si su caja tiene un turno activo (aunque lo abriera otra terminal) y, si no, el de comandero (uno por terminal: varios meseros con su PIN en una tableta ocupan uno). Sin cupo, 409 LICENSE_SEAT_UNAVAILABLE. Un reintento con una operation_id ya registrada no vuelve a pedir cupo.",
+        "description": "Crea la cuenta y su borrador inicial en una sola operación idempotente (accounts.open; con items, también orders.capture, catalog.read y catalog.prices.read). Con seen_account_ids responde 409 TABLE_HAS_ACCOUNT si la mesa tiene cuentas abiertas que la terminal no veía. Etapa L1 (Fase D, cupos de la licencia): crear o modificar un pedido ocupa un cupo de la terminal: el de caja si su caja tiene un turno activo (aunque lo abriera otra terminal) y, si no, el de comandero (uno por terminal: varios meseros con su PIN en una tableta ocupan uno). Sin cupo, 409 LICENSE_SEAT_UNAVAILABLE. Un reintento con una operation_id ya registrada no vuelve a pedir cupo. Etapa M1: con union_table_ids o union_group_id la unión de mesas nace en esta misma operación con la cuenta (que se llama como la unión si no trae nombre). Rechazos con Error (409 salvo que se diga; message exacto, para mostrarse; details lleva table_id y union_id cuando aplica): TABLE_UNION_AREA «Las mesas deben ser de la misma área.»; TABLE_UNION_OCCUPIED «Solo se pueden unir mesas libres: la {mesa} ya está ocupada.»; TABLE_UNION_BOTH_OCCUPIED «La {mesa A} y la {mesa B} tienen cuentas abiertas. Para juntar sus cuentas usa «Combinar cuentas».»; TABLE_UNION_UNAVAILABLE «La {mesa} está fuera de servicio o desactivada.»; TABLE_IN_UNION «La {mesa} ya está unida con otras mesas ({unión}).» con details.union (TableUnion) y details.accounts (identificadores de sus cuentas abiertas); TABLE_GROUP_SECTION_OCCUPIED «La sección {nombre} está ocupada. Únela con las secciones libres para crecer.»; TABLE_UNION_NOT_OPEN «Esta unión de mesas ya se deshizo.»; TABLE_UNION_CONFLICT «La unión cambió en otra terminal. Revisa las mesas e inténtalo otra vez.»; 400 OPERATION_VALIDATION con menos de dos mesas, una mesa repetida o un identificador inválido; 403 sin «Unir mesas» (restaurant.tables.join). {mesa} es documents.TableContext del nombre («Mesa 6» con una mesa «6» o «Mesa 6»).",
         "parameters": [
           {
             "$ref": "#/components/parameters/ClientVersion"
@@ -1149,6 +1149,26 @@
                       "$ref": "#/components/schemas/DraftItem"
                     },
                     "maxItems": 20
+                  },
+                  "union_table_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "minItems": 1,
+                    "maxItems": 39,
+                    "description": "Etapa M1 (M1-D9): las otras mesas de una unión que nace con el primer producto (creación diferida). Exige restaurant.tables.join. Todas las mesas deben estar libres, del mismo área, en servicio y sin unir; si no, 409 sin guardar nada."
+                  },
+                  "union_group_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Etapa M1: el atajo de una mesa divisible: une todas las secciones del grupo (table_id es una de ellas) con el primer producto. Con una sección ocupada, 409 TABLE_GROUP_SECTION_OCCUPIED."
+                  },
+                  "seen_union_id": {
+                    "type": ["string", "null"],
+                    "format": "uuid",
+                    "description": "Etapa M1: la unión que la terminal veía en la mesa (null si ninguna). Si viene y la mesa está en otra unión, 409 TABLE_IN_UNION con la unión y sus cuentas. Sin el campo (la 0.4.1), seen_account_ids se revisa contra todas las cuentas de la unión (TABLE_HAS_ACCOUNT)."
                   }
                 },
                 "required": ["operation_id", "mode"]
@@ -1784,7 +1804,7 @@
       "post": {
         "operationId": "submitOfflineOrder",
         "summary": "Pedido capturado sin conexión",
-        "description": "Para la aplicación Android: el pedido de la cola con la versión del catálogo con que se capturó, la hora de captura, el destino y el precio por unidad que vio el mesero. Sin cambios se acepta y se confirma (cocina lo recibe). Con cambios responde 409 ORDER_REQUIRES_CONFIRMATION con la lista; se acepta al reenviarlo con la misma operation_id y confirmation (la catalog_version vigente que devolvió el rechazo y los cambios que vio el mesero), siempre con los precios del servidor. Requiere orders.confirm, orders.capture, accounts.read, catalog.read y catalog.prices.read (y accounts.open para una mesa). Etapa A1: en lugar de la sesión acepta la credencial de envío del mesero (X-Offline-Credential, de pinLogin) junto con la del dispositivo, para que la cola salga aunque la sesión haya vencido; Go valida al recibir el dispositivo, el usuario activo, su PIN vigente (misma pin_version), waiter_devices.use y los permisos de la operación. Si la credencial ya no vale (PIN cambiado o quitado, usuario desactivado o sin waiter_devices.use, credencial reemplazada): 401 OFFLINE_CREDENTIAL_INVALID; el pedido se conserva y el mesero entra con su PIN con conexión. Sesión y credencial juntas: 400. Etapa A1 (A1-D6): con account_id, replaces_draft_items dice qué renglones del borrador de la cuenta sustituye el pedido (tal como los vio el dispositivo); al aceptarlo Go los quita del borrador en la misma transacción (removed_draft_item_ids) y avisa a las demás terminales como un guardado del borrador. Un renglón cambiado, quitado o ya enviado desde otra terminal es un cambio más (draft_item_changed, draft_item_removed, draft_item_sent) que el mesero confirma con la misma operation_id o corrige. A1-D18 (el servidor nunca repite lo que ya entró): una partida con el id de un renglón del borrador de la cuenta lo sustituye aunque no venga en replaces_draft_items (igual, o guardado por última vez por el mismo mesero en el mismo dispositivo: se quita; cambiado en otra terminal: draft_item_changed); una partida ya enviada a cocina es draft_item_sent y al confirmarlo se envía lo demás (si no queda nada, 200 sin pedido nuevo, already_sent_item_ids); la misma operation_id de un confirmDraft ya aplicado en esa cuenta por el mismo usuario y dispositivo es 409 OFFLINE_ORDER_ALREADY_ACCEPTED (origin confirm_draft) sin mandar nada (con otra cuenta, una mesa, otro usuario u otra operación, IDEMPOTENCY_CONFLICT); un pedido a una mesa cuyas partidas ya están en una cuenta abierta de esa mesa es items_in_account con account_id. Etapa A2 (Para llevar): con destination.takeaway abre un pedido para llevar nuevo (mode takeaway, sin mesa, origin «Para llevar», el cliente y el teléfono del destino, responsable = el mesero de la sesión o de la credencial de envío) y exige además accounts.open y takeaway.manage. Mismas reglas de la clave: un reintento con la misma operation_id devuelve el mismo pedido (nunca abre otro) y, si sus partidas ya están en un pedido para llevar abierto (la apertura en línea entró y su respuesta se perdió), responde items_in_account con su account_id para reenviarlo con la misma operation_id a destination.account_id. Etapa L1 (Fase D): el pedido ocupa el cupo de comandero del dispositivo como cualquier captura. Sin cupo, 409 LICENSE_SEAT_UNAVAILABLE (LicenseSeatUnavailable): el pedido no entró y su operation_id no quedó registrado; es definitivo para ese envío y el dispositivo no lo reintenta solo (lo marca rechazado con el mensaje).",
+        "description": "Para la aplicación Android: el pedido de la cola con la versión del catálogo con que se capturó, la hora de captura, el destino y el precio por unidad que vio el mesero. Sin cambios se acepta y se confirma (cocina lo recibe). Con cambios responde 409 ORDER_REQUIRES_CONFIRMATION con la lista; se acepta al reenviarlo con la misma operation_id y confirmation (la catalog_version vigente que devolvió el rechazo y los cambios que vio el mesero), siempre con los precios del servidor. Requiere orders.confirm, orders.capture, accounts.read, catalog.read y catalog.prices.read (y accounts.open para una mesa). Etapa A1: en lugar de la sesión acepta la credencial de envío del mesero (X-Offline-Credential, de pinLogin) junto con la del dispositivo, para que la cola salga aunque la sesión haya vencido; Go valida al recibir el dispositivo, el usuario activo, su PIN vigente (misma pin_version), waiter_devices.use y los permisos de la operación. Si la credencial ya no vale (PIN cambiado o quitado, usuario desactivado o sin waiter_devices.use, credencial reemplazada): 401 OFFLINE_CREDENTIAL_INVALID; el pedido se conserva y el mesero entra con su PIN con conexión. Sesión y credencial juntas: 400. Etapa A1 (A1-D6): con account_id, replaces_draft_items dice qué renglones del borrador de la cuenta sustituye el pedido (tal como los vio el dispositivo); al aceptarlo Go los quita del borrador en la misma transacción (removed_draft_item_ids) y avisa a las demás terminales como un guardado del borrador. Un renglón cambiado, quitado o ya enviado desde otra terminal es un cambio más (draft_item_changed, draft_item_removed, draft_item_sent) que el mesero confirma con la misma operation_id o corrige. A1-D18 (el servidor nunca repite lo que ya entró): una partida con el id de un renglón del borrador de la cuenta lo sustituye aunque no venga en replaces_draft_items (igual, o guardado por última vez por el mismo mesero en el mismo dispositivo: se quita; cambiado en otra terminal: draft_item_changed); una partida ya enviada a cocina es draft_item_sent y al confirmarlo se envía lo demás (si no queda nada, 200 sin pedido nuevo, already_sent_item_ids); la misma operation_id de un confirmDraft ya aplicado en esa cuenta por el mismo usuario y dispositivo es 409 OFFLINE_ORDER_ALREADY_ACCEPTED (origin confirm_draft) sin mandar nada (con otra cuenta, una mesa, otro usuario u otra operación, IDEMPOTENCY_CONFLICT); un pedido a una mesa cuyas partidas ya están en una cuenta abierta de esa mesa es items_in_account con account_id. Etapa A2 (Para llevar): con destination.takeaway abre un pedido para llevar nuevo (mode takeaway, sin mesa, origin «Para llevar», el cliente y el teléfono del destino, responsable = el mesero de la sesión o de la credencial de envío) y exige además accounts.open y takeaway.manage. Mismas reglas de la clave: un reintento con la misma operation_id devuelve el mismo pedido (nunca abre otro) y, si sus partidas ya están en un pedido para llevar abierto (la apertura en línea entró y su respuesta se perdió), responde items_in_account con su account_id para reenviarlo con la misma operation_id a destination.account_id. Etapa L1 (Fase D): el pedido ocupa el cupo de comandero del dispositivo como cualquier captura. Sin cupo, 409 LICENSE_SEAT_UNAVAILABLE (LicenseSeatUnavailable): el pedido no entró y su operation_id no quedó registrado; es definitivo para ese envío y el dispositivo no lo reintenta solo (lo marca rechazado con el mensaje). Etapa M1 (M1-D13): con destination.table_id de una mesa que al llegar está en una unión, las partidas ya recibidas y las cuentas no vistas se buscan en todas las mesas de la unión, y la cuenta nueva queda en la unión. Una unión que solo estaba en la pantalla nunca viaja en la cola.",
         "parameters": [
           {
             "$ref": "#/components/parameters/ClientVersion"
@@ -3789,6 +3809,612 @@
           }
         },
         "tags": ["Cocina"]
+      }
+    },
+    "/restaurant/table-unions/preview": {
+      "post": {
+        "operationId": "previewTableUnion",
+        "summary": "Vista previa de una unión de mesas",
+        "description": "Etapa M1 (M1-D9): calcula sin escribir (lock compartido) el nombre, la capacidad y los problemas de una unión: {table_ids} (todas, al menos dos; la primera es la mesa de inicio), {group_id} (el atajo de una mesa divisible) o {union_id, table_ids} (las que se agregan a una unión abierta). problems vacío = se puede; cada problema trae el código y el texto del rechazo que daría unir y su mesa. Requiere restaurant.tables.join. El cliente deshabilita con esto las mesas ocupadas, de otra área, unidas o fuera de servicio. 404 si el grupo o la unión no existen.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "table_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "minItems": 1,
+                    "maxItems": 40
+                  },
+                  "group_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "union_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Nombre, capacidad, mesas en orden y problemas.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "seats": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "table_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "format": "uuid"
+                      }
+                    },
+                    "problems": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/TableUnionProblem"
+                      }
+                    }
+                  },
+                  "required": ["name", "seats", "table_ids", "problems"]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Restaurante"]
+      }
+    },
+    "/restaurant/table-unions": {
+      "post": {
+        "operationId": "createTableUnion",
+        "summary": "Unir mesas desde una mesa ocupada",
+        "description": "Etapa M1 (§1.1): {operation_id, start_table_id, table_ids: [las demás]} o {operation_id, start_table_id, group_id} (la mesa de inicio es una sección del grupo). Solo con la mesa de inicio ocupada: sus cuentas quedan en la unión y se conservan (las que se llamaban como la mesa toman el nombre de la unión); las que se agregan deben estar libres. Con todas libres no guarda nada: 409 TABLE_UNION_DEFERRED «La unión se guarda con el primer producto.» (la unión nace con openAccount y union_table_ids). Requiere restaurant.tables.join. Idempotente con operation_id. Publica restaurant.table-unions.changed y restaurant.account.table_union por cuenta. Rechazos con Error (409 salvo que se diga; message exacto, para mostrarse; details lleva table_id y union_id cuando aplica): TABLE_UNION_AREA «Las mesas deben ser de la misma área.»; TABLE_UNION_OCCUPIED «Solo se pueden unir mesas libres: la {mesa} ya está ocupada.»; TABLE_UNION_BOTH_OCCUPIED «La {mesa A} y la {mesa B} tienen cuentas abiertas. Para juntar sus cuentas usa «Combinar cuentas».»; TABLE_UNION_UNAVAILABLE «La {mesa} está fuera de servicio o desactivada.»; TABLE_IN_UNION «La {mesa} ya está unida con otras mesas ({unión}).» con details.union (TableUnion) y details.accounts (identificadores de sus cuentas abiertas); TABLE_GROUP_SECTION_OCCUPIED «La sección {nombre} está ocupada. Únela con las secciones libres para crecer.»; TABLE_UNION_NOT_OPEN «Esta unión de mesas ya se deshizo.»; TABLE_UNION_CONFLICT «La unión cambió en otra terminal. Revisa las mesas e inténtalo otra vez.»; 400 OPERATION_VALIDATION con menos de dos mesas, una mesa repetida o un identificador inválido; 403 sin «Unir mesas» (restaurant.tables.join). {mesa} es documents.TableContext del nombre («Mesa 6» con una mesa «6» o «Mesa 6»).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "operation_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "start_table_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "table_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "minItems": 1,
+                    "maxItems": 39
+                  },
+                  "group_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                },
+                "required": ["operation_id", "start_table_id"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "La unión.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "union": {
+                      "$ref": "#/components/schemas/TableUnion"
+                    }
+                  },
+                  "required": ["union"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Rechazos de la unión (ver la descripción) o TABLE_UNION_DEFERRED; antes, la licencia o la hora.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/LicenseRejection"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SystemClockInvalid"
+                    },
+                    {
+                      "$ref": "#/components/schemas/Error"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Restaurante"]
+      }
+    },
+    "/restaurant/table-unions/{id}": {
+      "get": {
+        "operationId": "getTableUnion",
+        "summary": "Una unión de mesas con su historial",
+        "description": "Etapa M1: la unión (también deshecha, con state dissolved) con sus mesas y su historial (unir, agregar, quitar y deshacer, con quién y la terminal). Requiere restaurant.tables.read. 404 si no existe.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "La unión con sus mesas y su historial.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "union": {
+                      "$ref": "#/components/schemas/TableUnionDetail"
+                    }
+                  },
+                  "required": ["union"]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Restaurante"]
+      }
+    },
+    "/restaurant/table-unions/{id}/tables": {
+      "post": {
+        "operationId": "addTableToUnion",
+        "summary": "Agregar una mesa a una unión",
+        "description": "Etapa M1 (§1.1): {operation_id, revision, table_id}: una mesa libre del mismo área, en servicio y sin unir. El nombre y la capacidad cambian; las cuentas que se llamaban como la unión toman el nombre nuevo. Requiere restaurant.tables.join. Idempotente con operation_id. Rechazos con Error (409 salvo que se diga; message exacto, para mostrarse; details lleva table_id y union_id cuando aplica): TABLE_UNION_AREA «Las mesas deben ser de la misma área.»; TABLE_UNION_OCCUPIED «Solo se pueden unir mesas libres: la {mesa} ya está ocupada.»; TABLE_UNION_BOTH_OCCUPIED «La {mesa A} y la {mesa B} tienen cuentas abiertas. Para juntar sus cuentas usa «Combinar cuentas».»; TABLE_UNION_UNAVAILABLE «La {mesa} está fuera de servicio o desactivada.»; TABLE_IN_UNION «La {mesa} ya está unida con otras mesas ({unión}).» con details.union (TableUnion) y details.accounts (identificadores de sus cuentas abiertas); TABLE_GROUP_SECTION_OCCUPIED «La sección {nombre} está ocupada. Únela con las secciones libres para crecer.»; TABLE_UNION_NOT_OPEN «Esta unión de mesas ya se deshizo.»; TABLE_UNION_CONFLICT «La unión cambió en otra terminal. Revisa las mesas e inténtalo otra vez.»; 400 OPERATION_VALIDATION con menos de dos mesas, una mesa repetida o un identificador inválido; 403 sin «Unir mesas» (restaurant.tables.join). {mesa} es documents.TableContext del nombre («Mesa 6» con una mesa «6» o «Mesa 6»).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "operation_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "revision": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "table_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                },
+                "required": ["operation_id", "revision", "table_id"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "La unión con la mesa.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "union": {
+                      "$ref": "#/components/schemas/TableUnion"
+                    }
+                  },
+                  "required": ["union"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Rechazos de la unión (ver la descripción); antes, la licencia o la hora.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/LicenseRejection"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SystemClockInvalid"
+                    },
+                    {
+                      "$ref": "#/components/schemas/Error"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Restaurante"]
+      }
+    },
+    "/restaurant/table-unions/{id}/tables/{table_id}/remove": {
+      "post": {
+        "operationId": "removeTableFromUnion",
+        "summary": "Quitar una mesa de una unión",
+        "description": "Etapa M1 (§1.1; M1-D1): {operation_id, revision}. Quitar una mesa no saca ninguna cuenta de la unión: las cuentas de esa mesa pasan a la primera de las que quedan (en el orden del nombre). Si queda una sola mesa, la unión se deshace (dissolved true y union.state dissolved) y las cuentas quedan en esa mesa con su nombre. Requiere restaurant.tables.join. Idempotente con operation_id. 400 si la mesa no es parte de la unión. Rechazos con Error (409 salvo que se diga; message exacto, para mostrarse; details lleva table_id y union_id cuando aplica): TABLE_UNION_AREA «Las mesas deben ser de la misma área.»; TABLE_UNION_OCCUPIED «Solo se pueden unir mesas libres: la {mesa} ya está ocupada.»; TABLE_UNION_BOTH_OCCUPIED «La {mesa A} y la {mesa B} tienen cuentas abiertas. Para juntar sus cuentas usa «Combinar cuentas».»; TABLE_UNION_UNAVAILABLE «La {mesa} está fuera de servicio o desactivada.»; TABLE_IN_UNION «La {mesa} ya está unida con otras mesas ({unión}).» con details.union (TableUnion) y details.accounts (identificadores de sus cuentas abiertas); TABLE_GROUP_SECTION_OCCUPIED «La sección {nombre} está ocupada. Únela con las secciones libres para crecer.»; TABLE_UNION_NOT_OPEN «Esta unión de mesas ya se deshizo.»; TABLE_UNION_CONFLICT «La unión cambió en otra terminal. Revisa las mesas e inténtalo otra vez.»; 400 OPERATION_VALIDATION con menos de dos mesas, una mesa repetida o un identificador inválido; 403 sin «Unir mesas» (restaurant.tables.join). {mesa} es documents.TableContext del nombre («Mesa 6» con una mesa «6» o «Mesa 6»).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "table_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "operation_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "revision": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                },
+                "required": ["operation_id", "revision"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "La unión sin la mesa.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "union": {
+                      "$ref": "#/components/schemas/TableUnion"
+                    },
+                    "dissolved": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": ["union", "dissolved"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Rechazos de la unión (ver la descripción); antes, la licencia o la hora.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/LicenseRejection"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SystemClockInvalid"
+                    },
+                    {
+                      "$ref": "#/components/schemas/Error"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Restaurante"]
+      }
+    },
+    "/restaurant/table-groups": {
+      "post": {
+        "operationId": "createTableGroup",
+        "summary": "Crear una mesa divisible",
+        "description": "Etapa M1 (§3; M1-D4): {operation_id, area_id, name, table_ids: [al menos 2, en orden]}: un grupo predefinido con sus secciones (mesas normales del área, que conservan su nombre). Idempotente con operation_id. Rechazos (409): TABLE_GROUP_NAME_TAKEN «Ya hay una mesa o un grupo con ese nombre en esta área.» (sin distinguir mayúsculas); TABLE_GROUP_SECTION_TAKEN «La {mesa} ya es parte del grupo {grupo}.»; TABLE_UNION_AREA «Las mesas deben ser de la misma área.»; TABLE_GROUP_IN_USE «El grupo tiene mesas unidas. Cámbialo cuando se liberen.»; ACCOUNT_CONFLICT si la revisión cambió. 400 OPERATION_VALIDATION con menos de 2 o más de 40 mesas, una repetida o un nombre vacío o de más de 60 caracteres. Requiere restaurant.tables.manage. Publica restaurant.table-groups.changed.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "operation_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "area_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 60
+                  },
+                  "table_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "minItems": 2,
+                    "maxItems": 40
+                  }
+                },
+                "required": ["operation_id", "area_id", "name", "table_ids"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "El grupo.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "group": {
+                      "$ref": "#/components/schemas/TableGroup"
+                    }
+                  },
+                  "required": ["group"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Rechazos del grupo (ver la descripción); antes, la licencia o la hora.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/LicenseRejection"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SystemClockInvalid"
+                    },
+                    {
+                      "$ref": "#/components/schemas/Error"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Restaurante"]
+      }
+    },
+    "/restaurant/table-groups/{id}": {
+      "patch": {
+        "operationId": "updateTableGroup",
+        "summary": "Cambiar o quitar una mesa divisible",
+        "description": "Etapa M1 (§3; M1-D4): {operation_id, revision, name?, table_ids?, active?}. active false lo quita: ya no se lee en ningún lado, sus secciones dejan de serlo y su nombre vuelve a estar libre; un grupo ya quitado no se vuelve a usar (400; se crea otro). Idempotente con operation_id. Rechazos (409): TABLE_GROUP_NAME_TAKEN «Ya hay una mesa o un grupo con ese nombre en esta área.» (sin distinguir mayúsculas); TABLE_GROUP_SECTION_TAKEN «La {mesa} ya es parte del grupo {grupo}.»; TABLE_UNION_AREA «Las mesas deben ser de la misma área.»; TABLE_GROUP_IN_USE «El grupo tiene mesas unidas. Cámbialo cuando se liberen.»; ACCOUNT_CONFLICT si la revisión cambió. 400 OPERATION_VALIDATION con menos de 2 o más de 40 mesas, una repetida o un nombre vacío o de más de 60 caracteres. Requiere restaurant.tables.manage. Publica restaurant.table-groups.changed.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "operation_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "revision": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 60
+                  },
+                  "table_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "minItems": 2,
+                    "maxItems": 40
+                  },
+                  "active": {
+                    "type": "boolean"
+                  }
+                },
+                "required": ["operation_id", "revision"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "El grupo (con active false, el último estado que tuvo).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "group": {
+                      "$ref": "#/components/schemas/TableGroup"
+                    }
+                  },
+                  "required": ["group"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Rechazos del grupo (ver la descripción); antes, la licencia o la hora.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/LicenseRejection"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SystemClockInvalid"
+                    },
+                    {
+                      "$ref": "#/components/schemas/Error"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Restaurante"]
       }
     }
   },
@@ -5885,6 +6511,21 @@
           "releasable": {
             "type": "boolean",
             "description": "Lo calcula Go en cada lectura (etapa 7.1; en el contrato desde la etapa A3): discardable y además sin borrador, la cuenta vacía en sentido estricto («Liberar mesa» del escritorio)."
+          },
+          "table_union": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AccountTableUnion"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Etapa M1: la unión abierta en la que está la cuenta abierta, o null. table_id y table_name siguen siendo los de su mesa (para la 0.4.1). Una cuenta sin nombre propio en una unión se llama como la unión (M1-D14) y vuelve al nombre de su mesa al deshacerse."
+          },
+          "preparation_required": {
+            "type": "boolean",
+            "description": "Etapa M1 (§5.2): true si al menos un renglón vigente necesita preparación; una cuenta sin productos enviados también es true. Con false, ninguna etiqueta de cocina (ni en el renglón ni en la cuenta). No depende de table-unions-v1: un cliente que no lo recibe lo trata como true."
           }
         },
         "required": [
@@ -5907,7 +6548,9 @@
           "draft_quantity",
           "totals",
           "discardable",
-          "releasable"
+          "releasable",
+          "table_union",
+          "preparation_required"
         ],
         "description": "Cuenta con su revisión (control optimista: toda escritura la envía) y los estados que calcula Go. Un pedido para llevar es una cuenta con mode takeaway, sin mesa (table_id null), con su folio, el cliente, el origen y sus estados de preparación, pago y entrega independientes (estar pagado no es estar entregado)."
       },
@@ -5981,6 +6624,16 @@
           },
           "long_open": {
             "type": "boolean"
+          },
+          "union_id": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "Etapa M1: la unión abierta de la mesa (null si no está unida). Una mesa unida tiene state, account_count, balance, occupied_since, occupied_seconds y long_open de la unión (M1-D10): se lee ocupada aunque sus cuentas estén en otra mesa de la unión, no se desactiva, no se pone fuera de servicio ni cambia de área (TABLE_IN_UNION)."
+          },
+          "group_id": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "Etapa M1: el grupo activo (mesa divisible) del que la mesa es sección, o null. Una sección no cambia de área (TABLE_GROUP_SECTION_AREA)."
           }
         },
         "required": [
@@ -6001,7 +6654,9 @@
           "occupied_since",
           "occupied_seconds",
           "balance",
-          "long_open"
+          "long_open",
+          "union_id",
+          "group_id"
         ],
         "description": "Mesa con su ocupación calculada por Go. Mapa: lienzo lógico de 1000 × 560 por área (x + width ≤ 1000, y + height ≤ 560), forma rectangle o round y seats lugares. state: free, occupied, awaiting_payment, partial_payment u out_of_service (con varias cuentas gana el más avanzado). occupied_since es la apertura de la cuenta abierta más antigua y occupied_seconds el tiempo transcurrido según el servidor (null y 0 sin cuentas); long_open, si esa cuenta lleva más de long_open_hours abierta."
       },
@@ -6046,6 +6701,10 @@
           "created_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "preparation_required": {
+            "type": "boolean",
+            "description": "Etapa M1 (§5.2): false si el renglón ya se liberó y ninguna de sus unidades generó tarea de preparación (producto sin ruta con «No necesitan preparación», ruta «Sin preparación»); antes de liberarse (programado, pendiente) es true y un combo con algún componente con tarea también. Con false, el renglón no lleva etiqueta de cocina."
           }
         },
         "required": [
@@ -6056,7 +6715,8 @@
           "quantity",
           "request",
           "quote_line",
-          "totals"
+          "totals",
+          "preparation_required"
         ],
         "description": "Partida confirmada (enviada) con su estado de preparación."
       },
@@ -6180,6 +6840,34 @@
           "license": {
             "$ref": "#/components/schemas/LicenseSummary",
             "description": "Etapa L1 (Fase C): el estado de la licencia y de la hora del equipo. Un servidor anterior no lo envía."
+          },
+          "unions": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/TableUnion"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Etapa M1: las uniones abiertas (null sin restaurant.tables.read)."
+          },
+          "groups": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/TableGroup"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Etapa M1: los grupos activos (null sin restaurant.tables.read)."
           }
         },
         "required": [
@@ -6190,7 +6878,9 @@
           "terminal",
           "tables",
           "accounts",
-          "event_cursor"
+          "event_cursor",
+          "unions",
+          "groups"
         ],
         "description": "Estado para un cliente que se reconecta. tables es null sin restaurant.tables.read y accounts es null sin accounts.read; accounts trae las cuentas abiertas, y las para llevar (mode takeaway, con su preparación, pago y entrega) solo con takeaway.read."
       },
@@ -6275,6 +6965,11 @@
                   }
                 },
                 "description": "Etapa A2: un pedido para llevar nuevo (exclusivo con account_id y table_id; sin seen_account_ids, name ni replaces_draft_items). customer_name y phone son opcionales (vacíos si no se capturaron; con los límites de la cuenta, 100 y 40 caracteres ya recortados)."
+              },
+              "seen_union_id": {
+                "type": ["string", "null"],
+                "format": "uuid",
+                "description": "Etapa M1 (M1-D13, opcional; la 0.4.1 no lo manda): la unión que el mesero veía en la mesa. Si al llegar la mesa está en una unión, el pedido va a la unión: las partidas ya recibidas (items_in_account) y las cuentas no vistas (table_has_account, «La {mesa} ahora está unida con otras mesas ({unión}) y tiene cuentas abiertas…») se buscan en todas sus mesas. Si la unión ya no existe y la mesa está libre, cuenta nueva en la mesa. Sin tipos de cambio nuevos."
               }
             },
             "description": "Uno solo de: una cuenta abierta (account_id), una mesa donde abrir una cuenta nueva (table_id, con las cuentas que el mesero veía abiertas en ella y un name opcional) o, desde la etapa A2, un pedido para llevar nuevo (takeaway)."
@@ -6782,9 +7477,23 @@
           },
           "timezone": {
             "type": "string"
+          },
+          "unions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TableUnion"
+            },
+            "description": "Etapa M1: las uniones abiertas."
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TableGroup"
+            },
+            "description": "Etapa M1: los grupos activos (mesas divisibles)."
           }
         },
-        "required": ["areas", "tables", "settings", "timezone"],
+        "required": ["areas", "tables", "settings", "timezone", "unions", "groups"],
         "description": "Áreas (también las inactivas, con active), mesas con su ocupación y umbrales de tiempo."
       },
       "AccountNotOpenDetails": {
@@ -8649,6 +9358,278 @@
         },
         "required": ["tasks", "releases", "pending_changes", "stations", "server_time", "timezone"],
         "description": "El tablero de Cocina › Preparación con el panel «Por enviar a cocina»."
+      },
+      "TableUnion": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "description": "Lo calcula Go (M1-D2): «Mesa 5 + 6», «5 + 6» o el nombre del grupo."
+          },
+          "area_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "group_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "table_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "minItems": 1
+          },
+          "seats": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "state": {
+            "enum": ["occupied", "awaiting_payment", "partial_payment", "dissolved"]
+          },
+          "account_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "balance": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "occupied_since": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "occupied_seconds": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "long_open": {
+            "type": "boolean"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "area_id",
+          "group_id",
+          "table_ids",
+          "seats",
+          "state",
+          "account_count",
+          "balance",
+          "occupied_since",
+          "occupied_seconds",
+          "long_open",
+          "revision"
+        ],
+        "description": "Etapa M1: una unión de mesas (varias mesas del mismo área que se comportan como una sola). name lo calcula Go: las mesas en orden natural de su nombre, «Mesa 5 + 6» si todas empiezan con la palabra «Mesa» y «5 + 6» si no; con todas las secciones de un grupo (y nada más), el nombre del grupo y su group_id. table_ids en ese mismo orden; seats es la suma. state, account_count, balance, occupied_since, occupied_seconds y long_open son los de sus cuentas, como una mesa (el estado más avanzado); «dissolved» solo en getTableUnion de una unión que ya se deshizo (sin cuentas, saldo 0.00). revision sube con cada cambio de mesas."
+      },
+      "TableGroup": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "area_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 60
+          },
+          "table_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "minItems": 0
+          },
+          "seats": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": ["id", "area_id", "name", "table_ids", "seats", "revision"],
+        "description": "Etapa M1: una mesa divisible (grupo predefinido): un nombre («Mesa 3») sobre varias mesas normales del mismo área (sus secciones, en su orden). Cada sección conserva su nombre y se abre, se cobra y se libera por separado; el atajo del grupo las une con union_group_id en openAccount. Solo se leen los activos."
+      },
+      "TableUnionDetail": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "description": "Lo calcula Go (M1-D2): «Mesa 5 + 6», «5 + 6» o el nombre del grupo."
+          },
+          "area_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "group_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "table_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "minItems": 1
+          },
+          "seats": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "state": {
+            "enum": ["occupied", "awaiting_payment", "partial_payment", "dissolved"]
+          },
+          "account_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "balance": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "occupied_since": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "occupied_seconds": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "long_open": {
+            "type": "boolean"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "tables": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "seats": {
+                  "type": "integer"
+                }
+              },
+              "required": ["id", "name", "seats"]
+            }
+          },
+          "history": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "kind": {
+                  "enum": ["joined", "table_added", "table_removed", "dissolved"]
+                },
+                "table_id": {
+                  "type": ["string", "null"],
+                  "format": "uuid"
+                },
+                "table_name": {
+                  "type": ["string", "null"]
+                },
+                "user_name": {
+                  "type": "string"
+                },
+                "device_name": {
+                  "type": "string"
+                }
+              },
+              "required": ["at", "kind", "table_id", "table_name", "user_name", "device_name"]
+            }
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "area_id",
+          "group_id",
+          "table_ids",
+          "seats",
+          "state",
+          "account_count",
+          "balance",
+          "occupied_since",
+          "occupied_seconds",
+          "long_open",
+          "revision",
+          "tables",
+          "history"
+        ],
+        "description": "Etapa M1: la unión (también deshecha) con sus mesas (las actuales; las que tenía al deshacerse) y su historial: joined (una fila por mesa inicial), table_added, table_removed y dissolved, con quién y la terminal."
+      },
+      "TableUnionProblem": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "table_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          }
+        },
+        "required": ["code", "message", "table_id"],
+        "description": "Etapa M1: un motivo por el que no se puede unir, con el código y el texto del rechazo (contrato §5)."
+      },
+      "AccountTableUnion": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "table_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        },
+        "required": ["id", "name", "table_ids"],
+        "description": "Etapa M1: la unión abierta de una cuenta abierta (por su mesa), con sus mesas en el orden del nombre."
       }
     }
   }

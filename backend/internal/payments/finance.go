@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/shopspring/decimal"
 	"local/ad-el-pos/server/internal/kitchen"
+	"local/ad-el-pos/server/internal/tableunions"
 )
 
 // accountRecord es la parte de la cuenta que interesa al módulo financiero.
@@ -23,7 +24,12 @@ type accountRecord struct {
 }
 
 func readAccountRecord(ctx context.Context, tx pgx.Tx, accountID string, forUpdate bool) (*accountRecord, error) {
-	query := `SELECT a.id,a.folio,a.name,a.mode,a.state,a.revision,t.name,a.customer_name,
+	// Etapa M1 (M1-D14): el lugar de la cuenta es el nombre de su unión («Mesa 5 + 6») si está unida, o su mesa. Una
+	// cuenta abierta lee la unión vigente; una cerrada o cancelada, la que tenía al cerrarse, para reimprimir igual.
+	query := `SELECT a.id,a.folio,a.name,a.mode,a.state,a.revision,
+        coalesce(CASE WHEN a.state='open' THEN ` + tableunions.UnionNameSQL("a.table_id") + `
+            ELSE ` + tableunions.UnionNameAtSQL("a.table_id", "coalesce(a.closed_at,a.updated_at)") + ` END,t.name),
+        a.customer_name,
         (SELECT coalesce(sum(quantity),0)::integer FROM app.restaurant_draft_items d WHERE d.account_id=a.id)
         FROM app.restaurant_accounts a LEFT JOIN app.restaurant_tables t ON t.id=a.table_id WHERE a.id=$1`
 	if forUpdate {

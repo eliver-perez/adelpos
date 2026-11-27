@@ -9,6 +9,7 @@ import (
 	"local/ad-el-pos/server/internal/businessday"
 	"local/ad-el-pos/server/internal/payments"
 	"local/ad-el-pos/server/internal/plural"
+	"local/ad-el-pos/server/internal/tableunions"
 )
 
 // «En curso» (§0-B): las cuentas abiertas con su total, lo pagado y su saldo, con la fórmula única
@@ -66,7 +67,8 @@ func inProgress(defaultState string) func(ctx context.Context, query *Query) (*D
             FROM (
                 SELECT a.folio::text AS folio,a.name AS account,a.mode AS account_mode,
                     CASE a.mode WHEN 'dine_in' THEN 'Salón' ELSE 'Para llevar' END AS mode,
-                    coalesce(t.name,CASE WHEN a.mode='takeaway' THEN a.origin END,'Sin mesa') AS place,
+                    coalesce(`+tableunions.UnionNameSQL("a.table_id")+`,t.name,CASE WHEN a.mode='takeaway' THEN a.origin END,
+                        'Sin mesa') AS place,
                     a.created_at AS opened_at,u.display_name AS responsible,f.units::bigint AS units,f.total,f.paid,f.balance,
                     EXISTS(SELECT FROM app.takeaway_deliveries d WHERE d.account_id=a.id) AS delivered,
                     (EXISTS(SELECT FROM app.audit_events e WHERE e.action='payments.account_closed' AND e.entity_id=a.id)

@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"strings"
 	"time"
+
+	"local/ad-el-pos/server/internal/tableunions"
 )
 
 func (handler *service) validateAccountInput(input *AccountInput, previous *Account) (*time.Time, error) {
@@ -157,6 +159,19 @@ func (handler *service) openAccount() (any, error) {
 	if input.Revision != 0 {
 		return nil, invalid("Una cuenta nueva empieza sin revisión previa.")
 	}
+	// Etapa M1 (M1-D9): la unión que vivía solo en la pantalla nace aquí, con el primer producto y antes de nombrar la
+	// cuenta (una cuenta sin nombre en una unión se llama como la unión). Si una mesa se ocupó o se unió mientras tanto,
+	// el rechazo revierte todo: no queda ni la unión ni la cuenta.
+	unionID := ""
+	if len(input.UnionTableIDs) > 0 || input.UnionGroupID != nil {
+		created, err := handler.deferredUnion(&input)
+		if err != nil {
+			return nil, err
+		}
+		unionID = created
+	} else if err := handler.requireSeenUnion(input); err != nil {
+		return nil, err
+	}
 	// Etapa 6.2: el nombre es opcional al abrir; sin nombre, Go asigna la referencia neutra.
 	if err := handler.fillAccountName(&input.AccountInput); err != nil {
 		return nil, err
@@ -180,6 +195,16 @@ func (handler *service) openAccount() (any, error) {
 	}
 	if _, err := handler.insertAccountWithID(id, input.AccountInput, scheduled); err != nil {
 		return nil, err
+	}
+	if unionID != "" {
+		union, err := handler.readUnion(unionID)
+		if err != nil {
+			return nil, err
+		}
+		if err := handler.unionAccountEvent(id, "joined", input.Name, input.Name, nil,
+			unionReference(union.ID, union.Name, union.TableIDs)); err != nil {
+			return nil, err
+		}
 	}
 	if len(input.Items) > 0 {
 		if err := handler.insertDraftItems(id, input.Items); err != nil {
@@ -207,9 +232,10 @@ func (handler *service) requireNoUnseenAccounts(tableID *string, seen []string) 
 	if tableID == nil {
 		return nil
 	}
+	// Etapa M1 (M1-D9): en una mesa unida se comparan todas las cuentas abiertas de la unión.
 	unseen, err := readList[TableAccountRef](handler.ctx, handler.tx, `SELECT jsonb_build_object(
         'id',a.id,'folio',a.folio,'name',a.name) FROM app.restaurant_accounts a
-        WHERE a.table_id=$1 AND a.state='open' AND NOT (a.id::text = ANY($2::text[]))
+        WHERE a.table_id IN `+tableunions.PlaceTablesSQL("$1::uuid")+` AND a.state='open' AND NOT (a.id::text = ANY($2::text[]))
         ORDER BY a.created_at,a.id`, *tableID, seen)
 	if err != nil {
 		return err
@@ -223,6 +249,33 @@ func (handler *service) requireNoUnseenAccounts(tableID *string, seen []string) 
 		Message: "Esta mesa ya tiene una cuenta abierta en otra terminal. Elige si agregas los productos a esa cuenta o abres una cuenta nueva.",
 		Details: map[string]any{"accounts": unseen},
 	}
+}
+
+// requireSeenUnion compara la unión que la terminal veía en la mesa (seen_union_id) con la vigente (M1-D9). Sin el
+// campo (la 0.4.1) no se compara nada: seen_account_ids se revisa contra toda la unión. Con el campo (null u otra
+// unión) y la mesa en una unión distinta, TABLE_IN_UNION con la unión y sus cuentas. Una mesa que ya no está unida no
+// se rechaza por esto: la unión que vio la terminal se deshizo y la mesa se trata como siempre.
+func (handler *service) requireSeenUnion(input OpenAccountInput) error {
+	if !input.SeenUnionID.Set || input.TableID == nil || validateID(*input.TableID) != nil {
+		return nil
+	}
+	if input.SeenUnionID.Value != nil {
+		if err := validateID(*input.SeenUnionID.Value); err != nil {
+			return err
+		}
+	}
+	union, err := handler.unionOfTable(*input.TableID)
+	if err != nil || union == nil {
+		return err
+	}
+	if input.SeenUnionID.Value != nil && *input.SeenUnionID.Value == union.ID {
+		return nil
+	}
+	var name string
+	if err := handler.tx.QueryRow(handler.ctx, "SELECT name FROM app.restaurant_tables WHERE id=$1", *input.TableID).Scan(&name); err != nil {
+		return err
+	}
+	return handler.tableInUnion(*input.TableID, name, union)
 }
 
 func (handler *service) updateAccount(id string) (any, error) {
@@ -271,7 +324,12 @@ func (handler *service) updateAccount(id string) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return saved, handler.event(id, nil, "account.updated", account, saved.Account)
+	if err := handler.event(id, nil, "account.updated", account, saved.Account); err != nil {
+		return nil, err
+	}
+	// Etapa M1 (§5.3): cocina integra el cambio en el evento (quitar la hora envía el pedido en esta transacción), así
+	// que la respuesta se lee después, con la preparación vigente.
+	return handler.readBill(id)
 }
 
 // accountAction mueve una cuenta a otra mesa o cambia su responsable. La anulación anterior con

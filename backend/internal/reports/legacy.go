@@ -163,7 +163,7 @@ const (
             r.product_code,r.category_id,r.category_name,r.tax_rate,r.quantity::numeric AS quantity,r.gross::numeric AS gross,
             r.promotion::numeric AS promotion,r.discount::numeric AS discount,r.courtesy::numeric AS courtesy,
             r.charge::numeric AS charge,r.net::numeric AS net,r.base::numeric AS base,r.tax::numeric AS tax,
-            0::numeric AS legacy_difference,false AS legacy
+            0::numeric AS legacy_difference,false AS legacy,r.table_union_id,r.table_union_name,r.table_union_tables
         FROM app.sales_recognitions r`
 	legacyLedgerBranch = `SELECT l.sequence-4611686018427387904 AS sequence,'legacy'::text AS recognition_kind,l.recognized_at,
             ` + legacyAccountSQL + ` AS account_id,l.mode,'` + LegacySourceLabel + `'::text AS origin,l.table_id,l.table_name,
@@ -173,7 +173,8 @@ const (
             (CASE WHEN l.entry_kind='difference' THEN 0 ELSE l.gross END)::numeric AS gross,0::numeric AS promotion,
             l.discount::numeric AS discount,0::numeric AS courtesy,l.charge::numeric AS charge,l.net::numeric AS net,
             l.base::numeric AS base,l.tax::numeric AS tax,
-            (CASE WHEN l.entry_kind='difference' THEN l.net ELSE 0 END)::numeric AS legacy_difference,true AS legacy
+            (CASE WHEN l.entry_kind='difference' THEN l.net ELSE 0 END)::numeric AS legacy_difference,true AS legacy,
+            NULL::uuid AS table_union_id,NULL::text AS table_union_name,NULL::jsonb AS table_union_tables
         FROM app.legacy_sales_recognitions l`
 )
 

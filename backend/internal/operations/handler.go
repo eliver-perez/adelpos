@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"local/ad-el-pos/server/internal/events"
+	"local/ad-el-pos/server/internal/tableunions"
 )
 
 // retiredVoidMessage explica a cualquier cliente que la anulación anterior ya no existe y qué usar.
@@ -39,7 +40,8 @@ func Handle(ctx context.Context, tx pgx.Tx, request Request, audit Audit) (any, 
 	if err := request.Actor.Require(permission); err != nil {
 		return nil, err
 	}
-	if len(parts) > 1 && parts[0] != "accounts" && parts[0] != "layout" {
+	// Etapa M1: restaurant/table-unions/preview no lleva identificador; …/tables/{table_id}/remove se valida en su ruta.
+	if len(parts) > 1 && parts[0] != "accounts" && parts[0] != "layout" && !unionPreviewRoute(request.Method, parts) {
 		if err := validateID(parts[1]); err != nil {
 			return nil, err
 		}
@@ -50,7 +52,8 @@ func Handle(ctx context.Context, tx pgx.Tx, request Request, audit Audit) (any, 
 		}
 	}
 	previewRoute := len(parts) == 3 && (parts[2] == "edit-preview" || parts[2] == "draft-preview")
-	readOnly := request.Method == "GET" || previewRoute
+	// Etapa M1: la vista previa de una unión solo calcula (lock compartido, sin clave de operación).
+	readOnly := request.Method == "GET" || previewRoute || unionPreviewRoute(request.Method, parts)
 	lock := "SELECT pg_advisory_xact_lock(7820148305)"
 	if readOnly {
 		lock = "SELECT pg_advisory_xact_lock_shared(7820148305)"
@@ -83,6 +86,12 @@ func Handle(ctx context.Context, tx pgx.Tx, request Request, audit Audit) (any, 
 	}
 	result, err := handler.dispatch(parts)
 	if err != nil {
+		return nil, err
+	}
+	// Etapa M1 (M1-D7): al final de cada escritura, con 7820148305 exclusivo todavía tomado, se deshacen las uniones que
+	// se quedaron sin cuentas abiertas (cobrar no pasa por aquí: payments.Handle hace lo mismo). Un solo lugar para
+	// cancelar, descartar, liberar, combinar, mover, dividir, transferir y cualquier camino nuevo.
+	if _, err := tableunions.SettleEmpty(ctx, tx, handler.unionActor(), mutation.OperationID); err != nil {
 		return nil, err
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO app.restaurant_operations(id,actor_id,device_id,route,fingerprint,response)
@@ -215,6 +224,16 @@ func routePermission(method string, parts []string) string {
 	// Etapa 7.1: poner fuera de servicio o habilitar una mesa desde la operación.
 	if resource == "tables" && len(parts) == 3 && parts[2] == "service" && method == "POST" {
 		return "restaurant.tables.manage"
+	}
+	// Etapa M1: uniones de mesas («Unir mesas», salvo la lectura) y grupos predefinidos (Áreas y distribución).
+	if resource == "table-unions" {
+		return tableUnionPermission(method, parts)
+	}
+	if resource == "table-groups" {
+		if (method == "POST" && len(parts) == 1) || (method == "PATCH" && len(parts) == 2) {
+			return "restaurant.tables.manage"
+		}
+		return ""
 	}
 	if len(parts) == 2 && method == "PATCH" {
 		return map[string]string{
@@ -368,6 +387,10 @@ func (handler *service) dispatch(parts []string) (any, error) {
 		return handler.cancelReasons(parts)
 	case "offline-orders":
 		return handler.offlineOrder()
+	case "table-unions":
+		return handler.tableUnions(parts)
+	case "table-groups":
+		return handler.tableGroups(parts)
 	}
 	return nil, invalid("Operación no implementada.")
 }

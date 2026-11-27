@@ -21,6 +21,10 @@ var WaiterPermissions = []string{
 	"accounts.read",
 	// Abrir una cuenta con su primer producto (también desde un pedido sin conexión a una mesa).
 	"accounts.open",
+	// Unir mesas (etapa M1, M1-D8): «Unir con…», agregar y quitar mesas de una unión, el atajo de una mesa divisible y
+	// la unión que nace con el primer producto (previewTableUnion, createTableUnion, addTableToUnion,
+	// removeTableFromUnion y openAccount con union_table_ids o union_group_id).
+	"restaurant.tables.join",
 	// Capturar y modificar lo no enviado: saveDraft.
 	"orders.capture",
 	// «Enviar a cocina» y el pedido sin conexión: confirmDraft, submitOfflineOrder.
