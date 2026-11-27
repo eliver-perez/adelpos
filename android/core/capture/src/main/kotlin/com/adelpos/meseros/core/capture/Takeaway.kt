@@ -1,6 +1,5 @@
 package com.adelpos.meseros.core.capture
 
-import android.view.inputmethod.InputMethodManager
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -10,15 +9,11 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
@@ -48,32 +43,11 @@ fun CustomerDialog(
 ) {
     var name by rememberSaveable { mutableStateOf(initial.name) }
     var phone by rememberSaveable { mutableStateOf(initial.phone) }
-    // Etapa M1 (§5.7): en Android 8 el teclado se quedaba abierto al cerrar el diálogo (Android lo
-    // pasa a la ventana de la actividad) y la lista de Para llevar quedaba en una franja arriba de
-    // él: en la tableta horizontal solo «Nuevo pedido» y el primer pedido a la vista. El nombre
-    // nuevo sí llegaba y la lista sí se ponía al día, pero el pedido quedaba tapado. Se suelta el
-    // foco y se esconde el teclado al cerrar y, ya sin el diálogo, también desde la ventana de la
-    // actividad.
-    val keyboard = LocalSoftwareKeyboardController.current
-    val focus = LocalFocusManager.current
-    val host = LocalView.current
-    DisposableEffect(host) {
-        onDispose {
-            host.postDelayed(
-                {
-                    host.context
-                        .getSystemService(InputMethodManager::class.java)
-                        ?.hideSoftInputFromWindow(host.windowToken, 0)
-                },
-                KEYBOARD_HIDE_DELAY_MILLIS,
-            )
-        }
-    }
-    val close: (() -> Unit) -> Unit = { action ->
-        focus.clearFocus(force = true)
-        keyboard?.hide()
-        action()
-    }
+    // Etapa M1 (§5.7): en Android 8 el teclado se quedaba abierto al cerrar el diálogo y tapaba la
+    // lista de Para llevar. Se suelta el foco y se esconde el teclado al cerrar y, ya sin el
+    // diálogo, también desde la ventana de la actividad (HideKeyboardWhenClosed).
+    HideKeyboardWhenClosed()
+    val close = rememberKeyboardCloser()
     AlertDialog(
         onDismissRequest = { close(onDismiss) },
         title = { Text(stringResource(R.string.customer_title)) },
@@ -168,10 +142,3 @@ fun takeawayLabel(customer: TakeawayCustomer): String {
 const val TAG_CUSTOMER_NAME = "customer-name"
 const val TAG_CUSTOMER_PHONE = "customer-phone"
 const val TAG_CUSTOMER_SAVE = "customer-save"
-
-/**
- * Espera (ms) para esconder el teclado desde la ventana de la actividad después de cerrar el
- * diálogo: Android quita la ventana del diálogo y pasa el teclado a la actividad un momento después
- * (§5.7, Android 8).
- */
-private const val KEYBOARD_HIDE_DELAY_MILLIS = 150L
