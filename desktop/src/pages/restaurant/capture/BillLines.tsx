@@ -2,7 +2,8 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { Accordion } from '../../../components/Accordion';
 import type { Lookups, ProductBreakdown } from '../../../services/catalog';
 import { Icon, IconLabel } from '../../../components/Icon';
-import { preparationLabels } from '../../../services/kitchen';
+import { lineKitchenTag } from '../../../services/kitchen';
+import type { LineKitchenTag } from '../../../services/kitchen';
 import { formatDeduction, formatMoney, formatSignedMoney } from '../../../services/money';
 import type { ConfirmedLine, DraftItem } from '../../../services/restaurant';
 import {
@@ -18,18 +19,24 @@ export interface QuotedDraftLine {
   breakdown: ProductBreakdown;
 }
 
-// Estado de cocina de un producto enviado, una sola vez por producto (etapa 9D, §4.4): «Cancelado»;
-// «Enviado · sin confirmar en cocina» si su liberación quedó bloqueada (antes «Pendiente de
-// liberación · revisar cocina», repetido en el encabezado) o, desde la K1.1, si espera a que alguien
-// la envíe a cocina; si no, «En cocina» con su preparación.
-function kitchenState(line: ConfirmedLine) {
-  if (line.state === 'cancelled') {
-    return { tag: 'Cancelado', tone: 'capture-tag-cancelled', detail: '' };
+// Clase de cada tono de la etiqueta de cocina de un producto enviado.
+export const kitchenTagClasses: Record<LineKitchenTag['tone'], string> = {
+  cancelled: 'capture-tag-cancelled',
+  unconfirmed: 'capture-tag-unconfirmed',
+  ready: 'capture-tag-ready',
+  '': '',
+};
+
+// Etiqueta de cocina de un producto enviado, una sola vez por producto (etapa 9D, §4.4). Desde la etapa M1
+// (§5.1 y §5.2) es el estado que manda Go para el renglón («Listo», «En preparación», «En cocina»…), igual que el
+// panel de la mesa y que Android; antes decía siempre «En cocina» con el estado real en gris al lado. Un producto
+// sin preparación no lleva etiqueta.
+export function KitchenTag({ line }: { line: ConfirmedLine }) {
+  const tag = lineKitchenTag(line);
+  if (!tag) {
+    return null;
   }
-  if (line.preparation_state === 'pending_release') {
-    return { tag: preparationLabels.pending_release!, tone: 'capture-tag-unconfirmed', detail: '' };
-  }
-  return { tag: 'En cocina', tone: '', detail: preparationLabels[line.preparation_state ?? ''] };
+  return <span className={`capture-tag ${kitchenTagClasses[tag.tone]}`}>{tag.text}</span>;
 }
 
 // «Desglose» de un producto enviado (etapa 9D, §4.4): solo los complementos elegidos, los cargos y
@@ -101,7 +108,6 @@ function ConfirmedLineItem({
   const actionable = !cancelled && (canEdit || canCancel);
   const title = `${line.quantity} × ${line.quote_line.name}`;
   const detail = describeBreakdown(line.quote_line);
-  const kitchen = kitchenState(line);
 
   // El menú se cierra al tocar fuera del producto o con Escape (también si se abrió tocando el
   // renglón, sin foco dentro; la capa global de teclado no actúa mientras está abierto).
@@ -144,10 +150,11 @@ function ConfirmedLineItem({
             <strong className="capture-line-name">{title}</strong>
             <strong className="capture-line-total">{formatMoney(line.totals.total)}</strong>
           </div>
-          <div className="capture-line-meta">
-            <span className={`capture-tag ${kitchen.tone}`}>{kitchen.tag}</span>
-            {kitchen.detail && <span className="muted">{kitchen.detail}</span>}
-          </div>
+          {lineKitchenTag(line) && (
+            <div className="capture-line-meta">
+              <KitchenTag line={line} />
+            </div>
+          )}
           {detail.length > 0 && <p className="capture-line-detail">{detail.join(' · ')}</p>}
         </div>
         {actionable && (

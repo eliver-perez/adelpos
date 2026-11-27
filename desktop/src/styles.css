@@ -4383,6 +4383,12 @@ summary {
 .capture-tag-cancelled {
   text-decoration: line-through;
 }
+/* Etapa M1 (§5.1): un producto que la cocina marcó listo, en turquesa como en la aplicación de meseros. */
+.capture-tag-ready {
+  border-color: var(--teal);
+  background: var(--teal-soft);
+  color: var(--teal);
+}
 .capture-line-detail {
   font-size: 11px;
   color: var(--muted);

@@ -1,4 +1,4 @@
-import { preparationLabel } from '../../services/kitchen';
+import { accountNeedsPreparation, preparationLabel } from '../../services/kitchen';
 import { Field, Notice } from '../../components/Forms';
 import {
   accountLabel,
@@ -125,12 +125,16 @@ function AccountCard({
         {account.state !== 'open' && (
           <span className="finance-badge account-card-state">{closedStateText(account)}</span>
         )}
-        <span
-          className={`finance-badge account-card-preparation account-preparation-${account.preparation_state}`}
-          title={`Preparación: ${preparation}`}
-        >
-          {preparationTags[account.preparation_state] ?? preparation}
-        </span>
+        {/* Etapa M1 (§5.2, M1-D15): una cuenta cuyos productos no necesitan preparación (por ejemplo, solo
+            refrescos sin ruta) no lleva etiqueta de cocina. */}
+        {accountNeedsPreparation(account) && (
+          <span
+            className={`finance-badge account-card-preparation account-preparation-${account.preparation_state}`}
+            title={`Preparación: ${preparation}`}
+          >
+            {preparationTags[account.preparation_state] ?? preparation}
+          </span>
+        )}
         <FinanceBadges account={account} takeaway={takeaway} />
         {/* Unidades enviadas o, sin ellas, las que esperan en el borrador; sin ninguna, la etiqueta
             de preparación («Sin productos») ya lo dice. */}

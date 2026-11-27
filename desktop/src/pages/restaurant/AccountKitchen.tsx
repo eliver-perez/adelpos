@@ -3,7 +3,7 @@ import { Notice } from '../../components/Forms';
 import { IconLabel } from '../../components/Icon';
 import { useLiveResource } from '../../hooks/useLiveResource';
 import type { Board, Release } from '../../services/kitchen';
-import { preparationLabels } from '../../services/kitchen';
+import { accountNeedsPreparation, preparationLabels, taskStateLabel } from '../../services/kitchen';
 import type { Bill } from '../../services/restaurant';
 
 // Etapa 9D (§4.4, Fase 0 punto 4): Go registra una advertencia por unidad («Sin ruta de
@@ -56,7 +56,12 @@ export function AccountKitchen({
           <IconLabel icon="back">Volver</IconLabel>
         </button>
       </div>
-      <p>{preparationLabels[bill.account.preparation_state]}</p>
+      {/* Etapa M1 (§5.2, M1-D15): sin productos que necesiten preparación no se dice un estado de cocina. */}
+      <p>
+        {accountNeedsPreparation(bill.account)
+          ? preparationLabels[bill.account.preparation_state]
+          : 'Los productos de esta cuenta no necesitan preparación.'}
+      </p>
       <Notice>{board.error || releases.error}</Notice>
       {releases.data?.map((release) => (
         <Accordion key={release.id} title={releaseTitle(release)} summary={release.created_at}>
@@ -80,7 +85,7 @@ export function AccountKitchen({
           <strong>
             {task.station_name} · {task.instructions.name}
           </strong>
-          <p>{preparationLabels[task.state]}</p>
+          <p>{taskStateLabel(task.state)}</p>
           {task.instructions.notes && <p>{task.instructions.notes}</p>}
         </article>
       ))}

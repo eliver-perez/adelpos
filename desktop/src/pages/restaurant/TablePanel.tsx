@@ -16,6 +16,7 @@ import type {
 } from '../../services/restaurant';
 import type { BillAction } from './capture/BillFooter';
 import { CheckoutButton, accountMoreActions } from './capture/BillFooter';
+import { KitchenTag } from './capture/BillLines';
 import { MoreActions } from './capture/MoreActions';
 
 // Estado en el encabezado del panel: color, icono y texto, como en el mapa (no solo color).
@@ -28,8 +29,9 @@ function StateChip({ state }: { state: TableState }) {
   );
 }
 
-// Productos de la cuenta en el panel: enviados con «En cocina» y su importe de Go; nuevos (aún sin
-// enviar) con «Nuevo», sin importe (la cotización vive en la captura).
+// Productos de la cuenta en el panel: enviados con su estado de cocina (etapa M1, §5.1 y §5.2: el que manda Go,
+// como la captura; antes «En cocina» fijo) y su importe de Go; nuevos (aún sin enviar) con «Nuevo», sin importe (la
+// cotización vive en la captura).
 function PanelLines({
   bill,
   localDraft,
@@ -50,7 +52,7 @@ function PanelLines({
           <span className="table-panel-line-name">
             {line.quantity} × {line.quote_line.name}
           </span>
-          <span className="capture-tag">En cocina</span>
+          <KitchenTag line={line} />
           <strong className="table-panel-line-total">{formatMoney(line.totals.total)}</strong>
         </li>
       ))}

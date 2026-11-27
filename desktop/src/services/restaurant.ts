@@ -37,6 +37,51 @@ export interface RestaurantTable {
   // establecimiento (settings.long_open_hours). Lo calcula Go y siempre lo envía; es opcional solo
   // para las mesas que arma la interfaz (por ejemplo, una mesa nueva en la distribución).
   long_open?: boolean;
+  // Etapa M1 (M1-D10): la unión abierta de la mesa o null. Una mesa unida trae el estado, las cuentas, el saldo y el
+  // tiempo de la unión. Ausentes con un servidor anterior.
+  union_id?: string | null;
+  // Etapa M1 (M1-D4): el grupo predefinido (mesa divisible) del que la mesa es sección, o null.
+  group_id?: string | null;
+}
+
+// Unión de mesas (etapa M1, contrato §2): varias mesas del mismo área que se comportan como una sola. Go calcula
+// todo: el nombre («Mesa 5 + 6» o el del grupo), la capacidad sumada, el estado (el más avanzado de sus cuentas),
+// las cuentas, el saldo y el tiempo; el escritorio solo lo muestra.
+export interface TableUnion {
+  id: string;
+  name: string;
+  area_id: string;
+  group_id: string | null;
+  // En orden natural del nombre de las mesas.
+  table_ids: string[];
+  seats: number;
+  state: 'occupied' | 'awaiting_payment' | 'partial_payment' | 'dissolved';
+  account_count: number;
+  balance: string;
+  occupied_since: string | null;
+  occupied_seconds: number;
+  long_open: boolean;
+  revision: number;
+}
+
+// Mesa divisible (grupo predefinido, etapa M1, §3): un nombre («Mesa 3») sobre varias mesas normales del mismo área,
+// sus secciones, en su orden. Cada sección sigue siendo una mesa normal; el atajo del grupo las une de un toque.
+export interface TableGroup {
+  id: string;
+  area_id: string;
+  name: string;
+  table_ids: string[];
+  seats: number;
+  revision: number;
+}
+
+// Vista previa de una unión (POST restaurant/table-unions/preview): no escribe nada. Sin problemas, se puede unir.
+// Cada problema trae el código y el texto del rechazo de Go, que se muestra tal cual.
+export interface UnionPreview {
+  name: string;
+  seats: number;
+  table_ids: string[];
+  problems: { code: string; message: string; table_id: string | null }[];
 }
 
 export type TableState =
@@ -72,6 +117,9 @@ export interface Overview {
   tables: RestaurantTable[];
   settings: RestaurantSettings;
   timezone: string;
+  // Etapa M1: las uniones abiertas y los grupos activos (ausentes con un servidor anterior).
+  unions?: TableUnion[];
+  groups?: TableGroup[];
 }
 
 export interface Totals {
@@ -138,6 +186,11 @@ export interface Account {
   cancel_requires_authorization: boolean;
   // Lleva abierta más horas que el umbral del establecimiento (§3.4).
   long_open: boolean;
+  // Etapa M1 (contrato §2): la unión de mesas de la cuenta (su mesa es parte de ella) o null. table_id y table_name
+  // siguen siendo los de su mesa; el lugar que se muestra es el nombre de la unión (accountPlace).
+  table_union?: { id: string; name: string; table_ids: string[] } | null;
+  // Etapa M1 (§5.2, M1-D15): false si ningún producto vigente de la cuenta necesita preparación. Ausente = true.
+  preparation_required?: boolean;
 }
 
 export type CancelBlocker = '' | 'payments' | 'adjustments';
@@ -162,6 +215,9 @@ export interface DraftItem extends PreviewLine {
 
 export interface ConfirmedLine {
   preparation_state?: string;
+  // Etapa M1 (§5.2, M1-D15): false cuando el renglón ya se envió y ninguna de sus unidades necesitó preparación
+  // (un producto sin ruta con «No necesitan preparación» o con la ruta «Sin preparación»). Ausente = true.
+  preparation_required?: boolean;
   version_id: string;
   item_id: string;
   original_order_id: string;
@@ -626,6 +682,9 @@ export const eventLabels: Record<string, string> = {
   'order.confirmed': 'Pedido confirmado · Pendiente de envío a cocina',
   'item.modified': 'Producto modificado',
   'item.cancelled': 'Producto cancelado',
+  // Etapa M1: la cuenta está en una unión de mesas y la unión cambió (se unió, se agregó o se quitó una mesa, cambió
+  // de nombre o se deshizo).
+  'account.table_union': 'Mesas unidas',
 };
 
 // Etapa A3 (A3-D22): un valor que esta versión no conoce se dice en general, nunca con su código.

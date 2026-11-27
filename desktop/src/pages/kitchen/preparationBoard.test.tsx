@@ -212,7 +212,7 @@ describe('Preparación en modo cocina', () => {
       'Esta terminal muestra Barra y Postres, y tu usuario atiende Cocina caliente: no hay ' +
         'estaciones en común. Pide que ajusten la terminal o tu usuario.',
     );
-    expect(screen.queryByText('No hay unidades de preparación en este filtro.')).toBeNull();
+    expect(screen.queryByText('No hay pedidos con este filtro.')).toBeNull();
   });
 
   it('el aviso sonoro suena solo al llegar una comanda nueva y si la terminal lo tiene activado', async () => {
@@ -413,7 +413,7 @@ describe('Por enviar a cocina', () => {
     const send = within(automatic).getByRole('button', { name: 'Enviar a cocina ahora' });
     expect((send as HTMLButtonElement).disabled).toBe(true);
     expect(automatic.textContent).toContain(
-      'Para enviarlo antes de su hora hace falta el permiso de liberar anticipadamente.',
+      'Para enviarlo antes de su hora hace falta el permiso de enviar a cocina antes de tiempo.',
     );
     const waiting = screen.getByRole('article', { name: 'Pedido #23' });
     expect(
