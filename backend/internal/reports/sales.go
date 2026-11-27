@@ -48,7 +48,9 @@ func ledgerConditions(query *Query) conditions {
 	list := conditions{inPeriod("r.recognized_at")}
 	list.when(query, "mode", "r.mode = @mode")
 	list.when(query, "area_id", "r.area_id = @area_id::uuid")
-	list.when(query, "table_id", "r.table_id = @table_id::uuid")
+	// Etapa M1 (M1-D3, duda 4): con el filtro de una mesa también salen las ventas de las uniones en las que estuvo.
+	list.when(query, "table_id", "(r.table_id = @table_id::uuid OR r.table_union_tables @> "+
+		"jsonb_build_array(jsonb_build_object('id',@table_id::text)))")
 	list.when(query, "category_id", "r.category_id = @category_id::uuid")
 	list.when(query, "product_id", "r.product_id = @product_id::uuid")
 	list.when(query, "price_list_id", "r.price_list_id = @price_list_id::uuid")
@@ -293,15 +295,18 @@ func init() {
 	})
 	register(Definition{
 		ID: "sales.dine_in", Group: "sales", Title: "Ventas de salón",
-		Description: "Venta de salón por área y mesa (la mesa de la cuenta al cerrarse).",
+		Description: "Venta de salón por área y mesa (la mesa de la cuenta al cerrarse, o la unión de mesas en la que estaba).",
 		Permissions: []string{PermissionSales}, DateBasis: salesDateBasis,
 		Filters: withDataSource([]Filter{filterArea(), filterTable(), filterCategory(), filterProduct(), filterPriceList()}),
 		Columns: legacySalesColumns(withColumns([]Column{textColumn("area", "Área"), textColumn("table", "Mesa"), columnAccounts},
 			salesMeasureColumns(), []Column{columnAverageTicket, columnShare})),
 		DefaultSort: Sort{Key: "net", Descending: true}, Totals: combineTotals(averageTicketTotals, shareTotals),
 		Query: func(ctx context.Context, query *Query) (*Dataset, error) {
+			// Etapa M1 (M1-D3): una venta de una unión de mesas es un solo renglón con el nombre de la unión («Mesa 5 + 6»),
+			// sin repartirla entre sus mesas.
 			rows, err := ledgerReport(ctx, query, "coalesce("+latest("r.area_name")+",'Sin área') AS area,"+
-				"coalesce("+latest("r.table_name")+",'Sin mesa') AS \"table\"", "r.area_id,r.table_id", "r.mode = 'dine_in'", "")
+				"coalesce("+latest("r.table_union_name")+","+latest("r.table_name")+",'Sin mesa') AS \"table\"",
+				"r.area_id,coalesce(r.table_union_id,r.table_id)", "r.mode = 'dine_in'", "")
 			if err != nil {
 				return nil, err
 			}

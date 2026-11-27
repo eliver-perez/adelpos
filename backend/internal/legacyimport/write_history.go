@@ -50,6 +50,11 @@ func newHistoryNames(plan *Plan, ids IDMap) *historyNames {
 	for _, table := range plan.Catalog.Tables {
 		names.tables[table.LegacyID] = table
 	}
+	// Etapa M1 (M1-D5): la mesa que se volvió una mesa divisible no existe en lo vivo (su identificador queda nulo),
+	// pero sus ventas conservan su nombre y su área.
+	for _, table := range plan.Catalog.AbsorbedTables {
+		names.tables[table.LegacyID] = table
+	}
 	for _, user := range plan.Catalog.Users {
 		names.users[user.LegacyID] = user
 	}

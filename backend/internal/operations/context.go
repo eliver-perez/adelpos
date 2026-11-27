@@ -56,6 +56,9 @@ var Permissions = []Permission{
 	{"restaurant.areas.manage", "Administrar áreas del restaurante"},
 	{"restaurant.tables.read", "Consultar mesas y ocupación real"},
 	{"restaurant.tables.manage", "Administrar mesas y distribución"},
+	// Etapa M1 (M1-D8): unir, agregar y quitar mesas, y la unión que nace con el primer producto (la 0031 lo registra
+	// con la misma descripción y lo concede a los roles que ya abren cuentas y ven las mesas).
+	{"restaurant.tables.join", "Unir mesas"},
 	{"restaurant.settings.manage", "Configurar umbrales del tablero para llevar"},
 	{"accounts.read", "Consultar cuentas e importes"},
 	{"accounts.open", "Abrir cuentas"},

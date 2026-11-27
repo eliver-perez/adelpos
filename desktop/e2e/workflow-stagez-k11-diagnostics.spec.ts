@@ -28,8 +28,8 @@ import type { Display } from './kitchen-coverage-flow';
 //   2. Cocina › Enrutamiento: la lista «Sin ruta» con lo que dice el ajuste, «Productos sin ruta» («Enviar a una
 //      estación» y de vuelta a «No necesitan preparación») y los avisos de rutas a estaciones desactivadas.
 //   3. Cocina › Estaciones: «Computadoras en modo Cocina» y la recepción en pantalla en lenguaje sencillo.
-//   4. Preparación: «Por enviar a cocina» con un pedido programado y uno al que se le quitó la hora, y «Enviar a cocina
-//      ahora».
+//   4. Preparación: «Por enviar a cocina» con un pedido programado y «Enviar a cocina ahora». Desde la etapa M1 (§5.3,
+//      M1-D17) quitarle la hora a otro pedido lo envía a cocina en ese momento: ya no espera en el panel.
 // Los datos llevan un sufijo propio para convivir con la base compartida de las especificaciones anteriores.
 
 // Captura en una ventana alta: la barra de «Guardar» queda fija al pie del área con desplazamiento y, en una captura de
@@ -78,7 +78,8 @@ async function sendTakeaway(
   return account;
 }
 
-// Quitarle la hora a un pedido programado lo deja esperando a que alguien lo envíe (K11-D9).
+// Quitarle la hora a un pedido programado. Hasta la K1.1 lo dejaba esperando a que alguien lo enviara (K11-D9); desde la
+// etapa M1 (§5.3, M1-D17) Go lo envía a cocina en ese momento.
 async function unschedule(driver: Driver, id: string) {
   const current = (await call(driver, 'GET', `restaurant/accounts/${id}`)).account as Record<
     string,
@@ -324,7 +325,7 @@ test('diagnóstico de una pantalla de cocina, «Sin ruta» y «Productos sin rut
     await call(driver, 'POST', `devices/${display.device_id}/revoke`, {});
     revoked = true;
 
-    // 4. «Por enviar a cocina»: uno programado para mañana y otro al que se le quitó la hora.
+    // 4. «Por enviar a cocina»: uno programado para mañana; al otro se le quita la hora y se envía al momento (M1-D17).
     const scheduled = await sendTakeaway(
       driver,
       desserts.productID,
@@ -351,15 +352,19 @@ test('diagnóstico de una pantalla de cocina, «Sin ruta» y «Productos sin rut
     await expect(scheduledCard).toContainText(
       'Cambia cuándo llega a cocina. No cambia el pedido ni su precio.',
     );
+    // El pedido sin hora ya está en cocina: no aparece en el panel.
     const waitingCard = page.getByRole('article', { name: `Pedido #${waiting.folio}` });
-    await expect(waitingCard).toContainText('Espera a que lo envíes a cocina');
-    await expect(waitingCard).toContainText('La cocina lo recibe al momento.');
-    await expect(waitingCard.getByRole('button', { name: 'Cambiar la hora' })).toHaveCount(0);
+    await expect(waitingCard).toHaveCount(0);
+    const unscheduled = (await call(driver, 'GET', `restaurant/accounts/${waiting.id}`))
+      .account as {
+      preparation_state: string;
+    };
+    expect(['pending_release', 'scheduled']).not.toContain(unscheduled.preparation_state);
     await dismissNotices(page);
     await shot(page, testInfo, 'k11-panel');
-    await waitingCard.getByRole('button', { name: 'Enviar a cocina ahora', exact: true }).click();
-    await expect(notice(page, `Pedido #${waiting.folio} enviado a cocina.`)).toBeVisible();
-    await expect(waitingCard).toHaveCount(0);
+    await scheduledCard.getByRole('button', { name: 'Enviar a cocina ahora', exact: true }).click();
+    await expect(notice(page, `Pedido #${scheduled.folio} enviado a cocina.`)).toBeVisible();
+    await expect(scheduledCard).toHaveCount(0);
     for (const old of [
       'Bloqueado por configuración',
       'Liberar a preparación',

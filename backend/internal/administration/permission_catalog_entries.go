@@ -43,6 +43,14 @@ var permissionCatalogEntries = []catalogEntry{
 		description: "Crear mesas y acomodarlas en el mapa de cada área.",
 		requires:    []string{"restaurant.tables.read"},
 	},
+	// Etapa M1 (M1-D8): unir mesas libres a una mesa (también la ocupada, para crecer), agregar y quitar mesas de una
+	// unión y el atajo de una mesa divisible.
+	{
+		key:         "restaurant.tables.join",
+		group:       permissionGroupTables,
+		description: "Unir mesas para atender a un grupo grande como una sola mesa.",
+		requires:    []string{"accounts.open", "restaurant.tables.read"},
+	},
 	{
 		key:         "accounts.read",
 		group:       permissionGroupTables,

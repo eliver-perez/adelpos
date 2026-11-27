@@ -4045,6 +4045,7 @@ terminal_name}` o `null`), con la misma consulta (`terminalIdentityQuery`, `admi
   `accounts.read`, `accounts.open`, `orders.capture`, `orders.confirm`, `orders.edit`, `orders.cancel`, `catalog.read`,
   `catalog.prices.read`, `events.read`, `takeaway.read`, `takeaway.manage`, `takeaway.deliver` y
   **`payments.tickets.print`**. No `payments.tickets.reprint`: volver a imprimir arma una precuenta nueva, como en la caja.
+  Desde la etapa M1, también **`restaurant.tables.join`** («Unir mesas»; ver «Etapa M1 · Uniones de mesas»).
 - **«Quitar datos de prueba»**: si la impresora de precuentas de un dispositivo es de prueba, se desvincula («Impresora de
   precuentas de «…»»; el dispositivo queda sin impresora) en lugar de impedir que se elimine.
 - **Escritorio**: Terminales › Editar de un `android` muestra «Impresora de precuentas» y «Ver configuración» la informa,
@@ -4315,3 +4316,31 @@ kitchen/timing` lo aceptan y no lo cambian.
   `account_cancelled`) y `unrouted.saved`.
 - **Sin cambios**: `POST/PATCH kitchen/routes` (rechazan `unrouted` y `omitted_station_ids`, que solo viven en el
   `routing_snapshot`), `kitchen/stations`, `kitchen/outputs`, `kitchen/access`, el emparejamiento y `kitchen-display/*`.
+
+## Etapa M1 · Uniones de mesas y mesas divisibles (Fase A, esquema 31; servidor 0.18.0)
+
+Decisiones M1-D1 a M1-D19 y el contrato de la etapa en `docs/ETAPA_M1_AVANCE.md`; la forma de cada respuesta, los
+errores con su texto y la cola sin conexión están en `docs/API_V1.md`, «Uniones de mesas y mesas divisibles · etapa M1»,
+y en `openapi.json` (`previewTableUnion`, `createTableUnion`, `addTableToUnion`, `removeTableFromUnion`,
+`getTableUnion`, `createTableGroup` y `updateTableGroup`). Migración `0031_uniones_de_mesas.sql`, sección «Fase A».
+Capacidad `table-unions-v1`. Sin locks nuevos: todo va por `operations.Handle` (7820148305 exclusivo; la vista previa,
+compartido) y el índice único parcial de `app.table_union_members`.
+
+- **Modelo**: `app.table_unions` (nombre vigente, área, grupo, `open|dissolved`), `app.table_union_members` (una mesa en
+  una sola unión abierta), `app.table_union_events` (historial con el nombre después de cada cambio), `app.table_groups`
+  y `app.table_group_sections`. Una cuenta es de la unión por su `table_id`: `restaurant_accounts` no cambia.
+- **Paquete neutral `internal/tableunions`**: el nombre (orden natural, «Mesa 5 + 6»), los fragmentos SQL del lugar de
+  una cuenta (`UnionNameSQL`, `UnionNameAtSQL`, `PlaceTablesSQL`) que usan operations, payments, kitchen, reports y
+  administration, la instantánea de la venta y **`SettleEmpty`**, que al final de cada escritura de `operations.Handle`
+  y de `payments.Handle` deshace las uniones sin cuentas abiertas.
+- **Campos nuevos**: `Table.union_id` y `group_id`; `unions` y `groups` en `restaurant/overview` y `restaurant/state`;
+  `Account.table_union` y `preparation_required`; `ConfirmedLine.preparation_required`; `union_table_ids`,
+  `union_group_id` y `seen_union_id` en `POST restaurant/accounts`; `destination.seen_union_id` en
+  `POST restaurant/offline-orders`; `table_union_id`, `table_union_name` y `table_union_tables` en `sales_recognitions`.
+- **Permiso** `restaurant.tables.join` («Unir mesas»): roles de fábrica Mesero, Cajero y Supervisor, «Atender mesas»,
+  `WaiterPermissions` y la concesión de la 0031 a los roles existentes que ya abren cuentas y ven las mesas.
+- **Eventos**: `restaurant.table-unions.changed`, `restaurant.table-groups.changed` y `restaurant.account.table_union`
+  (en `displayAccountKinds`: la pantalla de cocina vuelve a leer el encabezado).
+- **También cambia**: `PATCH restaurant/tables/{id}` rechaza cambiar de área una mesa unida (`TABLE_IN_UNION`) o agrupada
+  (`TABLE_GROUP_SECTION_AREA`); quitar la hora a un pedido programado lo envía a cocina (§5.3, M1-D17) y la respuesta del
+  `PATCH` de la cuenta se lee después de integrar cocina.

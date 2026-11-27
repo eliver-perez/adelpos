@@ -94,11 +94,11 @@ var permissionCapabilities = []PermissionCapability{
 	{
 		Code:        "tables",
 		Name:        "Atender mesas",
-		Description: "Entrar con PIN, abrir cuentas, capturar y enviar pedidos e imprimir la precuenta.",
+		Description: "Entrar con PIN, abrir cuentas, unir mesas, capturar y enviar pedidos e imprimir la precuenta.",
 		Permissions: []string{
 			"waiter_devices.use", "restaurant.areas.read", "restaurant.tables.read", "accounts.read", "accounts.open",
-			"orders.capture", "orders.confirm", "catalog.read", "catalog.prices.read", "events.read",
-			"payments.tickets.print",
+			"restaurant.tables.join", "orders.capture", "orders.confirm", "catalog.read", "catalog.prices.read",
+			"events.read", "payments.tickets.print",
 		},
 	},
 	{
@@ -210,17 +210,21 @@ var permissionCapabilities = []PermissionCapability{
 var factoryRoleCodes = []string{"waiter", "cashier", "kitchen", "supervisor", "inventory", "finance"}
 
 // factoryRolePermissions son los conjuntos de fábrica de la Fase 0 (§0.4 y su anexo, A3-D2 y A3-D3), cerrados bajo
-// requires (lo comprueba permission_catalog_test.go). Se conceden solo en el asistente de una instalación nueva y con
-// «Restablecer permisos predeterminados»: una versión nueva de esta lista nunca cambia un rol sin que alguien toque el
-// botón (la 0027 no toca roles). El límite de descuento y las excepciones por usuario no son parte del conjunto.
+// requires (lo comprueba permission_catalog_test.go). Se conceden en el asistente de una instalación nueva y con
+// «Restablecer permisos predeterminados»: una versión nueva de esta lista sola nunca cambia un rol sin que alguien toque
+// el botón (la 0027 no toca roles). Etapa M1 (M1-D8): un permiso nuevo que la especificación pide en los roles de fábrica
+// sí llega a las instalaciones existentes, pero por su migración y solo agregando: la 0031 concede «Unir mesas»
+// (restaurant.tables.join) al Administrador, al Mesero, al Cajero y al Supervisor que ya abren cuentas y ven las mesas,
+// como la 0025 con waiter_devices.use; nada más cambia. El límite de descuento y las excepciones por usuario no son
+// parte del conjunto.
 var factoryRolePermissions = map[string][]string{
 	// Mesero: todo lo de la tabla de docs/ANDROID_INSTALAR.md §4, con Para llevar e imprimir la precuenta, salvo
 	// «Modificar» (orders.edit) y «Cancelar unidades» (orders.cancel), que quedan opcionales (§3.1). «Entregado»
 	// (takeaway.deliver) va marcado (A3-D3): Go sigue sin entregar un pedido sin pagar (BALANCE_PENDING).
 	"waiter": {
 		"accounts.open", "accounts.read", "catalog.prices.read", "catalog.read", "events.read", "orders.capture",
-		"orders.confirm", "payments.tickets.print", "restaurant.areas.read", "restaurant.tables.read",
-		"takeaway.deliver", "takeaway.manage", "takeaway.read", "waiter_devices.use",
+		"orders.confirm", "payments.tickets.print", "restaurant.areas.read", "restaurant.tables.join",
+		"restaurant.tables.read", "takeaway.deliver", "takeaway.manage", "takeaway.read", "waiter_devices.use",
 	},
 	// Cajero: caja, cobro y toma de pedidos en el mostrador; sin autorizaciones (retiros, correcciones, devoluciones,
 	// descuentos mayores), que son del supervisor. Los descuentos, dentro del límite del rol (0 % si no tiene).
@@ -232,7 +236,8 @@ var factoryRolePermissions = map[string][]string{
 		"orders.confirm", "payments.charges.create", "payments.collect", "payments.collect_partial",
 		"payments.collect_selection", "payments.discounts.apply", "payments.read", "payments.tickets.print",
 		"payments.tickets.reprint", "payments.tips.record", "payments.usd_rate.manage", "registers.read",
-		"restaurant.areas.read", "restaurant.tables.read", "takeaway.deliver", "takeaway.manage", "takeaway.read",
+		"restaurant.areas.read", "restaurant.tables.join", "restaurant.tables.read", "takeaway.deliver", "takeaway.manage",
+		"takeaway.read",
 	},
 	// Cocina: la pantalla de preparación de sus estaciones; sin todas las estaciones ni la configuración.
 	"kitchen": {
@@ -263,8 +268,8 @@ var factoryRolePermissions = map[string][]string{
 		"payments.tickets.print", "payments.tickets.reprint", "payments.tips.record", "payments.usd_rate.manage",
 		"registers.read", "reports.cash.read", "reports.discounts.read", "reports.employees.read",
 		"reports.export.excel", "reports.export.pdf", "reports.payments.read", "reports.read", "reports.sales.read",
-		"restaurant.areas.read", "restaurant.tables.read", "sessions.manage", "sessions.read", "takeaway.deliver",
-		"takeaway.manage", "takeaway.read", "users.read", "waiter_devices.use",
+		"restaurant.areas.read", "restaurant.tables.join", "restaurant.tables.read", "sessions.manage", "sessions.read",
+		"takeaway.deliver", "takeaway.manage", "takeaway.read", "users.read", "waiter_devices.use",
 	},
 	// Inventarios: insumos, recetas, compras, recepciones, mermas, conteos y transferencias, con sus reportes; sin
 	// autorizar (ajustes, conteos, compras), costos de referencia, valuación ni parámetros.

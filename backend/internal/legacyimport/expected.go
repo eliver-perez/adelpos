@@ -73,7 +73,15 @@ func computeExpected(model *Model, yearOf func(time.Time) int) Expected {
 	expected.Counts[CountCategories] = manifest("categorias", len(model.Categories))
 	expected.Counts[CountProducts] = manifest("productos", len(model.Products))
 	expected.Counts[CountComplements] = manifest("complementos", len(model.Complements))
-	expected.Counts[CountTables] = manifest("mesas", len(model.Tables)) - takeaway
+	// Etapa M1 (M1-D5): la mesa «Mesa N» que se volvió una mesa divisible no se crea como mesa (el grupo toma su nombre).
+	plain := []DiningTable{}
+	for _, table := range model.Tables {
+		if table.ID != takeawayTableID {
+			plain = append(plain, table)
+		}
+	}
+	absorbed := int64(len(detectTableGroups(plain).absorbed))
+	expected.Counts[CountTables] = manifest("mesas", len(model.Tables)) - takeaway - absorbed
 	expected.Counts[CountUsers] = manifest("usuarios", len(model.Users))
 	expected.Counts[CountSales] = manifest("ventas", len(model.Sales))
 	expected.Counts[CountLines] = manifest("ventas_productos", len(model.Lines))

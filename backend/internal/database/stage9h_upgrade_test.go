@@ -99,14 +99,16 @@ var stage9HLegacyTables = []string{"legacy_import_batches", "legacy_id_map", "le
 // stagea1_upgrade_test.go, la tabla ready_notices de la 0026 (etapa A2, parte D), que se comprueba en
 // stagea2_upgrade_test.go, y lo de la 0028 (etapa L1: las tablas license_revisions y license_trusted_time de la sección
 // «Fase A (revisión R1)», el permiso license.manage de la «Fase B» y la tabla license_seats de la «Fase D»), que se
-// comprueba en stagel1_upgrade_test.go, y la tabla kitchen_display_dismissals de la 0029 (etapa K1, Fase A), que se
-// comprueba en stagek1_upgrade_test.go.
+// comprueba en stagel1_upgrade_test.go, la tabla kitchen_display_dismissals de la 0029 (etapa K1, Fase A), que se
+// comprueba en stagek1_upgrade_test.go, y lo de la 0031 (etapa M1: las tablas de uniones y grupos y el permiso
+// restaurant.tables.join con sus concesiones), que se comprueba en stagem1_upgrade_test.go.
 func stage9HRowCounts(ctx context.Context, t *testing.T, pool *pgxpool.Pool) string {
 	t.Helper()
 	rows, err := pool.Query(ctx, `SELECT table_name FROM information_schema.tables WHERE table_schema = 'app'
         AND table_type = 'BASE TABLE' AND table_name NOT LIKE 'legacy\_%'
         AND table_name NOT IN ('pin_attempts', 'offline_order_credentials', 'ready_notices', 'license_seats', 'license_revisions',
-            'license_trusted_time', 'kitchen_display_dismissals')
+            'license_trusted_time', 'kitchen_display_dismissals', 'table_groups', 'table_group_sections', 'table_unions',
+            'table_union_members', 'table_union_events')
         ORDER BY table_name`)
 	if err != nil {
 		t.Fatal(err)
@@ -125,9 +127,9 @@ func stage9HRowCounts(ctx context.Context, t *testing.T, pool *pgxpool.Pool) str
 		filter := ""
 		switch name {
 		case "permissions":
-			filter = " WHERE key NOT IN ('waiter_devices.use','license.manage')"
+			filter = " WHERE key NOT IN ('waiter_devices.use','license.manage','restaurant.tables.join')"
 		case "role_permissions":
-			filter = " WHERE permission_key NOT IN ('waiter_devices.use','license.manage')"
+			filter = " WHERE permission_key NOT IN ('waiter_devices.use','license.manage','restaurant.tables.join')"
 		}
 		var count int
 		if err := pool.QueryRow(ctx, "SELECT count(*) FROM app."+name+filter).Scan(&count); err != nil {

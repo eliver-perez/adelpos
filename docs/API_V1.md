@@ -84,64 +84,71 @@ cocina»).
 
 ## Operaciones
 
-| `operationId`                       | Método y ruta (bajo `/api/v1`)                 | Para qué                                                                       |
-| ----------------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------ |
-| `getVersion`                        | `GET /version`                                 | Versión del servidor, `min_client_version`, tipos de cliente y funciones.      |
-| `getReadiness`                      | `GET /health/ready`                            | Servidor y base de datos listos (200) o no (503).                              |
-| `getOpenAPI`                        | `GET /openapi.json`                            | Este contrato.                                                                 |
-| `login`                             | `POST /auth/login`                             | Iniciar sesión en una terminal emparejada.                                     |
-| `logout`                            | `POST /auth/logout`                            | Cerrar la sesión.                                                              |
-| `getIdentity`                       | `GET /auth/me`                                 | Usuario, permisos vigentes, preferencias, terminal y establecimiento.          |
-| `listPinUsers`                      | `GET /auth/pin-users`                          | Meseros que pueden entrar con PIN en el dispositivo (sin sesión, etapa A1).    |
-| `pinLogin`                          | `POST /auth/pin-login`                         | Entrar con PIN: sesión y credencial de envío (etapa A1).                       |
-| `streamEvents`                      | `GET /events`                                  | Eventos en tiempo real (SSE).                                                  |
-| `getReadyAlerts`                    | `GET /ready-alerts`                            | Avisos de platillos listos desde un cursor (credencial del dispositivo, A2).   |
-| `streamReadyAlerts`                 | `GET /ready-alerts/stream`                     | Canal SSE de los avisos de platillos listos (credencial del dispositivo, A2).  |
-| `getCatalogSync`                    | `GET /catalog/sync`                            | Catálogo descargable completo o «solo cambios desde la versión X».             |
-| `listCatalogProducts`               | `GET /catalog/products`                        | Productos para la captura con disponibilidad, «Agotado» y precio de una lista. |
-| `getCatalogImage`                   | `GET /catalog/images/{id}`                     | Imagen en JSON base64 (la usa el escritorio).                                  |
-| `getCatalogImageContent`            | `GET /catalog/images/{id}/content`             | Imagen binaria con `ETag` (304 con `If-None-Match`).                           |
-| `setProductSoldOut`                 | `POST /catalog/products/{id}/sold-out`         | «Agotado» y «Disponible otra vez».                                             |
-| `getRecoveryState`                  | `GET /restaurant/state`                        | Estado al reconectar: permisos, mesas, cuentas, preparación y cursor.          |
-| `getRestaurantOverview`             | `GET /restaurant/overview`                     | Áreas, mesas (lista y mapa) y umbrales de tiempo (etapa A1).                   |
-| `listAccounts`                      | `GET /restaurant/accounts`                     | Cuentas con sus estados.                                                       |
-| `openAccount`                       | `POST /restaurant/accounts`                    | Abrir una cuenta con su primer producto.                                       |
-| `getAccount`                        | `GET /restaurant/accounts/{id}`                | Cuenta con su borrador y sus partidas confirmadas.                             |
-| `saveDraft`                         | `PUT /restaurant/accounts/{id}/draft`          | Guardar el borrador.                                                           |
-| `previewDraft`                      | `GET /restaurant/accounts/{id}/preview`        | Calcular el borrador y obtener su huella.                                      |
-| `confirmDraft`                      | `POST /restaurant/accounts/{id}/confirm`       | Confirmar (enviar a cocina) el borrador.                                       |
-| `cancelUnits`                       | `POST /restaurant/accounts/{id}/cancel`        | Cancelar unidades enviadas, con motivo (etapa A1 en el contrato).              |
-| `previewEdit`                       | `POST /restaurant/accounts/{id}/edit-preview`  | Calcular la modificación de una partida enviada y su huella.                   |
-| `editUnits`                         | `POST /restaurant/accounts/{id}/edit`          | Modificar una partida enviada, con motivo.                                     |
-| `updateTakeawayCustomer`            | `POST /restaurant/accounts/{id}/customer`      | Nombre del cliente y teléfono de un pedido para llevar (etapa A2).             |
-| `discardAccount`                    | `POST /restaurant/accounts/{id}/discard`       | Descartar sin motivo una cuenta vacía (etapa A3 en el contrato).               |
-| `submitOfflineOrder`                | `POST /restaurant/offline-orders`              | Pedido capturado sin conexión (Android; con sesión o credencial de envío).     |
-| `printPrecheck`                     | `POST /payments/accounts/{id}/precheck/print`  | Imprimir la precuenta (etapa A2 en el contrato).                               |
-| `getDocumentStatus`                 | `GET /payments/accounts/{id}/documents/status` | Estado de impresión de una precuenta, sin importes (etapa A2).                 |
-| `retryDocument`                     | `POST /payments/accounts/{id}/documents/retry` | Reintentar sin motivo una precuenta que no salió (etapa A2 en el contrato).    |
-| `deliverTakeaway`                   | `POST /payments/accounts/{id}/deliver`         | Marcar entregado un pedido para llevar ya pagado (etapa A2 en el contrato).    |
-| `createPairingRequest`              | `POST /pairing/requests`                       | Pedir un código de emparejamiento (sin credencial).                            |
-| `revealPairingNonce`                | `POST /pairing/requests/{id}/reveal`           | Revelar el número de la terminal después de recibir el del servidor.           |
-| `getPairingRequest`                 | `GET /pairing/requests/{id}`                   | Consultar si la computadora principal ya aprobó el código.                     |
-| `renamePairingRequest`              | `POST /pairing/requests/{id}/name`             | Corregir el nombre propuesto mientras espera.                                  |
-| `cancelPairingRequest`              | `POST /pairing/requests/{id}/cancel`           | Dejar de esperar la aprobación.                                                |
-| `claimPairingCredential`            | `POST /pairing/requests/{id}/claim`            | Recibir una sola vez la credencial de la terminal.                             |
-| `getLicenseStatus`                  | `GET /license/status`                          | Estado de la licencia del servidor principal (etapa L1; también sin sesión).   |
-| `setKitchenDisplayMode`             | `POST /kitchen/display-mode`                   | Entrar o salir de Preparación: ocupa o libera el cupo de cocina (etapa L1).    |
-| `connectKitchenDisplay`             | `POST /kitchen-display/connect`                | Pantalla de cocina: ocupar su cupo y leer su configuración (etapa K1).         |
-| `getKitchenDisplayOrders`           | `GET /kitchen-display/orders`                  | Pantalla de cocina: tarjetas, configuración, licencia y cursor (etapa K1).     |
-| `markKitchenDisplayItemsReady`      | `POST /kitchen-display/items/ready`            | Pantalla de cocina: marcar platillos como listos (etapa K1).                   |
-| `markKitchenDisplayOrderReady`      | `POST /kitchen-display/orders/ready`           | Pantalla de cocina: marcar el pedido completo como listo (etapa K1).           |
-| `getKitchenDisplayRecent`           | `GET /kitchen-display/recent`                  | Pantalla de cocina: lo marcado en los últimos 30 minutos (etapa K1).           |
-| `recoverKitchenDisplayItems`        | `POST /kitchen-display/recover`                | Pantalla de cocina: regresar lo marcado por error (etapa K1).                  |
-| `acknowledgeKitchenDisplayReceipts` | `POST /kitchen-display/receipts`               | Pantalla de cocina: confirmar que ya muestra unas comandas (etapa K1).         |
-| `checkKitchenDisplaySettingsAccess` | `POST /kitchen-display/settings-access`        | Pantalla de cocina: contraseña de un administrador para los ajustes (K1).      |
-| `unpairKitchenDisplay`              | `POST /kitchen-display/unpair`                 | Pantalla de cocina: «Volver a emparejar», se revoca y suelta su cupo (K1).     |
-| `getKitchenCoverage`                | `GET /kitchen/coverage`                        | Qué llega a cada estación y pantalla, lo sin ruta y sus avisos (etapa K1.1).   |
-| `saveKitchenUnrouted`               | `PUT /kitchen/unrouted`                        | Guardar «Productos sin ruta» (etapa K1.1).                                     |
-| `releaseKitchenOrder`               | `POST /kitchen/releases/{id}/release`          | «Enviar a cocina ahora» un pedido pendiente (etapa K1.1 en el contrato).       |
-| `retryKitchenChange`                | `POST /kitchen/changes/{event_id}/retry`       | «Volver a avisar» un cambio pendiente (etapa K1.1 en el contrato).             |
-| `getKitchenBoard`                   | `GET /kitchen/board`                           | Preparación y «Por enviar a cocina» (etapa K1.1 en el contrato).               |
+| `operationId`                       | Método y ruta (bajo `/api/v1`)                                | Para qué                                                                       |
+| ----------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `getVersion`                        | `GET /version`                                                | Versión del servidor, `min_client_version`, tipos de cliente y funciones.      |
+| `getReadiness`                      | `GET /health/ready`                                           | Servidor y base de datos listos (200) o no (503).                              |
+| `getOpenAPI`                        | `GET /openapi.json`                                           | Este contrato.                                                                 |
+| `login`                             | `POST /auth/login`                                            | Iniciar sesión en una terminal emparejada.                                     |
+| `logout`                            | `POST /auth/logout`                                           | Cerrar la sesión.                                                              |
+| `getIdentity`                       | `GET /auth/me`                                                | Usuario, permisos vigentes, preferencias, terminal y establecimiento.          |
+| `listPinUsers`                      | `GET /auth/pin-users`                                         | Meseros que pueden entrar con PIN en el dispositivo (sin sesión, etapa A1).    |
+| `pinLogin`                          | `POST /auth/pin-login`                                        | Entrar con PIN: sesión y credencial de envío (etapa A1).                       |
+| `streamEvents`                      | `GET /events`                                                 | Eventos en tiempo real (SSE).                                                  |
+| `getReadyAlerts`                    | `GET /ready-alerts`                                           | Avisos de platillos listos desde un cursor (credencial del dispositivo, A2).   |
+| `streamReadyAlerts`                 | `GET /ready-alerts/stream`                                    | Canal SSE de los avisos de platillos listos (credencial del dispositivo, A2).  |
+| `getCatalogSync`                    | `GET /catalog/sync`                                           | Catálogo descargable completo o «solo cambios desde la versión X».             |
+| `listCatalogProducts`               | `GET /catalog/products`                                       | Productos para la captura con disponibilidad, «Agotado» y precio de una lista. |
+| `getCatalogImage`                   | `GET /catalog/images/{id}`                                    | Imagen en JSON base64 (la usa el escritorio).                                  |
+| `getCatalogImageContent`            | `GET /catalog/images/{id}/content`                            | Imagen binaria con `ETag` (304 con `If-None-Match`).                           |
+| `setProductSoldOut`                 | `POST /catalog/products/{id}/sold-out`                        | «Agotado» y «Disponible otra vez».                                             |
+| `getRecoveryState`                  | `GET /restaurant/state`                                       | Estado al reconectar: permisos, mesas, cuentas, preparación y cursor.          |
+| `getRestaurantOverview`             | `GET /restaurant/overview`                                    | Áreas, mesas (lista y mapa) y umbrales de tiempo (etapa A1).                   |
+| `listAccounts`                      | `GET /restaurant/accounts`                                    | Cuentas con sus estados.                                                       |
+| `openAccount`                       | `POST /restaurant/accounts`                                   | Abrir una cuenta con su primer producto.                                       |
+| `getAccount`                        | `GET /restaurant/accounts/{id}`                               | Cuenta con su borrador y sus partidas confirmadas.                             |
+| `saveDraft`                         | `PUT /restaurant/accounts/{id}/draft`                         | Guardar el borrador.                                                           |
+| `previewDraft`                      | `GET /restaurant/accounts/{id}/preview`                       | Calcular el borrador y obtener su huella.                                      |
+| `confirmDraft`                      | `POST /restaurant/accounts/{id}/confirm`                      | Confirmar (enviar a cocina) el borrador.                                       |
+| `cancelUnits`                       | `POST /restaurant/accounts/{id}/cancel`                       | Cancelar unidades enviadas, con motivo (etapa A1 en el contrato).              |
+| `previewEdit`                       | `POST /restaurant/accounts/{id}/edit-preview`                 | Calcular la modificación de una partida enviada y su huella.                   |
+| `editUnits`                         | `POST /restaurant/accounts/{id}/edit`                         | Modificar una partida enviada, con motivo.                                     |
+| `updateTakeawayCustomer`            | `POST /restaurant/accounts/{id}/customer`                     | Nombre del cliente y teléfono de un pedido para llevar (etapa A2).             |
+| `discardAccount`                    | `POST /restaurant/accounts/{id}/discard`                      | Descartar sin motivo una cuenta vacía (etapa A3 en el contrato).               |
+| `submitOfflineOrder`                | `POST /restaurant/offline-orders`                             | Pedido capturado sin conexión (Android; con sesión o credencial de envío).     |
+| `printPrecheck`                     | `POST /payments/accounts/{id}/precheck/print`                 | Imprimir la precuenta (etapa A2 en el contrato).                               |
+| `getDocumentStatus`                 | `GET /payments/accounts/{id}/documents/status`                | Estado de impresión de una precuenta, sin importes (etapa A2).                 |
+| `retryDocument`                     | `POST /payments/accounts/{id}/documents/retry`                | Reintentar sin motivo una precuenta que no salió (etapa A2 en el contrato).    |
+| `deliverTakeaway`                   | `POST /payments/accounts/{id}/deliver`                        | Marcar entregado un pedido para llevar ya pagado (etapa A2 en el contrato).    |
+| `createPairingRequest`              | `POST /pairing/requests`                                      | Pedir un código de emparejamiento (sin credencial).                            |
+| `revealPairingNonce`                | `POST /pairing/requests/{id}/reveal`                          | Revelar el número de la terminal después de recibir el del servidor.           |
+| `getPairingRequest`                 | `GET /pairing/requests/{id}`                                  | Consultar si la computadora principal ya aprobó el código.                     |
+| `renamePairingRequest`              | `POST /pairing/requests/{id}/name`                            | Corregir el nombre propuesto mientras espera.                                  |
+| `cancelPairingRequest`              | `POST /pairing/requests/{id}/cancel`                          | Dejar de esperar la aprobación.                                                |
+| `claimPairingCredential`            | `POST /pairing/requests/{id}/claim`                           | Recibir una sola vez la credencial de la terminal.                             |
+| `getLicenseStatus`                  | `GET /license/status`                                         | Estado de la licencia del servidor principal (etapa L1; también sin sesión).   |
+| `setKitchenDisplayMode`             | `POST /kitchen/display-mode`                                  | Entrar o salir de Preparación: ocupa o libera el cupo de cocina (etapa L1).    |
+| `connectKitchenDisplay`             | `POST /kitchen-display/connect`                               | Pantalla de cocina: ocupar su cupo y leer su configuración (etapa K1).         |
+| `getKitchenDisplayOrders`           | `GET /kitchen-display/orders`                                 | Pantalla de cocina: tarjetas, configuración, licencia y cursor (etapa K1).     |
+| `markKitchenDisplayItemsReady`      | `POST /kitchen-display/items/ready`                           | Pantalla de cocina: marcar platillos como listos (etapa K1).                   |
+| `markKitchenDisplayOrderReady`      | `POST /kitchen-display/orders/ready`                          | Pantalla de cocina: marcar el pedido completo como listo (etapa K1).           |
+| `getKitchenDisplayRecent`           | `GET /kitchen-display/recent`                                 | Pantalla de cocina: lo marcado en los últimos 30 minutos (etapa K1).           |
+| `recoverKitchenDisplayItems`        | `POST /kitchen-display/recover`                               | Pantalla de cocina: regresar lo marcado por error (etapa K1).                  |
+| `acknowledgeKitchenDisplayReceipts` | `POST /kitchen-display/receipts`                              | Pantalla de cocina: confirmar que ya muestra unas comandas (etapa K1).         |
+| `checkKitchenDisplaySettingsAccess` | `POST /kitchen-display/settings-access`                       | Pantalla de cocina: contraseña de un administrador para los ajustes (K1).      |
+| `unpairKitchenDisplay`              | `POST /kitchen-display/unpair`                                | Pantalla de cocina: «Volver a emparejar», se revoca y suelta su cupo (K1).     |
+| `getKitchenCoverage`                | `GET /kitchen/coverage`                                       | Qué llega a cada estación y pantalla, lo sin ruta y sus avisos (etapa K1.1).   |
+| `saveKitchenUnrouted`               | `PUT /kitchen/unrouted`                                       | Guardar «Productos sin ruta» (etapa K1.1).                                     |
+| `releaseKitchenOrder`               | `POST /kitchen/releases/{id}/release`                         | «Enviar a cocina ahora» un pedido pendiente (etapa K1.1 en el contrato).       |
+| `retryKitchenChange`                | `POST /kitchen/changes/{event_id}/retry`                      | «Volver a avisar» un cambio pendiente (etapa K1.1 en el contrato).             |
+| `getKitchenBoard`                   | `GET /kitchen/board`                                          | Preparación y «Por enviar a cocina» (etapa K1.1 en el contrato).               |
+| `previewTableUnion`                 | `POST /restaurant/table-unions/preview`                       | Nombre, capacidad y problemas de una unión de mesas, sin escribir (etapa M1).  |
+| `createTableUnion`                  | `POST /restaurant/table-unions`                               | Unir mesas desde una mesa ocupada (etapa M1).                                  |
+| `addTableToUnion`                   | `POST /restaurant/table-unions/{id}/tables`                   | Agregar una mesa libre a una unión (etapa M1).                                 |
+| `removeTableFromUnion`              | `POST /restaurant/table-unions/{id}/tables/{table_id}/remove` | Quitar una mesa de una unión (etapa M1).                                       |
+| `getTableUnion`                     | `GET /restaurant/table-unions/{id}`                           | Una unión (también deshecha) con sus mesas y su historial (etapa M1).          |
+| `createTableGroup`                  | `POST /restaurant/table-groups`                               | Crear una mesa divisible (grupo predefinido; etapa M1).                        |
+| `updateTableGroup`                  | `PATCH /restaurant/table-groups/{id}`                         | Cambiar o quitar una mesa divisible (etapa M1).                                |
 
 ## Encontrar el servidor y emparejarse (fases B y C)
 
@@ -253,7 +260,7 @@ terminales de escritorio siguen con usuario y contraseña). Llevan la credencial
      `restaurant.tables.read`, `restaurant.areas.read`, `accounts.read`, `accounts.open`, `orders.capture`,
      `orders.confirm`, `orders.edit`, `orders.cancel`, `catalog.read`, `catalog.prices.read`, `events.read` y, desde la
      etapa A2, `takeaway.read`, `takeaway.manage` y `takeaway.deliver` (Para llevar) y `payments.tickets.print`
-     (imprimir la precuenta). `getIdentity` y
+     (imprimir la precuenta), y desde la etapa M1, `restaurant.tables.join` («Unir mesas»). `getIdentity` y
      `getRecoveryState` informan ya los permisos acotados; cualquier otra ruta responde 403 como sin el permiso. La
      lista vive en un solo lugar del servidor (`administration/waiter_scope.go`) y solo crece con las funciones de la
      aplicación (en la A2: Para llevar e impresión de la precuenta). Cambiar la contraseña desde esa sesión no la
@@ -1061,6 +1068,115 @@ kitchen/settings` y `PUT kitchen/timing` lo aceptan en el cuerpo y no lo cambian
 - **`retryKitchenChange`** (`POST /kitchen/changes/{event_id}/retry`, `{operation_id, revision}`; `kitchen.release` y
   `kitchen.stations.all`): «Volver a avisar» a la estación que tenía la comanda, si ya está activa (`{reviewed: true}`).
   Con un aviso ya terminado, **409 `KITCHEN_CHANGE_NOT_PENDING`** («Este aviso ya no está pendiente.»).
+
+## Uniones de mesas y mesas divisibles · etapa M1
+
+Capacidad `table-unions-v1` (servidor 0.18.0, esquema 31). Sin ella el escritorio y Android esconden «Unir con…», el
+contorno de la unión, el marco y el atajo de una mesa divisible y la administración de grupos. Decisiones M1-D1 a M1-D19
+y el contrato de la etapa en [ETAPA_M1_AVANCE.md](ETAPA_M1_AVANCE.md). Go decide todo (el nombre, la capacidad, qué
+mesas se pueden unir y qué pasa con las cuentas); el cliente solo muestra lo que responde.
+
+- **Modelo** (M1-D1): una unión es un conjunto de mesas del mismo área que se comporta como una sola mesa. Una cuenta es
+  de la unión porque su `table_id` es una mesa de la unión; `table_id` y `table_name` de la cuenta siguen siendo los de
+  su mesa (la 0.4.1 los entiende igual) y `Account.table_union` (`{id, name, table_ids}` o null) dice su unión. Una mesa
+  nunca está en dos uniones abiertas (lock 7820148305 y un índice único).
+- **Nombre** (M1-D2): las mesas en orden natural del nombre (sin distinguir mayúsculas: «2 + 10»); «Mesa 5 + 6» si todas
+  empiezan con la palabra «Mesa», «5 + 6» si no; una unión con todas las secciones de un grupo, y nada más, se llama
+  como el grupo («Mesa 3», con `group_id`). La capacidad es la suma. Una cuenta sin nombre propio en una unión se llama
+  como la unión, toma el nombre nuevo al agregar o quitar mesas y vuelve al de su mesa al deshacerse (sin subir su
+  revisión: un cambio de mesas no es una edición de la cuenta).
+- **Lecturas**: `getRestaurantOverview` y `getRecoveryState` agregan `unions` (`TableUnion`, solo abiertas) y `groups`
+  (`TableGroup`, solo activos; en el estado, null sin `restaurant.tables.read`). Cada `Table` agrega `union_id` y
+  `group_id`; **una mesa unida tiene el estado, las cuentas, el saldo, el tiempo y `long_open` de la unión** (M1-D10), así
+  que no se desactiva, no se pone fuera de servicio y no cambia de área (`TABLE_IN_UNION`). `listAccounts?table_id=X`
+  de una mesa unida devuelve las cuentas abiertas de toda la unión. `getTableUnion` (`GET
+/restaurant/table-unions/{id}`, `restaurant.tables.read`) es la unión (también deshecha, `state: dissolved`) con sus
+  mesas y su historial: `joined` (una fila por mesa inicial), `table_added`, `table_removed` y `dissolved`, con
+  `user_name` y `device_name`.
+- **`previewTableUnion`** (`POST /restaurant/table-unions/preview`, `restaurant.tables.join`, sin `operation_id`, no
+  escribe): `{table_ids}` (todas, al menos dos; la primera es la mesa de inicio), `{group_id}` (el atajo del grupo) o
+  `{union_id, table_ids}` (las que se agregan) → `{name, seats, table_ids, problems: [{code, message, table_id}]}`.
+  `problems` vacío = se puede; cada problema es el rechazo que daría unir.
+- **Unir** (§1.1 y M1-D9): con todas las mesas libres, **la unión vive solo en la pantalla** hasta el primer producto y
+  nace en **`openAccount`** con `union_table_ids` (las otras mesas) o `union_group_id` (`table_id` es una sección del
+  grupo), en la misma operación que la cuenta; si una mesa se ocupó mientras tanto, 409 sin guardar nada (el cliente
+  conserva lo capturado). Desde una mesa ocupada, **`createTableUnion`** (`POST /restaurant/table-unions`,
+  `{operation_id, start_table_id, table_ids | group_id}`) une al momento: sus cuentas quedan en la unión; las que se
+  agregan deben estar libres. Con todas libres responde **409 `TABLE_UNION_DEFERRED`** («La unión se guarda con el primer
+  producto.»). Para crecer se empieza desde la ocupada; dos ocupadas no se unen («Combinar cuentas»).
+- **`addTableToUnion`** (`POST /restaurant/table-unions/{id}/tables`, `{operation_id, revision, table_id}`) y
+  **`removeTableFromUnion`** (`POST /restaurant/table-unions/{id}/tables/{table_id}/remove`, `{operation_id,
+revision}` → `{union, dissolved}`): agregar una mesa libre del mismo área; quitar una mesa no saca ninguna cuenta de la
+  unión (las de esa mesa pasan a la primera que queda). Si queda una sola mesa, la unión se deshace (`dissolved: true`,
+  `union.state: dissolved`) y las cuentas quedan en esa mesa.
+- **Se deshace sola** (M1-D7) al quedarse sin cuentas abiertas: cobrar, cancelar, descartar, liberar, combinar en otra
+  mesa o mover la última cuenta fuera de la unión. Una cuenta que una devolución reabre vuelve a su mesa; si esa mesa
+  está en una unión abierta, queda en esa unión.
+- **`seen_union_id`** en `openAccount` (opcional): la unión que la terminal veía en la mesa (null si ninguna). Si viene y
+  la mesa está en otra unión, **409 `TABLE_IN_UNION`** con `details.union` y `details.accounts`. Sin el campo (la 0.4.1),
+  `seen_account_ids` se revisa contra todas las cuentas de la unión (`TABLE_HAS_ACCOUNT`, como hoy).
+- **Mesas divisibles** (§3 y M1-D4): **`createTableGroup`** (`POST /restaurant/table-groups`, `{operation_id, area_id,
+name, table_ids}`) y **`updateTableGroup`** (`PATCH /restaurant/table-groups/{id}`, `{operation_id, revision, name?,
+table_ids?, active?}`; `active: false` lo quita y su nombre vuelve a estar libre), con `restaurant.tables.manage`.
+  Responden `{group}`. Cada sección es una mesa normal. El atajo del grupo es `union_group_id`; una sección ocupada lo
+  impide (`TABLE_GROUP_SECTION_OCCUPIED`) y se crece desde ella con `createTableUnion` (si une todas, se llama como el
+  grupo). Un grupo con una sección unida no se cambia (`TABLE_GROUP_IN_USE`) y una sección no cambia de área
+  (`TABLE_GROUP_SECTION_AREA`).
+- **Rechazos** (409 salvo que se diga, `{error: {code, message, details}}`; `message` exacto, para mostrarse; `{mesa}`
+  es «Mesa 6» con una mesa «6» o «Mesa 6»; `details.table_id` y `details.union_id` cuando aplica):
+
+  | Código                         | Cuándo                                                           | Texto                                                                                                |
+  | ------------------------------ | ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+  | `TABLE_UNION_AREA`             | Mesas de áreas distintas (también en grupos)                     | «Las mesas deben ser de la misma área.»                                                              |
+  | `TABLE_UNION_OCCUPIED`         | Una mesa que se agrega tiene cuentas abiertas                    | «Solo se pueden unir mesas libres: la {mesa} ya está ocupada.»                                       |
+  | `TABLE_UNION_BOTH_OCCUPIED`    | La de inicio y otra tienen cuentas abiertas                      | «La {mesa A} y la {mesa B} tienen cuentas abiertas. Para juntar sus cuentas usa «Combinar cuentas».» |
+  | `TABLE_UNION_UNAVAILABLE`      | Mesa inactiva o fuera de servicio                                | «La {mesa} está fuera de servicio o desactivada.»                                                    |
+  | `TABLE_IN_UNION`               | La mesa ya está unida; `seen_union_id` distinto; cambiar de área | «La {mesa} ya está unida con otras mesas ({unión}).»                                                 |
+  | `TABLE_GROUP_SECTION_OCCUPIED` | Atajo del grupo con una sección ocupada                          | «La sección {nombre} está ocupada. Únela con las secciones libres para crecer.»                      |
+  | `TABLE_UNION_NOT_OPEN`         | La unión ya se deshizo                                           | «Esta unión de mesas ya se deshizo.»                                                                 |
+  | `TABLE_UNION_CONFLICT`         | Revisión distinta                                                | «La unión cambió en otra terminal. Revisa las mesas e inténtalo otra vez.»                           |
+  | `TABLE_UNION_DEFERRED`         | `createTableUnion` con todas libres                              | «La unión se guarda con el primer producto.»                                                         |
+  | `TABLE_GROUP_NAME_TAKEN`       | Nombre repetido en el área (mesas y grupos activos)              | «Ya hay una mesa o un grupo con ese nombre en esta área.»                                            |
+  | `TABLE_GROUP_SECTION_TAKEN`    | La mesa ya es sección de otro grupo                              | «La {mesa} ya es parte del grupo {grupo}.»                                                           |
+  | `TABLE_GROUP_IN_USE`           | Cambiar o quitar un grupo con una sección unida                  | «El grupo tiene mesas unidas. Cámbialo cuando se liberen.»                                           |
+  | `TABLE_GROUP_SECTION_AREA`     | Cambiar de área una sección                                      | «Quita la mesa del grupo antes de cambiarla de área.»                                                |
+
+  Menos de dos mesas, una mesa repetida o un identificador inválido: 400 `OPERATION_VALIDATION`. Sin «Unir mesas»: 403
+  `PERMISSION_DENIED`.
+
+- **Permiso «Unir mesas»** (`restaurant.tables.join`, grupo «Mesas y cuentas», `requires: accounts.open,
+restaurant.tables.read`; M1-D8): lo piden la vista previa, unir, agregar, quitar y la unión con el primer producto. Está
+  en los roles de fábrica Mesero, Cajero y Supervisor (el Administrador recibe todos), en «Restablecer permisos
+  predeterminados», en la vista sencilla («Atender mesas») y en la lista de permisos de mesero (sesión con PIN). La
+  migración 0031 lo concede a los roles existentes Administrador, Mesero, Cajero y Supervisor que ya abren cuentas y ven
+  las mesas.
+- **Idempotencia y eventos**: cada escritura con su `operation_id` (otra petición con la misma clave y otro cuerpo, 409
+  `IDEMPOTENCY_CONFLICT`). En la misma transacción: `restaurant.table-unions.changed` o `restaurant.table-groups.changed`
+  y, por cada cuenta abierta afectada, `restaurant.account.table_union` (también en su historial, con quién y la
+  terminal); la pantalla de cocina lo recibe y vuelve a leer el encabezado de la tarjeta.
+- **Cola sin conexión** (M1-D13): `destination.seen_union_id` (opcional; la 0.4.1 no lo manda). Un pedido a una mesa que
+  al llegar está en una unión va a la unión: las partidas ya recibidas (`items_in_account`) y las cuentas no vistas
+  (`table_has_account`, aceptable: «La {mesa} ahora está unida con otras mesas ({unión}) y tiene cuentas abiertas.
+  Confirma para abrir otra cuenta en la unión o envía el pedido a esa cuenta.») se buscan en todas sus mesas; sin
+  cuentas no vistas, la cuenta nueva queda en la unión. Si la unión que vio el mesero ya no existe y la mesa está libre,
+  o la mesa salió de la unión, cuenta nueva en la mesa; si la ocupó otra cuenta, `table_has_account` como siempre. Con
+  `destination.account_id`, a esa cuenta esté donde esté (o `account_closed`). No hay tipos de cambio nuevos, y una
+  unión que solo estaba en la pantalla nunca entra en la cola.
+- **El nombre en los lectores** (M1-D14): la precuenta, el ticket y el comprobante («Mesa 5 + 6»; una cuenta ya cobrada
+  con el nombre que tenía la unión al cerrarse), la comanda («Salón · Mesa 5 + 6»), el `title` del KDS, Preparación,
+  los avisos de platillos listos, «En curso» y las cancelaciones de los reportes, y la venta: `sales_recognitions` guarda
+  la unión al reconocer (`table_union_id`, `table_union_name`, `table_union_tables`); «Ventas de salón» la muestra en un
+  solo renglón sin repartirla y el filtro de una mesa incluye las uniones en las que estuvo (M1-D3).
+- **Preparación sin etiqueta** (§5.2; no depende de la capacidad): `ConfirmedLine.preparation_required` es false si el
+  renglón ya se liberó y ninguna de sus unidades generó tarea de preparación (producto sin ruta con «No necesitan
+  preparación», ruta «Sin preparación»); antes de liberarse es true, y un combo con algún componente con tarea también.
+  `Account.preparation_required` es true si algún renglón vigente lo es (sin productos enviados, true). Con false, el
+  cliente no pone ninguna etiqueta de cocina; un cliente que no recibe el campo lo trata como true.
+- **Quitar la hora envía** (§5.3, M1-D17): quitar la hora a un pedido programado (`PATCH restaurant/accounts/{id}` sin
+  `scheduled_local`) lo envía a cocina en la misma transacción, como un pedido sin hora; la respuesta ya trae la
+  preparación vigente. Antes quedaba «Por enviar a cocina» (K11-D9).
+- **Licencia**: la vista previa y `getTableUnion` son lecturas; unir, agregar y quitar son «reorganizar lo capturado»
+  (como mover y combinar); los grupos son administración (como las mesas y el plano). Sin cambio de cupos.
 
 ## Licencia del servidor principal (etapa L1, fase B)
 
