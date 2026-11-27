@@ -236,7 +236,7 @@ test('unir mesas en el escritorio: diferida, al momento, contorno, agregar, quit
   await page.getByLabel('Buscar cuenta o folio', { exact: true }).fill(String(joinedFolio));
   const card = page
     .locator('.account-list-card')
-    .filter({ hasText: new RegExp(`^Cuenta #${joinedFolio}\\b`) });
+    .filter({ hasText: new RegExp(`^Cuenta #${joinedFolio}(?!\\d)`) });
   await expect(card.locator('.account-card-place')).toHaveText('Mesa 51 + 52');
   await views.getByRole('button', { name: 'Mesas', exact: true }).click();
   await tableButton(page, 'Mesa 52').click();
