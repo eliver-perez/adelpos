@@ -197,6 +197,17 @@ test('mesas divisibles: grupo en Áreas y distribución, marco en el mapa y ataj
   await page.getByRole('button', { name: 'Guardar grupo', exact: true }).click();
   await expect(notice(page, /ya es parte del grupo Mesa 3/)).toBeVisible();
   await dismissNotices(page);
+  // M1-D33: tampoco una mesa se llama como un grupo activo de su área (el texto de Go, tal cual).
+  await page
+    .locator('.table-canvas[aria-label="Diseñador de distribución de mesas"]')
+    .getByRole('button', { name: /^Mesa 4, / })
+    .click();
+  await page.getByLabel('Nombre o número de mesa', { exact: true }).fill('Mesa 3');
+  await page.getByRole('button', { name: 'Guardar mesa', exact: true }).click();
+  await expect(
+    notice(page, 'Ya hay una mesa o un grupo con ese nombre en esta área.'),
+  ).toBeVisible();
+  await dismissNotices(page);
   expect((await overviewOf(driver, area.id)).groups.map((group) => group.name)).toEqual(['Mesa 3']);
 
   // 2. En el mapa, el marco tenue del grupo con su nombre; cada sección se sigue tocando.

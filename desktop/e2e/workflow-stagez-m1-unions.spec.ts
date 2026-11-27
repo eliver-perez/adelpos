@@ -199,9 +199,9 @@ test('unir mesas en el escritorio: diferida, al momento, contorno, agregar, quit
   // Con el primer producto nacen la unión y la cuenta.
   await panel.getByRole('button', { name: 'Capturar pedidos en esta mesa', exact: true }).click();
   await addProduct(page, categoryName, productName);
-  await expect(page.getByRole('heading', { name: /^Mesa 51 \+ 52 · Cuenta #\d+$/ })).toBeVisible({
-    timeout: 15000,
-  });
+  const joinedHeading = page.getByRole('heading', { name: /^Mesa 51 \+ 52 · Cuenta #\d+$/ });
+  await expect(joinedHeading).toBeVisible({ timeout: 15000 });
+  const joinedFolio = Number(/#(\d+)/.exec((await joinedHeading.textContent()) ?? '')?.[1]);
   await expect
     .poll(async () => (await unionsOf(driver, area.id)).map((union) => union.name))
     .toEqual(['Mesa 51 + 52']);
@@ -230,6 +230,17 @@ test('unir mesas en el escritorio: diferida, al momento, contorno, agregar, quit
   await expect(found.getByRole('button', { name: /^Mesa 51, / })).toHaveCount(0);
   await expect(found.getByRole('button', { name: /^Mesa 52, / })).toHaveCount(0);
   await page.getByRole('searchbox', { name: 'Buscar mesa por nombre, número o área' }).fill('');
+  // En Cuentas, la cuenta de la unión dice el nombre de la unión (el escritorio arma ese lugar, M1-D14).
+  const views = page.getByRole('group', { name: 'Vistas operativas' });
+  await views.getByRole('button', { name: 'Cuentas', exact: true }).click();
+  await page.getByLabel('Buscar cuenta o folio', { exact: true }).fill(String(joinedFolio));
+  const card = page
+    .locator('.account-list-card')
+    .filter({ hasText: new RegExp(`^Cuenta #${joinedFolio}\\b`) });
+  await expect(card.locator('.account-card-place')).toHaveText('Mesa 51 + 52');
+  await views.getByRole('button', { name: 'Mesas', exact: true }).click();
+  await tableButton(page, 'Mesa 52').click();
+  await expect(panel).toContainText(`Cuenta #${joinedFolio}`);
 
   // 3. «Agregar mesa» (vista previa de Go) y «Quitar mesa» (ninguna cuenta sale de la unión).
   await panel.getByRole('button', { name: 'Agregar mesa', exact: true }).click();
