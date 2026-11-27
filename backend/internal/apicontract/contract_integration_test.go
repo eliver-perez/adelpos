@@ -1300,6 +1300,13 @@ func contractTableUnions(t *testing.T, client *contractClient, data contractWait
 	if removed["dissolved"] != false || removed["union"].(map[string]any)["name"] != "Mesa U1 + U3" {
 		t.Fatalf("quitar una mesa: %v", removed)
 	}
+	// M1-D32: abrir en la mesa que salió con la unión vista (que sigue abierta sin ella) responde TABLE_UNION_CONFLICT.
+	conflicted := decodeContract[map[string]any](t, client.call("POST", "/restaurant/accounts", map[string]any{
+		"operation_id": contractID(), "mode": "dine_in", "table_id": tables[1], "seen_union_id": unionID,
+		"seen_account_ids": []string{}, "items": item()}, nil, 409).Body.Bytes())
+	if conflicted["error"].(map[string]any)["code"] != "TABLE_UNION_CONFLICT" {
+		t.Fatalf("seen_union_id de una unión abierta sin la mesa: %v", conflicted)
+	}
 	// Unir desde una mesa ocupada.
 	occupied := decodeContract[map[string]any](t, client.setup("POST", "/restaurant/accounts", map[string]any{
 		"operation_id": contractID(), "mode": "dine_in", "table_id": tables[3], "items": item()}, 200))
