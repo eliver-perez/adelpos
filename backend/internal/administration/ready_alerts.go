@@ -12,6 +12,7 @@ import (
 	"local/ad-el-pos/server/internal/businessday"
 	"local/ad-el-pos/server/internal/httpapi"
 	"local/ad-el-pos/server/internal/kitchen"
+	"local/ad-el-pos/server/internal/tableunions"
 )
 
 // Avisos de platillos listos (etapa A2, parte D; §4 de la especificación, decisiones A2-D4 y A2-D9 y las correcciones de
@@ -102,7 +103,7 @@ const readyPresenceSQL = `SELECT user_id,created_at FROM app.sessions WHERE devi
 // grupos ($3 es kitchen.ReadyAlertsRecentUse en segundos, para la presencia). Cada fila es un grupo: su último número,
 // si le queda alguna unidad activa y el aviso. La cuenta del aviso sigue las combinaciones hasta la vigente (revisión
 // R10).
-const readyAlertsQuery = `WITH RECURSIVE presence AS (
+var readyAlertsQuery = `WITH RECURSIVE presence AS (
         SELECT user_id,min(created_at) AS since FROM (` + readyPresenceSQL + `) counted GROUP BY user_id
     ), notices AS (
         SELECT n.sequence,n.alert_key,n.account_id,n.recipient_user_id,n.ready_at,u.state AS unit_state,
@@ -127,7 +128,8 @@ const readyAlertsQuery = `WITH RECURSIVE presence AS (
         SELECT DISTINCT ON (alert_key) alert_key,id FROM chain ORDER BY alert_key,depth DESC
     )
     SELECT g.last,EXISTS(SELECT FROM notices x WHERE x.alert_key=g.alert_key AND x.unit_state='active'),
-        jsonb_build_object('id',g.last,'key',g.alert_key,'account_id',a.id,'mode',a.mode,'table_name',t.name,
+        jsonb_build_object('id',g.last,'key',g.alert_key,'account_id',a.id,'mode',a.mode,
+        'table_name',coalesce(` + tableunions.UnionNameSQL("a.table_id") + `,t.name),
         'folio',a.folio,'customer_name',a.customer_name,'waiter_user_id',g.recipient_user_id,
         'waiter_short_name',coalesce(nullif(waiter.short_name,''),waiter.display_name),
         'items',coalesce((SELECT jsonb_agg(jsonb_build_object('product_name',item.product_name,'quantity',item.quantity)

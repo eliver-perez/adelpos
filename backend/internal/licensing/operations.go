@@ -276,6 +276,15 @@ func classifyRestaurant(method string, parts []string) Operation {
 	if readMethod(method) {
 		return known(RowRecords, false)
 	}
+	// Etapa M1 (contrato §9): la vista previa de una unión solo calcula; unir, agregar y quitar mesas reorganizan lo ya
+	// capturado (como mover y combinar); los grupos predefinidos son administración (como las mesas y el plano). La
+	// unión que nace con el primer producto viaja en POST restaurant/accounts, que no cambia. Sin cambio de cupos.
+	if len(parts) > 1 && parts[1] == "table-unions" {
+		return classifyTableUnion(method, parts)
+	}
+	if len(parts) > 1 && parts[1] == "table-groups" {
+		return known(RowAdministration, true)
+	}
 	length := len(parts)
 	resource := ""
 	if length > 1 {
@@ -296,6 +305,21 @@ func classifyRestaurant(method string, parts []string) Operation {
 		resource == "cancel-reasons":
 		// Áreas, mesas (también fuera de servicio), plano, configuración y motivos de cancelación.
 		return known(RowAdministration, true)
+	}
+	return unknownOperation(method)
+}
+
+// classifyTableUnion: restaurant/table-unions/… (etapa M1).
+func classifyTableUnion(method string, parts []string) Operation {
+	switch {
+	case method == "POST" && len(parts) == 3 && parts[2] == "preview":
+		return known(RowRecords, false)
+	case method == "POST" && len(parts) == 2:
+		return known(RowCaptured, true)
+	case method == "POST" && len(parts) == 4 && parts[3] == "tables":
+		return known(RowCaptured, true)
+	case method == "POST" && len(parts) == 6 && parts[3] == "tables" && parts[5] == "remove":
+		return known(RowCaptured, true)
 	}
 	return unknownOperation(method)
 }

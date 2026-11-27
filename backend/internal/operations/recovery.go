@@ -6,6 +6,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"local/ad-el-pos/server/internal/events"
+	"local/ad-el-pos/server/internal/tableunions"
 )
 
 // Recuperación del estado al reconectar (etapa 9G, §5.6). Una terminal o un teléfono que perdió la conexión no
@@ -20,6 +21,10 @@ import (
 type RecoveryView struct {
 	Tables   []Table   `json:"tables"`
 	Accounts []Account `json:"accounts"`
+	// Unions y Groups (etapa M1, contrato §2) son las uniones abiertas y los grupos activos; nil sin
+	// restaurant.tables.read, como las mesas.
+	Unions []TableUnion        `json:"unions"`
+	Groups []tableunions.Group `json:"groups"`
 	// EventCursor (etapa A1) es el cursor del canal de eventos en el momento de la lectura: lo que ocurra después llega
 	// por GET events?after=event_cursor.
 	EventCursor int64 `json:"event_cursor"`
@@ -46,6 +51,14 @@ func Recovery(ctx context.Context, tx pgx.Tx, request Request) (*RecoveryView, e
 			return nil, err
 		}
 		view.Tables = tables
+		view.Unions, err = handler.openUnions(tables)
+		if err != nil {
+			return nil, err
+		}
+		view.Groups, err = tableunions.ActiveGroups(ctx, tx)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if !request.Actor.Can("accounts.read") {
 		return view, nil

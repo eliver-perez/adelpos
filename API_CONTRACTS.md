@@ -4045,6 +4045,7 @@ terminal_name}` o `null`), con la misma consulta (`terminalIdentityQuery`, `admi
   `accounts.read`, `accounts.open`, `orders.capture`, `orders.confirm`, `orders.edit`, `orders.cancel`, `catalog.read`,
   `catalog.prices.read`, `events.read`, `takeaway.read`, `takeaway.manage`, `takeaway.deliver` y
   **`payments.tickets.print`**. No `payments.tickets.reprint`: volver a imprimir arma una precuenta nueva, como en la caja.
+  Desde la etapa M1, también **`restaurant.tables.join`** («Unir mesas»; ver «Etapa M1 · Uniones de mesas»).
 - **«Quitar datos de prueba»**: si la impresora de precuentas de un dispositivo es de prueba, se desvincula («Impresora de
   precuentas de «…»»; el dispositivo queda sin impresora) en lugar de impedir que se elimine.
 - **Escritorio**: Terminales › Editar de un `android` muestra «Impresora de precuentas» y «Ver configuración» la informa,

@@ -50,6 +50,9 @@ func recoveryState(ctx context.Context, tx pgx.Tx, principal Principal) (any, er
 		"terminal":        terminal,
 		"tables":          restaurant.Tables,
 		"accounts":        restaurant.Accounts,
+		// Etapa M1 (contrato §2): las uniones abiertas y los grupos activos (null sin restaurant.tables.read).
+		"unions": restaurant.Unions,
+		"groups": restaurant.Groups,
 		// Etapa A1: el cursor del canal de eventos al leer este estado (GET events?after=event_cursor).
 		"event_cursor": restaurant.EventCursor,
 	}, nil

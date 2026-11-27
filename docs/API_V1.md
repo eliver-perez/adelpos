@@ -253,7 +253,7 @@ terminales de escritorio siguen con usuario y contraseña). Llevan la credencial
      `restaurant.tables.read`, `restaurant.areas.read`, `accounts.read`, `accounts.open`, `orders.capture`,
      `orders.confirm`, `orders.edit`, `orders.cancel`, `catalog.read`, `catalog.prices.read`, `events.read` y, desde la
      etapa A2, `takeaway.read`, `takeaway.manage` y `takeaway.deliver` (Para llevar) y `payments.tickets.print`
-     (imprimir la precuenta). `getIdentity` y
+     (imprimir la precuenta), y desde la etapa M1, `restaurant.tables.join` («Unir mesas»). `getIdentity` y
      `getRecoveryState` informan ya los permisos acotados; cualquier otra ruta responde 403 como sin el permiso. La
      lista vive en un solo lugar del servidor (`administration/waiter_scope.go`) y solo crece con las funciones de la
      aplicación (en la A2: Para llevar e impresión de la precuenta). Cambiar la contraseña desde esa sesión no la

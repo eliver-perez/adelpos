@@ -6,6 +6,7 @@ import (
 
 	"local/ad-el-pos/server/internal/documents"
 	"local/ad-el-pos/server/internal/events"
+	"local/ad-el-pos/server/internal/tableunions"
 )
 
 func (handler *service) read(parts []string) (any, error) {
@@ -128,7 +129,8 @@ func (handler *service) board() (any, error) {
 	}
 	tasks, err := many[map[string]any](handler.ctx, handler.tx, `SELECT to_jsonb(t)||jsonb_build_object(
         'state',CASE WHEN u.state='cancelled' THEN 'cancelled' ELSE t.state END,
-        'folio',a.folio,'account_name',a.name,'table_name',p.name,'station_name',s.name,
+        'folio',a.folio,'account_name',a.name,'table_name',coalesce(`+tableunions.UnionNameSQL("a.table_id")+`,p.name),
+        'station_name',s.name,
         'warning_minutes',s.warning_minutes,'overdue_minutes',s.overdue_minutes,
         'target_minutes',s.target_minutes,'tracking',CASE WHEN s.tracking='inherit' THEN cfg.tracking ELSE s.tracking END,
         'elapsed_seconds',greatest(0,extract(epoch FROM now()-t.released_at)::bigint),'release_revision',r.revision)

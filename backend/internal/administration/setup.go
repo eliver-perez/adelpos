@@ -109,7 +109,9 @@ func (service *Service) setup(ctx context.Context, tx pgx.Tx, request Request) (
 	// Etapa A3 (§3.1, A3-D2): una instalación nueva trae los roles de fábrica con sus permisos habituales ya marcados
 	// (permission_catalog.go). Sustituye a lo que concedía hasta la A2 (algunos de consulta al supervisor, al cajero y a
 	// finanzas, y waiter_devices.use al mesero, A1-D2), que ya está dentro de cada conjunto. En una instalación
-	// existente nada cambia sin «Restablecer permisos predeterminados» (la 0027 no toca roles).
+	// existente nada cambia sin «Restablecer permisos predeterminados» (la 0027 no toca roles). Etapa M1 (M1-D8): «Unir
+	// mesas» (restaurant.tables.join) ya está en los conjuntos de Mesero, Cajero y Supervisor (el Administrador recibe
+	// todos arriba); en las instalaciones existentes lo concede la 0031.
 	for _, code := range factoryRoleCodes {
 		keys, _ := factoryPermissions(code)
 		_, err = tx.Exec(ctx, `INSERT INTO app.role_permissions(role_id,permission_key)

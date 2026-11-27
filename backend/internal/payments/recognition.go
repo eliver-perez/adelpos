@@ -6,6 +6,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/shopspring/decimal"
+
+	"local/ad-el-pos/server/internal/tableunions"
 )
 
 // Escritura del libro de reconocimiento de ventas (app.sales_recognitions, migración 0017). Se
@@ -39,6 +41,9 @@ type recognitionContext struct {
 	ShiftID         *string
 	RegisterID      *string
 	HasRecognitions bool
+	// Union es la unión abierta de la mesa al reconocer (etapa M1, M1-D3): su instantánea queda en table_union_id,
+	// table_union_name y table_union_tables, como table_name. nil si la mesa no está unida.
+	Union *tableunions.Snapshot
 }
 
 // recognizedSource es lo ya reconocido de una fuente (suma de sus diferencias) con los datos de su
@@ -126,6 +131,11 @@ func (handler *service) readRecognitionContext(accountID string) (*recognitionCo
         WHERE a.id=$1`, accountID).Scan(&context.Folio, &context.Mode, &context.Origin, &context.TableID, &context.TableName,
 		&context.AreaID, &context.AreaName, &context.ResponsibleID, &context.PriceListID, &context.PriceListName,
 		&context.HasRecognitions)
+	if err != nil {
+		return nil, err
+	}
+	// La unión sigue abierta aquí: SettleEmpty la deshace al final de la operación del cobro, después de reconocer.
+	context.Union, err = tableunions.OpenSnapshot(handler.ctx, handler.tx, context.TableID)
 	if err != nil {
 		return nil, err
 	}
@@ -368,16 +378,22 @@ func optionalID(value string) *string {
 // insertRecognitions escribe las diferencias con la hora del cierre (now(), la misma de closed_at).
 func (handler *service) insertRecognitions(accountID, kind string, context *recognitionContext, deltas []recognitionLine) error {
 	closingID := newID()
+	var unionID, unionName, unionTables *string
+	if context.Union != nil {
+		tables := string(context.Union.Tables)
+		unionID, unionName, unionTables = &context.Union.ID, &context.Union.Name, &tables
+	}
 	batch := &pgx.Batch{}
 	for _, line := range deltas {
 		attributes := line.Attributes
 		amounts := line.Amounts
 		batch.Queue(`INSERT INTO app.sales_recognitions(closing_id,recognition_kind,recognized_at,account_id,account_folio,mode,origin,
                 table_id,table_name,area_id,area_name,responsible_user_id,shift_id,register_id,actor_id,device_id,operation_id,
-                source_kind,unit_id,adjustment_id,tax_rate,quantity,gross,promotion,discount,courtesy,charge,net,base,tax,`+recognitionColumns+`)
+                source_kind,unit_id,adjustment_id,tax_rate,quantity,gross,promotion,discount,courtesy,charge,net,base,tax,`+recognitionColumns+`,
+                table_union_id,table_union_name,table_union_tables)
             VALUES ($1,$2,now(),$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22::numeric,$23::numeric,
                 $24::numeric,$25::numeric,$26::numeric,$27::numeric,$28::numeric,$29::numeric,
-                $30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,$45,$46,$47,$48,$49,$50)`,
+                $30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,$45,$46,$47,$48,$49,$50,$51,$52,$53::jsonb)`,
 			closingID, kind, accountID, context.Folio, context.Mode, context.Origin, context.TableID, context.TableName,
 			context.AreaID, context.AreaName, context.ResponsibleID, context.ShiftID, context.RegisterID,
 			optionalID(handler.request.Actor.UserID), optionalID(handler.request.Actor.DeviceID), optionalID(handler.operationID),
@@ -388,7 +404,7 @@ func (handler *service) insertRecognitions(accountID, kind string, context *reco
 			attributes.ProductKind, attributes.VariantID, attributes.VariantName, attributes.CategoryID, attributes.CategoryName,
 			attributes.PriceListID, attributes.PriceListName, attributes.AdjustmentKind, attributes.AdjustmentScope,
 			attributes.IsCourtesy, attributes.ReasonID, attributes.ReasonName, attributes.Concept, attributes.AdjustmentActorID,
-			attributes.AdjustmentAuthorizedBy, attributes.AdjustmentCreatedAt)
+			attributes.AdjustmentAuthorizedBy, attributes.AdjustmentCreatedAt, unionID, unionName, unionTables)
 	}
 	results := handler.tx.SendBatch(handler.ctx, batch)
 	for range deltas {

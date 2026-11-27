@@ -79,6 +79,13 @@ var capabilities = []string{
 	// sin ruta»), el 409 KITCHEN_RELEASE_NOT_PENDING de «Enviar a cocina ahora» y el 409 KITCHEN_CHANGE_NOT_PENDING de
 	// «Volver a avisar». El escritorio muestra el asistente, el diagnóstico y «Productos sin ruta» solo con ella.
 	"kitchen-coverage-v1",
+	// Etapa M1 (Fase A, servidor 0.18.0; M1-D12): uniones de mesas y mesas divisibles: POST restaurant/table-unions
+	// (/preview, unir, agregar y quitar mesas), GET restaurant/table-unions/{id}, POST y PATCH restaurant/table-groups,
+	// union_table_ids, union_group_id y seen_union_id en openAccount, seen_union_id en el destino de la cola sin
+	// conexión, unions y groups en overview y restaurant/state, union_id y group_id en cada mesa, table_union en cada
+	// cuenta y el permiso «Unir mesas». El escritorio y Android esconden «Unir con…», el contorno, el marco y el atajo
+	// del grupo sin ella. preparation_required (§5.2) no depende de la capacidad.
+	"table-unions-v1",
 }
 
 type ErrorBody struct {
