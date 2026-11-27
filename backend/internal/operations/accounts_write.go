@@ -324,7 +324,12 @@ func (handler *service) updateAccount(id string) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return saved, handler.event(id, nil, "account.updated", account, saved.Account)
+	if err := handler.event(id, nil, "account.updated", account, saved.Account); err != nil {
+		return nil, err
+	}
+	// Etapa M1 (§5.3): cocina integra el cambio en el evento (quitar la hora envía el pedido en esta transacción), así
+	// que la respuesta se lee después, con la preparación vigente.
+	return handler.readBill(id)
 }
 
 // accountAction mueve una cuenta a otra mesa o cambia su responsable. La anulación anterior con
