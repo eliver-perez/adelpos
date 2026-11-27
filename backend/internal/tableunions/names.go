@@ -59,6 +59,43 @@ func UnionName(tables []NamedTable) string {
 	return joined
 }
 
+// AccountNameLimit es el largo máximo del nombre de una cuenta (app.restaurant_accounts.name y validateAccountInput).
+const AccountNameLimit = 100
+
+// accountReferenceTail es lo que cierra una referencia recortada.
+const accountReferenceTail = " + …"
+
+// AccountReference es la referencia neutra de una cuenta sin nombre propio en una unión (M1-D14): el nombre de la unión
+// tal cual si cabe en el nombre de una cuenta. Si no cabe (M1-D29: una unión de muchas mesas puede pasar de 100
+// caracteres), se recorta en el último « + » que quepa, sin partir el nombre de una mesa, y termina en « + …»:
+// «Terraza 1 + Terraza 2 + … + Terraza 8 + …». La unión conserva su nombre completo en el mapa, la lista, los
+// documentos, la comanda y el KDS; solo la cuenta lleva la referencia recortada. Se mide en bytes, como la validación de
+// Go, que es más estricta que la de la base (caracteres).
+func AccountReference(unionName string) string {
+	if len(unionName) <= AccountNameLimit {
+		return unionName
+	}
+	limit := AccountNameLimit - len(accountReferenceTail)
+	cut := -1
+	for index := strings.Index(unionName, " + "); index >= 0 && index <= limit; {
+		cut = index
+		next := strings.Index(unionName[index+1:], " + ")
+		if next < 0 {
+			break
+		}
+		index += 1 + next
+	}
+	if cut > 0 {
+		return unionName[:cut] + accountReferenceTail
+	}
+	// Sin un « + » que quepa (una primera mesa de nombre larguísimo): se corta en un carácter completo.
+	runes := []rune(unionName)
+	for len(string(runes))+len("…") > AccountNameLimit {
+		runes = runes[:len(runes)-1]
+	}
+	return string(runes) + "…"
+}
+
 // Seats es la capacidad de la unión: la suma de sus mesas.
 func Seats(tables []NamedTable) int {
 	total := 0
