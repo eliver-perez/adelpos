@@ -118,6 +118,19 @@ data class AccountDto(
     @SerialName("created_at") val createdAt: String? = null,
     // Etapa A3 (§4.10): Go dice si es una cuenta vacía que se puede descartar.
     val discardable: Boolean = false,
+    // Etapa M1: el responsable de la cuenta («Tu cuenta», §5.5), si algo de ella necesita
+    // preparación (§5.2; un servidor anterior no lo manda: true) y su unión de mesas (§1).
+    @SerialName("assigned_user_id") val assignedUserId: String? = null,
+    @SerialName("preparation_required") val preparationRequired: Boolean = true,
+    @SerialName("table_union") val tableUnion: AccountUnionDto? = null,
+)
+
+/** `Account.table_union` (etapa M1): la unión de mesas de la cuenta con su nombre de Go. */
+@Serializable
+data class AccountUnionDto(
+    val id: String,
+    val name: String = "",
+    @SerialName("table_ids") val tableIds: List<String> = emptyList(),
 )
 
 /**
@@ -151,6 +164,8 @@ data class ConfirmedLineDto(
     val request: LineRequestDto,
     @SerialName("quote_line") val quoteLine: QuoteLineDto,
     val totals: TotalsDto,
+    // Etapa M1 (§5.2): false si el renglón ya salió y nada de él necesita preparación.
+    @SerialName("preparation_required") val preparationRequired: Boolean = true,
 )
 
 @Serializable

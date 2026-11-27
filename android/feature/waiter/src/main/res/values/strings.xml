@@ -49,8 +49,6 @@
     <string name="table_panel_discarded">Cuenta descartada.</string>
     <string name="table_panel_discard_changed">La cuenta cambió en otra terminal: ya se ve como está ahora.</string>
     <string name="table_panel_discard_failed">No se pudo descartar la cuenta. Inténtalo de nuevo.</string>
-    <string name="table_panel_my_work">Lo tuyo en esta mesa</string>
-    <string name="table_panel_capture">Captura: %1$s</string>
     <string name="table_panel_capture_new">cuenta nueva</string>
     <plurals name="table_panel_products">
         <item quantity="one">%d producto</item>

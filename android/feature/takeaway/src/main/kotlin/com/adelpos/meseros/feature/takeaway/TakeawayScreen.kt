@@ -317,7 +317,9 @@ private fun EntryRow(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 if (entry is TakeawayEntry.InGo) {
-                    TakeawayPreparationBadge(entry.preparation)
+                    if (entry.showsPreparation) {
+                        TakeawayPreparationBadge(entry.preparation)
+                    }
                     TakeawayPaymentBadge(
                         payment = entry.payment,
                         delivered = entry.delivery == TakeawayDelivery.DELIVERED,

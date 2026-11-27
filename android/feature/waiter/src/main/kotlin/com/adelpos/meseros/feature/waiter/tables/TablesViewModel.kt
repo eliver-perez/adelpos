@@ -56,7 +56,8 @@ class TablesViewModel(
     val link: StateFlow<LinkState> = dependencies.link
     val openAccounts: StateFlow<List<AccountSummary>> = dependencies.restaurant.openAccounts
 
-    private val userId: String? = dependencies.activeWaiter.value?.userId
+    /** El mesero activo al abrir Mesas (sus capturas y su cola; «Tu cuenta», §5.5). */
+    val userId: String? = dependencies.activeWaiter.value?.userId
 
     val tablesView: StateFlow<TablesView> =
         dependencies.tablesView.tablesView.stateIn(

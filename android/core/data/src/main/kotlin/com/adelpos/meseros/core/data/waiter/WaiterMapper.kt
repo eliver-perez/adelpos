@@ -7,6 +7,7 @@ import com.adelpos.meseros.core.domain.catalog.LineSelection
 import com.adelpos.meseros.core.domain.table.TableState
 import com.adelpos.meseros.core.domain.waiter.AccountBill
 import com.adelpos.meseros.core.domain.waiter.AccountSummary
+import com.adelpos.meseros.core.domain.waiter.AccountUnionRef
 import com.adelpos.meseros.core.domain.waiter.ChangeKind
 import com.adelpos.meseros.core.domain.waiter.DiningArea
 import com.adelpos.meseros.core.domain.waiter.DiningTable
@@ -87,6 +88,12 @@ object WaiterMapper {
             paymentState = dto.paymentState,
             deliveryState = dto.deliveryState,
             discardable = dto.discardable,
+            assignedUserId = dto.assignedUserId,
+            preparationRequired = dto.preparationRequired,
+            tableUnion =
+                dto.tableUnion?.let { union ->
+                    AccountUnionRef(id = union.id, name = union.name, tableIds = union.tableIds)
+                },
         )
 
     fun draftLine(dto: DraftItemDto): DraftLine =
@@ -129,6 +136,7 @@ object WaiterMapper {
             name = dto.quoteLine.name,
             unitPrice = dto.quoteLine.unitPrice,
             total = dto.totals.total,
+            preparationRequired = dto.preparationRequired,
         )
 
     fun bill(dto: BillDto): AccountBill =

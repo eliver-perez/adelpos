@@ -71,6 +71,19 @@ data class AccountSummary(
     val paymentState: String? = null,
     val deliveryState: String? = null,
     val discardable: Boolean = false,
+    /**
+     * Etapa M1 (§5.5, M1-D16): el responsable de la cuenta (`assigned_user_id`); «Tu cuenta» es la
+     * de este responsable.
+     */
+    val assignedUserId: String? = null,
+    /**
+     * Etapa M1 (§5.2, M1-D15): Go dice si algo de la cuenta necesita preparación
+     * (`preparation_required`); con false no lleva etiqueta de cocina. Sin el campo (un servidor
+     * anterior), true.
+     */
+    val preparationRequired: Boolean = true,
+    /** Etapa M1 (§1): la unión de mesas de la cuenta (`table_union`), o null. */
+    val tableUnion: AccountUnionRef? = null,
 ) {
     val isOpen: Boolean
         get() = state == STATE_OPEN
@@ -79,6 +92,12 @@ data class AccountSummary(
         const val STATE_OPEN = "open"
     }
 }
+
+/**
+ * La unión de mesas de una cuenta (`Account.table_union`, etapa M1): su nombre lo calcula Go («Mesa
+ * 5 + 6», M1-D2) y se muestra tal cual.
+ */
+data class AccountUnionRef(val id: String, val name: String, val tableIds: List<String>)
 
 /**
  * Renglón del borrador de una cuenta (`DraftItem`): su identificador (lo genera quien lo captura y
@@ -108,9 +127,22 @@ data class SentLine(
     val name: String,
     val unitPrice: Money,
     val total: Money,
+    /**
+     * Etapa M1 (§5.2, M1-D15): false si el renglón ya se envió y nada de él generó preparación (un
+     * producto sin ruta con «No necesitan preparación», la ruta «Sin preparación»): entonces no
+     * lleva etiqueta de cocina. Sin el campo (un servidor anterior), true.
+     */
+    val preparationRequired: Boolean = true,
 ) {
     val cancelled: Boolean
         get() = state == STATE_CANCELLED
+
+    /**
+     * El renglón lleva etiqueta: la de cocina si necesita preparación, o «Cancelado» (es el estado
+     * del renglón, no de cocina, y se dice siempre).
+     */
+    val showsPreparation: Boolean
+        get() = cancelled || preparationRequired
 
     companion object {
         const val STATE_CANCELLED = "cancelled"

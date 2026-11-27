@@ -35,6 +35,13 @@ sealed interface TakeawayEntry {
         val preparation: TakeawayPreparation
             get() = TakeawayStates.preparation(account.preparationState)
 
+        /**
+         * Etapa M1 (§5.2, M1-D15): sin etiqueta de cocina si Go dice que nada del pedido necesita
+         * preparación (por ejemplo, solo refrescos sin ruta).
+         */
+        val showsPreparation: Boolean
+            get() = account.preparationRequired
+
         val payment: TakeawayPayment
             get() = TakeawayStates.payment(account.paymentState)
 

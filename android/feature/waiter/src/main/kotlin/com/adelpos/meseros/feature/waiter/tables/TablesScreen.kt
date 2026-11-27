@@ -8,6 +8,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -61,6 +62,7 @@ import com.adelpos.meseros.core.domain.preferences.TablesView
 import com.adelpos.meseros.core.domain.table.TableState
 import com.adelpos.meseros.core.domain.waiter.AccountSummary
 import com.adelpos.meseros.core.domain.waiter.Capture
+import com.adelpos.meseros.core.domain.waiter.CardDelivery
 import com.adelpos.meseros.core.domain.waiter.DiningArea
 import com.adelpos.meseros.core.domain.waiter.DiningTable
 import com.adelpos.meseros.core.domain.waiter.DiscardAccountResult
@@ -73,13 +75,17 @@ import com.adelpos.meseros.core.domain.waiter.PrecheckPrintState
 import com.adelpos.meseros.core.domain.waiter.PrecheckSetup
 import com.adelpos.meseros.core.domain.waiter.RestaurantStatus
 import com.adelpos.meseros.core.domain.waiter.RestaurantView
+import com.adelpos.meseros.core.domain.waiter.TableCard
+import com.adelpos.meseros.core.domain.waiter.TableCards
 import com.adelpos.meseros.core.domain.waiter.WaiterAction
 import com.adelpos.meseros.core.domain.waiter.WaiterPermissions
 import com.adelpos.meseros.core.ui.components.TableStateBadge
 import com.adelpos.meseros.core.ui.components.tableStateColors
 import com.adelpos.meseros.core.ui.layout.AdaptivePanes
 import com.adelpos.meseros.core.ui.layout.PaneLayout
+import com.adelpos.meseros.core.ui.waiter.CaptureUnsentBadge
 import com.adelpos.meseros.core.ui.waiter.ElapsedLabel
+import com.adelpos.meseros.core.ui.waiter.MineBadge
 import com.adelpos.meseros.core.ui.waiter.OrderStateBadge
 import com.adelpos.meseros.core.ui.waiter.PreparationBadge
 import com.adelpos.meseros.feature.waiter.R
@@ -127,6 +133,7 @@ fun TablesRoute(
         orders = orders.filter { it.destination.tableId == selected?.id },
         showingTable = viewModel.showingAccount,
         opening = viewModel.opening,
+        userId = viewModel.userId,
         tools =
             AccountTools(
                 precheckSetup = precheckSetup,
@@ -245,6 +252,7 @@ fun TablesScreen(
     actions: TablesActions,
     modifier: Modifier = Modifier,
     tools: AccountTools = AccountTools.NONE,
+    userId: String? = null,
 ) {
     AdaptivePanes(
         layout = layout,
@@ -263,6 +271,7 @@ fun TablesScreen(
                 opening = opening,
                 tools = tools,
                 actions = actions,
+                userId = userId,
             )
         },
         modifier = modifier,
@@ -564,10 +573,13 @@ private fun TableRow(
 }
 
 /**
- * Panel de la mesa elegida (§6.2): lo del mesero en ella, las cuentas abiertas para elegir y «Nueva
- * cuenta» (creación diferida: nace con el primer producto). Lo que el mesero no puede hacer aparece
- * deshabilitado con su motivo. Etapa A3: cada cuenta en dos renglones (§4.8), con «Imprimir
- * precuenta» (§4.9) y, si Go la marca vacía, «Descartar cuenta vacía» (§4.10).
+ * Panel de la mesa elegida (§6.2): sus cuentas abiertas para elegir y «Nueva cuenta» (creación
+ * diferida: nace con el primer producto). Lo que el mesero no puede hacer aparece deshabilitado con
+ * su motivo. Etapa A3: cada cuenta en dos renglones (§4.8), con «Imprimir precuenta» (§4.9) y, si
+ * Go la marca vacía, «Descartar cuenta vacía» (§4.10). Etapa M1 (§5.5, M1-D16): **una sola tarjeta
+ * por cuenta** ([TableCards]) con lo del mesero dentro y «Tu cuenta» en la suya; lo que todavía no
+ * tiene cuenta (una captura o un pedido de la cola) es su propia tarjeta con «Por enviar». Ya no
+ * hay «Lo tuyo en esta mesa».
  */
 @Composable
 private fun TablePanel(
@@ -579,6 +591,7 @@ private fun TablePanel(
     opening: Boolean,
     tools: AccountTools,
     actions: TablesActions,
+    userId: String?,
 ) {
     LazyColumn(
         modifier =
@@ -604,75 +617,54 @@ private fun TablePanel(
                 TableStateBadge(table.state)
             }
         }
-        if (captures.isNotEmpty() || orders.isNotEmpty()) {
-            item {
-                Text(
-                    stringResource(R.string.table_panel_my_work),
-                    style = MaterialTheme.typography.titleMedium,
-                )
-            }
-            items(captures, key = { "captura-${it.id}" }) { capture ->
-                val label = capture.accountName ?: stringResource(R.string.table_panel_capture_new)
-                val count = OfflineOrderPlan.of(capture).items.sumOf { it.line.quantity }
-                val discarding = capture.sync == DraftSync.DISCARDING
-                val detail =
-                    if (discarding) {
-                        stringResource(CaptureR.string.pending_discarding)
-                    } else {
-                        pluralStringResource(R.plurals.table_panel_products, count, count)
-                    }
-                WorkRow(
-                    title = stringResource(R.string.table_panel_capture, label) + " · " + detail,
-                    badge = { OrderStateBadge(OrderState.DRAFT) },
-                    onClick = { actions.onOpenCapture(capture.id) },
-                    tag = "$TAG_TABLE_CAPTURE_PREFIX${capture.id}",
-                    // Un descarte pendiente ya no se captura (revisión R6, A2).
-                    enabled = !discarding,
-                )
-            }
-            items(orders, key = { "pedido-${it.operationId}" }) { order ->
-                val count = order.lines.sumOf { it.item.line.quantity }
-                val name =
-                    order.destination.accountName
-                        ?: stringResource(R.string.table_panel_capture_new)
-                WorkRow(
-                    title =
-                        name +
-                            " · " +
-                            pluralStringResource(R.plurals.table_panel_products, count, count),
-                    badge = { OrderStateBadge(order.state) },
-                    onClick = { actions.onOpenOrder(order) },
-                    tag = "$TAG_TABLE_ORDER_PREFIX${order.operationId}",
-                )
-            }
-        }
+        val cards =
+            TableCards.of(
+                tableId = table.id,
+                accounts = accounts,
+                captures = captures,
+                orders = orders,
+                userId = userId,
+            )
         item {
             Text(
                 stringResource(R.string.table_panel_accounts),
                 style = MaterialTheme.typography.titleMedium,
             )
         }
-        if (accounts.isEmpty()) {
+        if (cards.isEmpty()) {
             item { Message(stringResource(R.string.table_panel_no_accounts)) }
         }
         tools.discardResult?.let { result -> item { DiscardResultText(result, tools.canWriteNow) } }
-        items(accounts, key = { "cuenta-${it.id}" }) { account ->
-            // Lo de este dispositivo en esa cuenta (una captura o un pedido de la cola) se resuelve
-            // desde la captura o Pendientes: descartar la cuenta en Go lo dejaría sin cuenta.
-            val workHere =
-                captures.any { it.accountId == account.id } ||
-                    orders.any { it.destination.accountId == account.id }
-            AccountCard(
-                account = account,
-                permissions = permissions,
-                tools = tools,
-                workHere = workHere,
-                enabled = !opening && permissions.allows(WaiterAction.VIEW_ACCOUNTS),
-                onOpen = { actions.onOpenAccount(table, account) },
-                onPrintPrecheck = { actions.onPrintPrecheck(account) },
-                onRetryPrecheck = { actions.onRetryPrecheck(account) },
-                onDiscardEmpty = { actions.onDiscardEmpty(account) },
-            )
+        items(cards, key = { it.key }) { card ->
+            when (card) {
+                is TableCard.CaptureCard -> CaptureWorkCard(card.capture, actions)
+                is TableCard.OrderCard -> OrderWorkCard(card.order, actions)
+                is TableCard.AccountCard -> {
+                    val account = card.account
+                    // Lo de este dispositivo en esa cuenta (una captura o un pedido de la cola) se
+                    // resuelve desde la captura o Pendientes: descartar la cuenta en Go lo dejaría
+                    // sin cuenta.
+                    val workHere =
+                        captures.any { it.accountId == account.id } ||
+                            orders.any { it.destination.accountId == account.id }
+                    AccountCard(
+                        account = account,
+                        permissions = permissions,
+                        tools = tools,
+                        workHere = workHere,
+                        enabled = !opening && permissions.allows(WaiterAction.VIEW_ACCOUNTS),
+                        onOpen = { actions.onOpenAccount(table, account) },
+                        onPrintPrecheck = { actions.onPrintPrecheck(account) },
+                        onRetryPrecheck = { actions.onRetryPrecheck(account) },
+                        onDiscardEmpty = { actions.onDiscardEmpty(account) },
+                        mine = card.mine,
+                        delivery = card.delivery,
+                        showsKitchen = card.showsKitchen,
+                        onOpenCapture = actions.onOpenCapture,
+                        onOpenOrder = actions.onOpenOrder,
+                    )
+                }
+            }
         }
         item {
             val outOfService = table.state == TableState.OUT_OF_SERVICE
@@ -701,6 +693,44 @@ private fun TablePanel(
 }
 
 /**
+ * Una captura de una cuenta nueva (o de una cuenta que ya no está abierta) con productos sin enviar
+ * (§5.5): su propia tarjeta con «Por enviar», para que no se pierda de vista. Un descarte pendiente
+ * ya no se captura (revisión R6, A2).
+ */
+@Composable
+private fun CaptureWorkCard(capture: Capture, actions: TablesActions) {
+    val label = capture.accountName ?: stringResource(R.string.table_panel_capture_new)
+    val count = OfflineOrderPlan.of(capture).items.sumOf { it.line.quantity }
+    val discarding = capture.sync == DraftSync.DISCARDING
+    val detail =
+        if (discarding) {
+            stringResource(CaptureR.string.pending_discarding)
+        } else {
+            pluralStringResource(R.plurals.table_panel_products, count, count)
+        }
+    WorkRow(
+        title = "$label · $detail",
+        badge = { CaptureUnsentBadge() },
+        onClick = { actions.onOpenCapture(capture.id) },
+        tag = "$TAG_TABLE_CAPTURE_PREFIX${capture.id}",
+        enabled = !discarding,
+    )
+}
+
+/** Un pedido de la cola que todavía no tiene una cuenta abierta («Por enviar», «Enviando»…). */
+@Composable
+private fun OrderWorkCard(order: PendingOrder, actions: TablesActions) {
+    val count = order.lines.sumOf { it.item.line.quantity }
+    val name = order.destination.accountName ?: stringResource(R.string.table_panel_capture_new)
+    WorkRow(
+        title = name + " · " + pluralStringResource(R.plurals.table_panel_products, count, count),
+        badge = { OrderStateBadge(order.state) },
+        onClick = { actions.onOpenOrder(order) },
+        tag = "$TAG_TABLE_ORDER_PREFIX${order.operationId}",
+    )
+}
+
+/**
  * Una cuenta del panel de la mesa (etapa A3, §4.8): **dos renglones**, arriba «Mesa 6 · folio 12 ·
  * $755.00» en una sola línea y abajo la etiqueta corta de preparación. Antes la etiqueta, sin peso,
  * se medía primero con todo el ancho y en un panel angosto dejaba la columna con peso en ~0 dp: el
@@ -720,6 +750,11 @@ fun AccountCard(
     onDiscardEmpty: () -> Unit,
     modifier: Modifier = Modifier,
     workHere: Boolean = false,
+    mine: Boolean = false,
+    delivery: CardDelivery? = null,
+    showsKitchen: Boolean = true,
+    onOpenCapture: (String) -> Unit = {},
+    onOpenOrder: (PendingOrder) -> Unit = {},
 ) {
     Surface(
         shape = MaterialTheme.shapes.medium,
@@ -737,20 +772,40 @@ fun AccountCard(
                         .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                Text(
-                    text =
-                        stringResource(
-                            R.string.table_panel_account_line,
-                            account.name,
-                            account.folio,
-                            account.totals.total.display(),
-                        ),
-                    style = MaterialTheme.typography.titleSmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.testTag("$TAG_ACCOUNT_TITLE_PREFIX${account.id}"),
-                )
-                PreparationBadge(account.preparationState)
+                // Etapa M1 (§5.5): «Tu cuenta» arriba a la derecha, junto al título.
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text =
+                            stringResource(
+                                R.string.table_panel_account_line,
+                                account.name,
+                                account.folio,
+                                account.totals.total.display(),
+                            ),
+                        style = MaterialTheme.typography.titleSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier =
+                            Modifier.weight(1f).testTag("$TAG_ACCOUNT_TITLE_PREFIX${account.id}"),
+                    )
+                    if (mine) {
+                        MineBadge()
+                    }
+                }
+                // El envío de lo del mesero y la cocina de la cuenta (§5.5); sin etiqueta de
+                // cocina si nada necesita preparación (§5.2). Si no caben, bajan de renglón.
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    DeliveryBadge(delivery, onOpenCapture, onOpenOrder)
+                    if (showsKitchen) {
+                        PreparationBadge(account.preparationState)
+                    }
+                }
             }
             Column(
                 modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
@@ -778,6 +833,53 @@ fun AccountCard(
                         onClick = onDiscardEmpty,
                         tag = "$TAG_DISCARD_EMPTY_PREFIX${account.id}",
                     )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Lo del mesero en la cuenta (§5.5): un pedido de la cola sin recibir (al tocarlo, su detalle o su
+ * revisión), una captura con productos sin enviar (al tocarla, la captura) o «Recibido por el
+ * restaurante».
+ */
+@Composable
+private fun DeliveryBadge(
+    delivery: CardDelivery?,
+    onOpenCapture: (String) -> Unit,
+    onOpenOrder: (PendingOrder) -> Unit,
+) {
+    when (delivery) {
+        null -> Unit
+        is CardDelivery.Received -> OrderStateBadge(OrderState.RECEIVED)
+        is CardDelivery.Order ->
+            Box(
+                contentAlignment = Alignment.CenterStart,
+                modifier =
+                    Modifier.heightIn(min = AdelDimens.MinTouchTarget)
+                        .clickable { onOpenOrder(delivery.order) }
+                        .testTag("$TAG_TABLE_ORDER_PREFIX${delivery.order.operationId}"),
+            ) {
+                OrderStateBadge(delivery.order.state)
+            }
+        is CardDelivery.CaptureWork -> {
+            val discarding = delivery.capture.sync == DraftSync.DISCARDING
+            Box(
+                contentAlignment = Alignment.CenterStart,
+                modifier =
+                    Modifier.heightIn(min = AdelDimens.MinTouchTarget)
+                        .clickable(enabled = !discarding) { onOpenCapture(delivery.capture.id) }
+                        .testTag("$TAG_TABLE_CAPTURE_PREFIX${delivery.capture.id}"),
+            ) {
+                if (discarding) {
+                    Text(
+                        stringResource(CaptureR.string.pending_discarding),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    CaptureUnsentBadge()
                 }
             }
         }
