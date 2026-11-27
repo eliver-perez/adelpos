@@ -594,7 +594,9 @@ test('operación real, acordeones y ergonomía a 1280 × 720', async ({ page }, 
   const takeawaySteak = bill.getByRole('article', { name: '1 × Filete de prueba' });
   await expect(takeawaySteak).toContainText('Nuevo');
   await bill.getByRole('button', { name: 'Enviar a cocina · 1', exact: true }).click();
-  await expect(takeawaySteak).toContainText('En cocina');
+  // Etapa M1 (§5.1): la etiqueta sigue el estado que manda Go para el producto, como en Android; el pedido va
+  // programado para el 15/12, así que dice «Programado para preparación» (antes «En cocina» con ese estado en gris).
+  await expect(takeawaySteak.locator('.capture-tag')).toHaveText('Programado para preparación');
   await expect(bill).toContainText('$150.00');
   await expect(bill).toContainText('Entrega: no entregado');
   const unnamed = page.locator('.capture-topbar').getByRole('status');
