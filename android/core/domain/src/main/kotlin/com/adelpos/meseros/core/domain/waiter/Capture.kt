@@ -2,6 +2,25 @@ package com.adelpos.meseros.core.domain.waiter
 
 import com.adelpos.meseros.core.domain.money.Money
 
+/**
+ * Etapa M1 (M1-D9): la unión que veía el mesero en la mesa al capturar ([id] null: ninguna). Viaja
+ * como `seen_union_id`; sin este dato (lo guardado por la 0.4.1) el campo no se manda.
+ */
+data class SeenUnion(val id: String?)
+
+/**
+ * Etapa M1 (M1-D9): una unión que vive solo en la pantalla y nace en Go con el primer producto: las
+ * otras mesas ([tableIds]) o el grupo completo ([groupId]), con el nombre de la vista previa de Go.
+ * **Nunca entra en la cola** (M1-D13).
+ */
+data class UnionJoin(
+    val tableIds: List<String>,
+    val groupId: String?,
+    val name: String,
+    /** El nombre de la mesa de inicio, para «Enviar solo a la Mesa 5». */
+    val startName: String,
+)
+
 /** Cuenta abierta que otra terminal abrió en la mesa (`TABLE_HAS_ACCOUNT`, `details.accounts`). */
 data class TableAccountRef(val id: String, val folio: Int, val name: String)
 
@@ -100,9 +119,20 @@ data class Capture(
     val createdAccount: Boolean = false,
     val mode: OrderMode = OrderMode.DINE_IN,
     val customer: TakeawayCustomer = TakeawayCustomer.NONE,
+    /** Etapa M1: la unión que veía el mesero (null en lo guardado antes de la 0.5.0). */
+    val seenUnion: SeenUnion? = null,
+    /** Etapa M1: la unión en pantalla que nace con el primer producto (solo sin cuenta). */
+    val unionJoin: UnionJoin? = null,
 ) {
     val takeaway: Boolean
         get() = mode == OrderMode.TAKEAWAY
+
+    /**
+     * Etapa M1 (M1-D13): la cuenta todavía no nace y lleva una unión en pantalla: sin conexión no
+     * se envía (nunca a la cola); el mesero elige «Enviar solo a la mesa» o «Esperar».
+     */
+    val waitsForUnion: Boolean
+        get() = accountId == null && unionJoin != null
 
     /**
      * El nombre y el teléfono todavía se pueden cambiar en la captura misma: el pedido no ha salido
@@ -159,6 +189,8 @@ data class Capture(
             items = inFlightItems,
             mode = mode,
             customer = customer,
+            seenUnion = seenUnion,
+            unionJoin = unionJoin,
         )
     }
 

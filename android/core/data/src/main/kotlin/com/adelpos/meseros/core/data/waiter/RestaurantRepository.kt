@@ -19,6 +19,7 @@ import com.adelpos.meseros.core.data.waiter.db.WaiterStorage
 import com.adelpos.meseros.core.domain.waiter.AccountBill
 import com.adelpos.meseros.core.domain.waiter.AccountSummary
 import com.adelpos.meseros.core.domain.waiter.DiscardAccountResult
+import com.adelpos.meseros.core.domain.waiter.OrderMode
 import com.adelpos.meseros.core.domain.waiter.RestaurantSource
 import com.adelpos.meseros.core.domain.waiter.RestaurantStatus
 import com.adelpos.meseros.core.domain.waiter.RestaurantView
@@ -152,6 +153,38 @@ class RestaurantRepository(
 
     override fun refresh() {
         scope.launch { refreshNow() }
+    }
+
+    /**
+     * Etapa M1 (§5.6): la cuenta que Go acaba de devolver en una respuesta de este dispositivo
+     * (abrir la cuenta, guardar el borrador o «Enviar a cocina») se ve al momento en Mesas y en
+     * Para llevar. Antes el panel seguía con lo de la lectura anterior («$0.00 · Borrador») hasta
+     * la relectura que dispara el canal (400 ms después del evento, más las dos lecturas). Solo
+     * reemplaza una versión igual o más vieja de la cuenta (su revisión); una cuenta que ya no está
+     * abierta sale de la lista. La relectura de siempre sigue llegando y manda.
+     */
+    fun applyAccount(account: AccountSummary) {
+        mutableAccounts.value =
+            merged(mutableAccounts.value, account, keep = account.mode == OrderMode.DINE_IN)
+        mutableAllAccounts.value = merged(mutableAllAccounts.value, account, keep = true)
+    }
+
+    private fun merged(
+        accounts: List<AccountSummary>,
+        account: AccountSummary,
+        keep: Boolean,
+    ): List<AccountSummary> {
+        val index = accounts.indexOfFirst { it.id == account.id }
+        if (index >= 0 && accounts[index].revision > account.revision) {
+            return accounts
+        }
+        val open = account.isOpen && keep
+        return when {
+            index < 0 && open -> accounts + account
+            index < 0 -> accounts
+            open -> accounts.toMutableList().also { it[index] = account }
+            else -> accounts.filterIndexed { position, _ -> position != index }
+        }
     }
 
     /** Vuelve a leer después de una pausa corta: varios eventos seguidos dan una sola lectura. */
@@ -324,6 +357,8 @@ class RestaurantRepository(
             tables = dto.tables.mapNotNull(WaiterMapper::table),
             settings = dto.settings?.let(WaiterMapper::settings),
             readAtElapsedMillis = readAtElapsed,
+            unions = dto.unions.orEmpty().mapNotNull(WaiterMapper::union),
+            groups = dto.groups.orEmpty().map(WaiterMapper::group),
         )
 
     private fun openDineIn(accounts: List<AccountDto>): List<AccountSummary> =

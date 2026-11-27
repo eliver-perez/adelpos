@@ -26,10 +26,12 @@ import com.adelpos.meseros.core.domain.waiter.OrderMode
 import com.adelpos.meseros.core.domain.waiter.OrderSendRules
 import com.adelpos.meseros.core.domain.waiter.OrderState
 import com.adelpos.meseros.core.domain.waiter.PendingOrder
+import com.adelpos.meseros.core.domain.waiter.SeenUnion
 import com.adelpos.meseros.core.domain.waiter.SendOutcome
 import com.adelpos.meseros.core.domain.waiter.SendRequest
 import com.adelpos.meseros.core.domain.waiter.TableAccountRef
 import com.adelpos.meseros.core.domain.waiter.TakeawayCustomer
+import com.adelpos.meseros.core.domain.waiter.UnionJoin
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CompletableDeferred
@@ -85,6 +87,16 @@ class CaptureRepository(
     private val serverClock: ServerClock? = null,
     private val inFlight: OrdersInFlight = OrdersInFlight(),
     private val settleTimeoutMillis: Long = SETTLE_TIMEOUT_MILLIS,
+    /**
+     * Etapa M1 (§5.6): la cuenta que devolvió Go al abrirla, guardar su borrador o confirmarlo,
+     * para que Mesas la muestre al momento (`RestaurantRepository.applyAccount`).
+     */
+    private val accountAnswered: (AccountSummary) -> Unit = {},
+    /**
+     * Etapa M1 (M1-D32): Go dijo que las mesas cambiaron (una unión): Mesas vuelve a leer las mesas
+     * y las uniones.
+     */
+    private val placesChanged: () -> Unit = {},
 ) : CaptureService {
     /** Lo que el modo Mesero necesita del catálogo guardado. */
     interface CatalogLookups {
@@ -133,12 +145,36 @@ class CaptureRepository(
         tableName: String,
         account: AccountSummary?,
         seenAccountIds: List<String>,
+        seenUnion: SeenUnion?,
+        unionJoin: UnionJoin?,
     ): Capture {
         val existing = edits.withLock {
-            dao.capturesOf(userId).map(WaiterStorage::toCapture).firstOrNull { capture ->
-                capture.tableId == tableId &&
-                    capture.accountId == account?.id &&
-                    capture.sync != DraftSync.DISCARDING
+            val found =
+                dao.capturesOf(userId).map(WaiterStorage::toCapture).firstOrNull { capture ->
+                    capture.tableId == tableId &&
+                        capture.accountId == account?.id &&
+                        capture.sync != DraftSync.DISCARDING
+                }
+            // Etapa M1: una captura de cuenta nueva que todavía no salió toma la unión que ve
+            // ahora el mesero (por ejemplo, unió la mesa en pantalla después de empezarla). Una
+            // unión en pantalla que ya tenía no se quita en silencio (M1-D13): solo «Enviar solo a
+            // la mesa» la quita.
+            if (found != null && found.accountId == null && found.pendingOperationId == null) {
+                val join = unionJoin ?: found.unionJoin
+                val updated =
+                    found.copy(
+                        tableName =
+                            if (unionJoin == null && join != null) found.tableName else tableName,
+                        seenAccountIds = seenAccountIds,
+                        seenUnion = seenUnion ?: found.seenUnion,
+                        unionJoin = join,
+                    )
+                if (updated != found) {
+                    save(updated)
+                }
+                updated
+            } else {
+                found
             }
         }
         if (existing != null) {
@@ -167,6 +203,8 @@ class CaptureRepository(
                 pendingOperationId = null,
                 inFlightCount = 0,
                 createdAtMillis = clock(),
+                seenUnion = seenUnion,
+                unionJoin = unionJoin.takeIf { account == null },
             )
         edits.withLock { save(created) }
         if (account != null) {
@@ -474,6 +512,11 @@ class CaptureRepository(
         if (capture.sync == DraftSync.DISCARDING) {
             return SendRequest.NothingToSend
         }
+        if (capture.waitsForUnion) {
+            // Etapa M1 (M1-D13): una unión en pantalla nunca entra en la cola. Sin conexión (o si
+            // Go la rechazó) el mesero elige «Enviar solo a la mesa» o «Esperar».
+            return SendRequest.UnionPending
+        }
         if (capture.pendingOperationId != null && hasSession(capture)) {
             // Revisión R6, C1: con conexión no se arma el pedido mientras el guardado anterior no
             // tenga respuesta. Se espera a que llegue (su lectura tarda hasta 15 s) o se repite
@@ -681,6 +724,8 @@ class CaptureRepository(
                         seenAccountIds = sending.seenAccountIds,
                         customer = sending.customer,
                         items = items,
+                        seenUnion = sending.seenUnion,
+                        unionJoin = sending.unionJoin,
                     ),
                 )
             } else {
@@ -735,6 +780,7 @@ class CaptureRepository(
     }
 
     private suspend fun acknowledge(captureId: String, bill: AccountBill) {
+        accountAnswered(bill.account)
         val acknowledged = edits.withLock {
             val capture = load(captureId) ?: return
             val remaining = capture.operations.drop(capture.inFlightCount)
@@ -745,6 +791,16 @@ class CaptureRepository(
                     createdAccount = capture.createdAccount || capture.accountId == null,
                     accountId = bill.account.id,
                     accountName = bill.account.name,
+                    // Etapa M1: la unión en pantalla nació con la cuenta; desde ahora es la que se
+                    // ve.
+                    seenUnion =
+                        if (capture.accountId == null && capture.seenUnion != null) {
+                            SeenUnion(bill.account.tableUnion?.id)
+                        } else {
+                            capture.seenUnion
+                        },
+                    unionJoin = null,
+                    tableName = bill.account.tableUnion?.name ?: capture.tableName,
                     base = bill.draft,
                     baseRevision = bill.account.revision,
                     operations = remaining,
@@ -809,6 +865,51 @@ class CaptureRepository(
                     }
                 }
             }
+            // Etapa M1 (M1-D9): la mesa ya está en una unión que el mesero no veía. Se ofrece lo
+            // mismo que con TABLE_HAS_ACCOUNT, con las cuentas de la unión: agregar a una de ellas
+            // o abrir otra en la unión (que desde ahora es la vista).
+            problem.code == TABLE_IN_UNION &&
+                capture.accountId == null &&
+                capture.unionJoin == null -> {
+                val details = inUnionDetails(problem)
+                val accounts = unionAccounts(capture, details)
+                edits.withLock {
+                    load(captureId)?.let {
+                        save(
+                            it.copy(
+                                sync = DraftSync.TABLE_HAS_ACCOUNT,
+                                syncMessage = problem.message,
+                                tableAccounts = accounts,
+                                seenUnion = SeenUnion(details?.union?.id),
+                                pendingOperationId = null,
+                                inFlightCount = 0,
+                            ),
+                        )
+                    }
+                }
+                placesChanged()
+            }
+            // Etapa M1 (M1-D32): la unión que vio el mesero sigue abierta pero ya no tiene esta
+            // mesa. Go no guardó nada: se dice su mensaje, Mesas vuelve a leer y lo capturado se
+            // conserva. La unión vista se olvida (`seen_union_id` no se manda): al reintentar, Go
+            // revisa como siempre las cuentas que hay (TABLE_HAS_ACCOUNT si la mesa está en otra
+            // unión con cuentas; si quedó libre, la cuenta se abre en la mesa).
+            problem.code == TABLE_UNION_CONFLICT && capture.accountId == null -> {
+                edits.withLock {
+                    load(captureId)?.let {
+                        save(
+                            it.copy(
+                                sync = DraftSync.REJECTED,
+                                syncMessage = ApiErrors.shownMessage(problem),
+                                seenUnion = null,
+                                pendingOperationId = null,
+                                inFlightCount = 0,
+                            ),
+                        )
+                    }
+                }
+                placesChanged()
+            }
             // Una cuenta combinada ofrece solo seguir en la cuenta en que se combinó (M3); se
             // escribe todo junto para que nunca se vea «Abrir una cuenta nueva» con ella.
             isAccountNotOpen(problem) ->
@@ -854,6 +955,68 @@ class CaptureRepository(
                 )
             }
         }
+    }
+
+    private fun inUnionDetails(problem: ApiProblem): TableInUnionDetailsDto? {
+        val details = problem.details ?: return null
+        return try {
+            ApiJson.decodeFromJsonElement(TableInUnionDetailsDto.serializer(), details)
+        } catch (_: SerializationException) {
+            null
+        } catch (_: IllegalArgumentException) {
+            null
+        }
+    }
+
+    /**
+     * Las cuentas abiertas de la unión (`details.accounts` son solo identificadores): su folio y su
+     * nombre se leen de Go; si no se pueden leer, con el nombre de la unión.
+     */
+    private suspend fun unionAccounts(
+        capture: Capture,
+        details: TableInUnionDetailsDto?,
+    ): List<TableAccountRef> {
+        val ids = details?.accounts.orEmpty().take(MAXIMUM_UNION_ACCOUNTS_READ)
+        val transport = server.transport()
+        val headers = server.sessionHeaders(capture.waiterUserId)
+        val fallback = details?.union?.name.orEmpty()
+        return ids.map { id ->
+            val bill =
+                if (transport != null && headers != null) {
+                    (api.bill(transport, headers, id) as? ApiOutcome.Success)?.value
+                } else {
+                    null
+                }
+            TableAccountRef(id, bill?.account?.folio ?: 0, bill?.account?.name ?: fallback)
+        }
+    }
+
+    /**
+     * Etapa M1 (M1-D13): «Enviar solo a la mesa». La captura deja la unión en pantalla y sigue como
+     * una cuenta nueva de la mesa de inicio (si estaba rechazada, se vuelve a guardar).
+     */
+    override suspend fun dropUnion(captureId: String) {
+        edits.withLock {
+            val capture = load(captureId) ?: return
+            if (capture.unionJoin == null || capture.accountId != null) {
+                return
+            }
+            save(
+                capture.copy(
+                    unionJoin = null,
+                    seenUnion = SeenUnion(null),
+                    tableName = capture.unionJoin?.startName ?: capture.tableName,
+                    sync =
+                        if (capture.sync == DraftSync.REJECTED) {
+                            DraftSync.PENDING
+                        } else {
+                            capture.sync
+                        },
+                    syncMessage = null,
+                ),
+            )
+        }
+        requestSync(captureId)
     }
 
     private fun tableAccounts(problem: ApiProblem): List<TableAccountRef> {
@@ -1048,7 +1211,11 @@ class CaptureRepository(
                 ),
             )
         return when (outcome) {
-            is ApiOutcome.Success -> SendOutcome.Accepted(outcome.value.account.id)
+            is ApiOutcome.Success -> {
+                // §5.6: el panel de la mesa ve el total de Go en cuanto llega la respuesta.
+                accountAnswered(WaiterMapper.account(outcome.value.account))
+                SendOutcome.Accepted(outcome.value.account.id)
+            }
             is ApiOutcome.NoAnswer ->
                 if (outcome.requestSent) {
                     null
@@ -1125,6 +1292,8 @@ class CaptureRepository(
                         seenAccountIds = capture.seenAccountIds,
                         customer = capture.customer,
                         items = capture.inFlightItems,
+                        seenUnion = capture.seenUnion,
+                        unionJoin = capture.unionJoin,
                     ),
                 )
             when (opened) {
@@ -1372,6 +1541,11 @@ class CaptureRepository(
         const val MAXIMUM_ORDER_LINES = 20
 
         private const val TABLE_HAS_ACCOUNT = "TABLE_HAS_ACCOUNT"
+        private const val TABLE_IN_UNION = "TABLE_IN_UNION"
+        private const val TABLE_UNION_CONFLICT = "TABLE_UNION_CONFLICT"
+
+        /** Cuentas de una unión que se leen para ofrecerlas (una unión casi nunca tiene más). */
+        private const val MAXIMUM_UNION_ACCOUNTS_READ = 6
         private const val ACCOUNT_CONFLICT = "ACCOUNT_CONFLICT"
         private const val ACCOUNT_NOT_EMPTY = "ACCOUNT_NOT_EMPTY"
         private const val IDEMPOTENCY_CONFLICT = "IDEMPOTENCY_CONFLICT"

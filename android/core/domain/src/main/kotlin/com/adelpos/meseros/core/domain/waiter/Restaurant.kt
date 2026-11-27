@@ -52,6 +52,48 @@ data class DiningTable(
     val occupiedSeconds: Long,
     val balance: Money,
     val longOpen: Boolean,
+    /** Etapa M1 (§1): la unión abierta en que está (`union_id`), o null. */
+    val unionId: String? = null,
+    /** Etapa M1 (§3): el grupo predefinido del que es sección (`group_id`), o null. */
+    val groupId: String? = null,
+)
+
+/**
+ * Etapa M1 (§1, contrato §2): una unión abierta de mesas (`TableUnion`), que se comporta como una
+ * sola mesa. Go calcula todo: el nombre («Mesa 5 + 6», M1-D2), la capacidad sumada, el estado y el
+ * saldo de sus cuentas; la aplicación lo muestra tal cual.
+ *
+ * @param tableIds sus mesas en el orden del nombre.
+ * @param state el de sus cuentas (nunca libre: una unión abierta siempre tiene cuentas); null si
+ *   esta versión no conoce el que manda Go.
+ */
+data class TableUnion(
+    val id: String,
+    val name: String,
+    val areaId: String,
+    val groupId: String?,
+    val tableIds: List<String>,
+    val seats: Int,
+    val state: TableState?,
+    val accountCount: Int,
+    val balance: Money,
+    val occupiedSeconds: Long,
+    val longOpen: Boolean,
+    val revision: Int,
+)
+
+/**
+ * Etapa M1 (§3): una mesa divisible (`TableGroup`), por ejemplo «Mesa 3» con sus secciones 3A, 3B y
+ * 3C. Cada sección es una mesa normal; el grupo solo se dibuja junto en el mapa y su atajo une
+ * todas.
+ */
+data class TableGroup(
+    val id: String,
+    val areaId: String,
+    val name: String,
+    val tableIds: List<String>,
+    val seats: Int,
+    val revision: Int,
 )
 
 /** Umbrales de tiempo del restaurante (`settings` de `getRestaurantOverview`). */
@@ -83,6 +125,10 @@ data class RestaurantView(
     val tables: List<DiningTable>,
     val settings: RestaurantSettings?,
     val readAtElapsedMillis: Long,
+    /** Etapa M1: las uniones abiertas (`unions`); vacía con un servidor anterior. */
+    val unions: List<TableUnion> = emptyList(),
+    /** Etapa M1: los grupos activos (`groups`); vacía con un servidor anterior. */
+    val groups: List<TableGroup> = emptyList(),
 ) {
     /**
      * Mesas que se muestran en un área: las activas y las que aún tienen cuentas abiertas (una mesa
@@ -99,6 +145,35 @@ data class RestaurantView(
 
     fun table(id: String): DiningTable? = tables.firstOrNull { it.id == id }
 
+    /** Etapa M1: la unión abierta en que está la mesa [tableId], o null. */
+    fun unionOf(tableId: String): TableUnion? =
+        unions.firstOrNull { tableId in it.tableIds }
+            ?: table(tableId)?.unionId?.let { id -> unions.firstOrNull { it.id == id } }
+
+    fun group(id: String): TableGroup? = groups.firstOrNull { it.id == id }
+
+    fun groupsIn(areaId: String): List<TableGroup> = groups.filter { it.areaId == areaId }
+
+    fun unionsIn(areaId: String): List<TableUnion> = unions.filter { it.areaId == areaId }
+
+    /**
+     * Etapa M1 (§1.2): la lista de un área con **una sola entrada por unión** (en el lugar de su
+     * primera mesa) y las mesas que no están unidas, en su orden.
+     */
+    fun entriesIn(areaId: String): List<TablesEntry> {
+        val shown = mutableSetOf<String>()
+        val entries = mutableListOf<TablesEntry>()
+        for (table in tablesIn(areaId)) {
+            val union = unionOf(table.id)
+            if (union == null) {
+                entries += TablesEntry.Single(table)
+            } else if (shown.add(union.id)) {
+                entries += TablesEntry.Joined(union, union.tableIds.mapNotNull(::table))
+            }
+        }
+        return entries
+    }
+
     companion object {
         val EMPTY =
             RestaurantView(
@@ -107,6 +182,21 @@ data class RestaurantView(
                 settings = null,
                 readAtElapsedMillis = 0L,
             )
+    }
+}
+
+/** Una entrada de la lista de Mesas (etapa M1): una mesa sola o una unión con sus mesas. */
+sealed interface TablesEntry {
+    val key: String
+
+    data class Single(val table: DiningTable) : TablesEntry {
+        override val key: String
+            get() = table.id
+    }
+
+    data class Joined(val union: TableUnion, val tables: List<DiningTable>) : TablesEntry {
+        override val key: String
+            get() = "union-${union.id}"
     }
 }
 

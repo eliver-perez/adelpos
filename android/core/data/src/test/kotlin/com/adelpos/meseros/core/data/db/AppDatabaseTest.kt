@@ -57,7 +57,7 @@ class AppDatabaseTest {
             assertEquals("map", second.devicePreferences().get("tables_view"))
             second.devicePreferences().remove("tables_view")
             assertNull(second.devicePreferences().get("tables_view"))
-            assertEquals(6, second.openHelper.readableDatabase.version)
+            assertEquals(7, second.openHelper.readableDatabase.version)
         } finally {
             second.close()
         }

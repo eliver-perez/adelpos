@@ -72,6 +72,7 @@ import com.adelpos.meseros.core.ui.components.ActiveWaiterMenu
 import com.adelpos.meseros.core.ui.components.LicenseClockBanner
 import com.adelpos.meseros.core.ui.components.LicenseGraceBadge
 import com.adelpos.meseros.core.ui.components.LocalTopBarBack
+import com.adelpos.meseros.core.ui.components.PendingOrdersCompact
 import com.adelpos.meseros.core.ui.components.TopBarBack
 import com.adelpos.meseros.core.ui.layout.NavigationPlacement
 import com.adelpos.meseros.core.ui.layout.PaneLayout
@@ -264,9 +265,17 @@ fun AdelPosNavigation(
         modifier = Modifier.fillMaxSize().testTag(TAG_APP_ROOT),
         topBar = {
             Column {
+                // Etapa M1 (§5.6): en el teléfono vertical, el mesero solo con su inicial y «N
+                // pedidos por enviar» en dos renglones (antes «2 pedidos por en…»).
+                val roomy = currentTopBarHasRoom()
                 AdelTopBar(
                     title = title,
-                    connection = connection,
+                    connection =
+                        if (roomy) {
+                            connection
+                        } else {
+                            connection.copy(pendingOrders = 0)
+                        },
                     onBack = onBack,
                     // Con un panel abierto en el teléfono la flecha hace lo que hacía su «Volver a
                     // …»
@@ -289,7 +298,11 @@ fun AdelPosNavigation(
                                 onSwitchWaiter = onSwitchWaiter,
                                 offline = !waiter.hasServerSession,
                                 onAlertsHelp = { readyAlerts.helpRequested.value = true },
+                                compact = !roomy,
                             )
+                        }
+                        if (!roomy && connection.pendingOrders > 0) {
+                            PendingOrdersCompact(connection.pendingOrders)
                         }
                     },
                 )
