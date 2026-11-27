@@ -2175,3 +2175,132 @@ venta, cero uniones deshechas antes de abrirse y cero historiales hacia atrás.
 - **M1-D39. Limitación conocida.** «Modificaciones de cantidades» no tiene instantánea y todavía deduce la unión por la
   hora, como permite M1-D30. Si dos terminales actúan a la vez sobre la misma unión, con milisegundos de diferencia, ese
   renglón del reporte puede decir la mesa sola en lugar de la unión. No cambia ningún importe. Se dice en la entrega.
+
+## Fase C · Segunda parte
+
+Se retomó la Fase C con `etapa-m1` en `7c15d38e` (la Fase C fusionada y las correcciones de la Fase A, M1-D29 a
+M1-D33), fusionada en `etapa-m1-c` (avance rápido). Emuladores de la etapa (M1-D37): `ADEL_M1_Tablet_API37` (5570),
+`ADEL_A1_Tablet_API26` (5572) y `ADEL_M1_Phone_API37` (5574), con dos a la vez como máximo. Para correr en paralelo se
+usaron dos Go temporales de la fase: `C` (8241/8501) y `C2` (8242/8243), los dos dentro de los puertos de la fase.
+
+### Commits
+
+| Commit     | Qué                                                                                                             |
+| ---------- | --------------------------------------------------------------------------------------------------------------- |
+| `dcb2e4a8` | M1-D36: en el teléfono vertical el título va en su propio renglón y nunca se corta                              |
+| `d6873832` | Pruebas: `unions` u11 (M1-D32 de punta a punta) y u12 (el título); suite `legacy` (la 0.4.1 frente a una unión) |
+| `cfcc32c9` | §5.7: el teclado tampoco se queda abierto al cancelar o modificar lo enviado en Android 8                       |
+
+### Qué se hizo
+
+1. **M1-D36, el título del teléfono, solo en meseros.** La barra común (`android-core`) no se tocó, así que cocina
+   sigue en 0.1.0. En el teléfono vertical (ancho < 600 dp, con un mesero), meseros pasa el título vacío a `AdelTopBar` y
+   lo dibuja en su propio renglón debajo de la barra, con su mismo fondo, de todo el ancho y hasta en dos renglones, como
+   encabezado (`TAG_APP_TITLE`). En la barra quedan la flecha, el mesero con su inicial, «En línea» y «N pedidos por
+   enviar» en dos renglones. Vuelve «Nuevo pedido para llevar» completo: se quitó el título corto de la primera parte. En
+   horizontal (≥ 600 dp) y en la tableta, todo sigue en la barra como antes. Las pruebas que buscan el título lo aceptan
+   en la barra o en ese renglón.
+2. **Los otros diálogos con texto en Android 8.** Son «Cancelar unidades» y «Modificar», que piden motivo; los campos
+   del personalizador y del buscador no están en un diálogo. Se comprobó en la API 26 que también dejaban el teclado
+   abierto: con `waiter` w8 sin el arreglo, el diálogo se cerró a los 190 ms y el teclado siguió abierto 10 s (426 px).
+   La captura está en `capturas-C/api26-w8-sin-arreglo-teclado-abierto.png`. El arreglo de la primera parte pasó a
+   `core/capture/.../KeyboardOnClose.kt`, compartido:
+   - `HideKeyboardWhenClosed`: esconde el teclado desde la ventana de la actividad al quitarse el diálogo, en dos
+     intentos (150 y 600 ms);
+   - `rememberKeyboardCloser`: al confirmar o cerrar, suelta el foco y esconde el teclado mientras el diálogo todavía
+     lo tiene.
+
+   Lo usan «Nombre y teléfono», «Cancelar unidades» y «Modificar». Con el arreglo, w8 aprueba: el diálogo se cierra en
+   88–108 ms y el teclado también.
+
+3. **M1-D32 de punta a punta** (`unions` u11):
+   - la tableta abre una cuenta nueva desde la unión «Mesa 3»;
+   - mientras captura, la principal quita la Mesa 3a de la unión, que sigue abierta con la 3b y la 3c;
+   - al guardar el primer producto, Go responde `TABLE_UNION_CONFLICT` y la captura muestra su texto («La unión cambió
+     en otra terminal…»), sin cuenta y con el renglón a la vista;
+   - «Reintentar» manda el pedido sin `seen_union_id` y la cuenta se abre en la Mesa 3a, ya libre y sin unión.
+4. **La 0.4.1 frente a una unión** (suite `legacy`, M1-D9):
+   - `v1` corre con la 0.4.1 de `main` (copia `git archive`) y un APK de pruebas compilado de esa copia con el paso
+     agregado solo para la prueba; no se commitea en `main`;
+   - `v2` corre con la 0.5.0 instalada encima.
+
+   Resultado: abajo.
+
+   **Lo que de verdad pasa con la 0.4.1** (`ADEL_M1_Tablet_API37`; registro `AdelOnGo` «M1 · 0.4.1»; capturas
+   `api37-legacy-041-*`):
+   - la principal une la Mesa 21 (ocupada) con la 22;
+   - la 0.4.1 ve las dos mesas por separado, las dos «Ocupada»; la 22 sin cuentas propias;
+   - al capturar en la 22, Go le responde **`TABLE_HAS_ACCOUNT`** y la captura muestra «Otra terminal ya abrió una
+     cuenta en esta mesa» con «Agregar a «Mesa 21 + 22»» y «Abrir otra cuenta»;
+   - con «Abrir otra cuenta» el pedido entra en una cuenta nueva de la Mesa 22 **dentro de la unión**
+     (`table_union` = «Mesa 21 + 22»). No se pierde nada.
+
+   Con la 0.5.0 instalada encima (sin volver a emparejar, mismo `firstInstallTime`), la unión es una sola entrada con
+   sus dos cuentas.
+
+5. **La actualización 0.4.1 → 0.5.0 con un pedido en la cola**, repetida en la API 37 (`$SP/m1/c-upgrade.sh`):
+   - `waiter` w1 y w3 con la 0.4.1, la 0.5.0 encima y w4: aprobada (mismo `firstInstallTime`, versionCode 5 → 6);
+   - la firma de los APK de entrega: misma huella, `fb6a4bac…7c86`.
+
+### Decisiones propuestas (segunda parte)
+
+1. **M1-D36 resuelto solo en meseros**: en el teléfono vertical el título va en su propio renglón debajo de la barra,
+   de todo el ancho y hasta en dos renglones. Sin cambio en `android-core`, así que **cocina sigue en 0.1.0**. _Porqué_:
+   en 360–411 dp no caben en una fila la flecha, el título, el mesero, «En línea» y «N pedidos por enviar». Así el
+   título nunca se corta y el indicador se queda completo en la barra (regla 13). Cuesta un renglón de alto en el
+   teléfono vertical; en horizontal y en la tableta no cambia nada.
+2. **El teclado de los diálogos con texto en Android 8**: un solo arreglo compartido (`KeyboardOnClose.kt`) para los
+   tres diálogos con campos de texto de meseros.
+
+### Pruebas realmente ejecutadas (segunda parte)
+
+Go temporal de este árbol con `etapa-m1` `7c15d38e` (M1-D29 a M1-D33), base nueva por suite (`$SP/m1/c-chain.sh`).
+
+| Prueba                                                                                                                                               | Emulador                      | Resultado                                                                                                                                           |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `unions` u1–u12, con u11 (M1-D32 de punta a punta) y u12 (el título)                                                                                 | `ADEL_M1_Tablet_API37` (5570) | 12 de 12. u11 falló la primera vez por la prueba: tocaba la Mesa 3a, que en la lista sale dentro de la unión; se corrigió y se repitieron u11 y u12 |
+| `unions` u1–u12                                                                                                                                      | `ADEL_A1_Tablet_API26` (5572) | 12 de 12                                                                                                                                            |
+| `takeaway` t1–t9                                                                                                                                     | 5570                          | 9 de 9                                                                                                                                              |
+| `adjustments` a1–a7                                                                                                                                  | 5570                          | 7 de 7                                                                                                                                              |
+| `waiter` w1–w13c (con la comprobación del teclado en w8)                                                                                             | 5570                          | 19 de 19                                                                                                                                            |
+| `field` f1–f10                                                                                                                                       | 5570                          | 10 de 10; f7 OMITIDA: el guion no tenía `ADELPOS_E2E_DATABASE_URL`                                                                                  |
+| `precheck` p1–p7                                                                                                                                     | 5570                          | 7 de 7                                                                                                                                              |
+| `waiter` w1–w8 **sin** el arreglo de los diálogos (para comprobar el defecto)                                                                        | 5572                          | w8 FALLA: el diálogo se cerró a los 190 ms y el teclado siguió abierto (426 px)                                                                     |
+| `waiter` w1–w8 con el arreglo                                                                                                                        | 5572                          | 10 de 10: diálogos cerrados en 88–108 ms y el teclado también                                                                                       |
+| `legacy` v1 (0.4.1) y v2 (0.5.0 encima)                                                                                                              | 5570                          | aprobadas; lo que pasa, arriba                                                                                                                      |
+| Actualización 0.4.1 → 0.5.0 con pedido en la cola y firma (`c-upgrade.sh`)                                                                           | 5570                          | aprobada                                                                                                                                            |
+| Instrumentadas `StageM1ScreensTest`, `StageA3ScreensTest`, `WaiterScreensTest`, `AppNavigationTest`, `MainNavigationLayoutTest`                      | 5570                          | 20 de 20                                                                                                                                            |
+| `unions` u1, u3, u4 y u12 en vertical; u12 en horizontal; u3, u4 y u12 a **360 dp** (`wm density 480` solo durante la prueba, regresado con `reset`) | `ADEL_M1_Phone_API37` (5574)  | todo aprobado; el título completo en un renglón en los tres casos, también con «1 pedido por enviar» en la barra                                    |
+| JVM de todos los módulos, `ktfmtCheck`, `format` y `fmt-check`; md5 de la especificación                                                             | Mac                           | sin fallas; `4750ae46…`                                                                                                                             |
+
+**Capturas nuevas** (tema claro, `$SP/m1/capturas-C/`):
+
+- tableta API 37 (`api37-…`), vertical y horizontal: tarjeta única, contorno y panel de la unión, «Unir con…», M1-D13,
+  u11 (M1-D32), u12, a2, t9 y la 0.4.1 frente a la unión;
+- teléfono (`telefono-api37-…`): vertical, horizontal y 360 dp, con Mesas, «Nuevo pedido para llevar» y el pedido por
+  enviar;
+- el teclado abierto sin el arreglo (`api26-w8-sin-arreglo-teclado-abierto.png`).
+
+### Pendiente o no verificado (segunda parte)
+
+- `ADEL_A1_Phone_API33` no se usó: el ancho de 360 dp se probó en `ADEL_M1_Phone_API37` con `wm density`.
+- `field` f7 (el bloqueo largo del PIN) quedó omitido: necesita la URL de la base temporal.
+- **Observación** (no es de esta fase): en las capturas de los pasos sin red, la barra dice «En línea» con el modo avión
+  puesto. Ya pasaba antes. El pedido sí queda «Por enviar».
+- El diálogo de cancelar una vez tardó más de 10 s en cerrarse después de que Go aplicó la cancelación (en la corrida con
+  el emulador muy cargado). En las siguientes se cerró en 88–190 ms. No se investigó.
+
+### Decisiones del coordinador al cerrar la segunda parte de la Fase C
+
+Se fusiona otra vez `etapa-m1-c` en `etapa-m1`. `android-core`, `cocina`, `backend` y `desktop` no cambiaron.
+
+- **M1-D40.** Se aceptan las decisiones propuestas de la segunda parte:
+  - en el teléfono vertical, el título va en su propio renglón y la barra no cambia;
+  - el arreglo del teclado de Android 8 se comparte en `KeyboardOnClose.kt` entre los tres diálogos con texto.
+    La aplicación de cocina queda en **0.1.0**.
+- **M1-D41. Para la regresión de la Fase F.**
+  - **«En línea» con el modo avión puesto**: en los pasos sin red de las pruebas la barra dice «En línea», aunque el
+    pedido sí queda «Por enviar». Ya pasaba antes de la etapa. La Fase F comprueba si es de la prueba o de la
+    aplicación y lo dice; no se corrige en esta etapa salvo que sea de la aplicación y sencillo.
+  - **El diálogo de cancelar tardó más de 10 s** en cerrarse una vez, con el emulador muy cargado. En las demás corridas
+    tardó entre 88 y 190 ms. La Fase F lo vigila en la regresión.
