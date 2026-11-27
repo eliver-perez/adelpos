@@ -19,7 +19,9 @@ CREATE TABLE app.table_groups (
     name text NOT NULL CHECK (char_length(name) BETWEEN 1 AND 60),
     active boolean NOT NULL DEFAULT true,
     source text NOT NULL DEFAULT 'manual' CHECK (source IN ('manual', 'legacy')),
-    legacy_batch_id uuid REFERENCES app.legacy_import_batches(id),
+    -- El lote de la importación que lo creó, sin llave foránea: ninguna tabla operativa tiene llaves hacia el historial
+    -- protegido del sistema anterior (0024).
+    legacy_batch_id uuid,
     legacy_key text CHECK (char_length(legacy_key) BETWEEN 1 AND 100),
     revision integer NOT NULL DEFAULT 1 CHECK (revision > 0),
     created_at timestamptz NOT NULL DEFAULT now(),
@@ -105,10 +107,16 @@ CREATE INDEX table_union_events_union_idx ON app.table_union_events (union_id, s
 -- 3. La venta queda registrada en la unión (§1.4; M1-D3): la instantánea de la unión vigente de la mesa de la cuenta al
 --    reconocer la venta, como table_name. Las filas existentes quedan en NULL y no se reescribe ninguna (la tabla solo
 --    admite INSERT). table_union_tables es [{id, name}] de cada mesa de la unión, en el orden de su nombre.
+--    Una actualización desde un esquema anterior a la 0017 aplica en la misma transacción el relleno de la 0017, cuya
+--    llave diferida (operation_id) deja comprobaciones pendientes en sales_recognitions, y PostgreSQL no altera una
+--    tabla con comprobaciones pendientes: se hacen en este momento (las filas ya cumplen la llave) y la llave vuelve a
+--    diferirse, como se declaró, para lo que siga en la transacción.
+SET CONSTRAINTS app.sales_recognitions_operation_id_fkey IMMEDIATE;
 ALTER TABLE app.sales_recognitions
     ADD COLUMN table_union_id uuid,
     ADD COLUMN table_union_name text,
     ADD COLUMN table_union_tables jsonb;
+SET CONSTRAINTS app.sales_recognitions_operation_id_fkey DEFERRED;
 
 -- 4. Permiso «Unir mesas» (§1.3; M1-D8). Lo piden unir, agregar y quitar mesas y la unión que nace con el primer
 --    producto. Se concede a los roles existentes Administrador, Mesero, Cajero y Supervisor que ya tengan lo que el
