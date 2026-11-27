@@ -304,8 +304,11 @@ export function useRestaurantWorkspace(
             : current,
         );
         setPending((current) => (current?.localID === localID ? null : current));
-        // Etapa M1: la unión en pantalla ya nació en Go con la cuenta (o se envió solo a la mesa): deja la pantalla.
-        setScreenUnion(null);
+        // Etapa M1: la unión en pantalla de esa mesa ya nació en Go con la cuenta (o se envió solo a la mesa): deja
+        // la pantalla. La de otra mesa sigue.
+        setScreenUnion((current) =>
+          current && created.account.table_id === current.startTableID ? null : current,
+        );
         setRefresh((current) => current + 1);
       }),
     [draft.engine],

@@ -414,11 +414,6 @@ export class DraftSyncEngine {
     return null;
   }
 
-  // Unión en pantalla de una cuenta pendiente (etapa M1), para mostrarla en la captura.
-  pendingUnion(localID: string): PendingUnionJoin | null {
-    return this.creations.get(localID)?.union ?? null;
-  }
-
   // «Abrir una cuenta nueva»: se reenvía la creación sabiendo de las cuentas informadas (con un
   // operation_id nuevo: el rechazo no confirmó nada). Etapa M1: si la mesa quedó en una unión, la cuenta nueva se
   // abre en esa unión a sabiendas (seen_union_id).
