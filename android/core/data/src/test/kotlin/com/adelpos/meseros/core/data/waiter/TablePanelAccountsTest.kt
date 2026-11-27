@@ -114,6 +114,52 @@ class TablePanelAccountsTest {
             (discardable?.let { ""","discardable":$it""" } ?: "") +
             "}"
 
+    /**
+     * Etapa M1 (§5.6): la cuenta que devuelve Go a este dispositivo (al abrirla, guardar el
+     * borrador o «Enviar a cocina») se ve al momento, sin esperar la relectura; una versión vieja
+     * no reemplaza a la nueva y una cuenta que ya no está abierta sale de la lista. Lee también los
+     * campos nuevos de la M1: el responsable (§5.5) y si necesita preparación (§5.2).
+     */
+    @Test
+    fun laCuentaQueRespondeGoSeVeAlMomento() = runBlocking {
+        respond(
+            "GET restaurant/state",
+            stateWith(
+                """{"id":"$FULL","folio":13,"name":"Mesa 6","mode":"dine_in","state":"open",""" +
+                    """"table_id":"t6","table_name":"Mesa 6","revision":3,""" +
+                    """"assigned_user_id":"$ANA","preparation_required":false,""" +
+                    """"totals":{"subtotal":"0.00","discount":"0.00","total":"0.00"}}""",
+            ),
+        )
+        respond("GET restaurant/overview", json(200, """{"areas":[],"tables":[]}"""))
+        restaurant.start()
+        server.sessions[ANA] = "sesion-de-ana"
+        server.active.value =
+            ActiveWaiter(WaiterProfile(ANA, "Ana", "A", null, 1, null), hasServerSession = true)
+        val read = withTimeout(5_000) { restaurant.openAccounts.first { it.size == 1 } }.single()
+        assertEquals(ANA, read.assignedUserId)
+        assertFalse(read.preparationRequired)
+        val sent =
+            read.copy(
+                revision = 5,
+                totals =
+                    com.adelpos.meseros.core.domain.waiter.Totals(
+                        com.adelpos.meseros.core.domain.money.Money("120.00"),
+                        com.adelpos.meseros.core.domain.money.Money("0.00"),
+                        com.adelpos.meseros.core.domain.money.Money("120.00"),
+                    ),
+            )
+        restaurant.applyAccount(sent)
+        assertEquals(listOf(sent), restaurant.openAccounts.value)
+        assertEquals(listOf(sent), restaurant.allOpenAccounts.value)
+        // Una respuesta más vieja (otra revisión anterior) no deshace lo nuevo.
+        restaurant.applyAccount(read)
+        assertEquals("120.00", restaurant.openAccounts.value.single().totals.total.toString())
+        // Cobrada o cancelada en Go: sale de Mesas.
+        restaurant.applyAccount(sent.copy(revision = 6, state = "closed"))
+        assertTrue(restaurant.openAccounts.value.isEmpty())
+    }
+
     @Test
     fun laCuentaVaciaSeDescartaSoloComoLoDiceGo() = runBlocking {
         respond(

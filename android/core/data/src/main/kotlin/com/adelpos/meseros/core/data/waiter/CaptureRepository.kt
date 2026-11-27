@@ -85,6 +85,11 @@ class CaptureRepository(
     private val serverClock: ServerClock? = null,
     private val inFlight: OrdersInFlight = OrdersInFlight(),
     private val settleTimeoutMillis: Long = SETTLE_TIMEOUT_MILLIS,
+    /**
+     * Etapa M1 (§5.6): la cuenta que devolvió Go al abrirla, guardar su borrador o confirmarlo,
+     * para que Mesas la muestre al momento (`RestaurantRepository.applyAccount`).
+     */
+    private val accountAnswered: (AccountSummary) -> Unit = {},
 ) : CaptureService {
     /** Lo que el modo Mesero necesita del catálogo guardado. */
     interface CatalogLookups {
@@ -735,6 +740,7 @@ class CaptureRepository(
     }
 
     private suspend fun acknowledge(captureId: String, bill: AccountBill) {
+        accountAnswered(bill.account)
         val acknowledged = edits.withLock {
             val capture = load(captureId) ?: return
             val remaining = capture.operations.drop(capture.inFlightCount)
@@ -1048,7 +1054,11 @@ class CaptureRepository(
                 ),
             )
         return when (outcome) {
-            is ApiOutcome.Success -> SendOutcome.Accepted(outcome.value.account.id)
+            is ApiOutcome.Success -> {
+                // §5.6: el panel de la mesa ve el total de Go en cuanto llega la respuesta.
+                accountAnswered(WaiterMapper.account(outcome.value.account))
+                SendOutcome.Accepted(outcome.value.account.id)
+            }
             is ApiOutcome.NoAnswer ->
                 if (outcome.requestSent) {
                     null
