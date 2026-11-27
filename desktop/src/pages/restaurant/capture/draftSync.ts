@@ -22,6 +22,11 @@ import type { DraftOperation } from './draftOperations';
 //   conservan hasta que el operador elige agregarlos a esa cuenta o abrir una nueva.
 // - Etapa 9D (§4.1, decisión 2): el pedido para llevar y la cuenta sin mesa nacen igual, con su
 //   primer producto (sin mesa no hay cuentas vistas que comparar).
+// - Etapa M1 (M1-D9): una unión de mesas que vive solo en la pantalla nace en la misma operación que la cuenta
+//   (union_table_ids o union_group_id), y la terminal dice qué unión veía en la mesa (seen_union_id). Si Go rechaza
+//   la unión (una mesa se ocupó o se unió mientras tanto, M1-D32…), no se crea nada: los toques se conservan y el
+//   operador decide si los envía solo a la mesa de inicio o espera (unionConflict). Si la mesa quedó unida con otras
+//   en otra terminal (TABLE_IN_UNION), se decide como con TABLE_HAS_ACCOUNT, con las cuentas de esa unión.
 // - Etapa 9D (revisión, P2): si se sale de la captura con la creación en curso, la creación sigue
 //   (abandonPending). Si Go la rechaza de forma definitiva sin la captura a la vista, nadie puede
 //   corregir los toques: la cuenta pendiente se olvida y se informa con onCreationRejected para
@@ -38,6 +43,11 @@ export interface DraftSyncTransport {
     table_id: string | null;
     seen_account_ids: string[];
     items: DraftItem[];
+    // Etapa M1: la unión en pantalla (las otras mesas o el grupo) y la unión que se veía en la mesa. Ausentes, no
+    // se mandan (un servidor anterior los rechazaría).
+    union_table_ids?: string[];
+    union_group_id?: string;
+    seen_union_id?: string | null;
   }): Promise<Bill>;
   // Reintenta la última operación incierta con el mismo operation_id y cuerpo.
   retry(): Promise<Bill>;
@@ -64,6 +74,26 @@ export interface PendingCreation {
   mode?: 'dine_in' | 'takeaway';
   tableID: string | null;
   seenAccountIDs: string[];
+  // Etapa M1: la unión que vive en la pantalla (M1-D9) y la unión abierta que la terminal veía en la mesa (null si
+  // ninguna; sin el campo, no se manda: un servidor sin uniones).
+  union?: PendingUnionJoin | null;
+  seenUnionID?: string | null;
+}
+
+// Mesas de una unión en pantalla: las otras mesas (sin la de inicio) o el grupo predefinido.
+export interface PendingUnionJoin {
+  tableIDs: string[];
+  groupID: string | null;
+}
+
+// Cuenta pendiente detenida porque Go rechazó su unión en pantalla (etapa M1): el texto de Go, tal cual.
+export interface UnionCreationConflict {
+  localID: string;
+  tableID: string;
+  code: string;
+  message: string;
+  // La cuenta nacía con una unión en pantalla (si no, la rechazada fue la unión que se veía en la mesa, M1-D32).
+  joined: boolean;
 }
 
 // Cuenta pendiente cuya captura ya se cerró y que Go rechazó de forma definitiva (etapa 9D,
@@ -81,11 +111,18 @@ export interface TableAccountConflict {
   localID: string;
   tableID: string;
   accounts: TableAccountRef[];
+  // Etapa M1: la unión en que otra terminal dejó la mesa (TABLE_IN_UNION); null con TABLE_HAS_ACCOUNT.
+  union?: { id: string; name: string } | null;
 }
 
 interface Creation extends PendingCreation {
-  // Cuentas que Go informó con TABLE_HAS_ACCOUNT; mientras existan no se envía nada.
+  // Cuentas que Go informó con TABLE_HAS_ACCOUNT (o con TABLE_IN_UNION, de la unión en que quedó la mesa, etapa
+  // M1); mientras existan no se envía nada.
   accounts: TableAccountRef[] | null;
+  // Etapa M1: la unión en que otra terminal dejó la mesa (TABLE_IN_UNION); al abrir otra cuenta se manda como vista.
+  inUnion: { id: string; name: string } | null;
+  // Etapa M1: Go rechazó la unión en pantalla; mientras no se decida no se envía nada.
+  unionProblem: { code: string; message: string } | null;
   // La captura de la cuenta pendiente se cerró (abandonPending) mientras aún había algo que crear.
   abandoned: boolean;
   // Último rechazo definitivo de la creación, mientras no haya otro intento.
@@ -119,12 +156,44 @@ interface Entry {
 }
 
 function tableAccountsOf(problem: unknown): TableAccountRef[] | null {
-  if (!(problem instanceof APIError) || problem.code !== 'TABLE_HAS_ACCOUNT') {
+  if (
+    !(problem instanceof APIError) ||
+    (problem.code !== 'TABLE_HAS_ACCOUNT' && problem.code !== 'TABLE_IN_UNION')
+  ) {
     return null;
   }
-  const details = problem.details as { accounts?: TableAccountRef[] } | undefined;
-  return details?.accounts?.length ? details.accounts : null;
+  // Con TABLE_IN_UNION Go manda solo los identificadores de las cuentas (M1-D25); el transporte los completa con
+  // su folio y su nombre (useDraftSync). Sin ellos no hay a qué cuenta agregar.
+  const details = problem.details as { accounts?: unknown[] } | undefined;
+  const accounts = (details?.accounts ?? []).filter(
+    (entry): entry is TableAccountRef =>
+      !!entry && typeof entry === 'object' && typeof (entry as TableAccountRef).folio === 'number',
+  );
+  return accounts.length ? accounts : null;
 }
+
+// Etapa M1: la unión de mesas que trae TABLE_IN_UNION (details.union).
+function unionOfProblem(problem: unknown): { id: string; name: string } | null {
+  if (!(problem instanceof APIError) || problem.code !== 'TABLE_IN_UNION') {
+    return null;
+  }
+  const union = (problem.details as { union?: { id?: unknown; name?: unknown } } | undefined)
+    ?.union;
+  return union && typeof union.id === 'string' && typeof union.name === 'string'
+    ? { id: union.id, name: union.name }
+    : null;
+}
+
+// Etapa M1 (contrato §5): rechazos de la unión en pantalla al guardar el primer producto. Go no guardó nada.
+const unionRejections = new Set([
+  'TABLE_UNION_AREA',
+  'TABLE_UNION_OCCUPIED',
+  'TABLE_UNION_BOTH_OCCUPIED',
+  'TABLE_UNION_UNAVAILABLE',
+  'TABLE_GROUP_SECTION_OCCUPIED',
+  'TABLE_UNION_CONFLICT',
+  'TABLE_IN_UNION',
+]);
 
 function conflictError(problem: unknown) {
   return (
@@ -142,6 +211,26 @@ export function uncertainError(problem: unknown) {
 
 function message(problem: unknown, fallback: string) {
   return problem instanceof Error && problem.message ? problem.message : fallback;
+}
+
+// Cuerpo de la creación de una cuenta pendiente. Etapa M1: la unión en pantalla y la unión vista solo viajan si las
+// hay (un servidor anterior rechazaría los campos).
+function creationBody(creation: Creation, items: DraftItem[]) {
+  const body: Parameters<DraftSyncTransport['create']>[0] = {
+    mode: creation.mode ?? 'dine_in',
+    table_id: creation.tableID,
+    seen_account_ids: [...creation.seenAccountIDs],
+    items,
+  };
+  if (creation.union?.groupID) {
+    body.union_group_id = creation.union.groupID;
+  } else if (creation.union && creation.union.tableIDs.length > 0) {
+    body.union_table_ids = [...creation.union.tableIDs];
+  }
+  if (creation.seenUnionID !== undefined) {
+    body.seen_union_id = creation.seenUnionID;
+  }
+  return body;
 }
 
 export class DraftSyncEngine {
@@ -210,7 +299,14 @@ export class DraftSyncEngine {
         this.creations.delete(id);
       }
     }
-    this.creations.set(localID, { ...creation, accounts: null, abandoned: false, rejection: null });
+    this.creations.set(localID, {
+      ...creation,
+      accounts: null,
+      inUnion: null,
+      unionProblem: null,
+      abandoned: false,
+      rejection: null,
+    });
   }
 
   // Olvida una cuenta pendiente sin toques ni envíos: salir sin productos no deja registro.
@@ -223,6 +319,7 @@ export class DraftSyncEngine {
     const entry = this.entries.get(localID);
     const idle =
       !creation.accounts &&
+      !creation.unionProblem &&
       (!entry ||
         (entry.operations.length === 0 && !this.sendingAccount(localID) && entry.timer === null));
     if (!idle) {
@@ -258,6 +355,7 @@ export class DraftSyncEngine {
     if (
       creation.rejection &&
       !creation.accounts &&
+      !creation.unionProblem &&
       !this.sendingAccount(localID) &&
       entry.timer === null
     ) {
@@ -286,18 +384,44 @@ export class DraftSyncEngine {
     }
   }
 
-  // Primera cuenta pendiente detenida por TABLE_HAS_ACCOUNT.
+  // Primera cuenta pendiente detenida por TABLE_HAS_ACCOUNT (o TABLE_IN_UNION, con la unión en que quedó la mesa).
   tableConflict(): TableAccountConflict | null {
     for (const [localID, creation] of this.creations) {
       if (creation.accounts && creation.tableID) {
-        return { localID, tableID: creation.tableID, accounts: creation.accounts };
+        return {
+          localID,
+          tableID: creation.tableID,
+          accounts: creation.accounts,
+          ...(creation.inUnion ? { union: creation.inUnion } : {}),
+        };
       }
     }
     return null;
   }
 
+  // Etapa M1: primera cuenta pendiente detenida porque Go rechazó su unión en pantalla.
+  unionConflict(): UnionCreationConflict | null {
+    for (const [localID, creation] of this.creations) {
+      if (creation.unionProblem && creation.tableID) {
+        return {
+          localID,
+          tableID: creation.tableID,
+          ...creation.unionProblem,
+          joined: !!creation.union,
+        };
+      }
+    }
+    return null;
+  }
+
+  // Unión en pantalla de una cuenta pendiente (etapa M1), para mostrarla en la captura.
+  pendingUnion(localID: string): PendingUnionJoin | null {
+    return this.creations.get(localID)?.union ?? null;
+  }
+
   // «Abrir una cuenta nueva»: se reenvía la creación sabiendo de las cuentas informadas (con un
-  // operation_id nuevo: el rechazo no confirmó nada).
+  // operation_id nuevo: el rechazo no confirmó nada). Etapa M1: si la mesa quedó en una unión, la cuenta nueva se
+  // abre en esa unión a sabiendas (seen_union_id).
   openNewAccount(localID: string) {
     const creation = this.creations.get(localID);
     const entry = this.entries.get(localID);
@@ -308,10 +432,53 @@ export class DraftSyncEngine {
       ...creation.seenAccountIDs,
       ...creation.accounts.map((account) => account.id),
     ];
+    if (creation.inUnion) {
+      creation.seenUnionID = creation.inUnion.id;
+    }
     creation.accounts = null;
+    creation.inUnion = null;
     entry.error = '';
     this.emit();
     this.trySend(entry);
+  }
+
+  // Etapa M1: «Enviar solo a la mesa de inicio». La creación se reenvía sin la unión en pantalla y sin la unión que
+  // se veía (la mesa ya no estaba en ella), con un operation_id nuevo: el rechazo no guardó nada. Si la mesa quedó
+  // unida u ocupada en otra terminal, Go lo dice otra vez (TABLE_IN_UNION o TABLE_HAS_ACCOUNT) y se decide aparte.
+  dropUnion(localID: string) {
+    const creation = this.creations.get(localID);
+    const entry = this.entries.get(localID);
+    if (!creation || !entry) {
+      return;
+    }
+    creation.union = null;
+    if (creation.seenUnionID !== undefined) {
+      creation.seenUnionID = null;
+    }
+    creation.unionProblem = null;
+    entry.error = '';
+    this.emit();
+    this.trySend(entry);
+  }
+
+  // Etapa M1: «Esperar». La unión y los toques se conservan sin enviar; el texto de Go queda en la cuenta y el
+  // siguiente envío (un toque o «Enviar a cocina») vuelve a intentarlo.
+  waitForUnion(localID: string) {
+    const creation = this.creations.get(localID);
+    const entry = this.entries.get(localID);
+    if (!creation?.unionProblem || !entry) {
+      return;
+    }
+    const { code, message } = creation.unionProblem;
+    creation.unionProblem = null;
+    if (creation.abandoned) {
+      // Su captura ya se cerró: nadie puede volver a enviarla. Se olvida y se avisa, como cualquier rechazo.
+      this.dropRejected(localID, creation, new APIError(code, message, 409));
+      this.emit();
+      return;
+    }
+    entry.error = message;
+    this.emit();
   }
 
   // «Agregar a esa cuenta»: los toques de la cuenta pendiente se aplican sobre el borrador de la
@@ -505,9 +672,10 @@ export class DraftSyncEngine {
     this.send(entry);
   }
 
-  // La cuenta pendiente espera la decisión del operador ante TABLE_HAS_ACCOUNT.
+  // La cuenta pendiente espera la decisión del operador ante TABLE_HAS_ACCOUNT (o ante el rechazo de su unión).
   private blockedCreation(entry: Entry) {
-    return !!this.creations.get(entry.accountID)?.accounts;
+    const creation = this.creations.get(entry.accountID);
+    return !!creation?.accounts || !!creation?.unionProblem;
   }
 
   private send(entry: Entry) {
@@ -529,12 +697,7 @@ export class DraftSyncEngine {
       creation.rejection = null;
     }
     const request = creation
-      ? this.transport.create({
-          mode: creation.mode ?? 'dine_in',
-          table_id: creation.tableID,
-          seen_account_ids: [...creation.seenAccountIDs],
-          items,
-        })
+      ? this.transport.create(creationBody(creation, items))
       : this.transport.save(entry.accountID, { revision: entry.baseRevision, items });
     const promise = request
       .then(
@@ -594,11 +757,28 @@ export class DraftSyncEngine {
     }
     entry.sentCount = 0;
     const creation = this.creations.get(entry.accountID);
+    // Etapa M1: Go rechazó la unión en pantalla (o la que se veía, M1-D32). No guardó nada: el operador decide si
+    // envía solo a la mesa de inicio o espera, con el texto de Go. Una TABLE_IN_UNION sin unión en pantalla es la
+    // mesa que quedó unida en otra terminal: se decide como TABLE_HAS_ACCOUNT, abajo.
+    if (
+      creation?.tableID &&
+      problem instanceof APIError &&
+      unionRejections.has(problem.code) &&
+      (problem.code !== 'TABLE_IN_UNION' || !!creation.union || !tableAccountsOf(problem))
+    ) {
+      creation.unionProblem = { code: problem.code, message: problem.message };
+      entry.error = '';
+      if (creation.abandoned) {
+        creation.rejection = { problem };
+      }
+      return;
+    }
     // Sin mesa (para llevar o cuenta sin mesa) no hay cuentas de la mesa que decidir.
     const accounts = creation?.tableID ? tableAccountsOf(problem) : null;
     if (creation && accounts) {
       // Otra terminal abrió una cuenta en la mesa: Go no creó nada y el operador decide.
       creation.accounts = accounts;
+      creation.inUnion = unionOfProblem(problem);
       entry.error = '';
       return;
     }
@@ -742,6 +922,10 @@ export class DraftSyncEngine {
       const entry = this.entries.get(accountID);
       if (!entry) {
         return null;
+      }
+      const unionProblem = this.creations.get(accountID)?.unionProblem;
+      if (unionProblem) {
+        throw new DraftSyncError('table', unionProblem.message);
       }
       if (this.blockedCreation(entry)) {
         throw new DraftSyncError(

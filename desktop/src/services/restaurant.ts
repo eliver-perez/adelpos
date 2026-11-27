@@ -442,6 +442,7 @@ export function pendingAccountBill({
   localID,
   mode = 'dine_in',
   table,
+  union = null,
   priceListID,
   createdAt,
   timezone,
@@ -449,6 +450,8 @@ export function pendingAccountBill({
   localID: string;
   mode?: Account['mode'];
   table: Pick<RestaurantTable, 'id' | 'name'> | null;
+  // Etapa M1: la unión de la mesa (la de Go o la que vive en la pantalla), para mostrar su nombre en la captura.
+  union?: { id: string; name: string; table_ids: string[] } | null;
   priceListID: string;
   createdAt: string;
   timezone: string;
@@ -499,12 +502,27 @@ export function pendingAccountBill({
       cancel_blocker: '',
       cancel_requires_authorization: false,
       long_open: false,
+      table_union: takeaway ? null : union,
     },
     draft: [],
     lines: [],
     server_time: createdAt,
     timezone,
   };
+}
+
+// Unión de mesas que vive solo en la pantalla (etapa M1, M1-D9): todas sus mesas estaban libres y nace en Go con el
+// primer producto (union_table_ids o union_group_id en openAccount). El nombre y la capacidad son los de la vista
+// previa de Go. Salir sin capturar no guarda nada.
+export interface ScreenUnion {
+  startTableID: string;
+  // Las otras mesas, sin la de inicio (vacía con groupID).
+  tableIDs: string[];
+  groupID: string | null;
+  // Todas sus mesas, para dibujarla en el mapa.
+  allTableIDs: string[];
+  name: string;
+  seats: number;
 }
 
 export function serverDateTime(value: string, timezone: string) {
@@ -628,12 +646,71 @@ export function searchTables(
 // nombre capturado.
 const neutralAccountNames = ['Cuenta', 'Pedido para llevar', 'Para llevar'];
 
-export function accountCustomName(account: Pick<Account, 'name' | 'table_name'>): string {
+export function accountCustomName(
+  account: Pick<Account, 'name' | 'table_name'> & Pick<Partial<Account>, 'table_union'>,
+): string {
   const name = account.name.trim();
   if (!name || neutralAccountNames.includes(name) || name === account.table_name) {
     return '';
   }
+  if (account.table_union && unionReference(name, account.table_union.name)) {
+    return '';
+  }
   return name;
+}
+
+// Etapa M1 (M1-D14 y M1-D29): una cuenta sin nombre propio en una unión se llama como la unión; si el nombre de la
+// unión pasa de 100 caracteres, Go lo recorta en el último « + » que cabe y termina en « + …». Las dos formas son la
+// referencia neutra (no un nombre capturado).
+function unionReference(name: string, unionName: string) {
+  if (name === unionName) {
+    return true;
+  }
+  const cut = ' + …';
+  return name.endsWith(cut) && unionName.startsWith(`${name.slice(0, -cut.length)} + `);
+}
+
+// Lugar de una cuenta de salón como se muestra: el nombre de su unión de mesas, si está en una (etapa M1: las
+// cuentas son de la unión), o el de su mesa. null sin mesa.
+export function accountPlace(
+  account: Pick<Account, 'table_name'> & Pick<Partial<Account>, 'table_union'>,
+) {
+  return account.table_union?.name ?? account.table_name;
+}
+
+// Unión abierta y grupo activo de una mesa, tal como los manda Go en el mapa (etapa M1). Sin la capacidad o sin
+// uniones, null.
+export function unionOfTable(
+  overview: Pick<Overview, 'unions'> | null | undefined,
+  tableID: string,
+) {
+  return overview?.unions?.find((union) => union.table_ids.includes(tableID)) ?? null;
+}
+
+export function groupOfTable(
+  overview: Pick<Overview, 'groups'> | null | undefined,
+  tableID: string,
+) {
+  return overview?.groups?.find((group) => group.table_ids.includes(tableID)) ?? null;
+}
+
+// ¿La cuenta está en el mismo lugar que la mesa? Con la mesa en una unión, cualquier mesa de la unión.
+export function samePlace(
+  account: Pick<Account, 'table_id'>,
+  tableID: string,
+  union: Pick<TableUnion, 'table_ids'> | null,
+) {
+  if (!account.table_id) {
+    return false;
+  }
+  return union ? union.table_ids.includes(account.table_id) : account.table_id === tableID;
+}
+
+// Vista previa de una unión (etapa M1): Go da el nombre, la capacidad y los problemas sin escribir nada. Con
+// table_ids, la primera es la mesa de inicio (M1-D25); con group_id, el atajo del grupo; con union_id, las mesas que
+// se agregan a esa unión.
+export function previewUnion(body: { table_ids?: string[]; group_id?: string; union_id?: string }) {
+  return api<UnionPreview>('restaurant_preview_union', { body });
 }
 
 // Nombre con que se identifica a quien recoge un pedido para llevar: el cliente o, en pedidos
