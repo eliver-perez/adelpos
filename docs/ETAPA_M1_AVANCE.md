@@ -1511,3 +1511,283 @@ escritorio, y el servidor quedó idéntico al de la rama de la Fase A.
     - corre `workflow-stagez-k11-diagnostics`, que la A ajustó a M1-D17 sin correrla;
     - revisa el texto «Espera a que lo envíes a cocina» de `PendingKitchen.tsx`, que ya no se usa para pedidos nuevos.
   - **Fase F**: actualiza en `docs/KITCHEN_AND_PRINTING.md` lo que todavía describe K11-D9.
+
+## Fase R · Revisor independiente de la concurrencia de las uniones (§2.3, M1-D11)
+
+Rama `etapa-m1-r` (desde `etapa-m1` `531773d2`, con la Fase A fusionada), `ISO_TAG=R`. Sin Go temporal, sin emuladores
+y sin Playwright. No se tocó código del producto: solo pruebas nuevas. Se leyó el código antes que la sección «Para el
+revisor» de la Fase A y se comprobó cada afirmación de esa sección.
+
+### Commits (rama `etapa-m1-r`)
+
+| Commit     | Tema                                                                                                                        |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `062b38b7` | Prueba propia de concurrencia `TestStageM1ReviewConcurrency` (`operations/stagem1_review_concurrency_test.go`)              |
+| `baf5cf00` | `TestStageM1ReviewDeferredLeavesNothing` (`operations/stagem1_review_deferred_test.go`): la diferida rechazada no deja nada |
+
+Las pruebas que muestran defectos **no** están en la rama: van como parche en `$SP/m1/revisor/` con su salida.
+
+### Resumen
+
+- **Las invariantes de la §2.3 se cumplen.** Ninguna corrida dejó una mesa en dos uniones abiertas, una unión abierta
+  sin cuentas o con menos de dos mesas, una cuenta perdida, una respuesta 5xx o un rechazo fuera del contrato: la prueba
+  de la Fase A pasó 20 de 20 con `-race` y la propia, con una mezcla más amplia (22 escrituras de tres terminales a la
+  vez, en orden al azar), pasó 20 de 20 (200 rondas) con `-race`. El lock 7820148305 exclusivo se toma antes de leer en
+  todos los caminos que escriben uniones, mesas o cuentas, y `SettleEmpty` cubre todos los que cambian el estado o la mesa de una
+  cuenta.
+- **Dos defectos que deben corregirse** (ninguno bloquea ni rompe la §2.3; los dos con prueba que falla):
+  1. el nombre de una unión de más de 100 caracteres hace fallar con 400 unir, agregar, abrir una cuenta sin nombre,
+     mover una cuenta y la cola sin conexión;
+  2. las horas que se guardan son las del **inicio** de cada transacción y no las del orden del lock, así que el ticket
+     de una cuenta cobrada en una unión puede decir la mesa sola u **otra unión**, y el historial de una unión puede ir
+     hacia atrás. Pasa sin forzarlo: de 3 a 5 de cada ~46 cobros en uniones en la mezcla de 40 rondas.
+- **Un punto menor** (defensa del índice único) y **dos puntos para decidir** (una lectura del contrato y una regla de
+  nombres). Ver abajo.
+
+### Hallazgos
+
+#### R1. Una unión con nombre de más de 100 caracteres no se puede usar — debe corregirse
+
+- **Dónde**: el nombre de la unión no tiene límite (`tableunions/names.go:39`, columna de hasta 4000 en la 0031), pero
+  una cuenta sin nombre propio se llama como la unión (M1-D14) y `app.restaurant_accounts.name` admite de 1 a 100
+  (`migrations/0004_restaurant_operations.sql:43`; `operations/accounts_write.go:16` también rechaza más de 100):
+  - `operations/table_unions.go:558` (`renameUnionAccounts`, desde `createTableUnion` `:631`, `addTableToUnion` `:770` y
+    renombrar una mesa unida, `tables.go:175` → `:221`; este último, por lectura del código, sin prueba): `UPDATE … SET
+name` viola la comprobación (23514) y
+    `administration/http.go:163` lo traduce al genérico 400 `VALIDATION_ERROR` «Los datos o sus relaciones no son
+    válidos.»;
+  - `operations/account_names.go:35` (`neutralAccountName`, que usan `fillAccountName` y `movedAccountName`): abrir sin
+    nombre (también la diferida), mover a la unión (`accounts_write.go:375` → `:385`, 23514) y el pedido de la cola sin
+    conexión (`offline_orders.go:931`) responden 400 `OPERATION_VALIDATION` «Revisa nombre/referencia (100), cliente
+    (100)…», un texto que el mesero no puede corregir (no escribió ningún nombre).
+- **Escenario**: área con mesas «Terraza 1» a «Terraza 10» (sin la palabra «Mesa», el nombre lleva cada nombre
+  completo). La unión de las nueve primeras se llama «Terraza 1 + Terraza 2 + … + Terraza 9» (105 caracteres). Con las
+  mesas «Mesa N» del propietario hacen falta unas 20 mesas de dos cifras («Mesa 10 + 11 + … + 29», 102).
+  1. Cuenta sin nombre en «Terraza 1» → `POST restaurant/table-unions {start: Terraza 1, table_ids: 2…9}` → 400
+     `VALIDATION_ERROR`.
+  2. `POST restaurant/accounts {table_id: Terraza 1, union_table_ids: 2…9, items}` sin nombre → 400
+     `OPERATION_VALIDATION`.
+  3. Unión de 8 (93 caracteres) con su cuenta sin nombre + `POST …/tables {table_id: Terraza 9}` → 400 `VALIDATION_ERROR`.
+  4. Con la unión de 9 creada desde una cuenta con nombre propio («Familia López»): abrir otra cuenta sin nombre en la
+     unión → 400; mover a «Terraza 2» la cuenta sin nombre de «Terraza 10» → 400 `VALIDATION_ERROR`; un pedido de la cola
+     sin conexión a «Terraza 3» → 400 `OPERATION_VALIDATION` (Android lo deja rechazado con ese texto).
+     Nada queda a medias (la transacción se revierte entera), pero la unión, válida para la §1, no se puede usar.
+- **Prueba**: `$SP/m1/revisor/nombre-largo-de-la-union.patch` (`TestStageM1ReviewLongUnionName`, 4 subpruebas, 6
+  comprobaciones); salida en `nombre-largo-de-la-union.txt` (falla 6 de 6).
+- **Para decidir al corregir** (no lo decide el revisor): recortar la referencia neutra de la cuenta a 100 caracteres
+  (por ejemplo «Terraza 1 + Terraza 2 + …»), dejar a la cuenta el nombre de su mesa cuando el de la unión no cabe, o
+  limitar las uniones a un nombre de hasta 100 caracteres con un rechazo claro (esto cambia el límite de 40 mesas de la
+  lectura 12 de M1-D25).
+
+#### R2. Las horas de la unión y del cobro no siguen el orden del lock — debe corregirse
+
+- **Causa**: cada petición abre su transacción (`administration/service.go:255`), se autentica (entre otras cosas
+  `UPDATE app.sessions SET last_seen_at` en `service.go:599`, que espera si otra petición de la misma sesión tiene la
+  fila) y **después** toma 7820148305 (`operations/handler.go:57`, `payments/handler.go:100`). Todas las horas que se
+  guardan son `now()`, la hora en que **empezó** la transacción: `closed_at` del cobro (`payments/collect.go:648`),
+  `joined_at`/`created_at` (valor por omisión de la 0031), `left_at` y `dissolved_at` (`tableunions/settle.go:107` y
+  `:111`, `operations/table_unions.go:826`). Una petición que empezó antes y tomó el lock después guarda una hora
+  anterior a la de escrituras que ya se confirmaron antes que ella.
+- **Efecto**: `tableunions.UnionNameAtSQL` (`tableunions/sql.go:24`) compara esas horas para saber en qué unión estaba
+  la mesa «en ese instante». Lo usan el ticket, la precuenta y el comprobante de una cuenta cobrada o cancelada
+  (`payments/finance.go:31`; el ticket del cobro se arma con esa lectura, `collect.go:608` y `:618`) y «Cuentas
+  canceladas» (`reports/cancellations.go:59`). La venta (`sales_recognitions`, M1-D3) sí queda bien porque lee la unión
+  abierta en la misma transacción, así que el ticket y la venta dicen lugares distintos.
+- **Escenario 1** (forzado sin depender de la suerte: la prueba retiene la fila de la sesión de la caja para que el cobro
+  espere con su transacción ya empezada): cuenta enviada en «Mesa 5»; la caja manda el cobro total (empieza a las _t₀_);
+  mientras espera, el mesero une «Mesa 5 + 6» (`createTableUnion`, a las _t₁_ > _t₀_); el cobro termina. Resultado:
+  venta «Mesa 5 + 6»; **ticket del cobro y reimpresión «Mesa 5»**; la unión queda `dissolved_at < opened_at`, sus dos
+  mesas con `left_at < joined_at` y su historial dice «se deshizo» antes de «se unió».
+- **Escenario 2**: cuentas en «Mesa 8 + 9»; la caja manda el cobro de la de «Mesa 9»; mientras espera, el mesero quita
+  «Mesa 8» (la unión se deshace) y une «Mesa 9 + 10». Resultado: venta «Mesa 9 + 10»; **ticket y reimpresión «Mesa 8 +
+  9»**, una unión que ya no existía cuando se cobró.
+- **Sin forzarlo** pasa también: en la mezcla de la prueba propia (40 rondas, tres corridas) quedaron 3, 3 y 5 cobros en
+  uniones cuyo ticket dice la mesa sola (de 45 a 50 cobros en uniones por corrida), además de mesas que salieron antes de
+  entrar e historiales hacia atrás. En ese caso el ticket del momento sale bien y la que sale mal es la reimpresión: el
+  cobro se confirmó primero y una escritura que había empezado antes deshizo la unión con una hora anterior al cobro.
+  En el restaurante basta con que dos terminales actúen sobre la misma unión con milisegundos de diferencia, o que la
+  caja tenga otra petición en curso (la pantalla se refresca con cada evento).
+- **Prueba**: `$SP/m1/revisor/hora-de-la-transaccion.patch` (`TestStageM1ReviewClockOrder`, 2 subpruebas; falla 3 de 3
+  con `-count=3`), salida y el experimento sin forzar en `hora-de-la-transaccion.txt`; el experimento como prueba
+  temporal en `hora-de-la-transaccion-experimento.patch` (no falla: solo cuenta; necesita la prueba propia confirmada).
+- **Para decidir al corregir**: el ticket de una cuenta cobrada puede leer la instantánea de su venta
+  (`sales_recognitions.table_union_name`, escrita en la misma transacción que el cierre) en lugar de
+  `UnionNameAtSQL`; para «Cuentas canceladas», guardar la unión en la cancelación (la 0031 admite columnas nuevas) o en
+  el evento; y las horas de la unión tomarlas con `clock_timestamp()` después del lock, o mostrar el historial por su
+  secuencia. `closed_at` y el día comercial no deberían cambiar en esta etapa.
+
+#### R3. Una violación del índice único de miembros no daría el código del contrato — menor
+
+- `table_union_members_open_table_idx` (23505) se traduce en `administration/http.go:161` a 409 `ALREADY_EXISTS` «Ya
+  existe un registro con ese nombre o identificador.», no a `TABLE_IN_UNION`. Hoy **no se alcanza** por la API: toda
+  inserción de miembros (`table_unions.go:520` y `:758`) se valida antes con el mismo predicado del índice
+  (`left_at IS NULL`, `tableunions.UnionIDSQL`) y con 7820148305 exclusivo, y no hay otro escritor de miembros. Si se
+  alcanzara, la transacción se revierte entera (no queda nada a medias) y no es un 500. Sugerencia: traducir esa
+  restricción a `TABLE_IN_UNION` como `payments/shifts.go:415` hace con la suya. Sin prueba (no hay escenario por la API).
+
+#### Para decidir (no son defectos del contrato vigente)
+
+- **D-R1. `seen_union_id` de una unión que sigue abierta pero ya no tiene la mesa.** La lectura 5 de M1-D25 dice que
+  `seen_union_id` de una mesa que ya no está unida no rechaza. Eso cubre también este caso: la terminal ve «Mesa 5 + 6 +
+  7» y abre una cuenta nueva por «Mesa 7» con `seen_union_id` de esa unión; a la vez otra terminal quita «Mesa 7». La
+  cuenta se abre sola en «Mesa 7» (`accounts_write.go:258`, `requireSeenUnion` sale sin error cuando la mesa no está en
+  una unión; lo afirma la prueba de la A en `stagem1_unions_test.go:502-507`, cuyo comentario dice «una unión que ya no
+  existe» aunque la unión sigue abierta) y la unión sigue abierta en «Mesa 5 + 6» sin ella: las dos terminales «ganan» y la cuenta queda en un lugar
+  distinto del que veía el mesero, sin aviso. No pierde nada ni deja una mesa en dos lugares. Si se quiere que la
+  perdedora reciba un mensaje (§2.3), el código del contrato que encaja es `TABLE_UNION_CONFLICT` («La unión cambió en
+  otra terminal…») cuando la unión vista sigue abierta sin esa mesa; cambiaría la lectura 5 (la cola sin conexión ya
+  tiene su regla propia en el contrato §7 y no cambiaría).
+- **D-R2. Nombre de una mesa igual al de un grupo.** Crear o cambiar un grupo con el nombre de una mesa del área se
+  rechaza (`TABLE_GROUP_NAME_TAKEN`, `table_groups.go:85`), pero crear o renombrar una mesa con el nombre de un grupo
+  activo del área se acepta (`tables.go:112-169` no lo revisa): queda una mesa «Mesa 3» junto al grupo «Mesa 3», y la
+  unión de todas sus secciones también se llama «Mesa 3». No es de concurrencia; el contrato solo habla del nombre del
+  grupo.
+
+### La prueba de concurrencia de la Fase A (`TestStageM1Concurrency`)
+
+- **Sí es concurrente de verdad**: diez gorrutinas, cada una con su petición por `ServeHTTP`, su transacción y su
+  conexión del pool, salen juntas de un canal cerrado. Pasó 20 de 20 con `-count=20 -race`.
+- **Sus comprobaciones cubren la §2.3**: ninguna mesa en dos uniones abiertas, ninguna unión abierta sin cuentas o con
+  menos de dos mesas, mesas de una sola área, ningún miembro abierto de una unión deshecha
+  (`expectStageM1Invariants`); las cuentas abiertas son exactamente las que respondieron 200 (ninguna perdida ni
+  duplicada); cada perdedora recibe un 409 de una lista del contrato; cada mesa unida se lee ocupada.
+- **Lo que no cubre** (lo cubre la prueba propia):
+  - el orden de salida es fijo y el cobro gana siempre (25 de 25 en las 20 corridas), así que «agregar G», «agregar B» y
+    «quitar F» casi siempre encuentran la unión ya deshecha (`TABLE_UNION_NOT_OPEN` en 17, 21 y 20 de 25): agregar y
+    quitar contra una unión abierta con cuentas casi no compiten;
+  - no mezcla mover, combinar, descartar, la cola sin conexión, el atajo de un grupo, `seen_union_id` con una unión vista
+    ni el `PATCH` de mesas (área, activa, fuera de servicio);
+  - no comprueba que la perdedora no deje su clave de operación, ni el nombre de las cuentas (M1-D14), ni que la lista de
+    cuentas de una mesa unida sea la de toda la unión, ni las horas (R2).
+
+### La prueba propia (`TestStageM1ReviewConcurrency`)
+
+- **Mezcla** (tres terminales: dos meseros con «Unir mesas» y la caja; 22 escrituras por ronda, en orden al azar y con
+  0 a 2 ms de desfase): abrir solas «Mesa 1», «3B» y «Mesa 6» (esta sin ver la unión); unir con el primer producto «Mesa
+  1 + 2», «Mesa 2 + 4», «6 + 5» (con «5» en borrador), «Mesa 11 + 12» y el atajo del grupo «Mesa 3»; crecer «Mesa 9»
+  ocupada con «Mesa 8»; agregar «Mesa 8» y «Mesa 4» y quitar «Mesa 7» de «Mesa 6 + 7» con la misma revisión; mover la
+  cuenta de «Mesa 10» a «Mesa 7»; combinar la única cuenta de la unión con la de «Mesa 10» y cobrarla a la vez;
+  descartar la cuenta en borrador de «5»; abrir en la unión desde «Mesa 7» con `seen_union_id`; dos pedidos de la cola
+  sin conexión (a «Mesa 7» con la unión vista y a «Mesa 2»); «Mesa 8» a la terraza, desactivar «Mesa 4» y «Mesa 12»
+  fuera de servicio.
+- **Al final de cada ronda**: las invariantes de la Fase A y además ninguna 5xx ni error genérico de la base; las rutas
+  de uniones solo con códigos del §5; la clave de operación existe si y solo si respondió 200; las cuentas y las uniones
+  nuevas son exactamente las de las respuestas 200; ninguna cuenta de antes desaparece; ninguna cuenta abierta en una
+  mesa desactivada, fuera de servicio o de un área inactiva; ninguna mesa unida desactivada o fuera de servicio; cada
+  cuenta sin nombre propio se llama como su lugar (M1-D14); la unión de un grupo tiene exactamente sus secciones; el
+  historial de cada unión tiene su «joined» y, si se deshizo, su «dissolved»; el mapa lee cada mesa unida ocupada con
+  las cuentas de la unión, y la lista de cuentas de una mesa unida trae las de toda la unión con su `table_union`.
+- En 200 rondas (`-count=20`, 10 por corrida) cada carrera se resolvió de todas las formas posibles (totales del
+  registro `$SP/m1/r-logs/review-concurrency-count20.log`):
+  - cobrar la única cuenta de la unión: 147 veces ganó y 53 perdió contra la combinación (`BALANCE_CHANGED`); combinar:
+    53 ganó, 137 encontró la cuenta ya cobrada (400) y 10 chocó con «mover la cuenta de Mesa 10» (`ACCOUNT_CONFLICT`);
+  - agregar «Mesa 8»: 26 ganó, 26 `TABLE_UNION_CONFLICT`, 126 `TABLE_UNION_NOT_OPEN`, 13 `TABLE_UNION_AREA` (ya estaba en la
+    terraza) y 9 `TABLE_IN_UNION` (ya la había tomado «Mesa 9»); quitar «Mesa 7»: 58 ganó, 46 `TABLE_UNION_CONFLICT`, 96
+    `TABLE_UNION_NOT_OPEN`;
+  - «Mesa 8 a la terraza»: 105 ganó y 95 `TABLE_IN_UNION`; «Mesa 12 fuera de servicio»: 164 ganó y 36
+    `TABLE_HAS_OPEN_ACCOUNTS`; «unir Mesa 2 + 4»: 13 ganó, 93 `TABLE_IN_UNION`, 77 `TABLE_UNION_OCCUPIED`, 17
+    `TABLE_UNION_UNAVAILABLE`;
+  - abrir en la unión desde «Mesa 7» con la unión vista: 125 ganó (a veces ya sola en «Mesa 7», ver D-R1) y 75
+    `TABLE_HAS_ACCOUNT`.
+    Ninguna 5xx, ningún error genérico de la base y ninguna invariante rota. (El `BALANCE_CHANGED` al cobrar una cuenta que
+    ya se combinó es de antes de la etapa y no se revisó.)
+
+### Lo que se revisó y está bien
+
+- **Lock antes de leer**: `operations.Handle` (`handler.go:57-63`) y `payments.Handle` (`handler.go:100-106`) toman
+  7820148305 exclusivo antes de cualquier lectura de mesas o cuentas en las escrituras; antes solo hay permisos
+  estáticos y validación del cuerpo. La vista previa y `getTableUnion` lo toman compartido y no escriben.
+- **Orden de locks**: ninguna ruta nueva toma 7820148304, 7820148308 ni 7820148311; `SettleEmpty` y los eventos
+  (7820148306) van después del trabajo, y los cupos (7820148311) siguen al final en `dispatch`.
+- **Aislamiento**: las transacciones son READ COMMITTED, así que toda lectura después del lock ve lo último confirmado
+  (no hay instantánea vieja que decida dentro del lock).
+- **Todos los caminos que cambian el estado o la mesa de una cuenta** pasan por `operations.Handle` o `payments.Handle`
+  (cancelar, descartar, liberar, combinar, mover, dividir, transferir, editar, la cola sin conexión, cobrar, entregar y
+  la devolución que reabre); no hay otra escritura de `restaurant_accounts` en el servidor. `SettleEmpty` corre en los
+  dos al final, en la misma transacción.
+- **Miembros y uniones** solo se escriben en `operations/table_unions.go` (y el renombrado de una mesa unida,
+  `tables.go:175`) y en `tableunions/settle.go`, siempre bajo el lock exclusivo; `Dissolve` pone `left_at` a todos los miembros, así que el índice parcial y las lecturas
+  (`UnionIDSQL`, `PlaceTablesSQL`) nunca ven un miembro abierto de una unión deshecha.
+- **Ocupación (M1-D10)**: `tableQuery` con `PlaceTablesSQL` decide desactivar y fuera de servicio (`PATCH` y
+  `tables/{id}/service`); cambiar de área una mesa unida o agrupada se rechaza; desactivar un área con una unión se
+  rechaza porque sus cuentas están en mesas del área; abrir sola una mesa unida entra en la unión, o con
+  `seen_union_id` distinto da `TABLE_IN_UNION`, y `seen_account_ids` se revisa contra toda la unión.
+- **Creación diferida (M1-D9)**: con una mesa ocupada o unida, una sección ocupada, un producto agotado o sin «Unir
+  mesas», no queda ni cuenta, ni unión, ni miembros, ni historial, ni borrador, ni eventos, ni clave de operación, ni
+  registro (salvo la denegación del 403); la misma clave con otro cuerpo da `IDEMPOTENCY_CONFLICT` y la repetición
+  después de que la unión cambió devuelve la primera respuesta sin escribir (prueba `baf5cf00`).
+- **Idempotencia** de las rutas de uniones y grupos: la de siempre (`restaurant_operations`, huella del cuerpo y la
+  ruta), comprobada después del lock.
+- **Eventos**: en la misma transacción (tabla `realtime_events`), se revierten con ella. La unión que nace con el primer
+  producto no publica `restaurant.table-unions.changed` (la regla genérica excluye `accounts`), pero sí
+  `restaurant.account.opened` y `restaurant.account.table_union`; el escritorio y Android se refrescan por ámbito, así que
+  no falta nada.
+- **Grupos**: el índice de nombre activo y la unicidad de secciones se validan antes con el mismo criterio; un grupo con
+  una sección unida no cambia; crear un grupo con una mesa unida se rechaza.
+- **Importador**: toma 7820148305 → 7820148304 → 7820148308 y **después** vuelve a comprobar que la base no tiene
+  cuentas (`legacyimport/write.go:272-277`), así que nunca corre con uniones abiertas.
+- **«Quitar datos de prueba»**: no toca mesas, áreas, cuentas, uniones ni grupos (`maintenance/apply.go`).
+- **Cola sin conexión** (contrato §7): pasa por `Handle`; las cuentas no vistas y las partidas ya recibidas se buscan en
+  toda la unión; un rechazo con confirmación no guarda la clave.
+
+### Pruebas realmente corridas
+
+Todas con `$SP/m1/r-int.sh` (como `iso.sh go-int`: base `adel_pos_test_r_*` en el clúster 55499, borrada al final; con
+`-v`) o con `iso.sh go-int`. Registros en `$SP/m1/r-logs/` y `$SP/m1/revisor/`.
+
+| Prueba                                                                                        | `-count`                            | `-race` | Resultado                                                                                      |
+| --------------------------------------------------------------------------------------------- | ----------------------------------- | ------- | ---------------------------------------------------------------------------------------------- |
+| `TestStageM1Concurrency` (Fase A, 25 rondas por corrida)                                      | 20                                  | sí      | Aprobó 20 de 20 (343 s). El cobro ganó 25 de 25 en todas las corridas                          |
+| `TestStageM1ReviewConcurrency` (propia; 3 y 8 rondas, para afinarla)                          | 1 y 1                               | sí      | Aprobó                                                                                         |
+| `TestStageM1ReviewConcurrency` (propia, 10 rondas por corrida)                                | 20                                  | sí      | Aprobó 20 de 20 (200 rondas, 371 s)                                                            |
+| `TestStageM1ReviewDeferredLeavesNothing` (6 subpruebas)                                       | 1                                   | sí      | Aprobó                                                                                         |
+| `TestStageM1ReviewLongUnionName` (parche R1, sin confirmar)                                   | 1 y 1 (antes y después de `format`) | sí      | **Falla**: 6 de 6 comprobaciones, en las dos corridas                                          |
+| `TestStageM1ReviewClockOrder` (parche R2, sin confirmar)                                      | 1 y 3                               | sí      | **Falla**: las 2 subpruebas, en las 4 corridas                                                 |
+| Experimento `TestStageM1ReviewNaturalClockTmp` (40 rondas de la mezcla propia; sin confirmar) | 1, tres veces                       | no      | Aprobó (solo cuenta): 5, 3 y 3 tickets distintos de la venta, de 50, 45 y 46 cobros en uniones |
+| `iso.sh go-int ./internal/operations` (completo, con las dos pruebas confirmadas)             | 1                                   | sí      | Aprobó (933 s)                                                                                 |
+| `iso.sh go-int ./internal/payments`                                                           | 1                                   | sí      | Aprobó (8 s)                                                                                   |
+| `iso.sh go-int ./internal/kitchen`                                                            | 1                                   | sí      | Aprobó (8 s)                                                                                   |
+| `go vet -tags=integration ./internal/operations`                                              | —                                   | —       | Sin avisos                                                                                     |
+| `iso.sh format` y `fmt-check`; md5 de la especificación                                       | —                                   | —       | Sin cambios pendientes; `4750ae46956590f208bf486477bb0bbf` antes y después                     |
+
+**No verificado**: el camino de renombrar una mesa unida con R1 (solo por lectura del código); «Cuentas canceladas» con
+R2 (mismo fragmento `UnionNameAtSQL`, sin prueba propia). No se corrió `go-int ./cmd/ad-el-pos-server` (no hizo falta:
+no se tocó código del producto) ni `go-unit`.
+
+### Decisiones del coordinador al cerrar la revisión
+
+Se fusionan en `etapa-m1` las dos pruebas del revisor que aprueban. La §2.3 se cumple. Los hallazgos los corrige la
+Fase A con las pruebas del revisor (`$SP/m1/revisor/`):
+
+- **M1-D29. R1, nombre largo.**
+  - La unión conserva su nombre completo en el mapa, la lista, los documentos, la comanda y el KDS. El límite de 40
+    mesas de M1-D25 sigue.
+  - La referencia neutra de una cuenta sin nombre propio (M1-D14) se recorta cuando el nombre de la unión pasa de 100
+    caracteres. El corte va en el último « + » que quepa, sin partir el nombre de una mesa, y termina en « + …», por
+    ejemplo «Terraza 1 + Terraza 2 + … + Terraza 8 + …».
+  - Vale en cada camino: unir, agregar, abrir, la unión diferida, mover, la cola sin conexión y renombrar una mesa
+    unida.
+  - El KDS no repite esa referencia recortada como subtítulo.
+- **M1-D30. R2, horas fuera del orden del lock.**
+  - El ticket, la precuenta y el comprobante de una cuenta cobrada leen el lugar de la instantánea de su venta
+    (`sales_recognitions`), que se escribe en la misma transacción que el cierre.
+  - Una cuenta cancelada guarda su unión al cancelarse, en la misma transacción. «Cuentas canceladas» y sus documentos
+    leen ese dato. La Fase A elige el lugar (una columna nueva en la 0031 o el evento) y lo explica.
+  - Las horas de la unión (apertura, entrada y salida de mesas, deshacerse y su historial) se toman con
+    `clock_timestamp()` después del lock, y el historial se ordena también por su secuencia.
+  - `UnionNameAtSQL` queda solo donde no hay instantánea.
+  - `closed_at` y el día comercial no cambian.
+- **M1-D31. R3.** La violación de `table_union_members_open_table_idx` responde `TABLE_IN_UNION`, como hace
+  `payments/shifts.go` con la suya.
+- **M1-D32. D-R1: `seen_union_id` de una unión abierta que ya no tiene la mesa.**
+  - `openAccount` responde `TABLE_UNION_CONFLICT`, sin guardar nada, y el cliente conserva lo capturado. Así la
+    perdedora recibe el porqué (§2.3) y el pedido no cae en un lugar distinto del que veía el mesero.
+  - Esto corrige la lectura 5 de M1-D25 en este caso. Si la unión vista ya se deshizo y la mesa está libre, la cuenta se
+    abre como siempre.
+  - La cola sin conexión no cambia: sigue la tabla del contrato §7, «La mesa salió de la unión y quedó libre → cuenta
+    nueva en la mesa».
+- **M1-D33. D-R2: una mesa con el nombre de un grupo.**
+  - Crear o renombrar una mesa, o cambiarla de área, con el nombre de un grupo activo de su área se rechaza con
+    `TABLE_GROUP_NAME_TAKEN`, cuyo texto («Ya hay una mesa o un grupo con ese nombre en esta área.») ya cubre los dos
+    casos.
+  - Un choque con otra mesa sigue como hoy.
