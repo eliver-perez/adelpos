@@ -488,7 +488,9 @@ export async function installDriver(page: Page, options: DriverOptions = {}) {
   // Etapa L1: la carpeta identity del Go temporal (junto a su token, como en e2e/pairing.ts), para firmarle licencias.
   const identityDirectory = join(dirname(provisioningFile), 'identity');
   const rust = readFileSync(new URL('../src-tauri/src/api.rs', import.meta.url), 'utf8');
-  const routes = new Map<string, { method: string; path: string }>();
+  // pair: los dos nombres de una ruta con dos identificadores (etapa M1, «Quitar mesa» de una unión: la unión y la
+  // mesa viajan juntas como «unión/mesa», resource_pair de api.rs).
+  const routes = new Map<string, { method: string; path: string; pair?: [string, string] }>();
   for (const match of rust.matchAll(
     /"([a-z_]+)"\s*=>\s*\{?\s*Some\(\(\s*Method::(\w+),\s*"([^"]+)"\s*\)\)/g,
   )) {
@@ -505,6 +507,13 @@ export async function installDriver(page: Page, options: DriverOptions = {}) {
     const [, operation, method, route] = match;
     if (!operation || !method || !route) continue;
     routes.set(operation, { method, path: route });
+  }
+  for (const match of rust.matchAll(
+    /operation == "([a-z_]+)" \{\s*let \((\w+), (\w+)\) = resource_pair\(id\)\?;\s*return Ok\(\(\s*Method::(\w+),\s*format!\("([^"]+)"\)/g,
+  )) {
+    const [, operation, first, second, method, route] = match;
+    if (!operation || !first || !second || !method || !route) continue;
+    routes.set(operation, { method, path: route, pair: [first, second] });
   }
   const exportSource = readFileSync(new URL('../src-tauri/src/export.rs', import.meta.url), 'utf8');
   const exportableStart = exportSource.indexOf('const EXPORTABLE_REPORTS');
@@ -1551,6 +1560,16 @@ export async function installDriver(page: Page, options: DriverOptions = {}) {
       const entry = routes.get(operation);
       if (!entry) throw new Error(`Ruta nativa no reconocida: ${operation}`);
       let route = entry.path.replace('{identifier}', String(args.resourceId));
+      if (entry.pair) {
+        // Como resource_pair de Rust: «primero/segundo», cada uno con su forma de identificador.
+        const parts = String(args.resourceId).split('/');
+        if (parts.length !== 2 || parts.some((part) => !/^[0-9a-f-]{36}$/i.test(part))) {
+          return { __bridgeRejection: 'El identificador del registro no es válido.' };
+        }
+        route = entry.path
+          .replace(`{${entry.pair[0]}}`, parts[0]!)
+          .replace(`{${entry.pair[1]}}`, parts[1]!);
+      }
       if (args.query) route += `?${new URLSearchParams(args.query as Record<string, string>)}`;
       return pageRequest(entry.method, route, args.body ?? undefined);
     },
