@@ -30,6 +30,7 @@ import com.adelpos.meseros.core.ui.catalog.ProductCustomizer
 import com.adelpos.meseros.core.ui.components.SystemBackHandler
 import com.adelpos.meseros.core.ui.layout.AdaptivePanes
 import com.adelpos.meseros.core.ui.layout.PaneLayout
+import com.adelpos.meseros.core.ui.layout.currentTopBarHasRoom
 
 /**
  * Captura de una cuenta o de un pedido para llevar con su ViewModel; [onDone] vuelve a la lista de
@@ -283,7 +284,15 @@ fun captureTitle(title: CaptureTitle): String =
         is CaptureTitle.Table -> title.name
         is CaptureTitle.Takeaway -> stringResource(R.string.capture_title_takeaway, title.folio)
         is CaptureTitle.NamedTakeaway -> stringResource(R.string.takeaway_label_named, title.name)
-        CaptureTitle.NewTakeaway -> stringResource(R.string.capture_title_takeaway_new)
+        // Etapa M1 (§5.6): en el teléfono vertical «Nuevo pedido para llevar» no cabía junto al
+        // mesero y la conexión («Nuevo pe…»); ahí dice «Nuevo pedido» (la navegación ya marca
+        // «Para llevar»).
+        CaptureTitle.NewTakeaway ->
+            if (currentTopBarHasRoom()) {
+                stringResource(R.string.capture_title_takeaway_new)
+            } else {
+                stringResource(R.string.capture_title_takeaway_new_short)
+            }
     }
 
 const val TAG_CAPTURE = "capture"

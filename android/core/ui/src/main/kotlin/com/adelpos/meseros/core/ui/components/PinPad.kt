@@ -1,5 +1,6 @@
 package com.adelpos.meseros.core.ui.components
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -22,6 +24,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -32,6 +35,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.adelpos.core.ui.theme.AdelDimens
+import com.adelpos.core.ui.theme.AdelTheme
 import com.adelpos.meseros.core.ui.R
 
 /**
@@ -88,6 +92,9 @@ fun PinPad(
                 enabled = enabled && length > 0,
                 shape = RoundedCornerShape(12.dp),
                 contentPadding = KEY_PADDING,
+                // El mismo borde de las teclas (el de Material, `outline`, da 2.84:1 en el
+                // diálogo del tema claro).
+                border = BorderStroke(KEY_BORDER, keyBorder(enabled && length > 0)),
                 modifier = Modifier.weight(1f).heightIn(min = keyHeight).testTag(TAG_PIN_DELETE),
             ) {
                 Text(
@@ -109,6 +116,20 @@ fun PinPad(
         }
     }
 }
+
+/** Grosor del borde de las teclas (§5.6). */
+private val KEY_BORDER = 1.5.dp
+
+/** El borde de una tecla: gris del tema; deshabilitada, con la transparencia de Material. */
+@Composable
+private fun keyBorder(enabled: Boolean): Color =
+    if (enabled) {
+        AdelTheme.colors.gray
+    } else {
+        AdelTheme.colors.gray.copy(alpha = DISABLED_BORDER_ALPHA)
+    }
+
+private const val DISABLED_BORDER_ALPHA = 0.38f
 
 /** Medidas del teclado del PIN. */
 object AdelPinPadDefaults {
@@ -145,11 +166,21 @@ private fun RowScope.DigitKey(
     keyHeight: Dp,
     onDigit: (Char) -> Unit,
 ) {
+    // Etapa M1 (§5.6): en «Vuelve a escribir tu PIN» (fondo `surfaceContainerHigh`) la tecla gris
+    // suave casi no se distinguía del diálogo en el tema claro (1.01:1). Ahora es del color del
+    // panel con un borde gris: el borde contra el diálogo da 5.07:1 en el claro y 7.06:1 en el
+    // oscuro (AA pide 3:1 para el contorno de un control) y el número sobre la tecla, 14.22:1.
     FilledTonalButton(
         onClick = { onDigit(digit) },
         enabled = enabled,
         shape = RoundedCornerShape(12.dp),
         contentPadding = KEY_PADDING,
+        colors =
+            ButtonDefaults.filledTonalButtonColors(
+                containerColor = MaterialTheme.colorScheme.surface,
+                contentColor = MaterialTheme.colorScheme.onSurface,
+            ),
+        border = BorderStroke(KEY_BORDER, keyBorder(enabled)),
         modifier =
             Modifier.weight(1f).heightIn(min = keyHeight).testTag("$TAG_PIN_KEY_PREFIX$digit"),
     ) {

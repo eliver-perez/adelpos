@@ -367,11 +367,13 @@ private fun StateBadge(text: String, icon: ImageVector, tone: BadgeTone, modifie
                 tint = tone.accent,
                 modifier = Modifier.size(18.dp),
             )
-            // Etapa A3 (§4.8): una etiqueta nunca se parte; si no cabe, se acorta.
+            // Etapa A3 (§4.8): una etiqueta nunca se parte letra por letra. Etapa M1 (§5.6): si no
+            // cabe en un renglón, baja al segundo por palabras («Enviado · sin confirmar en
+            // cocina» en la tableta vertical se cortaba en «coci…»).
             Text(
                 text = text,
                 style = MaterialTheme.typography.labelLarge,
-                maxLines = 1,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
         }

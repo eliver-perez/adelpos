@@ -42,11 +42,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.adelpos.core.model.connection.LinkState
@@ -287,28 +289,31 @@ private fun TablesPane(state: TablesState, actions: TablesActions) {
                 .testTag(TAG_TABLES_SCREEN),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        // Etapa A3 (§4.7): una sola fila con «Lista | Mapa», las áreas como pestañas (se desplazan
-        // si no caben) y «Pendientes»; sin búsqueda de mesa.
-        Row(
+        // Etapa A3 (§4.7): una sola fila con «Lista | Mapa», las áreas como pestañas y
+        // «Pendientes»; sin búsqueda de mesa. Etapa M1 (§5.6): si las áreas no caben completas en
+        // esa fila (en la tableta vertical se veía «Terraz…» cortada en la orilla), bajan a su
+        // propia fila debajo, de todo el ancho.
+        TablesBar(
             modifier = Modifier.fillMaxWidth().padding(top = 8.dp).testTag(TAG_TABLES_BAR),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            ViewSwitch(state.tablesView, actions.onTablesViewChange)
-            AreaTabs(
-                areas = state.view.visibleAreas,
-                selected = state.area,
-                onSelect = actions.onAreaSelect,
-                modifier = Modifier.weight(1f),
-            )
-            TextButton(
-                onClick = actions.onOpenPending,
-                modifier =
-                    Modifier.heightIn(min = AdelDimens.MinTouchTarget).testTag(TAG_OPEN_PENDING),
-            ) {
-                Text(stringResource(R.string.tables_pending), maxLines = 1)
-            }
-        }
+            viewSwitch = { ViewSwitch(state.tablesView, actions.onTablesViewChange) },
+            areas = {
+                AreaTabs(
+                    areas = state.view.visibleAreas,
+                    selected = state.area,
+                    onSelect = actions.onAreaSelect,
+                )
+            },
+            pending = {
+                TextButton(
+                    onClick = actions.onOpenPending,
+                    modifier =
+                        Modifier.heightIn(min = AdelDimens.MinTouchTarget)
+                            .testTag(TAG_OPEN_PENDING),
+                ) {
+                    Text(stringResource(R.string.tables_pending), maxLines = 1)
+                }
+            },
+        )
         StatusLine(state.status, state.offline, actions.onRefresh)
         if (!state.permissions.allows(WaiterAction.VIEW_TABLES)) {
             Message(stringResource(R.string.tables_no_permission))
@@ -329,6 +334,52 @@ private fun TablesPane(state: TablesState, actions: TablesActions) {
         }
     }
 }
+
+/**
+ * La fila de arriba de Mesas (etapa A3, §4.7): «Lista | Mapa», las áreas y «Pendientes» en una sola
+ * fila cuando las áreas caben completas (su ancho natural, `maxIntrinsicWidth`). Etapa M1 (§5.6):
+ * si no caben, «Lista | Mapa» y «Pendientes» quedan arriba y las áreas en su propia fila de todo el
+ * ancho (si ni así caben, se desplazan como antes). Así ninguna pestaña queda cortada en la orilla.
+ */
+@Composable
+private fun TablesBar(
+    viewSwitch: @Composable () -> Unit,
+    areas: @Composable () -> Unit,
+    pending: @Composable () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Layout(contents = listOf(viewSwitch, areas, pending), modifier = modifier) {
+        (switchPart, areasPart, pendingPart),
+        constraints ->
+        val gap = BAR_GAP.roundToPx()
+        val width = constraints.maxWidth
+        val loose = constraints.copy(minWidth = 0, minHeight = 0)
+        val switch = switchPart.single().measure(loose)
+        val open = pendingPart.single().measure(loose)
+        val tabs = areasPart.single()
+        val room = (width - switch.width - open.width - gap * 2).coerceAtLeast(0)
+        val wanted = tabs.maxIntrinsicWidth(Constraints.Infinity)
+        if (wanted <= room) {
+            val placed = tabs.measure(loose.copy(maxWidth = room))
+            val height = maxOf(switch.height, placed.height, open.height)
+            layout(width, height) {
+                switch.placeRelative(0, (height - switch.height) / 2)
+                placed.placeRelative(switch.width + gap, (height - placed.height) / 2)
+                open.placeRelative(width - open.width, (height - open.height) / 2)
+            }
+        } else {
+            val placed = tabs.measure(loose.copy(maxWidth = width))
+            val top = maxOf(switch.height, open.height)
+            layout(width, top + gap + placed.height) {
+                switch.placeRelative(0, (top - switch.height) / 2)
+                open.placeRelative(width - open.width, (top - open.height) / 2)
+                placed.placeRelative(0, top + gap)
+            }
+        }
+    }
+}
+
+private val BAR_GAP = 8.dp
 
 /**
  * «Lista | Mapa» compacto (etapa A3, §4.7). El `SegmentedButton` de Material deja siempre lugar
