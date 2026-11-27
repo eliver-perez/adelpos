@@ -1214,3 +1214,300 @@ Se fusiona `etapa-m1-e` en `etapa-m1`. Se aceptan las cuatro decisiones propuest
   - `workflow-stage9d-accounts`, líneas 314–319 (quitar la hora ahora envía a cocina) y 392 y 414 (un producto sin ruta
     ya no lleva etiqueta de cocina);
   - `workflow-stagez-k11-diagnostics`, línea 340 (`unschedule` ya no deja el pedido esperando, M1-D17).
+
+## Fase A · Servidor: uniones de mesas, mesas divisibles y ajustes de servidor de la §5
+
+Árbol `$SP/wt/m1-a`, rama `etapa-m1-a` (desde `etapa-m1` `3614024`), `ISO_TAG=A`. Sin Go temporal, sin emuladores ni
+Playwright: todo se probó con las pruebas de Go contra el clúster temporal 55499 (bases `adel_pos_test_a_*`). La
+especificación quedó intacta (md5 `4750ae46…` antes y después de cada formato). Envoltorios de la fase (fuera del
+repositorio): `$SP/m1/a-go.sh` (go en `backend/` con el entorno del arnés), `$SP/m1/a-int.sh` (como `go-int`, con `-v` y
+`A_COUNT` repeticiones) y `$SP/m1/a-suites.sh`; registros en `$SP/m1/a-logs/`.
+
+### Commits (rama `etapa-m1-a`)
+
+| Commit    | Tema                                                                                                                                        |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `6e85bd6` | Migración 0031 (sección «Fase A»), esquema 31 y el paquete `internal/tableunions`                                                           |
+| `914eca8` | Servidor: rutas de uniones y grupos, creación diferida, ocupación, cola, `SettleEmpty`, lectores, permiso, capacidad, licencia, §5.2 y §5.3 |
+| `7d11a43` | Pruebas `stagem1_*` de operations y la respuesta del `PATCH` de la cuenta leída después de cocina                                           |
+| `ece3c2c` | Importador (M1-D5) con sus pruebas y el paquete sintético                                                                                   |
+| `08293e1` | Contrato v1 (openapi, `docs/API_V1.md`, `API_CONTRACTS.md`, `TestContractV1`) y los conjuntos de fábrica                                    |
+| `07d02de` | Actualización 30 → 31 probada y el arreglo de la 0031 (llave diferida, sin llave al historial)                                              |
+| `4ed60c7` | Prueba de reportes y la especificación de la K1.1 ajustada a M1-D17                                                                         |
+| `a188629` | La prueba de reportes en `reports_test` y con una mesa del mismo área                                                                       |
+
+### Qué se hizo
+
+1. **Migración `0031_uniones_de_mesas.sql`**, sección «Fase A» (solo agrega): `app.table_groups` y
+   `app.table_group_sections` (mesas divisibles), `app.table_unions`, `app.table_union_members` (con el índice único
+   parcial `table_union_members_open_table_idx`: una mesa en una sola unión abierta) y `app.table_union_events`
+   (historial con el nombre de la unión después de cada cambio), las tres columnas de la unión en
+   `app.sales_recognitions` (NULL en lo que ya existía) y el permiso `restaurant.tables.join` con la concesión de
+   M1-D8. `config/product.json` pasa a `schema_version: 31` (con la sincronía; la versión 0.18.0 queda para la Fase F).
+2. **Paquete neutral `internal/tableunions`** (depende solo de pgx, `events` y `documents`; lo usan operations, payments,
+   kitchen, reports y administration sin ciclos): el nombre (`UnionName`, orden natural `NaturalCompare`), los
+   fragmentos SQL del lugar de una cuenta (`UnionNameSQL`, `UnionNameAtSQL`, `UnionIDSQL`, `GroupIDSQL`,
+   `PlaceTablesSQL`), `ReadTables`/`Describe` (nombre, capacidad y grupo de un conjunto de mesas), la instantánea de la
+   venta (`OpenSnapshot`) y **`SettleEmpty`**, el único lugar donde una unión se deshace sola.
+3. **Rutas del contrato §3** en `operations.Handle` (`operations/table_unions.go` y `operations/table_groups.go`):
+   `previewTableUnion`, `createTableUnion`, `addTableToUnion`, `removeTableFromUnion`, `getTableUnion`,
+   `createTableGroup` y `updateTableGroup`, con los códigos y textos exactos del contrato §5, su idempotencia y sus
+   eventos (§6).
+4. **Creación diferida** en `openAccount` (`union_table_ids`, `union_group_id`) y **`seen_union_id`** (M1-D9);
+   `listAccounts?table_id=` de una mesa unida devuelve las cuentas de toda la unión; `overview` y `restaurant/state`
+   con `unions` y `groups`; `Table.union_id`/`group_id`; `Account.table_union`; la ocupación de la unión en cada mesa
+   (M1-D10, `tableQuery`); el `PATCH` de una mesa unida o agrupada ya no cambia de área.
+5. **El nombre de la unión en todos los lectores** (contrato §8): precuenta, ticket y comprobante (`payments/finance.go`,
+   también de una cuenta ya cobrada), comanda (`kitchen/releases.go`, «Salón · Mesa 5 + 6»), título del KDS
+   (`kitchen/display.go`), Preparación (`kitchen/reads.go`), avisos de listos (`administration/ready_alerts.go`),
+   «En curso» y cancelaciones (`reports/`), «Ventas de salón» por unión y el filtro de mesa con las uniones en que
+   estuvo (`reports/sales.go`, `reports/legacy.go`), y la instantánea de la venta (`payments/recognition.go`).
+   `restaurant.account.table_union` entra en `displayAccountKinds`.
+6. **Cola sin conexión** (contrato §7): `destination.seen_union_id` y la tabla de casos en `diagnoseOfflineTable`.
+7. **Permiso «Unir mesas»** (M1-D8): catálogo («Mesas y cuentas», `requires: accounts.open, restaurant.tables.read`),
+   conjuntos de fábrica de Mesero, Cajero y Supervisor (y por ellos el asistente y «Restablecer»), la vista sencilla
+   «Atender mesas», `WaiterPermissions` y sus tres copias (openapi `pinLogin`, `docs/API_V1.md`, `API_CONTRACTS.md`), la
+   concesión de la 0031 y el comentario de `permission_catalog.go` (factoryRolePermissions).
+8. **Licencia** (`licensing/operations.go`, `classifyTableUnion`) y capacidad **`table-unions-v1`** (`httpapi/router.go`).
+9. **Importador** (M1-D5, `legacyimport/table_groups.go`): la regla con y sin «Mesa N», las secciones juntas en la
+   cuadrícula, lo dudoso al resumen previo y al informe en lenguaje sencillo, la segunda importación; `legacysynth` con
+   «Mesa 3» + «3a, 3b, 3c», «Mesa 9a» a «Mesa 9d» y el dudoso «Mesa 12a, 12c».
+10. **§5.2** `preparation_required` por renglón y por cuenta (`kitchen.VersionPreparationRequired` y
+    `kitchen.AccountPreparationRequired`) y **§5.3** quitar la hora envía (`kitchen/releases.go`, `Integrate` de
+    `account.updated`).
+11. **Contrato**: `openapi.json` (7 operaciones y 5 esquemas nuevos, campos nuevos), `docs/API_V1.md` (tabla y sección
+    «Uniones de mesas y mesas divisibles · etapa M1»), `API_CONTRACTS.md` (sección «Etapa M1») y su paso en
+    `TestContractV1`.
+
+### Decisiones propuestas
+
+1. **Dónde vive el código.** Las rutas en `operations` (necesitan `handler.event`, `readAccount` y la idempotencia de
+   `Handle`); lo común en `internal/tableunions`, neutral, para que payments, kitchen, reports y administration lean el
+   nombre de la unión y payments deshaga uniones sin importar operations. _Porqué_: operations ya importa payments y
+   kitchen; poner `SettleEmpty` en operations crearía un ciclo con payments.
+2. **La ocupación de la unión se calcula una vez, en `tableQuery`** (`operations/tables.go:35`): las cuentas de una mesa
+   son las de `PlaceTablesSQL` (todas las mesas de su unión abierta o solo ella). `TableUnion` toma su estado, cuentas,
+   saldo y tiempo de cualquiera de sus mesas ya leídas (`unionFrom`). _Porqué_: un solo cálculo; las reglas de no
+   desactivar ni poner fuera de servicio una mesa con cuentas se aplican solas a toda la unión.
+3. **Un cambio de la unión no sube la revisión de la cuenta** (renombrar al unir, agregar, quitar o deshacer; mover las
+   cuentas de la mesa que se quita a la primera que queda). _Porqué_: no es una edición de la cuenta; si subiera, una
+   terminal que captura en esa cuenta recibiría `ACCOUNT_CONFLICT` por algo que hizo otra con las mesas. La unión sí
+   tiene su revisión (`TABLE_UNION_CONFLICT`).
+4. **El historial de la cuenta** registra cada cambio de su unión con `restaurant_events.kind = account.table_union`
+   (`after.change`: `joined`, `table_added`, `table_removed`, `dissolved` o `renamed`), una fila por cuenta abierta y
+   operación, con quién y la terminal. La unión que nace con el primer producto también lo registra en la cuenta nueva.
+5. **Quitar la mesa que tiene las cuentas** las pasa a la primera mesa que queda en el orden del nombre (M1-D1); si queda
+   una, la unión se deshace con `dissolve_reason = single_table` y las cuentas que se llamaban como la unión vuelven al
+   nombre de esa mesa. `SettleEmpty` deshace con `no_accounts` (y, por defensa, una unión abierta con menos de dos mesas).
+6. **El nombre de la unión en una cuenta cerrada o cancelada se lee en el instante** (`UnionNameAtSQL`: la unión de la
+   que la mesa era miembro en ese momento, con el nombre de su último cambio hasta entonces). La precuenta o el ticket
+   de una cuenta cobrada se reimprimen con «Mesa 5 + 6» aunque la unión se haya deshecho, y «Cuentas canceladas» dice la
+   unión que tenía la cuenta al cancelarla. Lo vivo (cuentas abiertas, KDS, Preparación, avisos, «En curso») lee la unión
+   abierta (`UnionNameSQL`).
+7. **Comanda y KDS con `documents.TableContext` solo en uniones**: «Salón · Mesa 5 + 6» y `title` «Mesa 5 + 6» también
+   con mesas «5» y «6»; una mesa sola sigue como antes. El subtítulo del KDS no repite una cuenta que se llama como la
+   unión (con o sin «Mesa»).
+8. **Renombrar una mesa unida** vuelve a nombrar su unión (y sus cuentas sin nombre propio), con el evento de cuenta
+   `renamed`; el historial de la unión no tiene ese tipo (la lista del contrato es cerrada).
+9. **Mesas divisibles**: `app.table_group_sections.table_id` es único (una mesa, un grupo); quitar un grupo borra sus
+   secciones y deja la fila del grupo inactiva (la recuerdan las uniones). Un grupo quitado no se reactiva (400). Crear
+   un grupo con una mesa unida responde `TABLE_GROUP_IN_USE`. El nombre se compara sin distinguir mayúsculas con las
+   mesas del área y los grupos activos.
+10. **`preparation_required`** (contrato §4): un renglón es `false` si todas sus unidades (de esa versión y ese estado en
+    la cuenta) ya se liberaron y ninguna tiene tarea en `kitchen_tasks`; la regla es la misma para un renglón cancelado
+    (no se le pone etiqueta de cocina si nunca la necesitó). La cuenta es `true` si alguna unidad activa la necesita o
+    si no tiene unidades activas.
+11. **§5.3** (M1-D17): al integrar `account.updated` sin hora, cocina libera en la misma transacción las liberaciones
+    que acaban de quedar sin hora (`prepareRelease`, como un pedido sin hora). La respuesta del `PATCH` de la cuenta se
+    lee después de integrar cocina (antes se leía antes), así que ya trae `released`.
+12. **Importador** (M1-D5): la base «Mesa N» que se vuelve grupo no se crea ni se cuenta como mesa viva (la validación
+    resta esas mesas, `expected.go`), sus ventas conservan su nombre y su área en `legacy_sales` (con `table_id` nulo),
+    y el resumen y el informe lo dicen (`table_group_base`). Dudosos (`table_group_doubtful`): letras repetidas o no
+    seguidas, una sola sección **y también más de una mesa con el mismo número** («Mesa 20» y «20»). Segunda
+    importación: los grupos `source legacy` anteriores se quitan (inactivos, sin secciones) y se crean otra vez; un
+    grupo del propietario que ya usa el nombre o una sección hace que ese grupo del anterior no se cree; un grupo del
+    propietario que se queda con menos de dos secciones (o con secciones de otra área) se quita. `legacy_batch_id` va
+    sin llave foránea (la 0024 prohíbe llaves de tablas operativas hacia el historial). El paquete de `legacysynth` usa
+    «Mesa 9a» a «Mesa 9d» para el caso sin base porque ya trae una «Mesa 7» (con «Mesa 7a» a «7d» sería un grupo con
+    base); el paquete en memoria de las pruebas (`MemorySource`) sí usa «Mesa 7a» a «Mesa 7d», sin «Mesa 7». En
+    `legacysynth`, la «Mesa 3» de siempre (con ventas) se vuelve el grupo de «3a», «3b» y «3c».
+13. **La 0031 hace inmediata la llave diferida de `sales_recognitions` antes de alterar la tabla** y la vuelve a diferir
+    (`SET CONSTRAINTS … IMMEDIATE/DEFERRED`). _Porqué_: una actualización desde antes de la 0017 aplica el relleno de la
+    0017 en la misma transacción y PostgreSQL no altera una tabla con comprobaciones pendientes (lo encontró
+    `TestStage9AReportsUpgradeBackfillsClosedAccounts`).
+14. **Las dudas del contrato** (`$SP/m1/contrato-dudas.md`): `details.accounts` como identificadores, 403
+    `PERMISSION_DENIED`, la primera de `table_ids` es la mesa de inicio en la vista previa, `createTableUnion` con
+    `group_id` desde una sección ocupada une todo el grupo, `seen_union_id` de una unión que ya no existe no rechaza,
+    respuestas `{union}`/`{group}`, `ACCOUNT_CONFLICT` para la revisión de un grupo, límites de 40 mesas.
+
+### Para el coordinador (decide)
+
+- **«Quitar datos de prueba» (M1-D7, último punto) no aplica tal como está escrito**: `internal/maintenance` solo
+  reconoce por firma exacta impresoras, estaciones, productos y categorías de las pruebas, y **nunca toca cuentas ni
+  mesas** (no existen «cuentas de prueba» ni «mesas de prueba»). Las uniones y los grupos no apuntan a nada de lo que
+  quita, así que «Quitar datos de prueba» sigue funcionando con ellos (sin cambio de código). Si se quiere que quite
+  uniones o grupos de pruebas, habría que definir sus firmas (por ejemplo, los nombres de mesas de las especificaciones
+  `workflow-stagez-m1-*` de la Fase B), y eso sería quitar mesas y cuentas, algo que hoy no hace.
+- **La prueba que afirmaba K11-D9 existe y es de Playwright**: `desktop/e2e/workflow-stagez-k11-diagnostics.spec.ts`,
+  paso 4 («Por enviar a cocina» con un pedido al que se le quitó la hora y «Enviar a cocina ahora» sobre él). La ajusté
+  (el pedido sin hora ya no está en el panel y su preparación no es `pending_release` ni `scheduled`; «Enviar a cocina
+  ahora» se prueba con el pedido programado), pero **no la corrí** (esta fase no usa Playwright): que la corra la Fase B
+  o la F. En Go no había ninguna. El texto del escritorio «Espera a que lo envíes a cocina» del caso sin hora
+  (`PendingKitchen.tsx:50-65`) queda sin uso para pedidos nuevos (Fase B), y `docs/KITCHEN_AND_PRINTING.md` (líneas
+  342, 722-731 y 778) describe K11-D9 (Fase F).
+- **Una cuenta reabierta por una devolución** conserva el nombre que tenía al cerrarse (por ejemplo «Mesa 5 + 6») aunque
+  su unión ya se haya deshecho: lo cerrado no se reescribe. Al volver a una mesa unida queda en esa unión (M1-D7).
+
+### Para el revisor de la concurrencia (§2.3, M1-D11)
+
+- **Dónde se decide la ocupación**: `tableQuery` (`operations/tables.go:35`), con `tableunions.PlaceTablesSQL`
+  (`tableunions/sql.go:40`). Las reglas de unir (una mesa ocupada = con cuentas propias abiertas; unida = miembro sin
+  `left_at`) están en `tableunions.ReadTables` (`describe.go`) y `joinProblems` (`operations/table_unions.go:307`).
+- **Orden de los locks en cada ruta nueva**: ninguno nuevo. Todas las rutas `restaurant/table-unions*` y
+  `restaurant/table-groups*`, y `openAccount` con la unión diferida, van por `operations.Handle`, que toma
+  `pg_advisory_xact_lock(7820148305)` **exclusivo antes de leer nada** (la vista previa y `getTableUnion`, compartido);
+  luego valida, escribe, llama a `SettleEmpty` con el mismo lock y guarda la operación. `payments.Handle` toma el mismo
+  lock exclusivo antes de leer y llama a `SettleEmpty` al final. Ninguna ruta nueva toma 7820148304, 7820148308 ni
+  7820148311 por sí misma (los cupos de la licencia siguen en `dispatch`, después del manejador, como siempre). La última
+  defensa es el índice único parcial `table_union_members_open_table_idx` (23505).
+- **Quién llama a `SettleEmpty`** (`tableunions/settle.go:42`): `operations.Handle` después de `dispatch` en toda
+  escritura (`operations/handler.go:94`; cubre cancelar, descartar, liberar, combinar, mover, dividir, transferir, la
+  cola sin conexión y las rutas de uniones) y `payments.Handle` después de la acción (`payments/handler.go:140`; cubre
+  cobrar, entregar, devolver y lo de caja). Deshacer con cuentas (quedó una mesa) lo hace `removeTableFromUnion` con
+  `dissolveWithAccounts` (`operations/table_unions.go:869`); `SettleEmpty` lo repite por defensa.
+- **Cómo correr la prueba de concurrencia** (`operations/stagem1_concurrency_test.go`, `TestStageM1Concurrency`): diez
+  peticiones a la vez por ronda (abrir solas B, A y D; unir A+B, C+B y D+C con el primer producto; agregar G y B a una
+  unión E+F, quitarle F y cobrarla, con la misma revisión), 25 rondas (`ADEL_M1_CONCURRENCY_ROUNDS`). Comprueba las
+  invariantes (`expectStageM1Invariants`), que las cuentas abiertas sean las que respondieron 200 y que cada perdedora
+  reciba un 409 del contrato; el registro trae la cuenta de resultados. Con el arnés:
+  `ISO_TAG=A ISO_RUN=TestStageM1Concurrency $SP/iso.sh <árbol> go-int ./internal/operations` (una vez) o
+  `A_RUN=TestStageM1Concurrency A_COUNT=3 $SP/m1/a-int.sh ./internal/operations` (con `-count=3` y `-v`).
+
+### Archivos
+
+- Migración: `backend/migrations/0031_uniones_de_mesas.sql`; `config/product.json` (`schema_version` 31) y la
+  sincronía (`backend/internal/product/metadata.json`, `desktop/src/generated/product.json`).
+- `backend/internal/tableunions/`: `doc.go`, `names.go`, `sql.go`, `describe.go`, `settle.go`, `snapshot.go`,
+  `names_test.go`.
+- `backend/internal/operations/`: `table_unions.go`, `table_groups.go` (nuevos); `handler.go` (rutas, permisos, vista
+  previa de solo lectura, `SettleEmpty`), `tables.go` (ocupación, área, nombre), `models.go`, `accounts_read.go`
+  (`table_union`, `preparation_required`, `listAccounts`), `accounts_write.go` (diferida, `seen_union_id`, respuesta del
+  `PATCH`), `account_names.go`, `areas.go` (`overview`), `recovery.go`, `offline_orders.go`, `context.go` (permiso).
+- `backend/internal/payments/`: `handler.go` (`SettleEmpty`), `recognition.go` (instantánea), `finance.go` (lugar).
+- `backend/internal/kitchen/`: `releases.go` (comanda y §5.3), `display.go` (título, `displayAccountKinds`), `reads.go`
+  (Preparación), `states.go` (§5.2).
+- `backend/internal/reports/`: `sales.go`, `legacy.go`, `sales_progress.go`, `cancellations.go`.
+- `backend/internal/administration/`: `permission_catalog_entries.go`, `permission_catalog.go`, `waiter_scope.go`,
+  `setup.go` (comentario), `ready_alerts.go`, `recovery.go`.
+- `backend/internal/licensing/operations.go`, `backend/internal/httpapi/router.go`.
+- `backend/internal/legacyimport/`: `table_groups.go` (nuevo), `catalog_plan.go`, `expected.go`, `summary.go`,
+  `write_live.go`, `write_history.go`; `backend/internal/legacysynth/generate.go`.
+- Contrato: `backend/internal/apicontract/openapi.json`, `docs/API_V1.md`, `API_CONTRACTS.md`.
+- Pruebas nuevas: `operations/stagem1_fixture_test.go`, `stagem1_unions_test.go`, `stagem1_groups_test.go`,
+  `stagem1_offline_test.go`, `stagem1_readers_test.go`, `stagem1_schedule_test.go`, `stagem1_concurrency_test.go`,
+  `stagem1_no_preparation_test.go` (el parche de la Fase 0); `reports/stagem1_unions_integration_test.go`;
+  `legacyimport/stagem1_table_groups_test.go` y `stagem1_import_integration_test.go`;
+  `database/stagem1_upgrade_test.go`; el paso `contractTableUnions` en `apicontract/contract_integration_test.go`.
+
+### Pruebas que cambiaron y por qué
+
+| Prueba                                                                                   | Cambio                                                                     | Porqué                                                                                                                 |
+| ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `administration/permission_catalog_test.go` `TestFactoryRolesAreClosedUnderDependencies` | Tamaños 15/37/89                                                           | «Unir mesas» en Mesero, Cajero y Supervisor (M1-D8)                                                                    |
+| `database/stagea1_upgrade_test.go` `stageA1Snapshot`                                     | Excluye `restaurant.tables.join` de `permissions` y `role_permissions`     | Las pruebas de actualización migran hasta la última; la concesión de la 0031 se comprueba en `stagem1_upgrade_test.go` |
+| `database/stage9h_upgrade_test.go` `stage9HRowCounts`                                    | Excluye las tablas de uniones y grupos y el permiso nuevo                  | Igual: lo de la 0031 se comprueba aparte                                                                               |
+| `database/existing_install_test.go` (etapa 8)                                            | Excluye `restaurant.tables.join` del conteo de permisos                    | Igual                                                                                                                  |
+| `desktop/e2e/workflow-stagez-k11-diagnostics.spec.ts` paso 4                             | El pedido sin hora ya no espera; «Enviar a cocina ahora» con el programado | §5.3 (M1-D17) reemplaza K11-D9. **No corrida**                                                                         |
+
+### Pruebas realmente ejecutadas
+
+Todas con el arnés (`iso.sh … go-int`, una base `adel_pos_test_a_*` por paquete, borrada al final) o con `a-int.sh`
+(lo mismo con `-v` y `-count`). Registros en `$SP/m1/a-logs/`.
+
+| Qué                                                                                                                                                                                                      | Resultado                                                                                                                       |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `TestStageM1NoPreparationLines` (el parche de la Fase 0, §5.2)                                                                                                                                           | Pasa (antes fallaba en sus 2 subpruebas)                                                                                        |
+| `TestStageM1TableUnions` (10 casos: diferida, crecer, rechazos, agregar y quitar, deshacerse en 8 caminos, reabierta, carrera de la diferida, permiso con y sin, con PIN, idempotencia, `seen_union_id`) | Pasa                                                                                                                            |
+| `TestStageM1TableGroups` (atajo, parcial, sección ocupada, crecer desde ella, administración y rechazos)                                                                                                 | Pasa                                                                                                                            |
+| `TestStageM1OfflineQueue` (las 6 filas del contrato §7)                                                                                                                                                  | Pasa                                                                                                                            |
+| `TestStageM1UnionReaders` (precuenta, finanzas, comanda, KDS, Preparación, encabezado del KDS al cambiar la unión, aviso de listos, instantánea de la venta, cuenta cobrada)                             | Pasa                                                                                                                            |
+| `TestStageM1RemovingScheduleSends` (§5.3)                                                                                                                                                                | Pasa                                                                                                                            |
+| `TestStageM1Concurrency` (25 rondas de 10 peticiones a la vez)                                                                                                                                           | Pasa; con `-count=3`, pasa las 3 (cada corrida con victorias y rechazos en todos los intentos salvo el cobro, que gana siempre) |
+| `TestStageM1UnionReports` (reports: En curso, Ventas de salón, filtro de mesa, Cuentas canceladas)                                                                                                       | Pasa                                                                                                                            |
+| `TestStageM1LegacyTableGroups`, `TestStageM1LegacyGroupsWrapRow` (unitarias) y `TestStageM1LegacyImportTableGroups` (integración, dos importaciones)                                                     | Pasan                                                                                                                           |
+| `TestStageM1Upgrade` (30 → 31)                                                                                                                                                                           | Pasa                                                                                                                            |
+| `TestContractV1` (63 operaciones, con `contractTableUnions`)                                                                                                                                             | Pasa                                                                                                                            |
+| `go-int ./internal/operations` completo                                                                                                                                                                  | Pasa dos veces (898 s en `7d11a43` y 898 s en `a188629`, el estado final)                                                       |
+| `go-int ./internal/database` completo                                                                                                                                                                    | Pasa (37 s) después de arreglar la 0031 (ver decisión 13) y las tres pruebas de actualización anteriores                        |
+| `go-int` legacyimport, apicontract, licensing, httpapi, reports/operational, payments, kitchen, administration, maintenance                                                                              | Pasan (21, 70, 12, 2, 50, 5, 7, 453 y 4 s)                                                                                      |
+| `go-int ./internal/reports` completo (con `TestStageM1UnionReports`)                                                                                                                                     | Pasa (150 s)                                                                                                                    |
+| `go-int ./cmd/ad-el-pos-server` (con el candado `$SP/m1/candado-cmd`, ya liberado)                                                                                                                       | Pasa (67 s)                                                                                                                     |
+| `go-unit` (vet normal e `integration`, `go test -race ./...`, build y vet de Windows)                                                                                                                    | Aprobado                                                                                                                        |
+| `format`, `fmt-check`, `sync-check`; md5 de la especificación                                                                                                                                            | Sin cambios pendientes; «Metadatos coherentes»; `4750ae46…`                                                                     |
+| `npx tsc --noEmit` del escritorio (incluye `e2e/`)                                                                                                                                                       | Sin errores                                                                                                                     |
+
+**No verificado**: la especificación de Playwright `workflow-stagez-k11-diagnostics.spec.ts` ajustada (no se corrió:
+esta fase no usa Playwright); el comportamiento de la 0.4.1 de Android frente a una unión (Fase C); la regla del
+importador con el respaldo real (nunca se tocó; con el paquete sintético y `MemorySource`).
+
+### Lecturas del contrato de la Fase A
+
+Ninguna bloquea: la Fase A implementó la lectura que se indica en cada una, sin cambiar el contrato. Las fases B y C
+pueden confiar en lo que dice aquí (lo prueba `stagem1_*_test.go` y `TestContractV1`).
+
+1. **`TABLE_IN_UNION`, `details.accounts`**: el contrato dice «`accounts` (ids)». Va como arreglo de identificadores
+   (`["uuid", …]`, las cuentas abiertas de la unión en orden de apertura), no como `TableAccountRef` de
+   `TABLE_HAS_ACCOUNT`. `details.union` es el `TableUnion` completo y `details.table_id`/`details.union_id` también van.
+2. **403 sin «Unir mesas»**: el contrato dice «403 `FORBIDDEN` · el de siempre». El de siempre de `restaurant/*` es
+   **`PERMISSION_DENIED`**; eso responde.
+3. **`previewTableUnion` con `{table_ids}`**: el contrato no dice cuál es la mesa de inicio. **La primera de `table_ids` es
+   la de inicio**: si está ocupada y otra también, `TABLE_UNION_BOTH_OCCUPIED`; si está libre y otra está ocupada,
+   `TABLE_UNION_OCCUPIED` en la ocupada (M1-D6). La respuesta trae `table_ids` en el orden del nombre.
+4. **`createTableUnion` con `group_id`**: con la mesa de inicio (una sección) ocupada y las demás libres, **une todo el
+   grupo** (crecer desde la sección ocupada; se llama como el grupo). Con la de inicio libre y otra sección ocupada,
+   `TABLE_GROUP_SECTION_OCCUPIED`; con dos ocupadas, `TABLE_UNION_BOTH_OCCUPIED`; con todas libres,
+   `TABLE_UNION_DEFERRED`. La vista previa `{group_id}` (sin mesa de inicio) marca cada sección ocupada con
+   `TABLE_GROUP_SECTION_OCCUPIED`, igual que `openAccount` con `union_group_id`.
+5. **`seen_union_id` en una mesa que ya no está unida**: no se rechaza (la unión que vio la terminal se deshizo); se
+   abre como siempre, con `seen_account_ids`. Solo responde `TABLE_IN_UNION` si la mesa **está** en una unión distinta
+   de la vista (o `null`). Es la misma regla que la cola sin conexión.
+6. **Forma de las respuestas**: `{union}` y `{group}` se leyeron como objetos con esa llave (`{"union": TableUnion}`,
+   `{"group": TableGroup}`; `removeTableFromUnion`: `{"union", "dissolved"}`; `getTableUnion`: `{"union":
+TableUnionDetail}`).
+7. **Revisión distinta en `updateTableGroup`**: no hay código propio en el contrato; responde el genérico
+   `ACCOUNT_CONFLICT` («La cuenta o distribución cambió en otra terminal…»), como las mesas y las áreas.
+8. **Crear un grupo con una mesa que está en una unión abierta**: se rechaza con `TABLE_GROUP_IN_USE` (como cambiarlo);
+   una unión toma su nombre de los grupos.
+9. **Un grupo quitado (`active: false`)** no se vuelve a activar: `PATCH` responde 400 «Este grupo ya se quitó. Crea uno
+   nuevo en Áreas y distribución.». Su respuesta al quitarlo es el grupo con sus secciones de antes y la revisión nueva.
+10. **`TableUnion.state`**: `occupied | awaiting_payment | partial_payment | dissolved` (nunca `free`: una unión abierta
+    siempre tiene cuentas).
+11. **Mesas con y sin la palabra «Mesa» en una unión**: con «5» y «Mesa 6» el nombre es «5 + Mesa 6» (M1-D2 literal; en
+    los documentos, «Mesa 5 + Mesa 6»). Con las mesas del propietario no pasa.
+12. **Límites**: una unión y un grupo admiten hasta 40 mesas; un grupo, de 2 a 40; el nombre de un grupo, hasta 60
+    caracteres.
+
+### Decisiones del coordinador al cerrar la Fase A
+
+Se fusiona `etapa-m1-a` en `etapa-m1`. Después de la fusión aprobaron `fmt-check`, `sync-check` y `tsc` del
+escritorio, y el servidor quedó idéntico al de la rama de la Fase A.
+
+- **M1-D24.** Se aceptan las decisiones propuestas 1 a 13 de la Fase A.
+- **M1-D25. Lecturas del contrato.** Las 12 lecturas de arriba pasan a ser parte del contrato. Las fases B y C las
+  usan tal cual:
+  - `details.accounts` son identificadores;
+  - el 403 es `PERMISSION_DENIED`;
+  - en la vista previa, la primera de `table_ids` es la mesa de inicio;
+  - las respuestas vienen como `{union}` y `{group}`;
+  - un grupo quitado no se reactiva.
+- **M1-D26. «Quitar datos de prueba».** Se retira el último punto de M1-D7. La especificación no lo pide, y esa función
+  nunca toca mesas ni cuentas, así que no hay uniones ni grupos «de prueba» que quitar. Sigue funcionando con uniones y
+  grupos (la suite de `maintenance` pasa) y no cambia.
+- **M1-D27. Cuenta reabierta por una devolución.** Conserva el nombre que tenía al cerrarse, por ejemplo «Mesa 5 + 6»,
+  aunque su unión ya se haya deshecho, porque lo cerrado no se reescribe. Si vuelve a una mesa unida, queda en esa
+  unión. Es una limitación conocida y se dice en la entrega.
+- **M1-D28. Lo que queda para otras fases.**
+  - **Fase B**:
+    - corre `workflow-stagez-k11-diagnostics`, que la A ajustó a M1-D17 sin correrla;
+    - revisa el texto «Espera a que lo envíes a cocina» de `PendingKitchen.tsx`, que ya no se usa para pedidos nuevos.
+  - **Fase F**: actualiza en `docs/KITCHEN_AND_PRINTING.md` lo que todavía describe K11-D9.
