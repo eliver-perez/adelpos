@@ -499,16 +499,29 @@ func testStageM1SeenUnion(t *testing.T, fixture *stageM1Fixture) {
 	if current := fixture.union(t, "Mesa 5"); current == nil || current.AccountCount != 2 {
 		t.Fatalf("la unión con dos cuentas: %+v", current)
 	}
-	// Una mesa sin unir con seen_union_id de una unión que ya no existe: se abre como siempre.
-	free := fixture.openAt(t, fixture.joiner, "Mesa 9", map[string]any{"seen_union_id": union.ID, "seen_account_ids": []string{}},
-		draftLine(fixture.coca, 1))
-	if free.Account.TableUnion != nil {
-		t.Fatal("una mesa sin unir quedó unida")
+	// M1-D32: una mesa sin unir con seen_union_id de una unión que sigue abierta (la mesa salió de ella o nunca estuvo):
+	// TABLE_UNION_CONFLICT, sin guardar nada, para que la cuenta no caiga en otro lugar del que veía el mesero.
+	accounts := fixture.count(t, "SELECT count(*)::int FROM app.restaurant_accounts")
+	conflicted := fixture.reject(t, fixture.joiner, "POST", "restaurant/accounts", map[string]any{"mode": "dine_in",
+		"table_id": fixture.id("Mesa 9"), "seen_union_id": union.ID, "seen_account_ids": []string{},
+		"items": []operations.DraftItem{draftLine(fixture.coca, 1)}}, 409, "TABLE_UNION_CONFLICT",
+		"La unión cambió en otra terminal. Revisa las mesas e inténtalo otra vez.")
+	if conflicted.Error.Details["union_id"] != union.ID || conflicted.Error.Details["table_id"] != fixture.id("Mesa 9") ||
+		fixture.count(t, "SELECT count(*)::int FROM app.restaurant_accounts") != accounts {
+		t.Fatalf("seen_union_id de una unión abierta sin la mesa: %+v", conflicted.Error.Details)
 	}
-	for _, id := range []string{bill.Account.ID, second.Account.ID, free.Account.ID} {
+	for _, id := range []string{bill.Account.ID, second.Account.ID} {
 		fixture.confirm(t, fixture.joiner, id)
 		fixture.pay(t, id)
 	}
+	// Con la unión vista ya deshecha y la mesa libre, la cuenta se abre como siempre, en la mesa sola.
+	free := fixture.openAt(t, fixture.joiner, "Mesa 6", map[string]any{"seen_union_id": union.ID, "seen_account_ids": []string{}},
+		draftLine(fixture.coca, 1))
+	if free.Account.TableUnion != nil || free.Account.Name != "Mesa 6" {
+		t.Fatalf("una mesa de una unión deshecha: %+v", free.Account)
+	}
+	fixture.confirm(t, fixture.joiner, free.Account.ID)
+	fixture.pay(t, free.Account.ID)
 }
 
 // structMap convierte un valor en el mapa de su JSON (para reutilizar la mesa leída como cuerpo de un PATCH).
