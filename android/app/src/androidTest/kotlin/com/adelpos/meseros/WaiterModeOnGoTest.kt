@@ -398,6 +398,8 @@ class WaiterModeOnGoTest {
             .performTextReplacement("El cliente cambió de opinión")
         compose.onNodeWithTag(TAG_CANCEL_CONFIRM).performClick()
         waitUntil("la cancelación en Go") { lineState(accountId, tacos) == "cancelled" }
+        // Etapa M1 (§5.7): al cerrar el diálogo el teclado no se queda abierto (Android 8).
+        waitForKeyboardClosed("cancelar")
         // Modificar la hamburguesa: observaciones nuevas, calculadas primero con Go.
         waitFor("$TAG_SENT_MODIFY_PREFIX$burger")
         tap("$TAG_SENT_MODIFY_PREFIX$burger")
@@ -415,6 +417,63 @@ class WaiterModeOnGoTest {
                     request.getValue("customization").jsonObject.text("notes") == "sin cebolla"
             }
         }
+        waitForKeyboardClosed("modificar")
+    }
+
+    /**
+     * Etapa M1 (§5.7): después de cerrar el diálogo, el teclado se cierra. Si no, deja la pantalla
+     * (`w8-teclado-<qué>.png` en la carpeta de capturas) y lo que dice Android, para saber qué
+     * pasó.
+     */
+    private fun waitForKeyboardClosed(what: String) {
+        // Primero se espera a que el diálogo se cierre (lo cierra la respuesta de Go).
+        val start = System.currentTimeMillis()
+        waitUntil("el diálogo cerrado después de $what", 60_000) { !present(TAG_SENT_REASON) }
+        Log.i(
+            "AdelOnGo",
+            "w8 · el diálogo de $what se cerró a los ${System.currentTimeMillis() - start} ms",
+        )
+        try {
+            waitUntil("el teclado cerrado después de $what", 10_000) { !keyboardOpen() }
+        } catch (failure: Throwable) {
+            val bitmap = automation.takeScreenshot()
+            if (bitmap != null) {
+                val folder =
+                    java.io.File(TestDevice.app.getExternalFilesDir(null), "screens").apply {
+                        mkdirs()
+                    }
+                java.io.FileOutputStream(java.io.File(folder, "w8-teclado-$what.png")).use {
+                    bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+                }
+            }
+            scenario?.onActivity { activity ->
+                val input =
+                    activity.getSystemService(
+                        android.view.inputmethod.InputMethodManager::class.java,
+                    )
+                val insets =
+                    androidx.core.view.ViewCompat.getRootWindowInsets(activity.window.decorView)
+                Log.i(
+                    "AdelOnGo",
+                    "w8 · teclado después de $what: activo ${input?.isActive}, " +
+                        "aceptando ${input?.isAcceptingText}, " +
+                        "${insets?.getInsets(androidx.core.view.WindowInsetsCompat.Type.ime())}, " +
+                        "foco ${activity.currentFocus}",
+                )
+            }
+            throw failure
+        }
+    }
+
+    /** El teclado de Android está abierto sobre la actividad (sus `WindowInsets`). */
+    private fun keyboardOpen(): Boolean {
+        var open = false
+        scenario?.onActivity { activity ->
+            open =
+                androidx.core.view.ViewCompat.getRootWindowInsets(activity.window.decorView)
+                    ?.isVisible(androidx.core.view.WindowInsetsCompat.Type.ime()) == true
+        }
+        return open
     }
 
     private fun lineState(accountId: String, versionId: String): String? {

@@ -29,6 +29,7 @@ import com.adelpos.meseros.feature.access.pin.TAG_REENTER_MESSAGE
 import com.adelpos.meseros.feature.takeaway.TAG_TAKEAWAY_EMPTY
 import com.adelpos.meseros.feature.takeaway.TAG_TAKEAWAY_NEW
 import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_SCREEN
+import com.adelpos.meseros.navigation.TAG_APP_TITLE
 import com.adelpos.meseros.navigation.TAG_MAIN_NAVIGATION
 import com.adelpos.meseros.navigation.TAG_NAV_TABLES
 import com.adelpos.meseros.navigation.TAG_NAV_TAKEAWAY
@@ -62,7 +63,12 @@ class AppNavigationTest {
     private fun assertTitle(title: String) {
         compose.waitUntil(timeoutMillis = 30_000) {
             compose
-                .onAllNodes(hasText(title).and(hasAnyAncestor(hasTestTag(TAG_TOP_BAR))))
+                .onAllNodes(
+                    hasText(title)
+                        .and(
+                            (hasAnyAncestor(hasTestTag(TAG_TOP_BAR)) or hasTestTag(TAG_APP_TITLE)),
+                        ),
+                )
                 .fetchSemanticsNodes()
                 .isNotEmpty()
         }
@@ -116,7 +122,12 @@ class AppNavigationTest {
         waitForTag(TAG_REENTER)
         compose.onNode(hasText("Vuelve a escribir tu PIN", substring = true)).assertIsDisplayed()
         // La pantalla del mesero sigue debajo, con su barra.
-        compose.onNode(hasText("Mesas").and(hasAnyAncestor(hasTestTag(TAG_TOP_BAR)))).assertExists()
+        compose
+            .onNode(
+                hasText("Mesas")
+                    .and((hasAnyAncestor(hasTestTag(TAG_TOP_BAR)) or hasTestTag(TAG_APP_TITLE))),
+            )
+            .assertExists()
         compose.onNodeWithTag(TAG_TABLES_SCREEN).assertExists()
 
         // Los toques en el diálogo (otra ventana) reinician el plazo del bloqueo por inactividad.
