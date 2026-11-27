@@ -400,8 +400,9 @@ test('diseñador 9B: duplicar, editar, vista previa 58/80, guardar, activar, mue
   await kinds.getByRole('button', { name: 'Ticket de pago', exact: true }).click();
 
   // 9. El ticket cobrado antes de editar se reimprime idéntico (misma versión de plantilla, sin
-  // marca de reimpresión), aunque la plantilla activa ya es otra.
-  await driver.request('POST', 'auth/login', { username: 'admin', password: 'admin' });
+  // marca de reimpresión), aunque la plantilla activa ya es otra. La prueba usa la sesión de la página, que el puente
+  // comparte (etapa M1, §5.8): volver a entrar por la API con la misma terminal reemplazaba la sesión de la página con
+  // sus peticiones en camino.
   const reprint = await call(
     driver,
     'POST',

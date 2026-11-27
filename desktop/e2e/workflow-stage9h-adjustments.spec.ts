@@ -447,6 +447,8 @@ test('el mismo usuario con sesión en dos terminales a la vez; iniciar de nuevo 
   await login(pageA, 'admin', 'admin');
   await expect(pageA.getByRole('button', { name: /^Menú del usuario/ })).toBeVisible();
   const before = await activeSessions();
+  // Volver a entrar a propósito con la misma terminal: el puente espera a que terminen las peticiones de la página en
+  // camino (etapa M1, §5.8), para que ninguna reciba SESSION_REPLACED con la sesión anterior.
   await call(driverA, 'POST', 'auth/login', { username: 'admin', password: 'admin' });
   expect(await activeSessions()).toBe(before);
 
