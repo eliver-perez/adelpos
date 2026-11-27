@@ -96,6 +96,8 @@ class WaiterModeContainer(
             inFlight = inFlight,
             // Etapa M1 (§5.6): lo que responde Go se ve al momento en Mesas.
             accountAnswered = { account -> restaurant.applyAccount(account) },
+            // Etapa M1 (M1-D32): la unión cambió en otra terminal; Mesas vuelve a leer.
+            placesChanged = { restaurant.refresh() },
         )
 
     val restaurant: RestaurantRepository =

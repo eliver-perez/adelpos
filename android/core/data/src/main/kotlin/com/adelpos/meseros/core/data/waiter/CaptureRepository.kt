@@ -92,6 +92,11 @@ class CaptureRepository(
      * para que Mesas la muestre al momento (`RestaurantRepository.applyAccount`).
      */
     private val accountAnswered: (AccountSummary) -> Unit = {},
+    /**
+     * Etapa M1 (M1-D32): Go dijo que las mesas cambiaron (una unión): Mesas vuelve a leer las mesas
+     * y las uniones.
+     */
+    private val placesChanged: () -> Unit = {},
 ) : CaptureService {
     /** Lo que el modo Mesero necesita del catálogo guardado. */
     interface CatalogLookups {
@@ -882,6 +887,28 @@ class CaptureRepository(
                         )
                     }
                 }
+                placesChanged()
+            }
+            // Etapa M1 (M1-D32): la unión que vio el mesero sigue abierta pero ya no tiene esta
+            // mesa. Go no guardó nada: se dice su mensaje, Mesas vuelve a leer y lo capturado se
+            // conserva. La unión vista se olvida (`seen_union_id` no se manda): al reintentar, Go
+            // revisa como siempre las cuentas que hay (TABLE_HAS_ACCOUNT si la mesa está en otra
+            // unión con cuentas; si quedó libre, la cuenta se abre en la mesa).
+            problem.code == TABLE_UNION_CONFLICT && capture.accountId == null -> {
+                edits.withLock {
+                    load(captureId)?.let {
+                        save(
+                            it.copy(
+                                sync = DraftSync.REJECTED,
+                                syncMessage = ApiErrors.shownMessage(problem),
+                                seenUnion = null,
+                                pendingOperationId = null,
+                                inFlightCount = 0,
+                            ),
+                        )
+                    }
+                }
+                placesChanged()
             }
             // Una cuenta combinada ofrece solo seguir en la cuenta en que se combinó (M3); se
             // escribe todo junto para que nunca se vea «Abrir una cuenta nueva» con ella.
@@ -1515,6 +1542,7 @@ class CaptureRepository(
 
         private const val TABLE_HAS_ACCOUNT = "TABLE_HAS_ACCOUNT"
         private const val TABLE_IN_UNION = "TABLE_IN_UNION"
+        private const val TABLE_UNION_CONFLICT = "TABLE_UNION_CONFLICT"
 
         /** Cuentas de una unión que se leen para ofrecerlas (una unión casi nunca tiene más). */
         private const val MAXIMUM_UNION_ACCOUNTS_READ = 6
