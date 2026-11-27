@@ -6,6 +6,7 @@ import android.graphics.Bitmap
 import android.os.SystemClock
 import android.util.Log
 import android.view.KeyEvent
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasAnyAncestor
@@ -21,6 +22,7 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.printToLog
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -29,9 +31,12 @@ import com.adelpos.core.testing.SystemDialogs
 import com.adelpos.core.ui.access.findserver.TAG_ADDRESS
 import com.adelpos.core.ui.access.findserver.TAG_FIND_SERVER
 import com.adelpos.core.ui.access.findserver.TAG_PAIRING_CODE
+import com.adelpos.core.ui.components.TAG_TOP_BAR
+import com.adelpos.meseros.core.capture.TAG_DRAFT_ROW_PREFIX
 import com.adelpos.meseros.core.capture.TAG_ORDER_PANEL
 import com.adelpos.meseros.core.capture.TAG_SEND_TO_KITCHEN
 import com.adelpos.meseros.core.capture.TAG_SYNC_PREFIX
+import com.adelpos.meseros.core.capture.TAG_SYNC_RETRY
 import com.adelpos.meseros.core.capture.TAG_UNION_PENDING_TEXT
 import com.adelpos.meseros.core.capture.TAG_UNION_SEND_ALONE
 import com.adelpos.meseros.core.capture.TAG_UNION_WAIT
@@ -58,6 +63,7 @@ import com.adelpos.meseros.core.ui.waiter.TAG_ORDER_STATE_PREFIX
 import com.adelpos.meseros.core.ui.waiter.TAG_PREPARATION_PREFIX
 import com.adelpos.meseros.feature.access.pin.TAG_ENTRY
 import com.adelpos.meseros.feature.access.pin.TAG_WAITER_PREFIX
+import com.adelpos.meseros.feature.takeaway.TAG_TAKEAWAY_NEW
 import com.adelpos.meseros.feature.waiter.tables.TAG_ACCOUNT_CARD_PREFIX
 import com.adelpos.meseros.feature.waiter.tables.TAG_ACCOUNT_PANE
 import com.adelpos.meseros.feature.waiter.tables.TAG_ACCOUNT_TITLE_PREFIX
@@ -81,6 +87,8 @@ import com.adelpos.meseros.feature.waiter.tables.TAG_UNION_GROUP
 import com.adelpos.meseros.feature.waiter.tables.TAG_UNION_JOIN
 import com.adelpos.meseros.feature.waiter.tables.TAG_UNION_PREFIX
 import com.adelpos.meseros.feature.waiter.tables.TAG_UNION_REMOVE
+import com.adelpos.meseros.navigation.TAG_APP_TITLE
+import com.adelpos.meseros.navigation.TAG_NAV_TAKEAWAY
 import java.io.File
 import java.io.FileOutputStream
 import java.util.UUID
@@ -118,7 +126,11 @@ import org.junit.runner.RunWith
  *   vive en pantalla y nace con el primer producto; `u8` (SIN red) una unión en pantalla nunca va a
  *   la cola: «Esperar» y «Enviar solo a la Mesa 3a» (M1-D13); `u9` (con red) el pedido llega solo a
  *   la mesa, el atajo «Unir Mesa 3» con una sección ocupada dice el mensaje de Go y desde la
- *   ocupada se crece a «Mesa 3»; `u10` §5.2, un refresco sin preparación sin etiqueta de cocina.
+ *   ocupada se crece a «Mesa 3»; `u10` §5.2, un refresco sin preparación sin etiqueta de cocina;
+ *   `u11` M1-D32: la principal quita la mesa de la unión mientras se captura, Go responde
+ *   `TABLE_UNION_CONFLICT`, se dice su texto, lo capturado se queda y al reintentar la cuenta se
+ *   abre en la mesa.
+ * - `u12` M1-D36: el título completo en Mesas y en «Nuevo pedido para llevar» (para el teléfono).
  *
  * Argumentos: `local`, `address`, `pin`, `mainDevice` y `mainToken` (los arma el guion).
  */
@@ -209,7 +221,7 @@ class UnionsOnGoTest {
                 inside(card, "$TAG_ORDER_STATE_PREFIX${OrderState.RECEIVED.storedName}")
             }
             assertTrue("«Tu cuenta» en la tarjeta de Ana", inside(card, TAG_ACCOUNT_MINE))
-            assertFalse("sin «Lo tuyo en esta mesa»", hasText("Lo tuyo en esta mesa"))
+            assertFalse("sin «Lo tuyo en esta mesa»", showsText("Lo tuyo en esta mesa"))
             val received = waitForOrder(ids.getValue(table)) { it.state == OrderState.RECEIVED }
             assertFalse(
                 "el pedido recibido no tiene su propia tarjeta",
@@ -248,6 +260,8 @@ class UnionsOnGoTest {
             "la tarjeta dice «Por enviar»",
             inside(tag, "$TAG_ORDER_STATE_PREFIX${OrderState.QUEUED.storedName}"),
         )
+        // M1-D36: con un pedido por enviar, el título sigue completo (en el teléfono, debajo).
+        assertTitleComplete("Mesas")
         screenshot("u3-por-enviar-vertical")
         saveIds(ids + ("order10" to order.operationId))
     }
@@ -490,6 +504,72 @@ class UnionsOnGoTest {
         screenshot("u10-sin-preparacion-vertical")
     }
 
+    @Test
+    fun u11_laUnionCambiaEnOtraTerminalYSeConservaLoCapturado() {
+        val ids = loadIds()
+        assumeTrue("Go sin table-unions-v1", hasUnions())
+        launch()
+        enterAna()
+        portrait()
+        // La Mesa 3a está en «Mesa 3» (u9) con su cuenta: una cuenta nueva desde la unión.
+        val union = waitForUnion(ids.getValue("table3a"))
+        // Una mesa unida no sale por separado en la lista: se toca la unión.
+        waitForTables()
+        tap("$TAG_UNION_PREFIX${union.text("id")}")
+        waitUntil("el panel de la unión") { textOf(TAG_TABLE_PANEL_TITLE) == union.text("name") }
+        tap(TAG_NEW_ACCOUNT)
+        waitFor(productTag(ids.getValue("burger")))
+        // Mientras tanto, la principal (otra terminal) quita la 3a de la unión; la unión sigue
+        // abierta con la 3b y la 3c.
+        val removed =
+            main.call(
+                "POST",
+                "restaurant/table-unions/${union.text("id")}/tables/${ids.getValue("table3a")}/remove",
+                """{"operation_id":"${UUID.randomUUID()}","revision":${union.text("revision")}}""",
+            )
+        assertEquals(removed.body.toString(), 200, removed.status)
+        assertTrue(unionOf(ids.getValue("table3b")) != null)
+        // M1-D32: al guardar el primer producto con la unión vista, Go responde
+        // TABLE_UNION_CONFLICT; el texto de Go se dice y lo capturado se queda.
+        addProduct(ids.getValue("burger"))
+        showOrder()
+        waitFor("${TAG_SYNC_PREFIX}rejected")
+        waitForText("La unión cambió en otra terminal.")
+        val capture = currentCapture(ids.getValue("table3a"))
+        assertEquals(null, capture.accountId)
+        waitFor("$TAG_DRAFT_ROW_PREFIX${capture.visible.single().id}")
+        screenshot("u11-la-union-cambio-vertical")
+        // Reintentar: ya sin la unión vista, la 3a está libre y la cuenta se abre en ella.
+        tap(TAG_SYNC_RETRY)
+        waitFor("${TAG_SYNC_PREFIX}saved")
+        val opened = currentCapture(ids.getValue("table3a")).accountId!!
+        val account =
+            main.call("GET", "restaurant/accounts/$opened").obj.getValue("account").jsonObject
+        assertEquals(ids.getValue("table3a"), account.text("table_id"))
+        assertTrue(account["table_union"] is JsonNull || account["table_union"] == null)
+    }
+
+    /**
+     * Etapa M1 (M1-D36), sobre todo en el teléfono: el título nunca se corta, tampoco «Nuevo pedido
+     * para llevar» ni con pedidos por enviar. Revisa el título en Mesas y en un pedido para llevar
+     * nuevo, en la orientación que tenga el dispositivo.
+     */
+    @Test
+    fun u12_elTituloNoSeCorta() {
+        val ids = loadIds()
+        launch()
+        enterAna()
+        val name =
+            if (orientationNow() == Configuration.ORIENTATION_LANDSCAPE) "horizontal"
+            else "vertical"
+        assertTitleComplete("Mesas")
+        screenshot("u12-mesas-$name")
+        tap(TAG_NAV_TAKEAWAY)
+        tap(TAG_TAKEAWAY_NEW)
+        assertTitleComplete("Nuevo pedido para llevar")
+        screenshot("u12-nuevo-pedido-$name")
+    }
+
     // --- §5.6: el retraso después de «Enviar a cocina» ---
 
     /**
@@ -553,6 +633,39 @@ class UnionsOnGoTest {
             ?.config
             ?.getOrElseNullable(SemanticsProperties.Text) { null }
             ?.joinToString("") { it.text }
+
+    // --- El título (M1-D36) ---
+
+    /** El título está a la vista completo: sin puntos suspensivos en ninguno de sus renglones. */
+    private fun assertTitleComplete(title: String) {
+        val matcher =
+            hasText(title) and
+                (hasAnyAncestor(hasTestTag(TAG_TOP_BAR)) or hasTestTag(TAG_APP_TITLE))
+        compose.waitUntil(timeoutMillis = 30_000) {
+            compose.onAllNodes(matcher, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+        }
+        val layouts = mutableListOf<TextLayoutResult>()
+        compose
+            .onAllNodes(matcher, useUnmergedTree = true)
+            .onFirst()
+            .fetchSemanticsNode()
+            .config[SemanticsActions.GetTextLayoutResult]
+            .action
+            ?.invoke(layouts)
+        val layout = layouts.single()
+        val cut = (0 until layout.lineCount).any { layout.isLineEllipsized(it) }
+        log("M1 · título «$title»: ${layout.lineCount} renglones, cortado: $cut")
+        assertFalse("el título «$title» cortado", cut)
+    }
+
+    private fun currentCapture(tableId: String) = runBlocking {
+        container.database
+            .waiter()
+            .capturesOf(loadIds().getValue("ana"))
+            .map(WaiterStorage::toCapture)
+            .filter { it.tableId == tableId }
+            .maxBy { it.createdAtMillis }
+    }
 
     // --- Ayudantes de uniones ---
 
@@ -642,7 +755,7 @@ class UnionsOnGoTest {
 
     private fun waitForText(text: String, timeout: Long = 40_000) {
         try {
-            compose.waitUntil(timeoutMillis = timeout) { hasText(text) }
+            compose.waitUntil(timeoutMillis = timeout) { showsText(text) }
         } catch (failure: Throwable) {
             compose.onRoot(useUnmergedTree = true).printToLog(TAG)
             throw failure
@@ -779,7 +892,7 @@ class UnionsOnGoTest {
             .fetchSemanticsNodes()
             .isNotEmpty()
 
-    private fun hasText(text: String): Boolean =
+    private fun showsText(text: String): Boolean =
         compose
             .onAllNodes(hasText(text, substring = true), useUnmergedTree = true)
             .fetchSemanticsNodes()
@@ -1046,6 +1159,8 @@ class UnionsOnGoTest {
                 "catalog.prices.read",
                 "events.read",
                 "payments.tickets.print",
+                "takeaway.read",
+                "takeaway.manage",
             )
     }
 }
