@@ -1084,7 +1084,10 @@ mesas se pueden unir y qué pasa con las cuentas); el cliente solo muestra lo qu
   empiezan con la palabra «Mesa», «5 + 6» si no; una unión con todas las secciones de un grupo, y nada más, se llama
   como el grupo («Mesa 3», con `group_id`). La capacidad es la suma. Una cuenta sin nombre propio en una unión se llama
   como la unión, toma el nombre nuevo al agregar o quitar mesas y vuelve al de su mesa al deshacerse (sin subir su
-  revisión: un cambio de mesas no es una edición de la cuenta).
+  revisión: un cambio de mesas no es una edición de la cuenta). **El nombre de una cuenta admite hasta 100 caracteres**
+  (M1-D29): si el de la unión pasa de ahí, la referencia de la cuenta se recorta en el último « + » que quepa, sin partir
+  el nombre de una mesa, y termina en « + …» («Terraza 1 + Terraza 2 + … + Terraza 8 + …»). La unión conserva su nombre
+  completo en el mapa, la lista, los documentos, la comanda y el KDS (que no repite la referencia como subtítulo).
 - **Lecturas**: `getRestaurantOverview` y `getRecoveryState` agregan `unions` (`TableUnion`, solo abiertas) y `groups`
   (`TableGroup`, solo activos; en el estado, null sin `restaurant.tables.read`). Cada `Table` agrega `union_id` y
   `group_id`; **una mesa unida tiene el estado, las cuentas, el saldo, el tiempo y `long_open` de la unión** (M1-D10), así
@@ -1092,7 +1095,9 @@ mesas se pueden unir y qué pasa con las cuentas); el cliente solo muestra lo qu
   de una mesa unida devuelve las cuentas abiertas de toda la unión. `getTableUnion` (`GET
 /restaurant/table-unions/{id}`, `restaurant.tables.read`) es la unión (también deshecha, `state: dissolved`) con sus
   mesas y su historial: `joined` (una fila por mesa inicial), `table_added`, `table_removed` y `dissolved`, con
-  `user_name` y `device_name`.
+  `user_name` y `device_name`. Las horas de una unión (apertura, entrada y salida de mesas, deshacerse y su historial)
+  son las del orden en que Go aplicó los cambios (`clock_timestamp()` con el lock tomado, M1-D30) y el historial va en
+  el orden de su secuencia.
 - **`previewTableUnion`** (`POST /restaurant/table-unions/preview`, `restaurant.tables.join`, sin `operation_id`, no
   escribe): `{table_ids}` (todas, al menos dos; la primera es la mesa de inicio), `{group_id}` (el atajo del grupo) o
   `{union_id, table_ids}` (las que se agregan) → `{name, seats, table_ids, problems: [{code, message, table_id}]}`.
@@ -1113,8 +1118,12 @@ revision}` → `{union, dissolved}`): agregar una mesa libre del mismo área; qu
   mesa o mover la última cuenta fuera de la unión. Una cuenta que una devolución reabre vuelve a su mesa; si esa mesa
   está en una unión abierta, queda en esa unión.
 - **`seen_union_id`** en `openAccount` (opcional): la unión que la terminal veía en la mesa (null si ninguna). Si viene y
-  la mesa está en otra unión, **409 `TABLE_IN_UNION`** con `details.union` y `details.accounts`. Sin el campo (la 0.4.1),
-  `seen_account_ids` se revisa contra todas las cuentas de la unión (`TABLE_HAS_ACCOUNT`, como hoy).
+  la mesa está en otra unión, **409 `TABLE_IN_UNION`** con `details.union` y `details.accounts`. Si la mesa ya no está
+  unida y **la unión vista sigue abierta** (otra terminal quitó la mesa mientras tanto), **409 `TABLE_UNION_CONFLICT`**
+  con `details.union` (la vigente), sin guardar nada: el cliente conserva lo capturado (M1-D32). Si la unión vista ya se
+  deshizo y la mesa está libre, la cuenta se abre como siempre. Sin el campo (la 0.4.1), `seen_account_ids` se revisa
+  contra todas las cuentas de la unión (`TABLE_HAS_ACCOUNT`, como hoy). La cola sin conexión no cambia (su tabla de
+  abajo).
 - **Mesas divisibles** (§3 y M1-D4): **`createTableGroup`** (`POST /restaurant/table-groups`, `{operation_id, area_id,
 name, table_ids}`) y **`updateTableGroup`** (`PATCH /restaurant/table-groups/{id}`, `{operation_id, revision, name?,
 table_ids?, active?}`; `active: false` lo quita y su nombre vuelve a estar libre), con `restaurant.tables.manage`.
@@ -1125,21 +1134,21 @@ table_ids?, active?}`; `active: false` lo quita y su nombre vuelve a estar libre
 - **Rechazos** (409 salvo que se diga, `{error: {code, message, details}}`; `message` exacto, para mostrarse; `{mesa}`
   es «Mesa 6» con una mesa «6» o «Mesa 6»; `details.table_id` y `details.union_id` cuando aplica):
 
-  | Código                         | Cuándo                                                           | Texto                                                                                                |
-  | ------------------------------ | ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-  | `TABLE_UNION_AREA`             | Mesas de áreas distintas (también en grupos)                     | «Las mesas deben ser de la misma área.»                                                              |
-  | `TABLE_UNION_OCCUPIED`         | Una mesa que se agrega tiene cuentas abiertas                    | «Solo se pueden unir mesas libres: la {mesa} ya está ocupada.»                                       |
-  | `TABLE_UNION_BOTH_OCCUPIED`    | La de inicio y otra tienen cuentas abiertas                      | «La {mesa A} y la {mesa B} tienen cuentas abiertas. Para juntar sus cuentas usa «Combinar cuentas».» |
-  | `TABLE_UNION_UNAVAILABLE`      | Mesa inactiva o fuera de servicio                                | «La {mesa} está fuera de servicio o desactivada.»                                                    |
-  | `TABLE_IN_UNION`               | La mesa ya está unida; `seen_union_id` distinto; cambiar de área | «La {mesa} ya está unida con otras mesas ({unión}).»                                                 |
-  | `TABLE_GROUP_SECTION_OCCUPIED` | Atajo del grupo con una sección ocupada                          | «La sección {nombre} está ocupada. Únela con las secciones libres para crecer.»                      |
-  | `TABLE_UNION_NOT_OPEN`         | La unión ya se deshizo                                           | «Esta unión de mesas ya se deshizo.»                                                                 |
-  | `TABLE_UNION_CONFLICT`         | Revisión distinta                                                | «La unión cambió en otra terminal. Revisa las mesas e inténtalo otra vez.»                           |
-  | `TABLE_UNION_DEFERRED`         | `createTableUnion` con todas libres                              | «La unión se guarda con el primer producto.»                                                         |
-  | `TABLE_GROUP_NAME_TAKEN`       | Nombre repetido en el área (mesas y grupos activos)              | «Ya hay una mesa o un grupo con ese nombre en esta área.»                                            |
-  | `TABLE_GROUP_SECTION_TAKEN`    | La mesa ya es sección de otro grupo                              | «La {mesa} ya es parte del grupo {grupo}.»                                                           |
-  | `TABLE_GROUP_IN_USE`           | Cambiar o quitar un grupo con una sección unida                  | «El grupo tiene mesas unidas. Cámbialo cuando se liberen.»                                           |
-  | `TABLE_GROUP_SECTION_AREA`     | Cambiar de área una sección                                      | «Quita la mesa del grupo antes de cambiarla de área.»                                                |
+  | Código                         | Cuándo                                                                                                                                                                    | Texto                                                                                                |
+  | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+  | `TABLE_UNION_AREA`             | Mesas de áreas distintas (también en grupos)                                                                                                                              | «Las mesas deben ser de la misma área.»                                                              |
+  | `TABLE_UNION_OCCUPIED`         | Una mesa que se agrega tiene cuentas abiertas                                                                                                                             | «Solo se pueden unir mesas libres: la {mesa} ya está ocupada.»                                       |
+  | `TABLE_UNION_BOTH_OCCUPIED`    | La de inicio y otra tienen cuentas abiertas                                                                                                                               | «La {mesa A} y la {mesa B} tienen cuentas abiertas. Para juntar sus cuentas usa «Combinar cuentas».» |
+  | `TABLE_UNION_UNAVAILABLE`      | Mesa inactiva o fuera de servicio                                                                                                                                         | «La {mesa} está fuera de servicio o desactivada.»                                                    |
+  | `TABLE_IN_UNION`               | La mesa ya está unida (también si lo detecta el índice único de la base, M1-D31); `seen_union_id` distinto; cambiar de área                                               | «La {mesa} ya está unida con otras mesas ({unión}).»                                                 |
+  | `TABLE_GROUP_SECTION_OCCUPIED` | Atajo del grupo con una sección ocupada                                                                                                                                   | «La sección {nombre} está ocupada. Únela con las secciones libres para crecer.»                      |
+  | `TABLE_UNION_NOT_OPEN`         | La unión ya se deshizo                                                                                                                                                    | «Esta unión de mesas ya se deshizo.»                                                                 |
+  | `TABLE_UNION_CONFLICT`         | Revisión distinta; `openAccount` con `seen_union_id` de una unión abierta que ya no tiene la mesa (M1-D32)                                                                | «La unión cambió en otra terminal. Revisa las mesas e inténtalo otra vez.»                           |
+  | `TABLE_UNION_DEFERRED`         | `createTableUnion` con todas libres                                                                                                                                       | «La unión se guarda con el primer producto.»                                                         |
+  | `TABLE_GROUP_NAME_TAKEN`       | Nombre de grupo repetido en el área (mesas y grupos activos); también al crear, renombrar o cambiar de área una mesa con el nombre de un grupo activo de su área (M1-D33) | «Ya hay una mesa o un grupo con ese nombre en esta área.»                                            |
+  | `TABLE_GROUP_SECTION_TAKEN`    | La mesa ya es sección de otro grupo                                                                                                                                       | «La {mesa} ya es parte del grupo {grupo}.»                                                           |
+  | `TABLE_GROUP_IN_USE`           | Cambiar o quitar un grupo con una sección unida                                                                                                                           | «El grupo tiene mesas unidas. Cámbialo cuando se liberen.»                                           |
+  | `TABLE_GROUP_SECTION_AREA`     | Cambiar de área una sección                                                                                                                                               | «Quita la mesa del grupo antes de cambiarla de área.»                                                |
 
   Menos de dos mesas, una mesa repetida o un identificador inválido: 400 `OPERATION_VALIDATION`. Sin «Unir mesas»: 403
   `PERMISSION_DENIED`.
@@ -1162,11 +1171,15 @@ restaurant.tables.read`; M1-D8): lo piden la vista previa, unir, agregar, quitar
   o la mesa salió de la unión, cuenta nueva en la mesa; si la ocupó otra cuenta, `table_has_account` como siempre. Con
   `destination.account_id`, a esa cuenta esté donde esté (o `account_closed`). No hay tipos de cambio nuevos, y una
   unión que solo estaba en la pantalla nunca entra en la cola.
-- **El nombre en los lectores** (M1-D14): la precuenta, el ticket y el comprobante («Mesa 5 + 6»; una cuenta ya cobrada
-  con el nombre que tenía la unión al cerrarse), la comanda («Salón · Mesa 5 + 6»), el `title` del KDS, Preparación,
-  los avisos de platillos listos, «En curso» y las cancelaciones de los reportes, y la venta: `sales_recognitions` guarda
-  la unión al reconocer (`table_union_id`, `table_union_name`, `table_union_tables`); «Ventas de salón» la muestra en un
-  solo renglón sin repartirla y el filtro de una mesa incluye las uniones en las que estuvo (M1-D3).
+- **El nombre en los lectores** (M1-D14): la precuenta, el ticket y el comprobante («Mesa 5 + 6»), la comanda («Salón ·
+  Mesa 5 + 6»), el `title` del KDS, Preparación, los avisos de platillos listos, «En curso» y las cancelaciones de los
+  reportes, y la venta: `sales_recognitions` guarda la unión al reconocer (`table_union_id`, `table_union_name`,
+  `table_union_tables`); «Ventas de salón» la muestra en un solo renglón sin repartirla y el filtro de una mesa incluye
+  las uniones en las que estuvo (M1-D3). **Lo cerrado no compara horas** (M1-D30): los documentos de una cuenta
+  cobrada (también `finance.table_name` y la reimpresión) leen el lugar de su venta, escrita en la misma transacción que
+  el cierre, y una cuenta cancelada guarda su unión al cancelarse (`account_cancellations.table_union_id` y
+  `table_union_name`), que leen «Cuentas canceladas» y sus documentos. Así el ticket dice lo mismo que la venta aunque
+  otra terminal cambie la unión con milisegundos de diferencia.
 - **Preparación sin etiqueta** (§5.2; no depende de la capacidad): `ConfirmedLine.preparation_required` es false si el
   renglón ya se liberó y ninguna de sus unidades generó tarea de preparación (producto sin ruta con «No necesitan
   preparación», ruta «Sin preparación»); antes de liberarse es true, y un combo con algún componente con tarea también.

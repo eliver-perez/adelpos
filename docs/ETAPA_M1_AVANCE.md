@@ -2052,3 +2052,126 @@ Se fusiona `etapa-m1-c` en `etapa-m1`. La fase no cambió `android-core`, `cocin
   - los otros diálogos con texto en Android 8;
   - la 0.4.1 frente a una unión;
   - `field` y `precheck`.
+
+## Fase A · Correcciones de la revisión de concurrencia
+
+Encargo `fase-A2.md`: los hallazgos del revisor independiente de la concurrencia (Fase R) con las decisiones M1-D29 a
+M1-D33. Antes se fusionó `etapa-m1` (`48f9a842`: la Fase E, el avance con M1-D24 a M1-D33 y las dos pruebas del revisor
+que aprueban). Mismo árbol, rama y `ISO_TAG=A`; sin Go temporal, sin emuladores ni Playwright.
+
+### Commits
+
+| Commit    | Tema                                                                                                |
+| --------- | --------------------------------------------------------------------------------------------------- |
+| `2c7863e` | R1 a R3 (M1-D29, M1-D30 y M1-D31), con las pruebas del revisor y una prueba del índice único        |
+| `7a00e20` | M1-D32 (`TABLE_UNION_CONFLICT` con `seen_union_id`) y M1-D33 (`TABLE_GROUP_NAME_TAKEN` de una mesa) |
+| `e7f8110` | Contrato: `openapi.json`, `docs/API_V1.md`, `API_CONTRACTS.md` y su paso en `TestContractV1`        |
+
+### Qué se hizo y dónde
+
+- **M1-D29 (R1), la referencia de una cuenta en una unión de nombre largo.**
+  - `tableunions.AccountReference` (`tableunions/names.go:74`): el nombre de la unión tal cual si cabe en 100; si no,
+    se corta en el último « + » que cabe y termina en « + …» («Terraza 1 + … + Terraza 8 + …»).
+  - La usan todos los caminos que ponen o quitan la referencia neutra:
+    - `neutralAccountName` (`operations/account_names.go:44`): abrir sin nombre, la unión diferida, mover y la cola sin
+      conexión;
+    - `renameUnionAccounts` (`operations/table_unions.go:594`): unir, agregar, quitar y renombrar una mesa unida;
+    - `RestoreAccountNames` (`tableunions/settle.go`): deshacer.
+  - El KDS no repite la referencia recortada como subtítulo (`kitchen/display.go:632`).
+  - La unión conserva su nombre completo en el mapa, la lista, los documentos, la comanda y el KDS. El límite de 40
+    mesas sigue.
+- **M1-D30 (R2), las horas fuera del orden del lock.**
+  - **Horas de la unión**: toda escritura de una unión pone `clock_timestamp()` con 7820148305 ya tomado:
+    - `opened_at` y `updated_at` al crear y al cambiar el nombre (`table_unions.go:516` y `:753`);
+    - `joined_at` (`insertMember`) y `left_at` (`:865` y `Dissolve`);
+    - `dissolved_at` y la hora del historial (`AppendHistory`).
+      Los valores por omisión de la 0031 también son `clock_timestamp()`. El historial ya se leía y comparaba por su
+      secuencia.
+  - **Documentos de una cuenta cobrada**: el lugar sale de su venta (`payments/finance.go:35`: el último renglón de
+    `sales_recognitions`, `table_union_name` o `table_name`). Eso vale para el ticket del cobro, la reimpresión, la
+    precuenta y el comprobante. Una cuenta abierta sigue con la unión vigente.
+  - **Una cancelación guarda su unión**, en columnas nuevas de `app.account_cancellations` (`table_union_id` y
+    `table_union_name`), en la sección 3b de la 0031:
+    - se escriben al cancelar, en la misma transacción y antes de que `SettleEmpty` deshaga la unión
+      (`operations/account_cancellation.go:214`);
+    - las leen «Cuentas canceladas» (`reports/cancellations.go:58`, `cancelledPlaceSQL`) y los documentos de la cuenta
+      cancelada (`finance.go`).
+  - `UnionNameAtSQL` queda solo en «Modificaciones de cantidades», que no tiene instantánea.
+  - `closed_at` y el día comercial no cambian.
+- **M1-D31 (R3), el índice único responde `TABLE_IN_UNION`.** `insertMember` (`operations/table_unions.go:543`) agrega
+  cada mesa en un punto de guardado. Si salta `table_union_members_open_table_idx` (23505), lo deshace, lee la unión que
+  ya tiene la mesa y responde `TABLE_IN_UNION` con sus detalles. La operación se revierte entera de todos modos.
+- **M1-D32 (D-R1).** `requireSeenUnionGone` (`operations/accounts_write.go:288`): en `openAccount`, si la mesa ya no está
+  unida y la unión vista sigue abierta, responde 409 `TABLE_UNION_CONFLICT` con `details.union` (la vigente), `union_id`
+  y `table_id`, sin guardar nada. Si la unión vista ya se deshizo, la cuenta se abre como siempre. La cola sin conexión
+  no cambia. Se corrigieron la prueba y el comentario de `stagem1_unions_test.go` (antes, líneas 502-507).
+- **M1-D33 (D-R2).** `requireNameFreeOfGroups` (`operations/tables.go:199`): crear una mesa, renombrarla o cambiarla de
+  área con el nombre (sin distinguir mayúsculas) de un grupo activo de su área responde `TABLE_GROUP_NAME_TAKEN`, con
+  el texto de siempre. Un choque con otra mesa sigue como antes.
+- **Contrato**: `openAccount` (`TABLE_UNION_CONFLICT` y `seen_union_id`), `Account.table_union` y `TableUnion.name` (el
+  recorte), `TableUnionDetail` (las horas) y `TABLE_IN_UNION` del índice en `openapi.json`. En `docs/API_V1.md`: el
+  recorte, las horas, «lo cerrado no compara horas», la lectura 5 corregida y la tabla de errores con los casos nuevos.
+  `API_CONTRACTS.md` lo resume. `TestContractV1` recorre el nuevo 409 de `openAccount`.
+
+### Decisiones propuestas
+
+1. **El recorte se mide en bytes**, como `validateAccountInput` (`len(name) > 100`), que es más estricta que la base
+   (caracteres). Si ningún « + » cabe (una primera mesa de nombre larguísimo, no posible con mesas de hasta 60), se
+   corta en un carácter completo y termina en «…».
+2. **El lugar de una cancelación va en columnas de `account_cancellations`** y no en el evento: los reportes leen esa
+   tabla, y así no se busca dentro del `payload`. La 0031 resuelve antes la llave diferida de esa tabla, como con
+   `sales_recognitions`.
+3. **Una cuenta cobrada lee el lugar del último renglón de su venta**: tras una devolución y un nuevo cobro, el de la
+   última vez que se reconoció; una reliquidación sin cambios no escribe renglones, así que conserva el del cobro
+   anterior.
+4. **`TABLE_UNION_CONFLICT` de M1-D32 lleva `details.union`** con la unión vigente (sin la mesa), para que el cliente
+   vuelva a dibujarla sin leer el mapa.
+5. **El índice único** se prueba con un disparador temporal que, al crear la unión nueva, mete la mesa en otra unión
+   abierta antes de agregar los miembros (`TestStageM1MemberIndexAnswersTableInUnion`). Por la API no se alcanza.
+
+### Pruebas que cambiaron y por qué
+
+| Prueba                                                | Cambio                                                                                                                                                                     | Porqué                                                                         |
+| ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `TestStageM1ReviewLongUnionName` (parche del revisor) | Espera 200 y la referencia recortada en unir, la diferida, agregar (y quitar: vuelve a la de ocho), abrir, mover, la cola y renombrar una mesa unida; el KDS sin subtítulo | M1-D29                                                                         |
+| `TestStageM1ReviewClockOrder` (parche del revisor)    | Sin cambios                                                                                                                                                                | Aprueba con M1-D30                                                             |
+| `TestStageM1TableUnions` · `seen_union_id`            | Una mesa con `seen_union_id` de una unión abierta da `TABLE_UNION_CONFLICT` y no guarda nada; con la unión ya deshecha se abre sola                                        | M1-D32 (el comentario decía «una unión que ya no existe» con la unión abierta) |
+| `TestStageM1TableGroups`                              | Crear, renombrar y cambiar de área una mesa con el nombre del grupo: `TABLE_GROUP_NAME_TAKEN`                                                                              | M1-D33                                                                         |
+| `TestStageM1Upgrade`                                  | Las columnas nuevas de `account_cancellations` quedan en NULL                                                                                                              | M1-D30                                                                         |
+| `tableunions` `TestAccountReference` (nueva)          | El recorte                                                                                                                                                                 | M1-D29                                                                         |
+| `TestStageM1MemberIndexAnswersTableInUnion` (nueva)   | El 23505 del índice responde `TABLE_IN_UNION`                                                                                                                              | M1-D31                                                                         |
+| `TestContractV1`                                      | El 409 `TABLE_UNION_CONFLICT` de `openAccount`                                                                                                                             | Contrato                                                                       |
+
+### Pruebas realmente ejecutadas
+
+| Qué                                                                                                                                                              | Resultado                                                                                                                                                                                                    |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Todas las `TestStageM1*` de operations (14, con las del revisor, las dos nuevas y las de concurrencia)                                                           | Pasan (152 s)                                                                                                                                                                                                |
+| Experimento temporal `TestStageM1ReviewNaturalClockTmp` (la mezcla del revisor, 40 rondas, el ticket leído con `payments.Handle`), tres corridas; no se confirmó | 0 tickets distintos de la venta (de 142, 144 y 144 cobros de salón; 53, 52 y 41 en uniones); 0 uniones deshechas antes de abrirse, 0 mesas que salieron antes de entrar y 0 historiales hacia atrás          |
+| `TestStageM1*` de reports y legacyimport                                                                                                                         | Pasan                                                                                                                                                                                                        |
+| `go-int ./internal/database` completo y `TestStageM1Upgrade`                                                                                                     | Pasan (20 s)                                                                                                                                                                                                 |
+| `TestContractV1`                                                                                                                                                 | Pasa (63 operaciones)                                                                                                                                                                                        |
+| `TestStageM1ReviewConcurrency` y `TestStageM1ReviewDeferredLeavesNothing` con `-count=10` y `-race`                                                              | 20 de 20 (296 s). El caso de M1-D32 no sale en esa mezcla: allí «quitar Mesa 7» deshace una unión de dos mesas, y con la unión ya deshecha la cuenta se abre como siempre. Lo cubre `TestStageM1TableUnions` |
+| `TestStageM1Concurrency` con `-count=5` y `-race`                                                                                                                | 5 de 5 (83 s)                                                                                                                                                                                                |
+| `go-int` completo de operations, payments, kitchen, reports, database, apicontract y administration                                                              | Pasan (950, 3, 8, 153, 19, 53 y 288 s)                                                                                                                                                                       |
+| `go-int ./cmd/ad-el-pos-server` (con el candado, ya liberado)                                                                                                    | Pasa (68 s)                                                                                                                                                                                                  |
+| `go-unit`, `format`, `fmt-check` y `sync-check`; md5 de la especificación                                                                                        | Aprobado; sin cambios pendientes; «Metadatos coherentes»; `4750ae46…`                                                                                                                                        |
+
+**Queda igual**: la columna «Mesa u origen» de «Modificaciones de cantidades» sigue leyendo la unión por su hora
+(`UnionNameAtSQL`), porque no tiene instantánea. Con dos terminales a la vez sobre la misma unión, ese renglón puede
+decir la mesa sola (M1-D30: «queda solo donde no hay instantánea»).
+
+### Decisiones del coordinador al cerrar las correcciones
+
+Se fusiona otra vez `etapa-m1-a` en `etapa-m1`. El servidor quedó idéntico al de la rama, y Android y el escritorio no
+cambiaron. El experimento sin forzar del revisor, con 40 rondas en tres corridas, dio cero tickets distintos de la
+venta, cero uniones deshechas antes de abrirse y cero historiales hacia atrás.
+
+- **M1-D38.** Se aceptan las cuatro decisiones propuestas de las correcciones:
+  - el recorte se mide en bytes, como la validación de Go;
+  - la unión de una cancelación va en columnas de `account_cancellations`;
+  - una cuenta cobrada toma el lugar del último renglón de su venta;
+  - `TABLE_UNION_CONFLICT` lleva en `details.union` la unión vigente.
+- **M1-D39. Limitación conocida.** «Modificaciones de cantidades» no tiene instantánea y todavía deduce la unión por la
+  hora, como permite M1-D30. Si dos terminales actúan a la vez sobre la misma unión, con milisegundos de diferencia, ese
+  renglón del reporte puede decir la mesa sola en lugar de la unión. No cambia ningún importe. Se dice en la entrega.

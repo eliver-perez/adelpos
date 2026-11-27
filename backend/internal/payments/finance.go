@@ -24,11 +24,18 @@ type accountRecord struct {
 }
 
 func readAccountRecord(ctx context.Context, tx pgx.Tx, accountID string, forUpdate bool) (*accountRecord, error) {
-	// Etapa M1 (M1-D14): el lugar de la cuenta es el nombre de su unión («Mesa 5 + 6») si está unida, o su mesa. Una
-	// cuenta abierta lee la unión vigente; una cerrada o cancelada, la que tenía al cerrarse, para reimprimir igual.
+	// Etapa M1 (M1-D14 y M1-D30): el lugar de la cuenta es el nombre de su unión («Mesa 5 + 6») si está unida, o su
+	// mesa. Una cuenta abierta lee la unión vigente; una cobrada, el lugar de su venta (sales_recognitions, escrita en la
+	// misma transacción que el cierre); una cancelada, la unión que guardó su cancelación. Así el ticket, la precuenta y
+	// el comprobante dicen lo mismo que la venta aunque otra terminal haya cambiado la unión con milisegundos de
+	// diferencia, sin comparar horas.
 	query := `SELECT a.id,a.folio,a.name,a.mode,a.state,a.revision,
-        coalesce(CASE WHEN a.state='open' THEN ` + tableunions.UnionNameSQL("a.table_id") + `
-            ELSE ` + tableunions.UnionNameAtSQL("a.table_id", "coalesce(a.closed_at,a.updated_at)") + ` END,t.name),
+        coalesce(CASE a.state
+            WHEN 'open' THEN ` + tableunions.UnionNameSQL("a.table_id") + `
+            WHEN 'closed' THEN (SELECT coalesce(r.table_union_name,r.table_name) FROM app.sales_recognitions r
+                WHERE r.account_id=a.id ORDER BY r.sequence DESC LIMIT 1)
+            WHEN 'voided' THEN (SELECT c.table_union_name FROM app.account_cancellations c WHERE c.account_id=a.id)
+        END,t.name),
         a.customer_name,
         (SELECT coalesce(sum(quantity),0)::integer FROM app.restaurant_draft_items d WHERE d.account_id=a.id)
         FROM app.restaurant_accounts a LEFT JOIN app.restaurant_tables t ON t.id=a.table_id WHERE a.id=$1`

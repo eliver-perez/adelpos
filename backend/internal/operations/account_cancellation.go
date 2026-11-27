@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"local/ad-el-pos/server/internal/payments"
+	"local/ad-el-pos/server/internal/tableunions"
 )
 
 // «Cancelar cuenta» (etapa 9D, §5 y decisiones 3–5 del coordinador). Cualquier cuenta abierta sin
@@ -206,9 +207,13 @@ func (handler *service) cancelAccount(id string) (any, error) {
 	if supervisor != nil {
 		authorizedBy, authorizedUsername = &supervisor.UserID, &supervisor.Username
 	}
+	// Etapa M1 (M1-D30): la cancelación guarda la unión en la que estaba la cuenta (leída con 7820148305 exclusivo, en
+	// esta misma transacción, antes de que SettleEmpty la deshaga), para «Cuentas canceladas» y sus documentos.
 	_, err = handler.tx.Exec(handler.ctx, `INSERT INTO app.account_cancellations(account_id,operation_id,reason_id,reason_name,
-            description,prepared_is_waste,cancelled_by,authorized_by,device_id,cancelled_units,cancelled_amount)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, id, handler.operationID, reason.ID, reason.Name, description,
+            description,prepared_is_waste,cancelled_by,authorized_by,device_id,cancelled_units,cancelled_amount,
+            table_union_id,table_union_name)
+        SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,`+tableunions.UnionIDSQL("a.table_id")+`,`+tableunions.UnionNameSQL("a.table_id")+`
+        FROM app.restaurant_accounts a WHERE a.id=$1`, id, handler.operationID, reason.ID, reason.Name, description,
 		reason.PreparedIsWaste, handler.request.Actor.UserID, authorizedBy, handler.request.Actor.DeviceID, len(units), amount)
 	if err != nil {
 		return nil, err

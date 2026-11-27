@@ -4344,3 +4344,11 @@ compartido) y el índice único parcial de `app.table_union_members`.
 - **También cambia**: `PATCH restaurant/tables/{id}` rechaza cambiar de área una mesa unida (`TABLE_IN_UNION`) o agrupada
   (`TABLE_GROUP_SECTION_AREA`); quitar la hora a un pedido programado lo envía a cocina (§5.3, M1-D17) y la respuesta del
   `PATCH` de la cuenta se lee después de integrar cocina.
+- **Correcciones de la revisión de concurrencia** (M1-D29 a M1-D33): la referencia de una cuenta sin nombre en una unión
+  de nombre de más de 100 caracteres se recorta en el último « + » que cabe («… + …»); las horas de las uniones son
+  `clock_timestamp()` con 7820148305 tomado y el historial va por su secuencia; los documentos de una cuenta cobrada
+  leen el lugar de su venta y una cancelación guarda su unión (`account_cancellations.table_union_id` y
+  `table_union_name`, en la 0031); una violación de `table_union_members_open_table_idx` responde `TABLE_IN_UNION`;
+  `openAccount` con `seen_union_id` de una unión abierta que ya no tiene la mesa responde `TABLE_UNION_CONFLICT`; y una
+  mesa que toma el nombre de un grupo activo de su área (crear, renombrar, cambiar de área) responde
+  `TABLE_GROUP_NAME_TAKEN`.

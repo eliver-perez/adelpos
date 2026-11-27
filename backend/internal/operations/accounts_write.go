@@ -253,8 +253,10 @@ func (handler *service) requireNoUnseenAccounts(tableID *string, seen []string) 
 
 // requireSeenUnion compara la unión que la terminal veía en la mesa (seen_union_id) con la vigente (M1-D9). Sin el
 // campo (la 0.4.1) no se compara nada: seen_account_ids se revisa contra toda la unión. Con el campo (null u otra
-// unión) y la mesa en una unión distinta, TABLE_IN_UNION con la unión y sus cuentas. Una mesa que ya no está unida no
-// se rechaza por esto: la unión que vio la terminal se deshizo y la mesa se trata como siempre.
+// unión) y la mesa en una unión distinta, TABLE_IN_UNION con la unión y sus cuentas. Etapa M1 (M1-D32): si la mesa ya
+// no está unida pero la unión que vio la terminal sigue abierta (otra terminal quitó la mesa mientras tanto),
+// TABLE_UNION_CONFLICT sin guardar nada, para que la cuenta no caiga en un lugar distinto del que veía el mesero. Si
+// la unión vista ya se deshizo, la mesa se trata como siempre.
 func (handler *service) requireSeenUnion(input OpenAccountInput) error {
 	if !input.SeenUnionID.Set || input.TableID == nil || validateID(*input.TableID) != nil {
 		return nil
@@ -265,8 +267,11 @@ func (handler *service) requireSeenUnion(input OpenAccountInput) error {
 		}
 	}
 	union, err := handler.unionOfTable(*input.TableID)
-	if err != nil || union == nil {
+	if err != nil {
 		return err
+	}
+	if union == nil {
+		return handler.requireSeenUnionGone(*input.TableID, input.SeenUnionID.Value)
 	}
 	if input.SeenUnionID.Value != nil && *input.SeenUnionID.Value == union.ID {
 		return nil
@@ -276,6 +281,26 @@ func (handler *service) requireSeenUnion(input OpenAccountInput) error {
 		return err
 	}
 	return handler.tableInUnion(*input.TableID, name, union)
+}
+
+// requireSeenUnionGone es la otra mitad de requireSeenUnion: la mesa ya no está en ninguna unión. Si la unión que vio
+// la terminal sigue abierta, la mesa salió de ella después (M1-D32): TABLE_UNION_CONFLICT con la unión vigente.
+func (handler *service) requireSeenUnionGone(tableID string, seen *string) error {
+	if seen == nil {
+		return nil
+	}
+	var open bool
+	if err := handler.tx.QueryRow(handler.ctx, "SELECT EXISTS(SELECT FROM app.table_unions WHERE id=$1 AND state='open')",
+		*seen).Scan(&open); err != nil || !open {
+		return err
+	}
+	union, err := handler.readUnion(*seen)
+	if err != nil {
+		return err
+	}
+	return &Error{Status: 409, Code: codeUnionConflict,
+		Message: "La unión cambió en otra terminal. Revisa las mesas e inténtalo otra vez.",
+		Details: map[string]any{"table_id": tableID, "union_id": union.ID, "union": union}}
 }
 
 func (handler *service) updateAccount(id string) (any, error) {
