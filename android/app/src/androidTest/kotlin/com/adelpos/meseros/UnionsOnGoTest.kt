@@ -195,6 +195,8 @@ class UnionsOnGoTest {
         val stale = mutableListOf<Long>()
         for ((index, table) in listOf("table5", "table7", "tableT1").withIndex()) {
             if (table == "tableT1") {
+                // En el teléfono el panel de la mesa anterior tapa las pestañas de las áreas.
+                pressBackIfPanel()
                 tap("$TAG_TABLES_AREA_PREFIX${ids.getValue("areaTerrace")}")
             }
             newAccountOn(ids.getValue(table))
