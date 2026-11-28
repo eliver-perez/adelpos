@@ -23,6 +23,8 @@ import type {
 } from '../../services/restaurant';
 import { Select } from '../../components/Select';
 import { tableField } from '../../services/restaurant';
+import { serverHas, tableUnionsCapability } from '../../services/serverCapabilities';
+import { TableGroupsAdmin } from './TableGroupsAdmin';
 
 // Borrador local del área: la posición elegida solo viaja al guardar.
 type AreaDraft = Area & { position?: Position };
@@ -105,6 +107,8 @@ export function OperationsAdmin({
   const selectedArea = overview.areas.some((entry) => entry.id === areaID)
     ? areaID
     : (overview.areas[0]?.id ?? '');
+  // Etapa M1 (§3, M1-D4): las mesas divisibles solo con la capacidad table-unions-v1.
+  const groupsAvailable = serverHas(tableUnionsCapability);
 
   async function saveTable(current: RestaurantTable) {
     const saved = await execute<RestaurantTable>(
@@ -353,6 +357,7 @@ export function OperationsAdmin({
           const entry = tables.find((candidate) => candidate.id === id);
           if (entry) setPositions((current) => ({ ...current, [id]: { ...entry, x, y } }));
         }}
+        groups={groupsAvailable ? overview.groups : undefined}
       />
       {can('restaurant.tables.manage') && (
         <div className="button-row">
@@ -371,6 +376,9 @@ export function OperationsAdmin({
             Descartar posiciones locales
           </button>
         </div>
+      )}
+      {groupsAvailable && can('restaurant.tables.manage') && (
+        <TableGroupsAdmin overview={overview} areaID={selectedArea} execute={execute} busy={busy} />
       )}
       {can('restaurant.settings.manage') && (
         <Accordion

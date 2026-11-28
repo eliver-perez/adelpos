@@ -261,6 +261,9 @@ export const auditActionLabels: Record<string, string> = {
   'restaurant.account.move': 'Cambio de mesa de una cuenta',
   'restaurant.account.opened': 'Cuenta abierta',
   'restaurant.account.split': 'División de cuenta',
+  // Etapa M1: cada cuenta abierta de una unión de mesas registra cuándo se unió, se agregó o se quitó una mesa y
+  // cuándo se deshizo la unión.
+  'restaurant.account.table_union': 'Cambio de las mesas unidas de una cuenta',
   'restaurant.account.updated': 'Datos de una cuenta actualizados',
   'restaurant.area.saved': 'Área guardada',
   'restaurant.areas.reordered': 'Áreas reordenadas',
@@ -274,6 +277,12 @@ export const auditActionLabels: Record<string, string> = {
   'restaurant.table.enabled': 'Mesa habilitada',
   'restaurant.table.out_of_service': 'Mesa fuera de servicio',
   'restaurant.table.saved': 'Mesa guardada',
+  // Etapa M1: uniones de mesas y mesas divisibles (grupos de Áreas y distribución).
+  'restaurant.table_group.removed': 'Mesa divisible quitada',
+  'restaurant.table_group.saved': 'Mesa divisible guardada',
+  'restaurant.table_union.joined': 'Mesas unidas',
+  'restaurant.table_union.table_added': 'Mesa agregada a una unión',
+  'restaurant.table_union.table_removed': 'Mesa quitada de una unión',
   'role.created': 'Rol creado',
   'role.updated': 'Rol modificado',
   'session.expired': 'Sesión expirada',

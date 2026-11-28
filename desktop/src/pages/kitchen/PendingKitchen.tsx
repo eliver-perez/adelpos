@@ -59,7 +59,8 @@ export function releaseCase(release: Release, timezone: string) {
         'Se envió con la versión anterior, que lo detenía por un producto sin ruta o una estación desactivada.',
     };
   }
-  // Un pedido al que le quitaron la hora (K11-D9): la cocina no lo recibe hasta que alguien lo envía.
+  // Un pedido al que le quitaron la hora con la 0.17.0 (K11-D9): la cocina no lo recibe hasta que alguien lo envía.
+  // Desde la etapa M1 (M1-D17) quitar la hora lo envía en el momento, así que solo quedan así los de antes.
   return {
     title: 'Espera a que lo envíes a cocina',
     detail: 'La cocina no lo recibe hasta que toques «Enviar a cocina ahora».',
@@ -205,7 +206,7 @@ export function PendingKitchen({
                     </button>
                     <small className="muted">
                       {earlyDenied
-                        ? 'Para enviarlo antes de su hora hace falta el permiso de liberar anticipadamente.'
+                        ? 'Para enviarlo antes de su hora hace falta el permiso de enviar a cocina antes de tiempo.'
                         : early
                           ? 'La cocina lo recibe al momento, antes de su hora.'
                           : 'La cocina lo recibe al momento.'}

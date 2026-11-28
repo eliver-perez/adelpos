@@ -337,6 +337,10 @@ const reversible: Record<string, string> = {
     'bloque del borrador de la plantilla, con «Deshacer»',
   // Etapa A1 (fase B): quitar el PIN de un mesero se deshace asignándole otro; lo confirma un diálogo normal.
   'pages/UserPin.tsx: Quitar PIN': 'el PIN se puede volver a asignar en el mismo panel',
+  // Etapa M1: quitar una mesa de una unión abre el diálogo para elegirla; ninguna cuenta sale de la unión y la mesa
+  // se vuelve a agregar con «Agregar mesa».
+  'pages/restaurant/TablePanel.tsx: Quitar mesa':
+    'abre el diálogo; no saca cuentas de la unión y la mesa se vuelve a agregar con «Agregar mesa»',
 };
 // Componentes que reciben su texto por la propiedad `label` y solo quitan un renglón de un
 // formulario sin guardar (los repetibles del catálogo): secundarios, como `reversible`.

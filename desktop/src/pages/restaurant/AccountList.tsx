@@ -1,7 +1,8 @@
-import { preparationLabel } from '../../services/kitchen';
+import { accountNeedsPreparation, preparationLabel } from '../../services/kitchen';
 import { Field, Notice } from '../../components/Forms';
 import {
   accountLabel,
+  accountPlace,
   defaultTakeawayOrigin,
   elapsedTime,
   serverDateTime,
@@ -52,7 +53,8 @@ function placeText(account: Account, takeaway: boolean) {
   if (takeaway || account.mode === 'takeaway') {
     return account.origin && account.origin !== defaultTakeawayOrigin ? account.origin : '';
   }
-  return account.table_name ?? 'Sin mesa';
+  // Etapa M1: una cuenta de una unión de mesas se ve con el nombre de la unión («Mesa 5 + 6»).
+  return accountPlace(account) ?? 'Sin mesa';
 }
 
 // Pago y entrega se muestran separados de la preparación, con los estados que calcula Go.
@@ -125,12 +127,16 @@ function AccountCard({
         {account.state !== 'open' && (
           <span className="finance-badge account-card-state">{closedStateText(account)}</span>
         )}
-        <span
-          className={`finance-badge account-card-preparation account-preparation-${account.preparation_state}`}
-          title={`Preparación: ${preparation}`}
-        >
-          {preparationTags[account.preparation_state] ?? preparation}
-        </span>
+        {/* Etapa M1 (§5.2, M1-D15): una cuenta cuyos productos no necesitan preparación (por ejemplo, solo
+            refrescos sin ruta) no lleva etiqueta de cocina. */}
+        {accountNeedsPreparation(account) && (
+          <span
+            className={`finance-badge account-card-preparation account-preparation-${account.preparation_state}`}
+            title={`Preparación: ${preparation}`}
+          >
+            {preparationTags[account.preparation_state] ?? preparation}
+          </span>
+        )}
         <FinanceBadges account={account} takeaway={takeaway} />
         {/* Unidades enviadas o, sin ellas, las que esperan en el borrador; sin ninguna, la etiqueta
             de preparación («Sin productos») ya lo dice. */}

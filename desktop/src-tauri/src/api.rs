@@ -39,6 +39,16 @@ pub(crate) fn resource_id(id: Option<&str>) -> Result<&str, String> {
     Ok(value)
 }
 
+// resource_pair valida dos identificadores de registro que viajan juntos como «primero/segundo» (etapa M1: la unión y
+// la mesa de «Quitar mesa»). Cada uno se valida como un identificador solo, así que no pueden salir de su ruta.
+pub(crate) fn resource_pair(id: Option<&str>) -> Result<(&str, &str), String> {
+    let value = id.ok_or("Falta el identificador del registro.")?;
+    let (first, second) = value
+        .split_once('/')
+        .ok_or("El identificador del registro no es válido.")?;
+    Ok((resource_id(Some(first))?, resource_id(Some(second))?))
+}
+
 // report_key valida la clave de un reporte o de una fuente de filtros: minúsculas, puntos y guiones
 // bajos, sin barras ni caracteres que permitan salir de la ruta.
 pub(crate) fn report_key(id: Option<&str>) -> Result<&str, String> {
@@ -239,6 +249,11 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         // Etapa 9D: catálogo de motivos de cancelación de cuentas.
         "restaurant_cancel_reasons" => Some((Method::GET, "restaurant/cancel-reasons")),
         "restaurant_create_cancel_reason" => Some((Method::POST, "restaurant/cancel-reasons")),
+        // Etapa M1 (contrato §3, capacidad table-unions-v1): vista previa de una unión (no escribe), unir desde una mesa
+        // ocupada y crear una mesa divisible (grupo predefinido) en Áreas y distribución.
+        "restaurant_preview_union" => Some((Method::POST, "restaurant/table-unions/preview")),
+        "restaurant_create_union" => Some((Method::POST, "restaurant/table-unions")),
+        "restaurant_create_table_group" => Some((Method::POST, "restaurant/table-groups")),
         // Etapa 8 (fase A): inventario.
         "inventory_summary" => Some((Method::GET, "inventory/summary")),
         "inventory_settings" => Some((Method::GET, "inventory/settings")),
@@ -316,6 +331,15 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
             _ => return Err("Operación no autorizada por el puente nativo.".into()),
         };
         return Ok((method, path));
+    }
+    // Etapa M1 (contrato §3): quitar una mesa de una unión es la única ruta con dos registros en el camino, la unión y
+    // la mesa (resource_pair).
+    if operation == "restaurant_remove_union_table" {
+        let (union, table) = resource_pair(id)?;
+        return Ok((
+            Method::POST,
+            format!("restaurant/table-unions/{union}/tables/{table}/remove"),
+        ));
     }
     let identifier = resource_id(id)?;
     let (method, path) = match operation {
@@ -463,6 +487,16 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         "restaurant_save_cancel_reason" => (
             Method::PATCH,
             format!("restaurant/cancel-reasons/{identifier}"),
+        ),
+        // Etapa M1 (contrato §3): leer una unión, agregarle una mesa y cambiar o quitar una mesa divisible.
+        "restaurant_union" => (Method::GET, format!("restaurant/table-unions/{identifier}")),
+        "restaurant_add_union_table" => (
+            Method::POST,
+            format!("restaurant/table-unions/{identifier}/tables"),
+        ),
+        "restaurant_save_table_group" => (
+            Method::PATCH,
+            format!("restaurant/table-groups/{identifier}"),
         ),
         "payments_save_method" => (Method::PATCH, format!("payments/methods/{identifier}")),
         "payments_save_discount_reason" => (
@@ -1579,6 +1613,99 @@ mod tests {
         assert!(route("restaurant_deliver", Some(identifier)).is_err());
         assert!(route("restaurant_pay", Some(identifier)).is_err());
         assert!(route("restaurant_confirm", Some("../../settings")).is_err());
+    }
+
+    #[test]
+    fn stage_m1_table_union_routes_are_closed() {
+        // Etapa M1 (contrato §3): las rutas de uniones y de mesas divisibles, con el método y la ruta exactos de Go.
+        let union = "00000000-0000-4000-8000-0000000000a1";
+        let table = "00000000-0000-4000-8000-0000000000b2";
+        for (operation, method, path) in [
+            (
+                "restaurant_preview_union",
+                Method::POST,
+                "restaurant/table-unions/preview",
+            ),
+            (
+                "restaurant_create_union",
+                Method::POST,
+                "restaurant/table-unions",
+            ),
+            (
+                "restaurant_create_table_group",
+                Method::POST,
+                "restaurant/table-groups",
+            ),
+        ] {
+            assert_eq!(
+                route(operation, None).unwrap(),
+                (method.clone(), path.to_string()),
+                "{operation}"
+            );
+            // Un identificador no cambia una ruta sin identificador.
+            assert_eq!(
+                route(operation, Some("../../settings")).unwrap(),
+                (method, path.to_string()),
+                "{operation}"
+            );
+        }
+        for (operation, method, path) in [
+            (
+                "restaurant_union",
+                Method::GET,
+                format!("restaurant/table-unions/{union}"),
+            ),
+            (
+                "restaurant_add_union_table",
+                Method::POST,
+                format!("restaurant/table-unions/{union}/tables"),
+            ),
+            (
+                "restaurant_save_table_group",
+                Method::PATCH,
+                format!("restaurant/table-groups/{union}"),
+            ),
+        ] {
+            assert_eq!(
+                route(operation, Some(union)).unwrap(),
+                (method, path),
+                "{operation}"
+            );
+            assert!(route(operation, None).is_err(), "{operation}");
+            assert!(
+                route(operation, Some("../../settings")).is_err(),
+                "{operation}"
+            );
+        }
+        // «Quitar mesa»: la unión y la mesa juntas, cada una con su validación.
+        assert_eq!(
+            route(
+                "restaurant_remove_union_table",
+                Some(&format!("{union}/{table}"))
+            )
+            .unwrap(),
+            (
+                Method::POST,
+                format!("restaurant/table-unions/{union}/tables/{table}/remove")
+            )
+        );
+        for invalid in [
+            None,
+            Some(union.to_string()),
+            Some(format!("{union}/../../settings")),
+            Some(format!("../../x/{table}")),
+            Some(format!("{union}/{table}/{table}")),
+            Some(format!("{union}/")),
+        ] {
+            assert!(
+                route("restaurant_remove_union_table", invalid.as_deref()).is_err(),
+                "{invalid:?}"
+            );
+        }
+        // Sin rutas que el contrato no tiene.
+        assert!(route("restaurant_table_groups", None).is_err());
+        assert!(route("restaurant_delete_table_group", Some(union)).is_err());
+        assert!(route("restaurant_dissolve_union", Some(union)).is_err());
     }
 
     #[test]

@@ -12,10 +12,14 @@ import type {
   Bill,
   DraftItem,
   RestaurantTable,
+  ScreenUnion,
+  TableGroup,
   TableState,
+  TableUnion,
 } from '../../services/restaurant';
 import type { BillAction } from './capture/BillFooter';
 import { CheckoutButton, accountMoreActions } from './capture/BillFooter';
+import { KitchenTag } from './capture/BillLines';
 import { MoreActions } from './capture/MoreActions';
 
 // Estado en el encabezado del panel: color, icono y texto, como en el mapa (no solo color).
@@ -28,8 +32,9 @@ function StateChip({ state }: { state: TableState }) {
   );
 }
 
-// Productos de la cuenta en el panel: enviados con «En cocina» y su importe de Go; nuevos (aún sin
-// enviar) con «Nuevo», sin importe (la cotización vive en la captura).
+// Productos de la cuenta en el panel: enviados con su estado de cocina (etapa M1, §5.1 y §5.2: el que manda Go,
+// como la captura; antes «En cocina» fijo) y su importe de Go; nuevos (aún sin enviar) con «Nuevo», sin importe (la
+// cotización vive en la captura).
 function PanelLines({
   bill,
   localDraft,
@@ -50,7 +55,7 @@ function PanelLines({
           <span className="table-panel-line-name">
             {line.quantity} × {line.quote_line.name}
           </span>
-          <span className="capture-tag">En cocina</span>
+          <KitchenTag line={line} />
           <strong className="table-panel-line-total">{formatMoney(line.totals.total)}</strong>
         </li>
       ))}
@@ -126,6 +131,105 @@ function EmptyTotals() {
 // Más… son secundarios.
 const captureLabel = 'Capturar pedidos en esta mesa';
 
+// Etapa M1 (§1 y §3; contrato §10): acciones de unir mesas del panel. Sin la capacidad table-unions-v1 o sin el
+// permiso «Unir mesas», la pantalla no las pasa y el panel no muestra nada nuevo.
+export interface TableJoinActions {
+  onJoin: () => void;
+  onGroup: (group: TableGroup) => void;
+  onAddTable: (union: TableUnion) => void;
+  onRemoveTable: (union: TableUnion) => void;
+  onDropScreenUnion: () => void;
+}
+
+// Unir mesas desde el panel: la unión que vive en la pantalla (con su nota y «Deshacer la unión»), «Agregar mesa» y
+// «Quitar mesa» de una unión abierta, o «Unir con…» y el atajo del grupo de una mesa sola.
+function UnionActions({
+  table,
+  union,
+  screenUnion,
+  group,
+  actions,
+  blocked,
+}: {
+  table: RestaurantTable;
+  union: TableUnion | null;
+  screenUnion: ScreenUnion | null;
+  group: TableGroup | null;
+  actions: TableJoinActions;
+  blocked: boolean;
+}) {
+  if (screenUnion) {
+    return (
+      <div className="table-panel-union" role="group" aria-label="Unión de mesas">
+        <p className="muted">
+          La unión se guarda con el primer producto. Si sales sin capturar nada, no queda guardada.
+        </p>
+        <div className="table-panel-union-actions">
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={blocked}
+            onClick={actions.onDropScreenUnion}
+          >
+            <IconLabel icon="split">Deshacer la unión</IconLabel>
+          </button>
+        </div>
+      </div>
+    );
+  }
+  if (union) {
+    return (
+      <div className="table-panel-union" role="group" aria-label="Unión de mesas">
+        <div className="table-panel-union-actions">
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={blocked}
+            onClick={() => actions.onAddTable(union)}
+          >
+            <IconLabel icon="plus">Agregar mesa</IconLabel>
+          </button>
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={blocked}
+            onClick={() => actions.onRemoveTable(union)}
+          >
+            <IconLabel icon="close">Quitar mesa</IconLabel>
+          </button>
+        </div>
+      </div>
+    );
+  }
+  if (!table.active || table.out_of_service) {
+    return null;
+  }
+  return (
+    <div className="table-panel-union" role="group" aria-label="Unión de mesas">
+      <div className="table-panel-union-actions">
+        <button
+          type="button"
+          className="secondary-button"
+          disabled={blocked}
+          onClick={actions.onJoin}
+        >
+          <IconLabel icon="table">Unir con…</IconLabel>
+        </button>
+        {group && (
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={blocked}
+            onClick={() => actions.onGroup(group)}
+          >
+            <IconLabel icon="table">{`Unir ${group.name}`}</IconLabel>
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // Panel lateral de la mesa seleccionada en el mapa (etapa 6.2): nombre, estado y tiempo abierta;
 // cuentas abiertas como botones; productos, totales y acciones de la cuenta elegida.
 //
@@ -156,6 +260,10 @@ export function TablePanel({
   onDiscard,
   onService,
   longOpenHours,
+  union = null,
+  screenUnion = null,
+  group = null,
+  joining = null,
 }: {
   table: RestaurantTable;
   // Cuentas abiertas de la mesa; null mientras se consultan.
@@ -177,6 +285,13 @@ export function TablePanel({
   onService: (outOfService: boolean) => void;
   // Umbral de cuenta abierta por mucho tiempo (settings.long_open_hours de Go), para el texto.
   longOpenHours?: number;
+  // Etapa M1: la unión abierta de la mesa (el panel es el de la unión: su nombre, su capacidad y sus cuentas), la
+  // unión que vive en la pantalla desde esta mesa, el grupo del que la mesa es sección y las acciones de unir (null
+  // sin la capacidad o sin el permiso «Unir mesas»).
+  union?: TableUnion | null;
+  screenUnion?: ScreenUnion | null;
+  group?: TableGroup | null;
+  joining?: TableJoinActions | null;
 }) {
   // Etapa 9F (§4.5): el nombre visible de la precuenta que eligió el restaurante.
   const precheck = usePrecheckName();
@@ -187,7 +302,12 @@ export function TablePanel({
   const oldest = open.reduce((seconds, account) => Math.max(seconds, account.elapsed_seconds), 0);
   const inService = table.active && !table.out_of_service;
   const canOpen = can('accounts.open') && inService;
-  const canManage = can('restaurant.tables.manage') && table.active;
+  // Una mesa unida no se pone fuera de servicio (está ocupada por la unión) ni se administra desde su panel.
+  const canManage = can('restaurant.tables.manage') && table.active && !union;
+  // Etapa M1: el panel de una unión lleva su nombre y su capacidad sumada (las calcula Go); el de una unión en
+  // pantalla, los de la vista previa de Go.
+  const title = union?.name ?? screenUnion?.name ?? table.name;
+  const seats = union?.seats ?? screenUnion?.seats ?? table.seats;
   // Solo se muestra la cuenta elegida si sigue abierta en esta mesa.
   const current = bill && open.some((account) => account.id === bill.account.id) ? bill : null;
   const account = current?.account ?? null;
@@ -244,17 +364,17 @@ export function TablePanel({
   // Etapa 9C (§4): el estado va en la etiqueta del encabezado; debajo del nombre, la capacidad
   // (la cuenta no guarda comensales) y el tiempo abierta, cada dato con su icono.
   return (
-    <aside className="table-panel" aria-label={`Panel de ${table.name}`}>
+    <aside className="table-panel" aria-label={`Panel de ${title}`}>
       <header className="table-panel-header">
         <div className="table-panel-title">
           <h2>
             <Icon name="table" size={22} className="table-panel-icon" />
-            {table.name}
+            {title}
           </h2>
           <ul className="table-panel-facts muted" aria-label="Datos de la mesa">
             <li>
               <Icon name="users" size={15} />
-              Mesa para {table.seats}
+              Mesa para {seats}
             </li>
             {occupied && (
               // Etapa 9D (§3.4): con una cuenta abierta más horas que el umbral (long_open, de
@@ -272,6 +392,16 @@ export function TablePanel({
         </div>
         <StateChip state={state} />
       </header>
+      {joining && (
+        <UnionActions
+          table={table}
+          union={union}
+          screenUnion={screenUnion}
+          group={group}
+          actions={joining}
+          blocked={blocked}
+        />
+      )}
       {accounts === null ? (
         <p className="muted table-panel-body">Consultando cuentas de la mesa…</p>
       ) : !occupied ? (

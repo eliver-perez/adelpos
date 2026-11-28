@@ -307,6 +307,15 @@ export type Operation =
   | 'restaurant_cancel_reasons'
   | 'restaurant_create_cancel_reason'
   | 'restaurant_save_cancel_reason'
+  // Etapa M1 (capacidad table-unions-v1): uniones de mesas y mesas divisibles (services/restaurant.ts).
+  // restaurant_remove_union_table lleva la unión y la mesa como «unión/mesa» (resource_pair de api.rs).
+  | 'restaurant_preview_union'
+  | 'restaurant_create_union'
+  | 'restaurant_union'
+  | 'restaurant_add_union_table'
+  | 'restaurant_remove_union_table'
+  | 'restaurant_create_table_group'
+  | 'restaurant_save_table_group'
   // Etapa 8 (fase A): inventario.
   | 'inventory_summary'
   | 'inventory_settings'

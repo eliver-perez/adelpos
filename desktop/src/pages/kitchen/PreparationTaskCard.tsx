@@ -1,4 +1,4 @@
-import { preparationLabels } from '../../services/kitchen';
+import { taskStateLabel } from '../../services/kitchen';
 import type { Task } from '../../services/kitchen';
 import { elapsedTime } from '../../services/restaurant';
 import { accountContext, taskUrgency, urgencyLabels, visibleParts } from './preparationModel';
@@ -31,7 +31,8 @@ export function PreparationTaskCard({
     >
       <div className="section-heading">
         <strong className="kitchen-task-station">{task.station_name}</strong>
-        <span className="kitchen-state-label">{preparationLabels[task.state]}</span>
+        {/* Etapa M1 (§5.4, M1-D18): lo que llegó y nadie ha empezado dice «Por preparar». */}
+        <span className="kitchen-state-label">{taskStateLabel(task.state)}</span>
       </div>
       <p className="kitchen-task-context">
         #{task.folio} · {accountContext(task.account_name, task.table_name)}

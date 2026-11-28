@@ -3,7 +3,7 @@ import { Notice } from '../../../components/Forms';
 import { useConfirmDialog } from '../../../components/ConfirmDialog';
 import { usePendingEntry } from '../../../hooks/pendingOperations';
 import type { Lookups } from '../../../services/catalog';
-import { preparationLabel } from '../../../services/kitchen';
+import { accountNeedsPreparation, preparationLabel } from '../../../services/kitchen';
 import { IconLabel } from '../../../components/Icon';
 import { formatMoney } from '../../../services/money';
 import {
@@ -40,10 +40,11 @@ function paymentDescription(account: Account) {
 }
 
 // Encabezado de la cuenta: preparación y, en el salón, el pago. Etapa 9D (§4.4): «Enviado · sin
-// confirmar en cocina» se indica una sola vez en cada producto y ya no se repite aquí.
+// confirmar en cocina» se indica una sola vez en cada producto y ya no se repite aquí. Etapa M1 (§5.2, M1-D15): una
+// cuenta cuyos productos no necesitan preparación no dice nada de cocina.
 function headerDescription(account: Account) {
   const parts: string[] = [];
-  if (account.preparation_state !== 'pending_release') {
+  if (account.preparation_state !== 'pending_release' && accountNeedsPreparation(account)) {
     parts.push(`Preparación: ${preparationLabel(account.preparation_state)}`);
   }
   if (account.mode !== 'takeaway') {
