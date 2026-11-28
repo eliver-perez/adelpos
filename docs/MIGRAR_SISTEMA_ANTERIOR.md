@@ -1,7 +1,9 @@
 # Migrar el sistema anterior
 
 Guía corta para pasar a AD-EL POS **todo lo del sistema anterior**: productos, categorías, complementos, mesas,
-usuarios y el historial completo de ventas, pagos, cortes y retiros. Desde la versión 0.11.0 (etapa 9H).
+usuarios y el historial completo de ventas, pagos, cortes y retiros. Desde la versión 0.11.0 (etapa 9H). Desde la
+0.18.0 también arma las **mesas divisibles** que reconoce por el nombre de sus mesas («Mesas divisibles del sistema
+anterior», al final de la sección 3).
 
 Se hace en dos pasos, con el asistente **«Migrar del sistema anterior»**:
 
@@ -122,7 +124,32 @@ Después de importar:
   **«Datos»** elige «AD-EL POS y sistema anterior» (lo normal, para comparar con años anteriores), «Solo AD-EL POS» o
   «Solo sistema anterior», y la columna «Datos» dice de dónde viene cada renglón. Un reporte abarca hasta 400 días:
   compara un año a la vez.
+- **Mesas divisibles**: las que la importación reconoce quedan listas en **Mesas › Áreas y distribución › «Mesas
+  divisibles»** (abajo).
 - Todo queda anotado en el **Registro de movimientos**: la preparación, la importación y su resultado.
+
+### Mesas divisibles del sistema anterior
+
+El sistema anterior no tenía mesas divisibles: solo una lista de mesas. Desde la 0.18.0 la importación reconoce una mesa
+divisible **por el nombre de sus mesas** y la arma como grupo (cómo se usa, en [UNIR_MESAS.md](UNIR_MESAS.md)):
+
+- **Las secciones**: dos o más mesas con el mismo número y una letra, seguidas desde la a («Mesa 3a», «Mesa 3b» y «Mesa
+  3c», o «3a», «3b» y «3c»; da igual si la letra va en mayúscula). Se crea la mesa divisible **«Mesa 3»** (o «3» si las
+  secciones no llevan la palabra «Mesa») con esas secciones en el orden de sus letras. Las secciones **conservan su
+  nombre** y quedan acomodadas juntas en el mapa, en un mismo renglón si caben.
+- **Si además existe la mesa «Mesa 3»** (o «3»), esa mesa **se vuelve la mesa divisible**: ya no se crea como una mesa
+  aparte, porque su nombre lo toma el grupo. Sus ventas anteriores no se pierden: siguen en el historial importado con
+  su nombre. Por eso el conteo de mesas del resumen y de la validación no la cuenta. El resumen lo dice en «Para tener
+  en cuenta»: «La mesa «Mesa 3» del sistema anterior ahora es la mesa divisible: ya no es una mesa aparte y sus ventas
+  anteriores siguen en el historial con su nombre.».
+- **Lo que no es seguro no se arma**: si las letras se repiten o no van seguidas desde la a («Mesa 12a» y «Mesa 12c»),
+  si hay una sola sección o si hay más de una mesa con el mismo número («Mesa 20» y «20»), las mesas quedan como mesas
+  normales y el resumen lo dice en «Para tener en cuenta» (por ejemplo, «Las mesas «Mesa 12a» y «Mesa 12c» parecen
+  secciones de una misma mesa, pero sus letras se repiten o no van seguidas desde la a. Quedaron como mesas normales;
+  si son una mesa divisible, arma el grupo en Áreas y distribución.»). Si de verdad es una mesa divisible, ármala a
+  mano en **Mesas › Áreas y distribución › «Mesas divisibles»** después de importar.
+- **Con el respaldo del restaurante** la importación arma una sola mesa divisible, **«Mesa 3», con cuatro secciones**
+  («Mesa 3a» a «Mesa 3d»), sin casos dudosos. Si la 3d no es parte de la mesa en U, quítala del grupo en «Editar».
 
 ## 4. Repetirlo al pasar a producción
 
@@ -141,6 +168,10 @@ Cuando decidas dejar el sistema anterior:
      final.
    - Lo importado antes que ya no viene en el paquete se borra si nada lo usa; si ya se usó, se desactiva y queda como
      retirado.
+   - Las **mesas divisibles** que armó la importación anterior se vuelven a calcular con el paquete nuevo (sección 3).
+     Las que armaste tú **se conservan**; si una tuya ya usa el nombre o una sección de una del sistema anterior, esa
+     del sistema anterior no se crea. Si una tuya se queda con menos de dos secciones (porque sus mesas ya no vienen),
+     se quita.
    - Reemplazar no se puede deshacer, salvo restaurando el respaldo que se hace antes.
 4. **En cuanto haya operación propia en AD-EL POS** (la primera venta, el primer turno de caja o el primer movimiento),
    **ya no se podrá volver a importar**. Por eso la importación final va justo antes de empezar a vender con AD-EL POS.

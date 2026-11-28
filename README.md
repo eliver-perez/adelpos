@@ -99,6 +99,8 @@ Desde la etapa 9D el **panel lateral de Mesas está siempre visible**: sin mesa 
 
 Desde la 9D, «Nuevo pedido» de Para llevar y «Cuenta sin mesa» entran a la captura sin crear nada: el pedido o la cuenta nacen al guardar el primer producto y, si se sale sin productos, no queda nada guardado (los datos del cliente se capturan después del primer producto). Las cuentas vacías que ya existían se quitan con **Descartar cuenta vacía**, sin motivo y sin contarlas como cancelación. Las tarjetas de Para llevar y de Mesas › Cuentas ocupan dos renglones (caben más del doble), el detalle dice «Enviado · sin confirmar en cocina» una sola vez por producto, el desglose solo muestra lo elegido y el descuento si lo hay, y «Modificar» y «Cancelar unidades» pasan a un menú que se abre al tocar el producto o «⋯».
 
+**Unir mesas** (etapa M1, servidor 0.18.0): desde el panel de una mesa, **«Unir con…»** junta mesas libres del mismo área en una sola, «Mesa 5 + 6», con un solo contorno en el mapa, sus cuentas, su precuenta y su cobro; desde una mesa ocupada sus cuentas pasan a la unión, desde una libre la unión se guarda con el primer producto, y se deshace sola al quedarse sin cuentas abiertas. En **Áreas y distribución › Mesas divisibles** se configura una mesa en U («Mesa 3» con 3A, 3B y 3C) que se une de un toque. Lo decide todo Go; guía del propietario en [docs/UNIR_MESAS.md](docs/UNIR_MESAS.md). Desde la misma etapa, la etiqueta de cocina de cada renglón sigue el estado real («En cocina», «En preparación», «Listo»), lo que no necesita preparación no lleva etiqueta y quitarle la hora a un pedido programado lo envía a cocina en ese momento.
+
 Desde **Acciones de cuenta** divide cantidades enteras, transfiere productos, combina cuentas, cambia mesa/responsable o consulta historial. Las unidades conservan identidad, personalización y centavos; las transferencias no generan preparación adicional. Una revisión obsoleta conserva la captura para revisión. Una respuesta incierta se recupera con el mismo UUID para evitar duplicados.
 
 **Para llevar** utiliza listado a la izquierda y cuenta a la derecha, orden por antigüedad, búsqueda, avisos configurables y programación en la zona horaria del establecimiento. Ventanilla es un origen de esta misma modalidad. Confirmar crea una intención durable y resuelve la liberación real a cocina; la configuración incompleta deja advertencias y el pedido conservado. Preparación, pago y entrega permanecen separados: un pedido para llevar se marca entregado solo cuando está liquidado.
@@ -220,6 +222,7 @@ ad-el-pos/
 │   ├── internal/kitchen/       # Preparación, documentos, transportes y trabajadores
 │   ├── internal/events/        # Outbox, cursor y replay autenticado
 │   ├── internal/operations/    # Mesas, cuentas, pedidos, unidades e historial
+│   ├── internal/tableunions/   # Uniones de mesas: nombre, lugar de la cuenta, instantánea y SettleEmpty (etapa M1)
 │   ├── internal/payments/      # Cobros, IVA, descuentos, devoluciones, tickets y caja (turnos, cortes, arqueo y cierre)
 │   ├── internal/inventory/     # Insumos, almacenes, existencias, costos, recetas, consumo, compras, ajustes y conteos
 │   ├── internal/reports/       # Reportes, resumen ejecutivo y exportación PDF/Excel (solo lectura)

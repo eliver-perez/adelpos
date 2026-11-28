@@ -7,6 +7,11 @@ llega a su estación y lo demás sigue el ajuste «Productos sin ruta» de Enrut
 liberaciones bloqueadas es historia de las versiones anteriores, salvo donde se indica; la regla vigente está en
 «Pedidos mixtos y productos sin ruta · etapa K1.1», al final.
 
+**Desde la etapa M1 (servidor 0.18.0, esquema 31)** quitar la hora a un pedido programado lo envía a cocina en ese
+momento (M1-D17, reemplaza K11-D9), un producto que no necesita preparación no lleva etiqueta de cocina (M1-D15) y la
+comanda, la pantalla de cocina y Preparación dicen el nombre de la unión de mesas («Mesa 5 + 6»): ver «Uniones de mesas,
+etiquetas por renglón y textos de Preparación · etapa M1», al final.
+
 ## Configuración inicial
 
 Abrir **Cocina y preparación** con permisos administrativos. No se crean estaciones, rutas, impresoras ni pedidos ficticios en la instalación real.
@@ -113,7 +118,7 @@ Una copia adicional usa un trabajo nuevo enlazado al original. Solo se solicita 
 
 ## Preparación y pantallas del POS
 
-**Preparación** muestra estación, cuenta, producto, cantidad, notas, antigüedad, tiempos y avisos. Filtra por estación/estado y pagina hasta 250 tareas. Permite avanzar de liberado a en preparación o listo, por partida o por pedido conforme a la configuración. No permite retroceder una tarea lista ni preparar unidades canceladas. Las revisiones evitan que otra terminal sobrescriba cambios recientes.
+**Preparación** muestra estación, cuenta, producto, cantidad, notas, antigüedad, tiempos y avisos. Filtra por estación/estado y pagina hasta 250 tareas. Permite avanzar de liberado (desde la etapa M1 la tarjeta dice «Por preparar», M1-D18) a en preparación o listo, por partida o por pedido conforme a la configuración. No permite retroceder una tarea lista ni preparar unidades canceladas. Las revisiones evitan que otra terminal sobrescriba cambios recientes.
 
 Una cuenta está lista cuando todas sus tareas activas de todas las estaciones están listas. La recepción KDS, aceptación de impresión, pago y entrega son estados diferentes. Una exención explícita sin preparación no crea tareas ficticias. Las cuentas y partidas del restaurante y para llevar muestran los estados calculados por Go; **Preparación y comandas** abre el detalle de la cuenta.
 
@@ -338,9 +343,11 @@ encabezado de la cuenta, a «Pendiente de liberación · revisar cocina» (`prep
 `kitchen.VersionPreparation` devuelve cuando una versión tiene unidades activas sin liberación canónica en
 `kitchen_unit_releases` y ninguna liberación programada); en la tarjeta de la cuenta, «Sin confirmar en cocina». Significa que el pedido se confirmó, pero
 **la cocina todavía no lo recibió**. **Desde la etapa K1.1 casi nunca aparece**: un envío ya no se bloquea, así que solo
-la dicen un pedido al que se le quitó la hora de su programación (espera en «Por enviar a cocina» a que alguien lo
-envíe, K11-D9) y un bloqueado de antes de la 0.17.0 de una cuenta todavía abierta. Lo que sigue es cómo era hasta la
-0.16.0, cuando **su liberación quedaba bloqueada**:
+la dicen un pedido al que se le quitó la hora de su programación **con la 0.17.0** (espera en «Por enviar a cocina» a
+que alguien lo envíe, K11-D9; desde la 0.18.0 quitar la hora lo envía en ese momento, M1-D17) y un bloqueado de antes
+de la 0.17.0 de una cuenta todavía abierta. Desde la etapa M1 tampoco la lleva un producto que no necesita preparación
+(`preparation_required: false`, M1-D15). Lo que sigue es cómo era hasta la 0.16.0, cuando **su liberación quedaba
+bloqueada**:
 
 - al confirmar, `prepareRelease` no encuentra ruta («Sin ruta de preparación: producto»), estación activa o destino válido
   y deja la liberación `blocked` sin unidades liberadas, con una advertencia por unidad: no se imprime nada, no se crean
@@ -719,7 +726,7 @@ pedido real. React no calcula rutas: solo agrupa lo que Go resolvió.
   0.16.0 respondía 200 sin hacer nada, o mandaba a la cocina el pedido de una cuenta ya cobrada); **«Volver a avisar»**
   (`POST kitchen/changes/{event_id}/retry`), 409 `KITCHEN_CHANGE_NOT_PENDING` con un aviso terminado.
 
-### El panel «Por enviar a cocina» (K11-D8 y K11-D9)
+### El panel «Por enviar a cocina» (K11-D8, K11-D9 y M1-D17)
 
 En **Cocina › Preparación**, para quien tiene `kitchen.stations.all` (`pages/kitchen/PendingKitchen.tsx`; hasta la
 0.16.0, «Pendientes de liberación y avisos»), con el resumen «N pedidos · N avisos». Lo que queda con la regla nueva:
@@ -728,7 +735,7 @@ En **Cocina › Preparación**, para quien tiene `kitchen.stations.all` (`pages/
 | -------------------------------------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
 | Programado que se envía solo                             | «Programado: se envía solo a su hora»                   | «Se envía a cocina solo el {día} a las {hora}.»                                                         | «Enviar a cocina ahora» y «Cambiar la hora» |
 | Programado manual                                        | «Programado: espera a que lo envíes»                    | «Programado para el {día} a las {hora}. Espera a que lo envíes a cocina.»                               | «Enviar a cocina ahora» y «Cambiar la hora» |
-| Programado al que se le quitó la hora (K11-D9)           | «Espera a que lo envíes a cocina»                       | «La cocina no lo recibe hasta que toques «Enviar a cocina ahora».»                                      | «Enviar a cocina ahora»                     |
+| Programado al que se le quitó la hora con la 0.17.0      | «Espera a que lo envíes a cocina»                       | «La cocina no lo recibe hasta que toques «Enviar a cocina ahora».»                                      | «Enviar a cocina ahora»                     |
 | Bloqueado de antes de la 0.17.0, de una cuenta abierta   | «La cocina no recibió este pedido»                      | «Se envió con la versión anterior, que lo detenía por un producto sin ruta o una estación desactivada.» | «Enviar a cocina ahora»                     |
 | Aviso para una estación desactivada que tenía la comanda | «La cocina no recibió una modificación» (o cancelación) | «No se pudo avisar a Barra: está desactivada.» y «Actívala en Cocina › Estaciones y vuelve a avisar.»   | «Volver a avisar»                           |
 
@@ -742,6 +749,9 @@ En **Cocina › Preparación**, para quien tiene `kitchen.stations.all` (`pages/
   se cancelaron o la cuenta se cerró antes de enviarlo.»), y Cocina › Historial nombra «Pedido sin enviar dado por
   terminado», «Aviso sin entregar dado por terminado» y «Productos sin ruta actualizado», con el motivo en palabras.
 - Sin la capacidad `kitchen-coverage-v1` (un servidor 0.16.0), el panel es el de siempre.
+- **Desde la 0.18.0 (M1-D17) ya no entra ningún pedido nuevo en la fila «Programado al que se le quitó la hora»**:
+  quitar la hora lo envía en la misma transacción. La fila se conserva para los que quedaron así con la 0.17.0 (la
+  instalación del propietario puede tener alguno), hasta enviarlos o cerrar su cuenta.
 
 ### Configuración guiada en el escritorio (K11-D6, K11-D7 y K11-D22)
 
@@ -775,8 +785,9 @@ En la misma transacción del migrador (el `host` respalda antes de migrar):
 
 ### Limitaciones
 
-- **Quitar la hora a un pedido programado no lo envía** (K11-D9): queda «Espera a que lo envíes a cocina» hasta que
-  alguien toca «Enviar a cocina ahora».
+- **Hasta la 0.17.0, quitar la hora a un pedido programado no lo enviaba** (K11-D9): quedaba «Espera a que lo envíes a
+  cocina» hasta que alguien tocaba «Enviar a cocina ahora». **Corregido en la etapa M1** (M1-D17): desde la 0.18.0 se
+  envía en ese momento, como un pedido sin hora.
 - **Inventario de los pendientes viejos** (K11-D11): lo que quedó bloqueado nunca consumió existencias, y darlo por
   terminado no registra ese consumo.
 
@@ -785,3 +796,76 @@ En la misma transacción del migrador (el `host` respalda antes de migrar):
 `administration`), Vitest y `workflow-stagez-k11-assistant.spec.ts` y `workflow-stagez-k11-diagnostics.spec.ts`
 (Chromium y WebKit); regresión en [VERIFICATION_STAGEK1_1.md](VERIFICATION_STAGEK1_1.md). **Pendiente**: la comanda en
 papel, una tableta real y la ventana nativa.
+
+## Uniones de mesas, etiquetas por renglón y textos de Preparación · etapa M1
+
+Etapa M1 (servidor 0.18.0, esquema 31; especificación [etapas/ETAPA_M1_MESAS.md](etapas/ETAPA_M1_MESAS.md) y decisiones
+M1-D1 a M1-D43 en [ETAPA_M1_AVANCE.md](ETAPA_M1_AVANCE.md)). La aplicación de cocina no cambió (sigue en 0.1.0, M1-D14):
+pinta el título que manda Go. Guía para el propietario: [UNIR_MESAS.md](UNIR_MESAS.md).
+
+### El nombre de la unión en cocina (§1.5, M1-D14)
+
+- **Comanda impresa** (`kitchen/releases.go`): «Salón · Mesa 5 + 6». **Pantalla de cocina** (`title` de
+  `kitchen/display.go`): «Mesa 5 + 6». **Preparación** (`table_name` de la tarea, `kitchen/reads.go`) y los **avisos de
+  platillos listos** (`administration/ready_alerts.go`): el nombre de la unión. Todos leen el lugar de la cuenta con el
+  mismo fragmento SQL de Go (`internal/tableunions`: la unión abierta de su mesa o la mesa sola) y lo pasan por
+  `documents.TableContext`, así que dicen «Mesa 5 + 6» también con mesas llamadas «5» y «6». Una mesa sola sigue como
+  antes.
+- **Un cambio de la unión con tarjetas en cocina** (unir, agregar, quitar o deshacerse) publica
+  `restaurant.account.table_union` por cada cuenta abierta afectada, en la misma transacción. Está en
+  `displayAccountKinds`: la pantalla de cocina vuelve a leer el encabezado de la tarjeta (el evento de encabezado de la
+  K1, K1-D7).
+- **El subtítulo de la tarjeta no repite** una cuenta sin nombre propio que se llama como la unión (con o sin «Mesa»), ni
+  la referencia recortada en « + …» de una unión de nombre largo (M1-D29).
+
+### La etiqueta de cada renglón sigue a Go (§5.1, M1-D15)
+
+- La etiqueta de cocina de cada renglón del escritorio (captura y panel de la mesa) sale de una sola regla,
+  `lineKitchenTag` (`desktop/src/services/kitchen.ts`), con el estado que manda Go y los mismos textos que la aplicación
+  de meseros (`WaiterBadges.kt`): «Listo» (en turquesa), «En preparación», «En cocina» (`released`), «Programado para
+  preparación», «Enviado · sin confirmar en cocina», «Cambio de cocina pendiente de revisión» y «Pendiente de
+  liberación».
+- **La causa** del defecto de la 0.17.0 era del escritorio: la captura ponía siempre «En cocina» con el estado real en
+  gris al lado y el panel de la mesa tenía «En cocina» fijo. Fallaba igual con la marca de la pantalla de cocina que con
+  la de Preparación del escritorio (el mismo campo y el mismo dibujo).
+
+### Sin etiqueta para lo que no necesita preparación (§5.2, M1-D15 y M1-D34)
+
+- Go manda **`preparation_required`** en cada renglón confirmado y en cada cuenta (`kitchen.VersionPreparationRequired`
+  y `kitchen.AccountPreparationRequired`). Un renglón es `false` cuando ya se liberó y **ninguna** de sus unidades generó
+  tarea de preparación (un producto sin ruta con «No necesitan preparación», una ruta «Sin preparación»); antes de
+  liberarse (programado o pendiente) es `true`, y un combo con algún componente con tarea también (los combos no
+  cambian). Una cuenta es `true` si al menos un renglón vigente lo es, o si no tiene renglones confirmados.
+- Con `false`, el escritorio y Android no ponen **ninguna etiqueta de cocina**: ni en el renglón, ni en la tarjeta de la
+  cuenta, ni «Preparación: …» en su encabezado; «Cocina» de la cuenta dice «Los productos de esta cuenta no necesitan
+  preparación.». Un renglón cancelado conserva «Cancelado» (es su estado, no una etiqueta de cocina). Un cliente que no
+  recibe el campo (un servidor anterior) lo trata como `true`.
+
+### Quitar la hora envía a cocina (§5.3, M1-D17)
+
+- Al integrar `account.updated` de un pedido que se queda sin hora, cocina **libera en la misma transacción** las
+  liberaciones que acaban de quedar sin hora (`prepareRelease`, como un pedido sin hora). La respuesta del `PATCH` de la
+  cuenta se lee después de integrar cocina, así que ya trae `released`. Reemplaza K11-D9.
+- Los que se quedaron sin hora con la 0.17.0 siguen en «Por enviar a cocina» con «Espera a que lo envíes a cocina» hasta
+  enviarlos o cerrar su cuenta (`PendingKitchen.tsx`, M1-D28).
+
+### Textos de Preparación (§5.4, M1-D18 y M1-D43)
+
+| Antes                                                                                  | Desde la 0.18.0                                                                                |
+| -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| «Liberado a preparación» (la tarjeta de una tarea que llegó y nadie ha empezado)       | «Por preparar» (para no confundirse con «En preparación»), también en el historial             |
+| «No hay unidades de preparación en este filtro.»                                       | «No hay pedidos con este filtro.»                                                              |
+| «Liberar a cocina automáticamente a su hora»                                           | «Enviar a cocina automáticamente a su hora»                                                    |
+| «Esta operación ajusta preparación; conserva cantidades, precios y la hora comercial…» | «Solo cambia cuándo llega el pedido a cocina: sus productos, cantidades y precios no cambian.» |
+| «…el permiso de liberar anticipadamente.»                                              | «…el permiso de enviar a cocina antes de tiempo.»                                              |
+
+En las vistas de la cuenta, `released` dice «En cocina» (antes «Liberado a preparación»), en el escritorio y en Android.
+**Sin cambiar en esta etapa** (M1-D43: la §5.4 solo pide Preparación; quedan como sugerencia): la liberación automática
+y su anticipación de Cocina › Comandas y tiempos, los textos de Comandas y de Enrutamiento, «Liberación manual
+revisada» del historial de cocina y el panel que solo se ve con servidores anteriores a la 0.17.0 (`PendingReleases`).
+
+**Verificación**: integración PostgreSQL (`TestStageM1UnionReaders`, `TestStageM1NoPreparationLines` y
+`TestStageM1RemovingScheduleSends` en `operations`), Vitest (`lineKitchenTag` y Preparación), Playwright
+`workflow-stagez-m1-labels.spec.ts`, `workflow-stage9d-accounts.spec.ts` y `workflow-stagez-k11-diagnostics.spec.ts`
+(Chromium y WebKit) y la suite `unions` de Android (u10, el refresco sin etiqueta). **Pendiente**: la comanda en papel
+con una unión y una tableta de cocina real.
