@@ -2304,3 +2304,271 @@ Se fusiona otra vez `etapa-m1-c` en `etapa-m1`. `android-core`, `cocina`, `backe
     aplicación y lo dice; no se corrige en esta etapa salvo que sea de la aplicación y sencillo.
   - **El diálogo de cancelar tardó más de 10 s** en cerrarse una vez, con el emulador muy cargado. En las demás corridas
     tardó entre 88 y 190 ms. La Fase F lo vigila en la regresión.
+
+## Fase B · Escritorio: unir mesas, mesas divisibles y ajustes del escritorio (§5.1, §5.2, §5.4)
+
+Árbol `$SP/wt/m1-b`, rama `etapa-m1-b` (desde `etapa-m1` `f925b891`, con las fases A, E, C y las pruebas del revisor;
+`etapa-m1` `7c15d38e`, con M1-D29 a M1-D33, fusionada en `64c562a7`), `ISO_TAG=B`. Playwright con el arnés y los cuatro
+servidores de la suite completa (Go 8231, vista previa 1441, base limpia 8232, Go sin activar 8234, simulador de
+licencias 8492; envoltorio `$SP/m1/b-run.sh`). Sin Go temporal a mano y sin emuladores. Se probó siempre contra el Go
+real de la etapa (el de la Fase A), nunca contra uno simulado. La especificación quedó intacta (md5 `4750ae46…` antes y
+después de cada formato).
+
+### Commits (rama `etapa-m1-b`)
+
+| Commit     | Tema                                                                                                                                     |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `58995794` | §5.1, §5.2 y §5.4: la etiqueta de cada renglón sigue a Go, sin etiqueta lo que no necesita preparación, Preparación en lenguaje sencillo |
+| `fcd9ef8c` | Las 7 rutas de uniones y grupos en la lista cerrada de Tauri, en `api.ts` y en el puente de Playwright                                   |
+| `64c562a7` | Fusión de `etapa-m1` (`7c15d38e`, M1-D29 a M1-D33)                                                                                       |
+| `2e767ad3` | Unir mesas: mapa, «Unir con…», panel de la unión, unión diferida en el motor del borrador, captura                                       |
+| `8ff18a13` | Mesas divisibles en Áreas y distribución                                                                                                 |
+| `5fe8ef79` | El nombre de la unión donde el escritorio arma el lugar, el historial de la unión y los nombres de la auditoría                          |
+| `e52ad081` | `workflow-stage9d-accounts` con §5.2 y §5.3                                                                                              |
+| `42a4f5db` | Playwright `workflow-stagez-m1-labels`, `-unions` y `-groups`                                                                            |
+| `939b1719` | Vitest `stageM1Unions.test.tsx`                                                                                                          |
+| `ee1a03d7` | `restaurant.spec` con §5.1 («Programado para preparación»)                                                                               |
+| `84e6726a` | La unión en Cuentas y M1-D33 en las especificaciones de la etapa                                                                         |
+| `b9b24a41` | La tarjeta de la unión se busca por su folio exacto (corrección de la prueba)                                                            |
+| `c4c6a4b6` | La unión en pantalla solo se quita cuando nace la cuenta de su mesa; sin código sin uso                                                  |
+
+### Qué se hizo
+
+1. **§5.1 · La etiqueta de cada renglón sigue a Go** (M1-D15).
+   - **Causa** (la de la Fase 0, confirmada): era del escritorio, no de Go. La captura (`capture/BillLines.tsx`)
+     ponía siempre la etiqueta «En cocina» con el estado real en gris al lado, y el panel de la mesa
+     (`TablePanel.tsx`) tenía «En cocina» fijo y ni leía `preparation_state`. Fallaba igual con la marca de la
+     pantalla de cocina que con la de Preparación del escritorio: es el mismo campo y el mismo dibujo.
+   - **Arreglo**: una sola regla, `lineKitchenTag` (`services/kitchen.ts`), con los textos de Android
+     (`WaiterBadges.kt`): «Listo» (en turquesa, como Android), «En preparación», «En cocina» solo para `released`,
+     «Programado para preparación», «Enviado · sin confirmar en cocina», «Cambio de cocina pendiente de revisión» y
+     «Pendiente de liberación». La usan la captura (`KitchenTag` de `BillLines.tsx`) y el panel de la mesa. La lista de
+     cuentas ya seguía el estado de la cuenta y no cambió de regla.
+2. **§5.2 · Sin etiqueta para lo que no necesita preparación** (M1-D15 y M1-D34). Con `preparation_required === false`
+   (ausente = `true`): sin etiqueta en el renglón (captura y panel), sin etiqueta de cocina en la tarjeta de Cuentas y
+   Para llevar, sin «Preparación: …» en el encabezado de la cuenta y, en «Cocina» de la cuenta, «Los productos de esta
+   cuenta no necesitan preparación.». Un renglón cancelado conserva «Cancelado» (M1-D34). Los combos no cambian (Go los
+   manda `true`).
+3. **§5.4 · Preparación en lenguaje sencillo** (M1-D18).
+   - La tarjeta liberada dice **«Por preparar»** (`taskStateLabels`), también en el historial de Cocina; en las vistas
+     de la cuenta `released` sigue diciendo «En cocina» (`preparationLabels.released`, antes «Liberado a
+     preparación»).
+   - El filtro vacío dice **«No hay pedidos con este filtro.»** (antes «No hay unidades de preparación en este
+     filtro.»).
+   - Revisión del resto de Preparación: «Liberar a cocina automáticamente a su hora» → «Enviar a cocina
+     automáticamente a su hora»; «Esta operación ajusta preparación; conserva cantidades, precios y la hora comercial
+     del pedido.» → «Solo cambia cuándo llega el pedido a cocina: sus productos, cantidades y precios no cambian.»
+     (`ScheduleEditor.tsx`); «…el permiso de liberar anticipadamente.» → «…el permiso de enviar a cocina antes de
+     tiempo.» (`PendingKitchen.tsx`).
+   - «Espera a que lo envíes a cocina» (`PendingKitchen.tsx`, M1-D28): con M1-D17 ya no se usa para pedidos nuevos;
+     se conserva para los que se quedaron así con la 0.17.0 (la instalación del propietario puede tener alguno) y el
+     comentario lo dice.
+   - **Sin cambiar** (no son Preparación o solo se ven con un servidor anterior a la 0.17.0): el panel
+     `PendingReleases` de `PreparationBoard.tsx` («Pendientes de liberación y avisos», «Liberar a preparación»…, solo
+     sin `kitchen-coverage-v1`), «Liberar automáticamente los pedidos programados» y «Anticipación de liberación en
+     minutos» de Cocina › Comandas y tiempos, los textos de Enrutamiento y de Comandas y los nombres del historial de
+     cocina («Liberación manual revisada»…). Ver «Para el coordinador».
+4. **Unir mesas** (§1, contrato §10), con la capacidad `table-unions-v1` y el permiso `restaurant.tables.join`; sin
+   ellos no se ve nada nuevo.
+   - **Mapa** (`components/restaurant/TableMap.tsx`): el contorno sólido de cada unión (el rectángulo de sus mesas con
+     la misma fórmula de escala que las mesas, del color de su estado) con «Mesa 5 + 6 · 8 lugares» de Go; tocar
+     cualquier mesa unida abre la unión y la unión entera se ve elegida; el nombre accesible de la mesa dice «unida en
+     Mesa 5 + 6». El grupo activo: marco tenue con su nombre, y tocar el nombre es su atajo («Unir Mesa 3», mientras
+     ninguna sección está unida); cada sección sigue tocable. La unión que vive en la pantalla: contorno discontinuo
+     con «· sin guardar».
+   - **Lista**: en las mesas encontradas del buscador (y en la paleta, ⌘K) la unión es una sola entrada con su nombre.
+   - **«Unir con…»** (`pages/restaurant/TableUnions.tsx`, `JoinTablesDialog`) en el panel de la mesa: las mesas del
+     área como botones grandes; las ocupadas, unidas o fuera de servicio, deshabilitadas con su motivo (del estado que
+     manda Go); la vista previa de Go (`POST restaurant/table-unions/preview`, la mesa de inicio primero, M1-D25) da el
+     nombre, la capacidad y los problemas tal cual, y con un problema no se puede unir.
+   - **Desde una mesa ocupada**, `createTableUnion` al momento («Mesas unidas: Mesa 55 + 56.»). **Desde una libre** (o
+     el atajo del grupo con todas sus secciones libres) la unión vive en la pantalla: el panel lleva su nombre, «Mesa
+     para 8», «La unión se guarda con el primer producto. Si sales sin capturar nada, no queda guardada.» y «Deshacer la
+     unión»; la captura se titula «Mesa 5 + 6 · Cuenta nueva» con «La unión y la cuenta se guardan con el primer
+     producto». Nace con el primer producto, con `union_table_ids` o `union_group_id` y `seen_union_id` en
+     `openAccount` (motor del borrador, `draftSync.ts`). Salir sin capturar no guarda nada; elegir otra mesa, otra área
+     u otra vista la quita. Si Go responde `TABLE_UNION_DEFERRED` (la mesa de inicio se liberó mientras tanto), queda
+     en la pantalla igual.
+   - **Panel de la unión** (`TablePanel.tsx`): el nombre de la unión como título, «Mesa para N» con la capacidad de
+     Go, las cuentas de todas sus mesas como las de una mesa, «Agregar mesa» (una a la vez, con la vista previa
+     `{union_id, table_ids}`) y «Quitar mesa» (con su nota: ninguna cuenta sale de la unión; con una sola mesa se
+     deshace). Una mesa unida no ofrece «Poner fuera de servicio».
+   - **Rechazos de Go tal cual**: en el diálogo (por ejemplo «La Mesa 54 y la Mesa 58 tienen cuentas abiertas. Para
+     juntar sus cuentas usa «Combinar cuentas».»). Al guardar el primer producto de una unión en pantalla:
+     «No se pudieron unir las mesas» con el texto de Go («Solo se pueden unir mesas libres: la Mesa 52 ya está
+     ocupada.»), «No se guardó nada. Tus productos se conservan en esta terminal.», y «Enviar solo a la Mesa 54» o
+     «Esperar» (como Android). `TABLE_UNION_CONFLICT` al abrir la cuenta (M1-D32): «La unión cambió en otra terminal»
+     con el texto de Go, «Abrir la cuenta en la Mesa 7» o «Esperar»; en los dos casos se vuelve a leer el mapa.
+     `TABLE_IN_UNION` (otra terminal unió la mesa mientras se capturaba): como `TABLE_HAS_ACCOUNT`, «Agregar a la Cuenta
+     #N» por cada cuenta de la unión (el escritorio lee su folio, M1-D25) o «Abrir una cuenta nueva en Mesa 5 + 6» (con
+     `seen_union_id`).
+   - **Las cuentas vistas** al abrir una cuenta en una mesa unida son las de toda la unión y se manda `seen_union_id`
+     (solo con la capacidad).
+5. **Mesas divisibles en Áreas y distribución** (§3, M1-D4; `pages/restaurant/TableGroupsAdmin.tsx`): «Mesas
+   divisibles» del área con cada grupo, sus secciones y su capacidad; «Crear grupo» y «Editar» (nombre y secciones en el
+   orden en que se eligen) y «Quitar grupo» (rojo, con confirmación: `PATCH active: false`). Las secciones nunca se
+   renombran aquí. Los rechazos de Go tal cual (`TABLE_GROUP_NAME_TAKEN`, `TABLE_GROUP_SECTION_TAKEN`,
+   `TABLE_GROUP_IN_USE`, `TABLE_GROUP_SECTION_AREA`, y el `TABLE_GROUP_NAME_TAKEN` de una mesa de M1-D33 en «Guardar
+   mesa»). El diseñador dibuja también el marco del grupo.
+6. **El nombre de la unión donde el escritorio arma el lugar** (M1-D14): la tarjeta de Cuentas, «Cambiar de mesa»
+   (cada mesa unida dice «unida en …»), «Combinar» y «Transferir» (la cuenta de destino), el título de la captura, el
+   resultado de «Cancelar cuenta», «Liberar mesa» y «Descartar cuenta vacía» (sin otras cuentas, «la unión se deshará
+   y sus mesas quedarán libres»). La referencia neutra de una cuenta en una unión (también la recortada en « + …» de
+   M1-D29) no se muestra como nombre capturado. Lo que ya manda Go no cambió: precuenta, ticket y comprobante,
+   el cobro (`finance.table_name`), Preparación (`table_name` de la tarea), «En curso», cancelaciones y «Ventas de
+   salón» con su filtro por mesa (M1-D3).
+7. **Historial y Registro de movimientos**: el evento `account.table_union` en «Historial de la cuenta» («Mesas
+   unidas»: «Se unieron las mesas: Mesa 5 + 6.», «Se agregó una mesa a la unión: ahora es …», «Se quitó una mesa…», «La
+   unión ahora se llama …», «La unión Mesa 5 + 6 se deshizo.») y los nombres de las acciones nuevas de la auditoría
+   (`restaurant.table_union.*`, `restaurant.table_group.*`, `restaurant.account.table_union`), que hacían fallar
+   `auditActions.test.ts` desde la Fase A.
+8. **Tauri** (`desktop/src-tauri/src/api.rs`): las 7 operaciones del contrato §3 en la lista cerrada con el método y la
+   ruta exactos: `restaurant_preview_union` (POST `restaurant/table-unions/preview`), `restaurant_create_union` (POST
+   `restaurant/table-unions`), `restaurant_union` (GET `…/{id}`), `restaurant_add_union_table` (POST `…/{id}/tables`),
+   `restaurant_remove_union_table` (POST `…/{id}/tables/{table_id}/remove`), `restaurant_create_table_group` (POST
+   `restaurant/table-groups`) y `restaurant_save_table_group` (PATCH `…/{id}`). «Quitar mesa» es la única ruta con dos
+   identificadores: viajan como «unión/mesa» y `resource_pair` valida cada uno como un identificador solo
+   (`api.rs:42`); prueba `stage_m1_table_union_routes_are_closed`. El puente de Playwright (`native-driver.ts`) lee
+   también esa forma de la ruta de Rust y la reconoce.
+9. **Especificaciones de Playwright que cambian** (decisión del coordinador al cerrar la Fase E):
+   - `workflow-stage9d-accounts`: quitar la hora ahora envía a cocina (M1-D17): el paso 1 espera que el pedido quede
+     `released` o `ready` con `preparation_required: false` (antes `pending_release`); la tarjeta (antes «Sin confirmar
+     en cocina») y el renglón (antes «Enviado · sin confirmar en cocina») ya no llevan etiqueta de cocina (§5.2). Se
+     conservan las demás comprobaciones (nada de cocina en el encabezado, ninguna «revisar cocina», el menú por
+     producto…).
+   - `workflow-stagez-k11-diagnostics`: la ajustó la Fase A a M1-D17 sin correrla; se corrió sin cambios.
+   - `workflow-stage9f-kitchen-stations`: «No hay pedidos con este filtro.» en lugar del texto anterior.
+
+### Decisiones propuestas
+
+1. **«Unir con…», el atajo del grupo, «Agregar mesa» y «Quitar mesa» van en el panel de la mesa**, en su propia
+   fila debajo del encabezado (son acciones de la mesa, no de la cuenta). El escritorio no tiene un menú contextual de
+   la mesa: su «menú» es el panel lateral que abre el mapa o el buscador (la «lista»). El atajo del grupo también está
+   en el nombre del marco del mapa, como en Android.
+2. **Las mesas deshabilitadas de «Unir con…» y su motivo salen del estado que manda Go en el mapa** (ocupada, unida,
+   fuera de servicio o desactivada; los mismos textos que Android); lo que vale es la vista previa de Go de lo elegido,
+   que se pide cada vez que cambia la selección. _Porqué_: una vista previa por mesa serían decenas de peticiones por
+   apertura; el contrato pide «deshabilitadas con su motivo» y la vista previa con los problemas, que se muestran tal
+   cual.
+3. **Desde una mesa ocupada o libre lo decide el estado de Go** (`account_count` de la mesa de inicio): ocupada →
+   `createTableUnion`; libre → la unión en pantalla. Si Go responde `TABLE_UNION_DEFERRED`, queda en pantalla igual.
+4. **La unión en pantalla sobrevive a salir de la captura sin productos** (no hay nada en Go); se quita al elegir otra
+   mesa, otra área u otra vista, o con «Deshacer la unión». Igual que Android (decisión 9 de la Fase C).
+5. **Rechazo de la unión en pantalla al guardar el primer producto**: diálogo «No se pudieron unir las mesas» con el
+   texto de Go y «Enviar solo a la Mesa N» o «Esperar» (los botones de Android, M1-D13). «Esperar» deja el texto de Go
+   en la cuenta y conserva todo sin enviar; el siguiente toque o «Enviar a cocina» lo vuelve a intentar.
+   `TABLE_UNION_CONFLICT` (M1-D32): «La unión cambió en otra terminal» con «Abrir la cuenta en la Mesa N» o «Esperar».
+6. **`TABLE_IN_UNION` al abrir la cuenta se ofrece como `TABLE_HAS_ACCOUNT`** con las cuentas de la unión: el
+   transporte del borrador lee cada cuenta (hasta seis, como Android) para su folio, porque `details.accounts` son
+   identificadores (M1-D25); «Abrir una cuenta nueva en …» reenvía con `seen_union_id` de esa unión.
+7. **«Quitar mesa» es secundario, no rojo**: abre el diálogo, no saca cuentas de la unión y la mesa se vuelve a agregar
+   (anotado en `stage9dStyles.test.tsx`). **«Quitar grupo» sí es rojo**, con confirmación: un grupo quitado no se
+   reactiva (lectura 9 de M1-D25).
+8. **«Listo» en turquesa** (`--teal`), como la aplicación de meseros; los demás estados con el tono de siempre.
+9. **«Quitar mesa» en Tauri lleva sus dos identificadores como «unión/mesa»** (`resource_pair`): es la única ruta del
+   contrato con dos registros en el camino; cada uno se valida como un identificador solo y no puede salir de
+   `restaurant/table-unions/`. Go rechaza campos desconocidos, así que la mesa no podía ir en el cuerpo.
+10. **Las secciones de un grupo se eligen con el selector múltiple de siempre** (`MultiSelect`) y se guardan en el orden
+    en que se eligen (así lo dice el formulario).
+11. **Una cuenta sin preparación**: en «Cocina» de la cuenta (`AccountKitchen.tsx`), «Los productos de esta cuenta no
+    necesitan preparación.» en lugar de un estado de cocina (M1-D15 dice que no lleva etiqueta de cocina).
+12. **Preparación, más allá de los dos textos de la especificación**: se cambiaron también «Liberar a cocina
+    automáticamente…», la nota de «Programación de preparación» y «…el permiso de liberar anticipadamente» (Preparación,
+    regla de lenguaje sencillo). No se tocaron textos de Cocina que no son Preparación (ver «Para el coordinador»).
+13. **`restaurant.spec` cambia por §5.1**: el producto de un pedido para llevar programado decía «En cocina» con
+    «Programado para preparación» en gris; ahora la etiqueta es «Programado para preparación», como Android.
+
+### Archivos
+
+- **Etiquetas y Preparación**: `desktop/src/services/kitchen.ts:353-427` (`preparationLabels.released`,
+  `taskStateLabels`, `lineKitchenTag`, `accountNeedsPreparation`); `pages/restaurant/capture/BillLines.tsx`
+  (`KitchenTag`); `pages/restaurant/TablePanel.tsx` (`PanelLines`); `capture/CaptureBill.tsx`, `AccountList.tsx`,
+  `AccountKitchen.tsx`; `pages/kitchen/PreparationTaskCard.tsx`, `PreparationBoard.tsx`, `KitchenPage.tsx`,
+  `ScheduleEditor.tsx`, `PendingKitchen.tsx`.
+- **Uniones y grupos**: `services/restaurant.ts` (tipos `TableUnion`, `TableGroup`, `UnionPreview`, `ScreenUnion`;
+  `accountPlace`, `unionOfTable`, `groupOfTable`, `samePlace`, `previewUnion`, referencia neutra de la unión);
+  `services/serverCapabilities.ts` (`tableUnionsCapability`); `components/restaurant/TableMap.tsx` (`boxStyle`:572,
+  marco, contorno, `searchEntries`:312); `pages/restaurant/TableUnions.tsx` (`JoinTablesDialog`:107,
+  `unavailableReason`:37); `TablePanel.tsx` (`UnionActions`:146, `TableJoinActions`:136); `OperationalPage.tsx`
+  (`confirmJoin`:474, `groupShortcut`:553, diálogos de los rechazos); `TableGroupsAdmin.tsx` y `OperationsAdmin.tsx`;
+  `hooks/useRestaurantWorkspace.ts` (`startPendingCapture`:530, `showScreenUnion`:607, `sendWithoutUnion`:595);
+  `pages/restaurant/capture/draftSync.ts` (`unionRejections`:188, `creationBody`:218, `unionConflict`:403,
+  `dropUnion`:448, `waitForUnion`:466); `hooks/useDraftSync.ts` (`withUnionAccounts`:13); `capture/CaptureTopBar.tsx`,
+  `CaptureScreen.tsx`; `AccountActions.tsx`, `CancelAccount.tsx`; `components/restaurant/HistoryDetails.tsx`;
+  `services/auditActions.ts`; `styles.css` (tono «Listo», marco, contorno, panel, diálogo, grupos).
+- **Tauri y puente**: `desktop/src-tauri/src/api.rs` (`resource_pair`:44, rutas, prueba
+  `stage_m1_table_union_routes_are_closed`); `desktop/e2e/native-driver.ts`; `desktop/src/services/api.ts`.
+- **Pruebas**: Vitest `pages/restaurant/stageM1Lines.test.tsx` (el parche de la Fase 0 ampliado: §5.1, §5.2, M1-D34,
+  la lista de cuentas y Preparación) y `stageM1Unions.test.tsx`; `auditActions.test.ts`, `stage9dStyles.test.tsx`,
+  `preparationBoard.test.tsx`; Playwright `workflow-stagez-m1-labels.spec.ts`, `workflow-stagez-m1-unions.spec.ts`,
+  `workflow-stagez-m1-groups.spec.ts`, y las ajustadas `workflow-stage9d-accounts.spec.ts`, `restaurant.spec.ts`,
+  `workflow-stage9f-kitchen-stations.spec.ts`.
+
+### Pruebas realmente ejecutadas
+
+Playwright siempre con el arnés (`ISO_TAG=B`) y los cuatro servidores de la suite completa (`$SP/m1/b-run.sh`);
+registros en `$SP/m1/b-logs/` (resúmenes `batch1` a `batch4-resumen.txt`). Capturas en tema claro en
+`$SP/m1/capturas-B/` (`chromium-…` y `webkit-…`).
+
+| Prueba                                                                                                                                                                                 | Motor             | Resultado                                                                                                                                                                                                                                                         |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Vitest completo (`npm test`, con `tsc --noEmit`) después de cada commit                                                                                                                | —                 | 112 archivos, 1075 pruebas aprobadas (con `stageM1Lines` 8 y `stageM1Unions` 18)                                                                                                                                                                                  |
+| `stageM1Lines.test.tsx` antes del arreglo (el parche de la Fase 0)                                                                                                                     | —                 | Fallaba como se esperaba (§5.1 y §5.2)                                                                                                                                                                                                                            |
+| `auditActions.test.ts` al empezar la fase (con la Fase A)                                                                                                                              | —                 | Fallaba: 5 acciones nuevas sin nombre y `tableunions.AccountKind` sin declarar; aprobado con los nombres                                                                                                                                                          |
+| `cargo test` (`iso.sh cargo`)                                                                                                                                                          | —                 | 123 aprobadas (con `stage_m1_table_union_routes_are_closed`), 4 ignoradas, al agregar las rutas y al final                                                                                                                                                        |
+| `iso.sh build` (al final)                                                                                                                                                              | —                 | Aprobado                                                                                                                                                                                                                                                          |
+| `format` y `fmt-check` antes de cada commit; md5 de la especificación                                                                                                                  | —                 | Sin cambios pendientes; `4750ae46…`                                                                                                                                                                                                                               |
+| `workflow-stagez-m1-labels` sola                                                                                                                                                       | Chromium · WebKit | 1 de 1 · 1 de 1                                                                                                                                                                                                                                                   |
+| `workflow-stagez-m1-unions` sola                                                                                                                                                       | Chromium · WebKit | 1 de 1 · 1 de 1 (la versión con Cuentas falló una vez en los dos por la prueba: `\b` entre «#2» y «Mesa»; corregida en `b9b24a41` y aprobada en los dos)                                                                                                          |
+| `workflow-stagez-m1-groups` sola                                                                                                                                                       | Chromium · WebKit | 1 de 1 · 1 de 1 (la primera en WebKit no llegó a correr: la vista previa no compiló porque en ese momento se estaba editando un archivo de prueba)                                                                                                                |
+| `workflow-stage9d-accounts` sola (ajustada)                                                                                                                                            | Chromium · WebKit | 1 de 1 · 1 de 1                                                                                                                                                                                                                                                   |
+| `workflow-stagez-k11-diagnostics` sola (la de la Fase A)                                                                                                                               | Chromium · WebKit | 1 de 1 · 1 de 1                                                                                                                                                                                                                                                   |
+| `restaurant.spec` sola (ajustada por §5.1)                                                                                                                                             | Chromium · WebKit | 1 de 1 · 1 de 1                                                                                                                                                                                                                                                   |
+| Conjunto: las tres M1 con `restaurant.spec`, `workflow-stage9c-tables-time`, `-9d-accounts`, `-9d-topbar-tables`, `-9f-kitchen-stations`, `-9f-topbar-map` y `-stagez-k11-diagnostics` | Chromium · WebKit | Primera vez 9 de 10 en los dos (`restaurant.spec:597`, por §5.1; se ajustó); después **10 de 10 en los dos**                                                                                                                                                      |
+| Las tres M1 juntas con el último ajuste (`c4c6a4b6`)                                                                                                                                   | Chromium · WebKit | 3 de 3 · 3 de 3                                                                                                                                                                                                                                                   |
+| La suite completa en Chromium corrió antes de `c4c6a4b6` (solo cambia cuándo se quita la unión en pantalla y quita un método sin uso); la de WebKit, después                           | —                 | —                                                                                                                                                                                                                                                                 |
+| **Suite completa**                                                                                                                                                                     | Chromium          | **58 de 58** (27,4 min, 16:41–17:08; 46 especificaciones, con las 4 de «instalación limpia»)                                                                                                                                                                      |
+| Suite completa, primera corrida                                                                                                                                                        | WebKit            | 42 aprobadas y 16 fallidas, **no válida**: la Mac se durmió con la tapa cerrada de 17:12 a 17:39 (`pmset -g log`: «Clamshell Sleep») y las 16 (de `warehouse-control` a `workflow-stage9f-printing`) fallaron con «<html> intercepts pointer events» o por tiempo |
+| **Suite completa**, segunda corrida                                                                                                                                                    | WebKit            | **58 de 58** (27,2 min, 17:59–18:27, con `caffeinate -i`; sin suspensiones en `pmset -g log`)                                                                                                                                                                     |
+
+### Pendiente o no verificado
+
+- **Windows**: no se corrió (ni Tauri real ni WebKit de Windows); `api.rs` y el puente se probaron con `cargo` y con el
+  puente de Playwright.
+- **La aplicación de escritorio real (Tauri)**: todo se probó con el puente de Playwright y la vista previa; el `.pkg`
+  lo arma la Fase F.
+- **Dos terminales de escritorio a la vez sobre la misma unión** (carreras reales): se probaron con otra «terminal» por
+  la API (la mesa ocupada mientras se captura, la mesa ocupada antes de confirmar), no con dos ventanas.
+- **`TABLE_IN_UNION` y `TABLE_UNION_CONFLICT` al abrir la cuenta** (M1-D32) solo con Vitest (motor del borrador); en
+  Playwright se probó el rechazo de la unión en pantalla y el de unir dos ocupadas.
+- **Tema oscuro**: las capturas son en tema claro (regla de la etapa); los colores nuevos son tokens que ya existen en
+  los dos temas y `styles.test.ts` aprueba.
+
+### Para el coordinador
+
+- **Textos de Cocina fuera de Preparación** (decidir si entran en la regla de §5.4): «Liberar automáticamente los
+  pedidos programados» y «Anticipación de liberación en minutos» (Cocina › Comandas y tiempos), «Las comandas se
+  generan al liberar productos confirmados.» (Comandas), los dos de Enrutamiento («…sin duplicar la unidad comercial»,
+  «Los pedidos liberados conservan el enrutamiento original…»), los nombres del historial de cocina («Liberación manual
+  revisada», «Liberación automática revisada») y el panel de Preparación para servidores anteriores a la 0.17.0
+  (`PendingReleases`). Los dejé como estaban porque §5.4 habla de Preparación y algunos los usan las especificaciones
+  de la 9F; cambiarlos es un cambio pequeño de textos.
+- **`restaurant.spec`** cambió por §5.1 (decisión propuesta 13); no estaba en la lista del encargo.
+- Ninguna decisión de la especificación ni de negocio cambió. No se tocó la instalación real, la hora de la Mac ni
+  `licensing.sicrat.com`; no se usaron emuladores ni Go temporales a mano.
+
+### Decisiones del coordinador al cerrar la Fase B
+
+Se fusiona `etapa-m1-b` en `etapa-m1`. La fase solo cambió `desktop/`.
+
+- **M1-D42.** Se aceptan las 13 decisiones propuestas de la Fase B. La 5 es coherente con M1-D32: Go rechaza, el
+  escritorio muestra su texto y conserva lo capturado, y abrir la cuenta solo en la mesa es una elección explícita del
+  usuario, igual que el «Reintentar» de Android.
+- **M1-D43. Textos de Cocina fuera de Preparación.** La §5.4 solo pide Preparación, así que no se cambian en esta etapa:
+  - la liberación automática y su anticipación;
+  - Comandas y Enrutamiento;
+  - «Liberación manual revisada» del historial de cocina;
+  - el panel que solo se ve con servidores anteriores a la 0.17.0.
+    Quedan como sugerencia para una etapa siguiente y se dicen en la entrega.
+- **Lo no verificado** (Windows, la aplicación Tauri real, dos escritorios a la vez) queda así, como en las etapas
+  anteriores: el puente de Playwright usa la misma lista cerrada de `api.rs` y `cargo` la prueba.
