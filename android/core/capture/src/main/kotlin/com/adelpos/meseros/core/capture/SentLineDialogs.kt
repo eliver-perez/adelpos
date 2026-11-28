@@ -71,8 +71,11 @@ private fun CancelDialog(
 ) {
     var quantity by rememberSaveable(line.versionId) { mutableIntStateOf(1) }
     var reason by rememberSaveable(line.versionId) { mutableStateOf("") }
+    // Etapa M1 (§5.7): en Android 8 el teclado no se queda abierto al cerrar.
+    HideKeyboardWhenClosed()
+    val close = rememberKeyboardCloser()
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { close(onDismiss) },
         title = { Text(stringResource(R.string.sent_cancel_title, line.name)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -93,7 +96,7 @@ private fun CancelDialog(
         },
         confirmButton = {
             TextButton(
-                onClick = { onCancel(line, quantity, reason) },
+                onClick = { close { onCancel(line, quantity, reason) } },
                 enabled = !working && validReason(reason),
                 modifier = Modifier.testTag(TAG_CANCEL_CONFIRM),
             ) {
@@ -101,7 +104,7 @@ private fun CancelDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.sent_close)) }
+            TextButton(onClick = { close(onDismiss) }) { Text(stringResource(R.string.sent_close)) }
         },
         modifier = Modifier.reportsUserActivity(LocalUserActivity.current),
     )
@@ -133,8 +136,11 @@ private fun ModifyDialog(
         } else {
             line.quantity
         }
+    // Etapa M1 (§5.7): en Android 8 el teclado no se queda abierto al cerrar.
+    HideKeyboardWhenClosed()
+    val close = rememberKeyboardCloser()
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { close(onDismiss) },
         title = { Text(stringResource(R.string.sent_modify_title, line.name)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -182,7 +188,7 @@ private fun ModifyDialog(
                 }
             } else {
                 TextButton(
-                    onClick = { onEdit(line, request, reason) },
+                    onClick = { close { onEdit(line, request, reason) } },
                     enabled = !working && validReason(reason),
                     modifier = Modifier.testTag(TAG_MODIFY_CONFIRM),
                 ) {
@@ -191,7 +197,7 @@ private fun ModifyDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.sent_close)) }
+            TextButton(onClick = { close(onDismiss) }) { Text(stringResource(R.string.sent_close)) }
         },
         modifier = Modifier.reportsUserActivity(LocalUserActivity.current),
     )

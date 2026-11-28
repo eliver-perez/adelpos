@@ -49,6 +49,12 @@ enum class WaiterAction(val requiredPermissions: Set<String>) {
      * exige Go para imprimir tickets y precuentas.
      */
     PRINT_PRECHECK(setOf("payments.tickets.print")),
+
+    /**
+     * Etapa M1 (§1.3, M1-D8): «Unir mesas» (`restaurant.tables.join`, con lo que pide: abrir
+     * cuentas y ver las mesas). Solo se ofrece si Go lo dio (`grants`).
+     */
+    JOIN_TABLES(setOf("restaurant.tables.join", "accounts.open", "restaurant.tables.read")),
 }
 
 /**

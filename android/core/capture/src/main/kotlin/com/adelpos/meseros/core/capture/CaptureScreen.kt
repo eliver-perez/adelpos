@@ -22,8 +22,12 @@ import com.adelpos.meseros.core.domain.catalog.Catalog
 import com.adelpos.meseros.core.domain.catalog.CatalogImages
 import com.adelpos.meseros.core.domain.catalog.CatalogProduct
 import com.adelpos.meseros.core.domain.catalog.LineSelection
+import com.adelpos.meseros.core.domain.waiter.Capture
 import com.adelpos.meseros.core.domain.waiter.CaptureTitle
+import com.adelpos.meseros.core.domain.waiter.DraftSync
 import com.adelpos.meseros.core.domain.waiter.OfflineOrderPlan
+import com.adelpos.meseros.core.domain.waiter.TableContext
+import com.adelpos.meseros.core.domain.waiter.UnionJoin
 import com.adelpos.meseros.core.domain.waiter.WaiterAction
 import com.adelpos.meseros.core.ui.catalog.CatalogBrowser
 import com.adelpos.meseros.core.ui.catalog.ProductCustomizer
@@ -64,6 +68,7 @@ fun CaptureRoute(
     var editingCustomer by rememberSaveable { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
     var discardPending by remember { mutableStateOf(false) }
+    var unionPending by remember { mutableStateOf(false) }
     val tooMany = stringResource(R.string.capture_too_many)
     val nothing = stringResource(R.string.capture_nothing)
     val stillSaving = stringResource(R.string.capture_still_saving)
@@ -74,6 +79,7 @@ fun CaptureRoute(
             CaptureNotice.NothingToSend -> message = nothing
             CaptureNotice.StillSaving -> message = stillSaving
             CaptureNotice.DiscardPending -> discardPending = true
+            CaptureNotice.UnionPending -> unionPending = true
             null -> Unit
         }
         viewModel.onNoticeShown()
@@ -94,6 +100,18 @@ fun CaptureRoute(
         return
     }
     val current = capture ?: return
+    val join = current.unionJoin
+    if (unionPending && join != null) {
+        UnionPendingDialog(
+            capture = current,
+            join = join,
+            onSendAlone = {
+                unionPending = false
+                viewModel.onSendWithoutUnion()
+            },
+            onWait = { unionPending = false },
+        )
+    }
     val ownCount = OfflineOrderPlan.of(current).items.sumOf { it.line.quantity }
     val title = captureTitle(CaptureTitle.of(current, bill))
     LaunchedEffect(title) { onTitleChange(title) }
@@ -276,6 +294,47 @@ private fun CatalogPane(
     )
 }
 
+/**
+ * Etapa M1 (M1-D13): la unión en pantalla no se pudo guardar. Sin conexión dice que no se pueden
+ * unir mesas; si Go la rechazó (por ejemplo, otra terminal ocupó una de las mesas), su mensaje. En
+ * los dos casos lo capturado se conserva: «Enviar solo a la Mesa 5» o «Esperar». Nunca va a la cola
+ * con la unión.
+ */
+@Composable
+private fun UnionPendingDialog(
+    capture: Capture,
+    join: UnionJoin,
+    onSendAlone: () -> Unit,
+    onWait: () -> Unit,
+) {
+    val start = TableContext.of(join.startName)
+    val rejected = capture.sync == DraftSync.REJECTED && !capture.syncMessage.isNullOrBlank()
+    AlertDialog(
+        onDismissRequest = onWait,
+        text = {
+            Text(
+                if (rejected) {
+                    stringResource(R.string.capture_union_rejected, capture.syncMessage!!, start)
+                } else {
+                    stringResource(R.string.capture_union_offline, start)
+                },
+                modifier = Modifier.testTag(TAG_UNION_PENDING_TEXT),
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onSendAlone, modifier = Modifier.testTag(TAG_UNION_SEND_ALONE)) {
+                Text(stringResource(R.string.capture_union_send_alone, start))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onWait, modifier = Modifier.testTag(TAG_UNION_WAIT)) {
+                Text(stringResource(R.string.capture_union_wait))
+            }
+        },
+        modifier = Modifier.reportsUserActivity(LocalUserActivity.current),
+    )
+}
+
 /** El título de la barra superior (etapa A3, §4.2): dónde se está. */
 @Composable
 fun captureTitle(title: CaptureTitle): String =
@@ -283,10 +342,15 @@ fun captureTitle(title: CaptureTitle): String =
         is CaptureTitle.Table -> title.name
         is CaptureTitle.Takeaway -> stringResource(R.string.capture_title_takeaway, title.folio)
         is CaptureTitle.NamedTakeaway -> stringResource(R.string.takeaway_label_named, title.name)
+        // Etapa M1 (M1-D36): en el teléfono vertical el título va en su propio renglón debajo de
+        // la barra (AdelPosApp), así que cabe completo.
         CaptureTitle.NewTakeaway -> stringResource(R.string.capture_title_takeaway_new)
     }
 
 const val TAG_CAPTURE = "capture"
+const val TAG_UNION_PENDING_TEXT = "capture-union-pending"
+const val TAG_UNION_SEND_ALONE = "capture-union-send-alone"
+const val TAG_UNION_WAIT = "capture-union-wait"
 const val TAG_DISCARD_CONFIRM = "capture-discard-confirm"
 const val TAG_CUSTOMIZER_NEW = "capture-customizer-new"
 const val TAG_CUSTOMIZER_UPDATE = "capture-customizer-update"

@@ -22,6 +22,7 @@ import com.adelpos.meseros.core.domain.waiter.DraftSync
 import com.adelpos.meseros.core.domain.waiter.OrderFactory
 import com.adelpos.meseros.core.domain.waiter.OrderState
 import com.adelpos.meseros.core.domain.waiter.ReviewReason
+import com.adelpos.meseros.core.domain.waiter.SeenUnion
 import com.adelpos.meseros.core.domain.waiter.SendRequest
 import com.adelpos.meseros.core.domain.waiter.TableAccountRef
 import com.adelpos.meseros.core.domain.waiter.Totals
@@ -237,6 +238,104 @@ class CaptureSyncTest {
             creations[1]["seen_account_ids"]!!.jsonArray.map { it.jsonPrimitive.content },
         )
         assertFalse(creations[0]["operation_id"] == creations[1]["operation_id"])
+    }
+
+    /**
+     * Etapa M1 (M1-D32): la unión que vio el mesero ya no tiene la mesa. Go no guarda nada: su
+     * mensaje se dice, Mesas vuelve a leer, lo capturado se queda y al reintentar ya no se manda la
+     * unión vista (Go revisa las cuentas como siempre).
+     */
+    @Test
+    fun laUnionCambioEnOtraTerminalSeDiceYSeConservaLoCapturado() = runBlocking {
+        var refreshed = 0
+        scope.cancel()
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        captures =
+            CaptureRepository(
+                dao = database.waiter(),
+                server = server,
+                api = WaiterApi(),
+                scheduler = { sends.incrementAndGet() },
+                catalog =
+                    object : CaptureRepository.CatalogLookups {
+                        override val lookup = WaiterTestSupport.lookup
+
+                        override fun stamp() = OrderFactory.CatalogStamp(41, "epoca-1")
+                    },
+                scope = scope,
+                clock = { 1_700_000_000_000L },
+                newId = { "00000000-0000-4000-8000-%012d".format(ids.incrementAndGet()) },
+                saveDelayMillis = 20,
+                placesChanged = { refreshed++ },
+            )
+        captures.start()
+        val message = "La unión cambió en otra terminal. Revisa las mesas e inténtalo otra vez."
+        respond(
+            "POST restaurant/accounts",
+            json(
+                409,
+                """{"error":{"code":"TABLE_UNION_CONFLICT","message":"$message",""" +
+                    """"details":{"table_id":"$TABLE","union_id":"u-vista"}}}""",
+            ),
+        )
+        val capture =
+            captures.open(
+                ANA,
+                TABLE,
+                "Mesa 5 + 6",
+                account = null,
+                seenAccountIds = listOf("vista"),
+                seenUnion = SeenUnion("u-vista"),
+            )
+        captures.stage(capture.id, DraftOperation.Add(DraftLine("r1", line(BURGER))), null)
+        val rejected = awaitCapture(capture.id) { it.sync == DraftSync.REJECTED }
+        assertEquals(message, rejected.syncMessage)
+        assertEquals(null, rejected.seenUnion)
+        assertEquals(listOf("r1"), rejected.visible.map { it.id })
+        assertEquals(1, refreshed)
+        val first = body(requests("POST restaurant/accounts").single())
+        assertEquals("u-vista", first["seen_union_id"]!!.jsonPrimitive.content)
+        // Reintentar: sin la unión vista.
+        respond("POST restaurant/accounts", bill(1, "[${draftJson("r1", quantity = 1)}]"))
+        captures.retrySave(capture.id)
+        awaitCapture(capture.id) { it.sync == DraftSync.SAVED && it.accountId == ACCOUNT }
+        val second = body(requests("POST restaurant/accounts")[1])
+        assertFalse(second.containsKey("seen_union_id"))
+    }
+
+    /**
+     * Etapa M1 (M1-D9): la mesa ya está en una unión que el mesero no veía. Se ofrece como
+     * TABLE_HAS_ACCOUNT con las cuentas de la unión (se leen su folio y su nombre) y la unión pasa
+     * a ser la vista.
+     */
+    @Test
+    fun laMesaUnidaSeOfreceComoOtraCuentaDeLaUnion() = runBlocking {
+        respond(
+            "POST restaurant/accounts",
+            json(
+                409,
+                """{"error":{"code":"TABLE_IN_UNION","message":"La Mesa 4 ya está unida con """ +
+                    """otras mesas (Mesa 4 + 5).","details":{"table_id":"$TABLE",""" +
+                    """"union_id":"u1","union":{"id":"u1","name":"Mesa 4 + 5"},""" +
+                    """"accounts":["$ACCOUNT"]}}}""",
+            ),
+        )
+        respond("GET restaurant/accounts/$ACCOUNT", bill(3))
+        val capture =
+            captures.open(
+                ANA,
+                TABLE,
+                "Mesa 4",
+                account = null,
+                seenAccountIds = emptyList(),
+                seenUnion = SeenUnion(null),
+            )
+        captures.stage(capture.id, DraftOperation.Add(DraftLine("r1", line(BURGER))), null)
+        val blocked = awaitCapture(capture.id) { it.sync == DraftSync.TABLE_HAS_ACCOUNT }
+        assertEquals(listOf(TableAccountRef(ACCOUNT, 7, "Mesa 4")), blocked.tableAccounts)
+        assertEquals(SeenUnion("u1"), blocked.seenUnion)
+        val sent = body(requests("POST restaurant/accounts").single())
+        assertEquals("null", sent["seen_union_id"].toString())
     }
 
     @Test

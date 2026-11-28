@@ -431,7 +431,7 @@ test('terminal de cocina por estaciones: intersección, colores y sin «Actualiz
         'estaciones en común. Pide que ajusten la terminal o tu usuario.',
     );
     await expect(cards).toHaveCount(0);
-    await expect(page.getByText('No hay unidades de preparación en este filtro.')).toHaveCount(0);
+    await expect(page.getByText('No hay pedidos con este filtro.')).toHaveCount(0);
     await views(page, testInfo, 'cocina-sin-estaciones-en-comun', async () => {
       await expect(scope).toBeVisible();
     });

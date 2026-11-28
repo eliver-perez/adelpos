@@ -517,7 +517,8 @@ test('cancelar cuenta con permiso propio y con supervisor, reportes, catálogo y
     await expect(hours).toBeVisible();
   });
 
-  await call(driver, 'POST', 'auth/login', { username: 'admin', password: 'admin' });
+  // Con la sesión del administrador en la página, que el puente comparte (etapa M1, §5.8): volver a entrar por la API
+  // con la misma terminal reemplazaba la sesión de la página con sus peticiones en camino.
   const saved = (await call(driver, 'GET', 'restaurant/cancel-reasons')) as {
     name: string;
     prepared_is_waste: boolean;

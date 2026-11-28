@@ -49,9 +49,31 @@
     <string name="table_panel_discarded">Cuenta descartada.</string>
     <string name="table_panel_discard_changed">La cuenta cambió en otra terminal: ya se ve como está ahora.</string>
     <string name="table_panel_discard_failed">No se pudo descartar la cuenta. Inténtalo de nuevo.</string>
-    <string name="table_panel_my_work">Lo tuyo en esta mesa</string>
-    <string name="table_panel_capture">Captura: %1$s</string>
     <string name="table_panel_capture_new">cuenta nueva</string>
+
+    <!-- Etapa M1: unir mesas (§1, contrato §10). Los rechazos son los mensajes de Go, tal cual. -->
+    <string name="table_panel_join">Unir con…</string>
+    <string name="table_panel_join_group">Unir %1$s</string>
+    <string name="table_panel_add_table">Agregar mesa</string>
+    <string name="table_panel_remove_table">Quitar mesa</string>
+    <string name="table_panel_join_offline">Para unir mesas necesitas conexión con la computadora principal.</string>
+    <string name="table_panel_union_pending">La unión se guarda con el primer producto. Si sales sin capturar nada, no queda guardada.</string>
+    <string name="table_panel_union_cancel">Deshacer la unión</string>
+    <string name="join_title">Unir %1$s con…</string>
+    <string name="join_group_title">Unir %1$s</string>
+    <string name="join_add_title">Agregar una mesa a %1$s</string>
+    <string name="join_remove_title">Quitar una mesa de %1$s</string>
+    <string name="join_preview">%1$s · %2$d lugares</string>
+    <string name="join_unavailable_occupied">Ocupada</string>
+    <string name="join_unavailable_union">Unida con otras mesas</string>
+    <string name="join_unavailable_out">Fuera de servicio o desactivada</string>
+    <string name="join_checking">Revisando con la computadora principal…</string>
+    <string name="join_failed">No se pudo hacer. Inténtalo de nuevo.</string>
+    <string name="join_remove_note">Quitar una mesa no saca ninguna cuenta de la unión. Si queda una sola mesa, la unión se deshace.</string>
+    <string name="join_confirm">Unir</string>
+    <string name="join_add_confirm">Agregar</string>
+    <string name="join_remove_confirm">Quitar</string>
+    <string name="join_cancel">Cancelar</string>
     <plurals name="table_panel_products">
         <item quantity="one">%d producto</item>
         <item quantity="many">%d productos</item>

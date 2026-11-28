@@ -4,10 +4,13 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -22,13 +25,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.adelpos.core.ui.components.LocalUserActivity
+import com.adelpos.core.ui.components.TAG_PENDING_ORDERS
 import com.adelpos.core.ui.components.reportsUserActivity
 import com.adelpos.core.ui.icons.AdelIcons
 import com.adelpos.core.ui.theme.AdelDimens
@@ -78,6 +85,7 @@ fun ActiveWaiterMenu(
     modifier: Modifier = Modifier,
     offline: Boolean = false,
     onAlertsHelp: (() -> Unit)? = null,
+    compact: Boolean = false,
 ) {
     var open by remember { mutableStateOf(false) }
     Box(modifier = modifier) {
@@ -90,13 +98,19 @@ fun ActiveWaiterMenu(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 WaiterBadge(initial = initial, colorHex = colorHex, size = 32.dp)
-                Text(
-                    text = name,
-                    style = MaterialTheme.typography.titleSmall,
-                    color = AdelTheme.colors.text,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                // Etapa M1 (§5.6): en el teléfono vertical solo la inicial (el nombre lo dicen la
+                // descripción y el menú); así caben el título y «N pedidos por enviar».
+                if (compact) {
+                    Spacer(Modifier.semantics { contentDescription = name })
+                } else {
+                    Text(
+                        text = name,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = AdelTheme.colors.text,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
                 Icon(
                     imageVector = AdelIcons.ChevronDown,
                     contentDescription = null,
@@ -150,3 +164,46 @@ fun ActiveWaiterMenu(
 const val TAG_WAITER_MENU = "waiter-menu"
 const val TAG_WAITER_SWITCH = "waiter-menu-switch"
 const val TAG_WAITER_ALERTS_HELP = "waiter-menu-alerts-help"
+
+/**
+ * Etapa M1 (§5.6): «N pedidos por enviar» de la barra en el teléfono vertical, en dos renglones si
+ * hace falta. En la barra común el texto va en uno solo y, junto al título, al mesero y a «En
+ * línea», se cortaba («2 pedidos por en…»). La raíz lo pone en lugar del de la barra común cuando
+ * la barra no tiene espacio (`currentTopBarHasRoom`); el texto es el mismo.
+ */
+@Composable
+fun PendingOrdersCompact(count: Int, modifier: Modifier = Modifier) {
+    val colors = AdelTheme.colors
+    Row(
+        modifier =
+            modifier
+                .heightIn(min = 32.dp)
+                .background(colors.amberSoft, RoundedCornerShape(16.dp))
+                .padding(horizontal = 8.dp, vertical = 2.dp)
+                .testTag(TAG_PENDING_ORDERS),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Icon(
+            imageVector = AdelIcons.Send,
+            contentDescription = null,
+            tint = colors.amber,
+            modifier = Modifier.size(16.dp),
+        )
+        Text(
+            text =
+                pluralStringResource(
+                    com.adelpos.core.ui.R.plurals.connection_pending_orders,
+                    count,
+                    count,
+                ),
+            style = MaterialTheme.typography.labelMedium,
+            color = colors.amber,
+            maxLines = 2,
+            modifier = Modifier.widthIn(max = PENDING_COMPACT_TEXT_WIDTH),
+        )
+    }
+}
+
+/** Ancho del texto de [PendingOrdersCompact]: «2 pedidos» arriba y «por enviar» abajo. */
+private val PENDING_COMPACT_TEXT_WIDTH = 76.dp

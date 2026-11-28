@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.material3.Icon
@@ -21,6 +22,7 @@ import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -35,6 +37,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -72,6 +78,7 @@ import com.adelpos.meseros.core.ui.components.ActiveWaiterMenu
 import com.adelpos.meseros.core.ui.components.LicenseClockBanner
 import com.adelpos.meseros.core.ui.components.LicenseGraceBadge
 import com.adelpos.meseros.core.ui.components.LocalTopBarBack
+import com.adelpos.meseros.core.ui.components.PendingOrdersCompact
 import com.adelpos.meseros.core.ui.components.TopBarBack
 import com.adelpos.meseros.core.ui.layout.NavigationPlacement
 import com.adelpos.meseros.core.ui.layout.PaneLayout
@@ -264,9 +271,22 @@ fun AdelPosNavigation(
         modifier = Modifier.fillMaxSize().testTag(TAG_APP_ROOT),
         topBar = {
             Column {
+                // Etapa M1 (§5.6, M1-D36): en el teléfono vertical, el mesero solo con su inicial,
+                // «N pedidos por enviar» en dos renglones (antes «2 pedidos por en…») y **el título
+                // en su propio renglón debajo de la barra**, de todo el ancho y hasta en dos
+                // renglones: junto al mesero, «En línea» y los pedidos por enviar no cabía (antes
+                // «Nuevo pe…», y con pedidos por enviar casi no quedaba lugar). Se hace en meseros,
+                // sin cambiar la barra común (la de cocina no cambia).
+                val roomy = currentTopBarHasRoom()
+                val titleBelow = !roomy && waiter != null
                 AdelTopBar(
-                    title = title,
-                    connection = connection,
+                    title = if (titleBelow) "" else title,
+                    connection =
+                        if (roomy) {
+                            connection
+                        } else {
+                            connection.copy(pendingOrders = 0)
+                        },
                     onBack = onBack,
                     // Con un panel abierto en el teléfono la flecha hace lo que hacía su «Volver a
                     // …»
@@ -289,10 +309,17 @@ fun AdelPosNavigation(
                                 onSwitchWaiter = onSwitchWaiter,
                                 offline = !waiter.hasServerSession,
                                 onAlertsHelp = { readyAlerts.helpRequested.value = true },
+                                compact = !roomy,
                             )
+                        }
+                        if (!roomy && connection.pendingOrders > 0) {
+                            PendingOrdersCompact(connection.pendingOrders)
                         }
                     },
                 )
+                if (titleBelow && title.isNotEmpty()) {
+                    NarrowTitle(title)
+                }
                 // Etapa L1 (§6.2): el aviso fijo de la hora incorrecta, en todas las pantallas
                 // mientras
                 // Go lo diga.
@@ -622,8 +649,33 @@ private fun WaiterNavigation(
 private const val HOME_WAIT_MILLIS = 5_000L
 
 const val TAG_APP_ROOT = "app-root"
+
+/** El título del teléfono vertical, debajo de la barra (etapa M1, M1-D36). */
+const val TAG_APP_TITLE = "app-title"
 const val TAG_APP_NOTICE = "app-notice"
 const val TAG_MAIN_NAVIGATION = "main-navigation"
 const val TAG_NAVIGATION_RAIL = "main-navigation-rail"
 const val TAG_NAV_TABLES = "nav-tables"
 const val TAG_NAV_TAKEAWAY = "nav-takeaway"
+
+/**
+ * Etapa M1 (M1-D36): el título del teléfono vertical en su propio renglón, debajo de la barra
+ * común, con su mismo fondo y de todo el ancho (hasta dos renglones, nunca cortado a la mitad de la
+ * palabra). Es un encabezado para los lectores de pantalla, como el de la barra.
+ */
+@Composable
+private fun NarrowTitle(title: String) {
+    Surface(color = AdelTheme.colors.panel, modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleLarge,
+            color = AdelTheme.colors.text,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier =
+                Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp)
+                    .semantics { heading() }
+                    .testTag(TAG_APP_TITLE),
+        )
+    }
+}

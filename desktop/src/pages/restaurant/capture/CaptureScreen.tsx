@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { useConfirmDialog } from '../../../components/ConfirmDialog';
 import type { useRestaurantWorkspace } from '../../../hooks/useRestaurantWorkspace';
-import { isPendingAccount } from '../../../services/restaurant';
+import { isPendingAccount, unionOfTable } from '../../../services/restaurant';
 import type { ConfirmedLine } from '../../../services/restaurant';
 import { CaptureBill } from './CaptureBill';
 import type { BillAction } from './CaptureBill';
@@ -73,6 +73,11 @@ export function CaptureScreen({
     captureEnabled;
   const table =
     workspace.overview.data?.tables.find((entry) => entry.id === bill?.account.table_id) ?? null;
+  // Etapa M1: la capacidad de una unión (la de Go o la de la unión en pantalla) en lugar de la de su mesa.
+  const union = table ? unionOfTable(workspace.overview.data, table.id) : null;
+  const screenUnion =
+    table && workspace.screenUnion?.startTableID === table.id ? workspace.screenUnion : null;
+  const seats = union?.seats ?? screenUnion?.seats ?? table?.seats ?? null;
   const tableAccounts =
     view === 'tables'
       ? (workspace.accounts.data?.items.filter((entry) => entry.state === 'open') ?? [])
@@ -122,6 +127,7 @@ export function CaptureScreen({
         account={bill?.account ?? null}
         backLabel={view === 'tables' ? 'Mesas' : view === 'takeaway' ? 'Para llevar' : 'Cuentas'}
         table={table}
+        seats={seats}
         tableAccounts={tableAccounts}
         timezone={bill?.timezone ?? timezone}
         canOpenAccount={

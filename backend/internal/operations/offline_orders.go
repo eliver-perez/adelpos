@@ -12,6 +12,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"local/ad-el-pos/server/internal/catalog"
+	"local/ad-el-pos/server/internal/tableunions"
 )
 
 // Pedido capturado sin conexión (etapa 9G, §5.5 y §0-B de la especificación). La futura aplicación Android de
@@ -126,12 +127,16 @@ type OfflineOrderInput struct {
 // OfflineDestination es una cuenta abierta (account_id), una mesa donde abrir una cuenta nueva (table_id, con las
 // cuentas que el mesero veía abiertas en ella y un nombre opcional) o, desde la etapa A2, un pedido para llevar nuevo
 // (takeaway). Solo uno de los tres.
+//
+// Etapa M1 (M1-D13, contrato §7): SeenUnionID (opcional; la 0.4.1 no lo manda) es la unión que el mesero veía en la
+// mesa al capturar. Una unión que solo estaba en la pantalla nunca viaja en la cola: el destino es siempre la mesa.
 type OfflineDestination struct {
 	AccountID      *string          `json:"account_id"`
 	TableID        *string          `json:"table_id"`
 	SeenAccountIDs []string         `json:"seen_account_ids"`
 	Name           string           `json:"name"`
 	Takeaway       *OfflineTakeaway `json:"takeaway"`
+	SeenUnionID    *string          `json:"seen_union_id"`
 }
 
 // OfflineTakeaway (etapa A2) son los datos opcionales del cliente de un pedido para llevar nuevo, con los mismos límites
@@ -464,6 +469,12 @@ func pendingOfflineItems(items []OfflineItem, sent map[string]bool) []OfflineIte
 
 // diagnoseOfflineTable revisa una mesa de destino: que siga en servicio, que sus partidas no estén ya en una cuenta
 // abierta de la mesa y qué cuentas abiertas no veía el mesero.
+//
+// Etapa M1 (M1-D13, la tabla del contrato §7): si al llegar la mesa está en una unión (la que vio el mesero u otra),
+// el pedido va a la unión: las partidas ya recibidas y las cuentas no vistas se buscan en todas sus mesas; sin cuentas
+// no vistas, la cuenta nueva se abre en la mesa, que es de la unión. Si la unión que vio el mesero ya se deshizo (o la
+// mesa salió de ella), la mesa se trata como siempre: libre, cuenta nueva sin confirmar; ocupada por otra cuenta,
+// table_has_account. No hay tipos de cambio nuevos: la 0.4.1 entiende table_has_account e items_in_account.
 func (handler *service) diagnoseOfflineTable(input OfflineOrderInput) ([]OfflineChange, error) {
 	destination := input.Destination
 	if err := handler.request.Actor.Require("accounts.open"); err != nil {
@@ -486,6 +497,14 @@ func (handler *service) diagnoseOfflineTable(input OfflineOrderInput) ([]Offline
 			Message: "La mesa «" + name + "» está fuera de servicio o inactiva. Elige otra mesa.",
 		}}, nil
 	}
+	union, err := handler.unionOfTable(*destination.TableID)
+	if err != nil {
+		return nil, err
+	}
+	place := name
+	if union != nil {
+		place = union.Name
+	}
 	holding, err := handler.openAccountsWithItems(destination.TableID, input.Items)
 	if err != nil {
 		return nil, err
@@ -501,7 +520,7 @@ func (handler *service) diagnoseOfflineTable(input OfflineOrderInput) ([]Offline
 				Kind:      OfflineItemsInAccount,
 				Now:       &folio,
 				AccountID: &accountID,
-				Message: "Lo que capturaste ya está en la cuenta «" + account.Name + "» (" + folio + ") de la mesa «" + name +
+				Message: "Lo que capturaste ya está en la cuenta «" + account.Name + "» (" + folio + ") de la mesa «" + place +
 					"». Envía el pedido a esa cuenta.",
 			})
 		}
@@ -509,7 +528,7 @@ func (handler *service) diagnoseOfflineTable(input OfflineOrderInput) ([]Offline
 	}
 	unseen, err := readList[TableAccountRef](handler.ctx, handler.tx, `SELECT jsonb_build_object(
         'id',a.id,'folio',a.folio,'name',a.name) FROM app.restaurant_accounts a
-        WHERE a.table_id=$1 AND a.state='open' AND NOT (a.id::text = ANY($2::text[]))
+        WHERE a.table_id IN `+tableunions.PlaceTablesSQL("$1::uuid")+` AND a.state='open' AND NOT (a.id::text = ANY($2::text[]))
         ORDER BY a.created_at,a.id`, *destination.TableID, destination.SeenAccountIDs)
 	if err != nil {
 		return nil, err
@@ -522,10 +541,16 @@ func (handler *service) diagnoseOfflineTable(input OfflineOrderInput) ([]Offline
 		labels = append(labels, fmt.Sprintf("folio %d", account.Folio))
 	}
 	now := strings.Join(labels, ", ")
+	message := "La mesa «" + place + "» ya tiene una cuenta abierta en otra terminal (" + now + "). Confirma para abrir otra cuenta o envía el pedido a esa cuenta."
+	// La mesa se unió después de que el mesero la vio (o está en otra unión): se le dice con el nombre de la unión.
+	if union != nil && (destination.SeenUnionID == nil || *destination.SeenUnionID != union.ID) {
+		message = "La " + tableReference(name) + " ahora está unida con otras mesas (" + union.Name +
+			") y tiene cuentas abiertas. Confirma para abrir otra cuenta en la unión o envía el pedido a esa cuenta."
+	}
 	return []OfflineChange{{
 		Kind:       OfflineTableHasAccount,
 		Now:        &now,
-		Message:    "La mesa «" + name + "» ya tiene una cuenta abierta en otra terminal (" + now + "). Confirma para abrir otra cuenta o envía el pedido a esa cuenta.",
+		Message:    message,
 		Acceptable: true,
 	}}, nil
 }
@@ -568,8 +593,8 @@ type heldAccount struct {
 	CustomerName string `json:"customer_name"`
 }
 
-// openAccountsWithItems son las cuentas abiertas de la mesa (con tableID) o los pedidos para llevar abiertos (sin
-// tableID, etapa A2) que ya tienen alguna partida del pedido: en su borrador o ya enviada (una partida confirmada con
+// openAccountsWithItems son las cuentas abiertas de la mesa (con tableID; de toda su unión si está unida, etapa M1) o
+// los pedidos para llevar abiertos (sin tableID, etapa A2) que ya tienen alguna partida del pedido: en su borrador o ya enviada (una partida confirmada con
 // ese id cuyas unidades siguen en la cuenta o que se confirmó en ella).
 func (handler *service) openAccountsWithItems(tableID *string, items []OfflineItem) ([]heldAccount, error) {
 	ids := make([]string, 0, len(items))
@@ -579,7 +604,8 @@ func (handler *service) openAccountsWithItems(tableID *string, items []OfflineIt
 	return readList[heldAccount](handler.ctx, handler.tx, `SELECT jsonb_build_object('id',a.id,'folio',a.folio,'name',a.name,
         'customer_name',a.customer_name)
         FROM app.restaurant_accounts a WHERE a.state='open'
-            AND (($1::uuid IS NOT NULL AND a.table_id=$1) OR ($1::uuid IS NULL AND a.mode='takeaway')) AND (
+            AND (($1::uuid IS NOT NULL AND a.table_id IN `+tableunions.PlaceTablesSQL("$1::uuid")+`)
+                OR ($1::uuid IS NULL AND a.mode='takeaway')) AND (
             EXISTS(SELECT FROM app.restaurant_draft_items d WHERE d.account_id=a.id AND d.id=ANY($2::uuid[]))
             OR EXISTS(SELECT FROM app.restaurant_items i JOIN app.restaurant_orders o ON o.id=i.original_order_id
                 WHERE i.draft_item_id=ANY($2::uuid[]) AND (o.original_account_id=a.id

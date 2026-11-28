@@ -7,6 +7,7 @@ import com.adelpos.meseros.core.domain.catalog.LineSelection
 import com.adelpos.meseros.core.domain.table.TableState
 import com.adelpos.meseros.core.domain.waiter.AccountBill
 import com.adelpos.meseros.core.domain.waiter.AccountSummary
+import com.adelpos.meseros.core.domain.waiter.AccountUnionRef
 import com.adelpos.meseros.core.domain.waiter.ChangeKind
 import com.adelpos.meseros.core.domain.waiter.DiningArea
 import com.adelpos.meseros.core.domain.waiter.DiningTable
@@ -17,11 +18,18 @@ import com.adelpos.meseros.core.domain.waiter.OrderMode
 import com.adelpos.meseros.core.domain.waiter.PreparationState
 import com.adelpos.meseros.core.domain.waiter.QuotedLine
 import com.adelpos.meseros.core.domain.waiter.RestaurantSettings
+import com.adelpos.meseros.core.domain.waiter.SeenUnion
 import com.adelpos.meseros.core.domain.waiter.SentLine
+import com.adelpos.meseros.core.domain.waiter.TableGroup
 import com.adelpos.meseros.core.domain.waiter.TableShape
+import com.adelpos.meseros.core.domain.waiter.TableUnion
 import com.adelpos.meseros.core.domain.waiter.Takeaway
 import com.adelpos.meseros.core.domain.waiter.TakeawayCustomer
 import com.adelpos.meseros.core.domain.waiter.Totals
+import com.adelpos.meseros.core.domain.waiter.UnionJoin
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonPrimitive
 
 /** Correspondencia entre las formas del contrato del modo Mesero y el dominio. */
 object WaiterMapper {
@@ -48,8 +56,43 @@ object WaiterMapper {
             occupiedSeconds = dto.occupiedSeconds,
             balance = dto.balance,
             longOpen = dto.longOpen,
+            unionId = dto.unionId,
+            groupId = dto.groupId,
         )
     }
+
+    /** Etapa M1: una unión abierta (una ya deshecha no se muestra). */
+    fun union(dto: TableUnionDto): TableUnion? {
+        if (dto.state == UNION_DISSOLVED || dto.tableIds.size < 2) {
+            return null
+        }
+        return TableUnion(
+            id = dto.id,
+            name = dto.name,
+            areaId = dto.areaId,
+            groupId = dto.groupId,
+            tableIds = dto.tableIds,
+            seats = dto.seats,
+            state = TableState.fromWireName(dto.state),
+            accountCount = dto.accountCount,
+            balance = dto.balance,
+            occupiedSeconds = dto.occupiedSeconds,
+            longOpen = dto.longOpen,
+            revision = dto.revision,
+        )
+    }
+
+    fun group(dto: TableGroupDto): TableGroup =
+        TableGroup(
+            id = dto.id,
+            areaId = dto.areaId,
+            name = dto.name,
+            tableIds = dto.tableIds,
+            seats = dto.seats,
+            revision = dto.revision,
+        )
+
+    private const val UNION_DISSOLVED = "dissolved"
 
     fun settings(dto: RestaurantSettingsDto): RestaurantSettings =
         RestaurantSettings(
@@ -87,6 +130,12 @@ object WaiterMapper {
             paymentState = dto.paymentState,
             deliveryState = dto.deliveryState,
             discardable = dto.discardable,
+            assignedUserId = dto.assignedUserId,
+            preparationRequired = dto.preparationRequired,
+            tableUnion =
+                dto.tableUnion?.let { union ->
+                    AccountUnionRef(id = union.id, name = union.name, tableIds = union.tableIds)
+                },
         )
 
     fun draftLine(dto: DraftItemDto): DraftLine =
@@ -129,6 +178,7 @@ object WaiterMapper {
             name = dto.quoteLine.name,
             unitPrice = dto.quoteLine.unitPrice,
             total = dto.totals.total,
+            preparationRequired = dto.preparationRequired,
         )
 
     fun bill(dto: BillDto): AccountBill =
@@ -184,6 +234,8 @@ object WaiterMapper {
         seenAccountIds: List<String>,
         customer: TakeawayCustomer,
         items: List<DraftLine>,
+        seenUnion: SeenUnion? = null,
+        unionJoin: UnionJoin? = null,
     ): OpenAccountBody =
         when (mode) {
             OrderMode.DINE_IN ->
@@ -193,6 +245,10 @@ object WaiterMapper {
                     tableId = requireNotNull(tableId) { "Una cuenta de salón nace en una mesa" },
                     seenAccountIds = seenAccountIds,
                     items = items.map(::draftItem),
+                    // Etapa M1 (M1-D9): sin dato no se escribe (como la 0.4.1).
+                    seenUnionId = seenUnionJson(seenUnion),
+                    unionTableIds = unionJoin?.takeIf { it.groupId == null }?.tableIds,
+                    unionGroupId = unionJoin?.groupId,
                 )
             OrderMode.TAKEAWAY -> {
                 val trimmed = customer.trimmed()
@@ -207,6 +263,14 @@ object WaiterMapper {
                 )
             }
         }
+
+    /**
+     * `seen_union_id` (etapa M1): sin dato, null (no se escribe); la unión vista, su id; ninguna,
+     * `null` escrito.
+     */
+    fun seenUnionJson(seenUnion: SeenUnion?): JsonElement? = seenUnion?.let { seen ->
+        seen.id?.let(::JsonPrimitive) ?: JsonNull
+    }
 
     /** El cambio tal como lo dio Go, para devolverlo en la confirmación. */
     fun changeDto(change: OrderChange): OfflineChangeDto =

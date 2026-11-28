@@ -46,8 +46,12 @@ type CatalogPlan struct {
 	Defaults      []PlannedDefault
 	Areas         []PlannedArea
 	Tables        []PlannedTable
-	Users         []PlannedUser
-	Notes         []PlanNote
+	// TableGroups (etapa M1, M1-D5) son las mesas divisibles reconocidas en los nombres; AbsorbedTables, las mesas
+	// «Mesa N» que se volvieron un grupo: no se crean como mesas vivas, pero sus ventas conservan su nombre.
+	TableGroups    []PlannedTableGroup
+	AbsorbedTables []PlannedTable
+	Users          []PlannedUser
+	Notes          []PlanNote
 }
 
 // PlanNote es una advertencia de la correspondencia para el informe (sin datos sensibles: nombres del catálogo y
@@ -414,6 +418,10 @@ func (plan *CatalogPlan) buildComplements(model *Model) {
 
 // buildTables acomoda las mesas (sin «para llevar») en áreas «Salón» de hasta 48 mesas, en una cuadrícula de 8 por
 // renglón dentro del lienzo de 1000 × 560, con su capacidad (4 si no la tenía; entre 1 y 40).
+//
+// Etapa M1 (M1-D5): las secciones de una mesa divisible van juntas, en el orden de sus letras, donde aparece la
+// primera; si no caben en lo que queda del renglón empiezan uno nuevo (y si no caben en el área, la siguiente). La mesa
+// «Mesa N» que se volvió el grupo no ocupa lugar. Sin grupos, el acomodo es el de siempre.
 func (plan *CatalogPlan) buildTables(model *Model) {
 	tables := []DiningTable{}
 	for _, table := range model.Tables {
@@ -421,42 +429,97 @@ func (plan *CatalogPlan) buildTables(model *Model) {
 			tables = append(tables, table)
 		}
 	}
+	grouping := detectTableGroups(tables)
+	plan.Notes = append(plan.Notes, grouping.notes...)
 	names := map[string]map[string]bool{}
-	for index, table := range tables {
-		areaNumber := index / tablesPerArea
-		if areaNumber >= len(plan.Areas) {
+	slot := 0
+	place := func(table DiningTable) PlannedTable {
+		areaNumber := slot / tablesPerArea
+		for areaNumber >= len(plan.Areas) {
+			number := len(plan.Areas)
 			key := "salon"
 			name := areaNamePrefix
-			if areaNumber > 0 {
-				key = fmt.Sprintf("salon-%d", areaNumber+1)
-				name = fmt.Sprintf("%s %d", areaNamePrefix, areaNumber+1)
+			if number > 0 {
+				key = fmt.Sprintf("salon-%d", number+1)
+				name = fmt.Sprintf("%s %d", areaNamePrefix, number+1)
 			}
-			plan.Areas = append(plan.Areas, PlannedArea{Key: key, Name: name, SortOrder: areaNumber})
+			plan.Areas = append(plan.Areas, PlannedArea{Key: key, Name: name, SortOrder: number})
 			names[key] = map[string]bool{}
 		}
 		area := plan.Areas[areaNumber]
-		cell := index % tablesPerArea
-		seats := defaultSeats
-		if table.Capacity.Valid {
-			seats = int(table.Capacity.Value)
-		}
-		if seats < 1 {
-			seats = 1
-		}
-		if seats > maxSeats {
-			seats = maxSeats
-		}
-		plan.Tables = append(plan.Tables, PlannedTable{
+		cell := slot % tablesPerArea
+		slot++
+		planned := PlannedTable{
 			Key:      legacyKey(table.ID),
 			LegacyID: table.ID,
 			AreaKey:  area.Key,
 			AreaName: area.Name,
-			Name:     uniqueName(cleanName(table.Name, 60, fmt.Sprintf("Mesa %d", table.ID)), names[area.Key], 60),
-			Seats:    seats,
+			Name:     uniqueName(legacyTableName(table), names[area.Key], 60),
+			Seats:    legacySeats(table),
 			X:        (cell%tablesPerRow)*tableCellX + tableMarginX,
 			Y:        (cell/tablesPerRow)*tableCellY + tableMarginY,
-		})
+		}
+		plan.Tables = append(plan.Tables, planned)
+		return planned
 	}
+	placedGroups := map[int]bool{}
+	for _, table := range tables {
+		if grouping.absorbed[table.ID] {
+			continue
+		}
+		index, section := grouping.sectionOf[table.ID]
+		if !section {
+			place(table)
+			continue
+		}
+		if placedGroups[index] {
+			continue
+		}
+		placedGroups[index] = true
+		group := grouping.groups[index]
+		size := len(group.sections)
+		if column := (slot % tablesPerArea) % tablesPerRow; size <= tablesPerRow && column+size > tablesPerRow {
+			slot += tablesPerRow - column
+		}
+		if cell := slot % tablesPerArea; size <= tablesPerArea && cell+size > tablesPerArea {
+			slot += tablesPerArea - cell
+		}
+		planned := PlannedTableGroup{Key: legacyGroupKey(group.number), Name: group.name, Base: group.base}
+		for _, sectionTable := range group.sections {
+			placed := place(sectionTable)
+			planned.AreaKey = placed.AreaKey
+			planned.TableKeys = append(planned.TableKeys, placed.Key)
+			planned.SectionNames = append(planned.SectionNames, placed.Name)
+		}
+		plan.TableGroups = append(plan.TableGroups, planned)
+		if group.base != nil {
+			// La mesa que se volvió el grupo: sus ventas conservan su nombre, en el área del grupo, sin mesa viva.
+			area := plan.Areas[len(plan.Areas)-1]
+			for _, candidate := range plan.Areas {
+				if candidate.Key == planned.AreaKey {
+					area = candidate
+				}
+			}
+			plan.AbsorbedTables = append(plan.AbsorbedTables, PlannedTable{Key: legacyKey(group.base.ID),
+				LegacyID: group.base.ID, AreaKey: area.Key, AreaName: area.Name, Name: group.name,
+				Seats: legacySeats(*group.base)})
+		}
+	}
+}
+
+// legacySeats es la capacidad de una mesa del anterior: 4 si no la tenía; entre 1 y 40.
+func legacySeats(table DiningTable) int {
+	seats := defaultSeats
+	if table.Capacity.Valid {
+		seats = int(table.Capacity.Value)
+	}
+	if seats < 1 {
+		seats = 1
+	}
+	if seats > maxSeats {
+		seats = maxSeats
+	}
+	return seats
 }
 
 // roleForPosition es la correspondencia de puestos del anterior con los roles predeterminados de AD-EL POS

@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"local/ad-el-pos/server/internal/ordering"
+	"local/ad-el-pos/server/internal/tableunions"
 )
 
 const areaQuery = `SELECT to_jsonb(a) || jsonb_build_object('table_count',
@@ -130,7 +131,17 @@ func (handler *service) overview() (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"areas": areas, "tables": tables, "settings": settings, "timezone": location.String()}, nil
+	// Etapa M1 (contrato §2): las uniones abiertas y los grupos activos, para el contorno, el marco y la lista.
+	unions, err := handler.openUnions(tables)
+	if err != nil {
+		return nil, err
+	}
+	groups, err := tableunions.ActiveGroups(handler.ctx, handler.tx)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"areas": areas, "tables": tables, "settings": settings, "timezone": location.String(),
+		"unions": unions, "groups": groups}, nil
 }
 
 func (handler *service) readSettings() (*Settings, error) {

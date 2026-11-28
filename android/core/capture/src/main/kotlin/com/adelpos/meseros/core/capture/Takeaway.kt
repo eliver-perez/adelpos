@@ -43,8 +43,13 @@ fun CustomerDialog(
 ) {
     var name by rememberSaveable { mutableStateOf(initial.name) }
     var phone by rememberSaveable { mutableStateOf(initial.phone) }
+    // Etapa M1 (§5.7): en Android 8 el teclado se quedaba abierto al cerrar el diálogo y tapaba la
+    // lista de Para llevar. Se suelta el foco y se esconde el teclado al cerrar y, ya sin el
+    // diálogo, también desde la ventana de la actividad (HideKeyboardWhenClosed).
+    HideKeyboardWhenClosed()
+    val close = rememberKeyboardCloser()
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { close(onDismiss) },
         title = { Text(stringResource(R.string.customer_title)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -86,14 +91,16 @@ fun CustomerDialog(
         },
         confirmButton = {
             TextButton(
-                onClick = { onSave(TakeawayCustomer(name, phone).trimmed()) },
+                onClick = { close { onSave(TakeawayCustomer(name, phone).trimmed()) } },
                 modifier = Modifier.testTag(TAG_CUSTOMER_SAVE),
             ) {
                 Text(stringResource(R.string.customer_save))
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.capture_cancel)) }
+            TextButton(onClick = { close(onDismiss) }) {
+                Text(stringResource(R.string.capture_cancel))
+            }
         },
         modifier = Modifier.reportsUserActivity(LocalUserActivity.current),
     )

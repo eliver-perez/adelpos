@@ -119,6 +119,12 @@ func (generator *generator) reference() {
 	}{
 		{"Mesa 1", int64(4)}, {"Mesa 2", int64(2)}, {"Mesa 3", int64(6)}, {"Barra", int64(3)},
 		{"Terraza «A»", int64(8)}, {nil, int64(4)}, {"Mesa 7", nil},
+		// Etapa M1 (§3 y §7; M1-D5): «Mesa 3» con «3a», «3b» y «3c» (la mesa divisible de la especificación: «Mesa 3» se
+		// vuelve el grupo), «Mesa 9a» a «Mesa 9d» sin «Mesa 9» (como las del propietario) y un caso dudoso, «Mesa 12a» y
+		// «Mesa 12c» (falta la b), que queda como dos mesas normales en el informe.
+		{"3a", int64(2)}, {"3b", int64(2)}, {"3c", int64(2)},
+		{"Mesa 9a", int64(4)}, {"Mesa 9b", int64(4)}, {"Mesa 9c", int64(4)}, {"Mesa 9d", int64(4)},
+		{"Mesa 12a", int64(2)}, {"Mesa 12c", int64(2)},
 	}
 	for index, table := range tables {
 		generator.add("mesas", int64(index+2), table.name, table.seats)

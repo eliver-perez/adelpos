@@ -4,9 +4,11 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -152,14 +154,25 @@ class AccessScreensTest {
         compose.onNodeWithTag("${TAG_WAITER_PREFIX}ana").performClick()
         type("4829")
         waitFor(TAG_TABLES_SCREEN)
-        compose.onNodeWithText("Ana", useUnmergedTree = true).assertIsDisplayed()
+        activeWaiterIs("Ana")
         compose.onNodeWithTag(TAG_WAITER_MENU).performClick()
         compose.onNodeWithTag(TAG_WAITER_SWITCH).performClick()
         waitFor("${TAG_WAITER_PREFIX}dora")
         compose.onNodeWithTag("${TAG_WAITER_PREFIX}dora").performClick()
         type("4829")
         waitFor(TAG_TABLES_SCREEN)
-        compose.onNodeWithText("Dora Elena", useUnmergedTree = true).assertIsDisplayed()
+        activeWaiterIs("Dora Elena")
+    }
+
+    /**
+     * El mesero activo en el menú de la barra: con su nombre escrito o, en el teléfono vertical
+     * (etapa M1, §5.6), solo con su inicial y el nombre en la descripción del menú.
+     */
+    private fun activeWaiterIs(name: String) {
+        compose
+            .onNodeWithTag(TAG_WAITER_MENU)
+            .assert(hasText(name) or hasContentDescription(name))
+            .assertIsDisplayed()
     }
 
     @Test

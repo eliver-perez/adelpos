@@ -1,12 +1,16 @@
 package operations
 
 import (
+	"errors"
 	"fmt"
 	"local/ad-el-pos/server/internal/kitchen"
 	"local/ad-el-pos/server/internal/payments"
+	"local/ad-el-pos/server/internal/tableunions"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 const accountQuery = `SELECT to_jsonb(a) || jsonb_build_object(
@@ -70,6 +74,18 @@ func (handler *service) decorateAccount(account *Account) error {
 	if state != "" && !(state == "cancelled" && account.DraftQuantity > 0) {
 		account.PreparationState = state
 	}
+	// Etapa M1 (§5.2): Go dice si la cuenta necesita preparación, para que nadie le ponga etiqueta de cocina a lo que no.
+	account.PreparationRequired, err = kitchen.AccountPreparationRequired(handler.ctx, handler.tx, account.ID)
+	if err != nil {
+		return err
+	}
+	// Etapa M1 (contrato §2): la unión abierta de una cuenta abierta, por su mesa.
+	if account.State == "open" && account.TableID != nil {
+		account.TableUnion, err = handler.accountTableUnion(*account.TableID)
+		if err != nil {
+			return err
+		}
+	}
 
 	if account.ScheduledAt != nil {
 		account.ScheduledLocal = account.ScheduledAt.In(location).Format("2006-01-02T15:04")
@@ -96,6 +112,26 @@ func (handler *service) decorateAccount(account *Account) error {
 		account.CancelRequiresAuthorization = !handler.request.Actor.Can(cancelPermission)
 	}
 	return nil
+}
+
+// accountTableUnion es la unión abierta de la mesa con sus mesas en el orden del nombre; nil si no está unida.
+func (handler *service) accountTableUnion(tableID string) (*AccountTableUnion, error) {
+	var union AccountTableUnion
+	err := handler.tx.QueryRow(handler.ctx, `SELECT u.id::text,u.name FROM app.table_union_members m
+        JOIN app.table_unions u ON u.id=m.union_id WHERE m.table_id=$1 AND m.left_at IS NULL AND u.state='open'`, tableID).
+		Scan(&union.ID, &union.Name)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	members, err := tableunions.OpenMembers(handler.ctx, handler.tx, union.ID)
+	if err != nil {
+		return nil, err
+	}
+	union.TableIDs = memberIDs(members)
+	return &union, nil
 }
 
 func (handler *service) listAccounts() (any, error) {
@@ -136,17 +172,24 @@ func (handler *service) listAccounts() (any, error) {
 	if page > 10000 || size > 100 {
 		return nil, invalid("Se admiten páginas hasta 10000, con hasta 100 cuentas por página.")
 	}
+	// Etapa M1 (contrato §2): las cuentas abiertas de una mesa unida son las de toda su unión ($7, la mesa como uuid
+	// solo si se piden las abiertas de una mesa). El historial de una mesa (otros estados) sigue siendo el de la mesa.
+	var place *string
+	if tableID != "" && tableID != "unassigned" && state == "open" {
+		place = &tableID
+	}
 	filter := ` WHERE ($1='' OR a.mode=$1) AND ($2='all' OR a.state=$2)
-        AND ($3='' OR a.table_id::text=$3 OR ($3='unassigned' AND a.table_id IS NULL))
+        AND ($3='' OR ($7::uuid IS NULL AND a.table_id::text=$3) OR ($3='unassigned' AND a.table_id IS NULL)
+            OR ($7::uuid IS NOT NULL AND a.table_id IN ` + tableunions.PlaceTablesSQL("$7::uuid") + `))
         AND ($4='' OR a.folio::text ILIKE $5 OR a.customer_name ILIKE $5 OR a.phone ILIKE $5 OR a.name ILIKE $5)
         AND (a.mode<>'takeaway' OR $6)`
-	arguments := []any{mode, state, tableID, search, "%" + search + "%", handler.request.Actor.Can("takeaway.read")}
+	arguments := []any{mode, state, tableID, search, "%" + search + "%", handler.request.Actor.Can("takeaway.read"), place}
 	var total int
 	if err := handler.tx.QueryRow(handler.ctx, "SELECT count(*) FROM app.restaurant_accounts a"+filter, arguments...).Scan(&total); err != nil {
 		return nil, err
 	}
 	arguments = append(arguments, size, (page-1)*size)
-	accounts, err := readList[Account](handler.ctx, handler.tx, accountQuery+filter+" ORDER BY a.created_at,a.id LIMIT $7 OFFSET $8", arguments...)
+	accounts, err := readList[Account](handler.ctx, handler.tx, accountQuery+filter+" ORDER BY a.created_at,a.id LIMIT $8 OFFSET $9", arguments...)
 	if err != nil {
 		return nil, err
 	}
@@ -206,6 +249,12 @@ func (handler *service) readBill(id string) (*Bill, error) {
 		return nil, err
 	}
 	for index := range lines {
+		// Etapa M1 (§5.2): si el renglón necesita preparación, con la regla de Go (kitchen.VersionPreparationRequired).
+		required, err := kitchen.VersionPreparationRequired(handler.ctx, handler.tx, id, lines[index].VersionID, lines[index].State)
+		if err != nil {
+			return nil, err
+		}
+		lines[index].PreparationRequired = required
 		if lines[index].State == "cancelled" {
 			lines[index].PreparationState = "cancelled"
 			continue

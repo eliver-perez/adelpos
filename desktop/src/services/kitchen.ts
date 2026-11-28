@@ -353,7 +353,10 @@ export const preparationLabels: Record<string, string> = {
   pending_release: 'Enviado · sin confirmar en cocina',
   change_pending: 'Cambio de cocina pendiente de revisión',
   scheduled: 'Programado para preparación',
-  released: 'Liberado a preparación',
+  // Etapa M1 (§5.4, M1-D18): en las vistas de la cuenta, lo enviado que la cocina todavía no empieza dice «En
+  // cocina», como Android (WaiterBadges.kt); antes «Liberado a preparación». En Preparación es «Por preparar»
+  // (taskStateLabels).
+  released: 'En cocina',
   preparing: 'En preparación',
   ready: 'Listo',
   cancelled: 'Cancelado',
@@ -362,6 +365,65 @@ export const preparationLabels: Record<string, string> = {
 // Etapa A3 (A3-D22): un valor que esta versión no conoce se dice en general, nunca con su código.
 export function preparationLabel(state: string) {
   return preparationLabels[state] ?? 'Otro estado de preparación';
+}
+
+// Etapa M1 (§5.4, M1-D18): estado de una tarjeta de Preparación (y de su historial) en lenguaje sencillo. Lo que
+// llegó a la estación y nadie ha empezado dice «Por preparar», para no confundirse con «En preparación».
+export const taskStateLabels: Record<string, string> = {
+  released: 'Por preparar',
+  preparing: 'En preparación',
+  ready: 'Listo',
+  cancelled: 'Cancelado',
+};
+
+export function taskStateLabel(state: string) {
+  return taskStateLabels[state] ?? preparationLabel(state);
+}
+
+// Etiqueta de cocina de un producto enviado, la misma en la captura y en el panel de la mesa (etapa M1, §5.1 y
+// §5.2; M1-D15 y M1-D34). Sigue el estado que manda Go para el renglón, con los textos de Android
+// (WaiterBadges.kt): «Listo», «En preparación», «En cocina» (solo lo que llegó a cocina y nadie ha empezado),
+// «Programado para preparación» o «Enviado · sin confirmar en cocina». Un renglón que Go marca sin preparación
+// (preparation_required: false, por ejemplo un refresco sin ruta) no lleva etiqueta de cocina: el mesero no espera
+// un aviso que nunca llegará. Un renglón cancelado siempre dice «Cancelado» (es su estado, no una etiqueta de
+// cocina), como Android. Sin preparation_required (un servidor anterior) se trata como que sí la necesita.
+export interface LineKitchenTag {
+  text: string;
+  tone: 'cancelled' | 'unconfirmed' | 'ready' | '';
+}
+
+export function lineKitchenTag(line: {
+  state: string;
+  preparation_state?: string;
+  preparation_required?: boolean;
+}): LineKitchenTag | null {
+  if (line.state === 'cancelled') {
+    return { text: 'Cancelado', tone: 'cancelled' };
+  }
+  if (line.preparation_required === false) {
+    return null;
+  }
+  switch (line.preparation_state) {
+    case 'pending_release':
+      return { text: preparationLabels.pending_release!, tone: 'unconfirmed' };
+    case 'ready':
+      return { text: 'Listo', tone: 'ready' };
+    case 'preparing':
+    case 'scheduled':
+    case 'change_pending':
+    case 'confirmed_pending_dispatch':
+    case 'cancelled':
+      return { text: preparationLabels[line.preparation_state]!, tone: '' };
+    default:
+      // «released» y un estado que esta versión no conoce: la etiqueta de siempre (Android dice lo mismo).
+      return { text: 'En cocina', tone: '' };
+  }
+}
+
+// Una cuenta sin preparación (todos sus productos vigentes son así, M1-D15) no lleva etiqueta de cocina en la
+// lista ni en el panel. Sin el campo (un servidor anterior), sí.
+export function accountNeedsPreparation(account: { preparation_required?: boolean }) {
+  return account.preparation_required !== false;
 }
 
 // Tipo de documento en comandas y cola de impresión, incluidos los documentos comerciales.

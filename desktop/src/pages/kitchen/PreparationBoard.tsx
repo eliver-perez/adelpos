@@ -194,7 +194,7 @@ export function PreparationBoard({
           </div>
           {board?.tasks.length === 0 && (
             <div className="panel">
-              <p className="muted">No hay unidades de preparación en este filtro.</p>
+              <p className="muted">No hay pedidos con este filtro.</p>
             </div>
           )}
           <div className="button-row">

@@ -249,6 +249,8 @@ class OrderSender(
                         seenAccountIds = save.seenAccountIds,
                         customer = save.customer,
                         items = save.items,
+                        seenUnion = save.seenUnion,
+                        unionJoin = save.unionJoin,
                     ),
                 )
             } else {
@@ -479,6 +481,8 @@ class OrderSender(
                             OfflineDestinationDto(
                                 tableId = destination.tableId,
                                 seenAccountIds = destination.seenAccountIds,
+                                // Etapa M1 (contrato §7): la unión que veía el mesero.
+                                seenUnionId = WaiterMapper.seenUnionJson(destination.seenUnion),
                             )
                     },
                 items =

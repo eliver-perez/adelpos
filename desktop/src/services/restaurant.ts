@@ -37,6 +37,51 @@ export interface RestaurantTable {
   // establecimiento (settings.long_open_hours). Lo calcula Go y siempre lo envía; es opcional solo
   // para las mesas que arma la interfaz (por ejemplo, una mesa nueva en la distribución).
   long_open?: boolean;
+  // Etapa M1 (M1-D10): la unión abierta de la mesa o null. Una mesa unida trae el estado, las cuentas, el saldo y el
+  // tiempo de la unión. Ausentes con un servidor anterior.
+  union_id?: string | null;
+  // Etapa M1 (M1-D4): el grupo predefinido (mesa divisible) del que la mesa es sección, o null.
+  group_id?: string | null;
+}
+
+// Unión de mesas (etapa M1, contrato §2): varias mesas del mismo área que se comportan como una sola. Go calcula
+// todo: el nombre («Mesa 5 + 6» o el del grupo), la capacidad sumada, el estado (el más avanzado de sus cuentas),
+// las cuentas, el saldo y el tiempo; el escritorio solo lo muestra.
+export interface TableUnion {
+  id: string;
+  name: string;
+  area_id: string;
+  group_id: string | null;
+  // En orden natural del nombre de las mesas.
+  table_ids: string[];
+  seats: number;
+  state: 'occupied' | 'awaiting_payment' | 'partial_payment' | 'dissolved';
+  account_count: number;
+  balance: string;
+  occupied_since: string | null;
+  occupied_seconds: number;
+  long_open: boolean;
+  revision: number;
+}
+
+// Mesa divisible (grupo predefinido, etapa M1, §3): un nombre («Mesa 3») sobre varias mesas normales del mismo área,
+// sus secciones, en su orden. Cada sección sigue siendo una mesa normal; el atajo del grupo las une de un toque.
+export interface TableGroup {
+  id: string;
+  area_id: string;
+  name: string;
+  table_ids: string[];
+  seats: number;
+  revision: number;
+}
+
+// Vista previa de una unión (POST restaurant/table-unions/preview): no escribe nada. Sin problemas, se puede unir.
+// Cada problema trae el código y el texto del rechazo de Go, que se muestra tal cual.
+export interface UnionPreview {
+  name: string;
+  seats: number;
+  table_ids: string[];
+  problems: { code: string; message: string; table_id: string | null }[];
 }
 
 export type TableState =
@@ -72,6 +117,9 @@ export interface Overview {
   tables: RestaurantTable[];
   settings: RestaurantSettings;
   timezone: string;
+  // Etapa M1: las uniones abiertas y los grupos activos (ausentes con un servidor anterior).
+  unions?: TableUnion[];
+  groups?: TableGroup[];
 }
 
 export interface Totals {
@@ -138,6 +186,11 @@ export interface Account {
   cancel_requires_authorization: boolean;
   // Lleva abierta más horas que el umbral del establecimiento (§3.4).
   long_open: boolean;
+  // Etapa M1 (contrato §2): la unión de mesas de la cuenta (su mesa es parte de ella) o null. table_id y table_name
+  // siguen siendo los de su mesa; el lugar que se muestra es el nombre de la unión (accountPlace).
+  table_union?: { id: string; name: string; table_ids: string[] } | null;
+  // Etapa M1 (§5.2, M1-D15): false si ningún producto vigente de la cuenta necesita preparación. Ausente = true.
+  preparation_required?: boolean;
 }
 
 export type CancelBlocker = '' | 'payments' | 'adjustments';
@@ -162,6 +215,9 @@ export interface DraftItem extends PreviewLine {
 
 export interface ConfirmedLine {
   preparation_state?: string;
+  // Etapa M1 (§5.2, M1-D15): false cuando el renglón ya se envió y ninguna de sus unidades necesitó preparación
+  // (un producto sin ruta con «No necesitan preparación» o con la ruta «Sin preparación»). Ausente = true.
+  preparation_required?: boolean;
   version_id: string;
   item_id: string;
   original_order_id: string;
@@ -386,6 +442,7 @@ export function pendingAccountBill({
   localID,
   mode = 'dine_in',
   table,
+  union = null,
   priceListID,
   createdAt,
   timezone,
@@ -393,6 +450,8 @@ export function pendingAccountBill({
   localID: string;
   mode?: Account['mode'];
   table: Pick<RestaurantTable, 'id' | 'name'> | null;
+  // Etapa M1: la unión de la mesa (la de Go o la que vive en la pantalla), para mostrar su nombre en la captura.
+  union?: { id: string; name: string; table_ids: string[] } | null;
   priceListID: string;
   createdAt: string;
   timezone: string;
@@ -443,12 +502,27 @@ export function pendingAccountBill({
       cancel_blocker: '',
       cancel_requires_authorization: false,
       long_open: false,
+      table_union: takeaway ? null : union,
     },
     draft: [],
     lines: [],
     server_time: createdAt,
     timezone,
   };
+}
+
+// Unión de mesas que vive solo en la pantalla (etapa M1, M1-D9): todas sus mesas estaban libres y nace en Go con el
+// primer producto (union_table_ids o union_group_id en openAccount). El nombre y la capacidad son los de la vista
+// previa de Go. Salir sin capturar no guarda nada.
+export interface ScreenUnion {
+  startTableID: string;
+  // Las otras mesas, sin la de inicio (vacía con groupID).
+  tableIDs: string[];
+  groupID: string | null;
+  // Todas sus mesas, para dibujarla en el mapa.
+  allTableIDs: string[];
+  name: string;
+  seats: number;
 }
 
 export function serverDateTime(value: string, timezone: string) {
@@ -572,12 +646,71 @@ export function searchTables(
 // nombre capturado.
 const neutralAccountNames = ['Cuenta', 'Pedido para llevar', 'Para llevar'];
 
-export function accountCustomName(account: Pick<Account, 'name' | 'table_name'>): string {
+export function accountCustomName(
+  account: Pick<Account, 'name' | 'table_name'> & Pick<Partial<Account>, 'table_union'>,
+): string {
   const name = account.name.trim();
   if (!name || neutralAccountNames.includes(name) || name === account.table_name) {
     return '';
   }
+  if (account.table_union && unionReference(name, account.table_union.name)) {
+    return '';
+  }
   return name;
+}
+
+// Etapa M1 (M1-D14 y M1-D29): una cuenta sin nombre propio en una unión se llama como la unión; si el nombre de la
+// unión pasa de 100 caracteres, Go lo recorta en el último « + » que cabe y termina en « + …». Las dos formas son la
+// referencia neutra (no un nombre capturado).
+function unionReference(name: string, unionName: string) {
+  if (name === unionName) {
+    return true;
+  }
+  const cut = ' + …';
+  return name.endsWith(cut) && unionName.startsWith(`${name.slice(0, -cut.length)} + `);
+}
+
+// Lugar de una cuenta de salón como se muestra: el nombre de su unión de mesas, si está en una (etapa M1: las
+// cuentas son de la unión), o el de su mesa. null sin mesa.
+export function accountPlace(
+  account: Pick<Account, 'table_name'> & Pick<Partial<Account>, 'table_union'>,
+) {
+  return account.table_union?.name ?? account.table_name;
+}
+
+// Unión abierta y grupo activo de una mesa, tal como los manda Go en el mapa (etapa M1). Sin la capacidad o sin
+// uniones, null.
+export function unionOfTable(
+  overview: Pick<Overview, 'unions'> | null | undefined,
+  tableID: string,
+) {
+  return overview?.unions?.find((union) => union.table_ids.includes(tableID)) ?? null;
+}
+
+export function groupOfTable(
+  overview: Pick<Overview, 'groups'> | null | undefined,
+  tableID: string,
+) {
+  return overview?.groups?.find((group) => group.table_ids.includes(tableID)) ?? null;
+}
+
+// ¿La cuenta está en el mismo lugar que la mesa? Con la mesa en una unión, cualquier mesa de la unión.
+export function samePlace(
+  account: Pick<Account, 'table_id'>,
+  tableID: string,
+  union: Pick<TableUnion, 'table_ids'> | null,
+) {
+  if (!account.table_id) {
+    return false;
+  }
+  return union ? union.table_ids.includes(account.table_id) : account.table_id === tableID;
+}
+
+// Vista previa de una unión (etapa M1): Go da el nombre, la capacidad y los problemas sin escribir nada. Con
+// table_ids, la primera es la mesa de inicio (M1-D25); con group_id, el atajo del grupo; con union_id, las mesas que
+// se agregan a esa unión.
+export function previewUnion(body: { table_ids?: string[]; group_id?: string; union_id?: string }) {
+  return api<UnionPreview>('restaurant_preview_union', { body });
 }
 
 // Nombre con que se identifica a quien recoge un pedido para llevar: el cliente o, en pedidos
@@ -626,6 +759,9 @@ export const eventLabels: Record<string, string> = {
   'order.confirmed': 'Pedido confirmado · Pendiente de envío a cocina',
   'item.modified': 'Producto modificado',
   'item.cancelled': 'Producto cancelado',
+  // Etapa M1: la cuenta está en una unión de mesas y la unión cambió (se unió, se agregó o se quitó una mesa, cambió
+  // de nombre o se deshizo).
+  'account.table_union': 'Mesas unidas',
 };
 
 // Etapa A3 (A3-D22): un valor que esta versión no conoce se dice en general, nunca con su código.

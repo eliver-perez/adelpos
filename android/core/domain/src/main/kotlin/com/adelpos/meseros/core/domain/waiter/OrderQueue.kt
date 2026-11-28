@@ -80,6 +80,8 @@ data class OrderDestination(
     val seenAccountIds: List<String>,
     val mode: OrderMode = OrderMode.DINE_IN,
     val customer: TakeawayCustomer = TakeawayCustomer.NONE,
+    /** Etapa M1 (contrato §7): la unión que veía el mesero en la mesa (`seen_union_id`). */
+    val seenUnion: SeenUnion? = null,
 ) {
     val takeaway: Boolean
         get() = mode == OrderMode.TAKEAWAY
@@ -243,6 +245,9 @@ data class UnresolvedSave(
     val items: List<DraftLine>,
     val mode: OrderMode = OrderMode.DINE_IN,
     val customer: TakeawayCustomer = TakeawayCustomer.NONE,
+    /** Etapa M1: lo que llevaba el guardado (se repite **igual**). */
+    val seenUnion: SeenUnion? = null,
+    val unionJoin: UnionJoin? = null,
 )
 
 /**

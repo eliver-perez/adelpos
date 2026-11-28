@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+
+	"local/ad-el-pos/server/internal/tableunions"
 )
 
 // route describe una ruta financiera: permiso base, si solo lee y qué acción la atiende.
@@ -131,6 +133,12 @@ func Handle(ctx context.Context, tx pgx.Tx, request Request, audit Audit) (any, 
 	}
 	result, err := selected.action(handler, parts)
 	if err != nil {
+		return nil, err
+	}
+	// Etapa M1 (M1-D7): como al final de operations.Handle, se deshacen las uniones que el cobro dejó sin cuentas
+	// abiertas (con 7820148305 exclusivo todavía tomado), después de reconocer la venta con la unión abierta.
+	if _, err := tableunions.SettleEmpty(ctx, tx, tableunions.Actor{UserID: request.Actor.UserID,
+		DeviceID: request.Actor.DeviceID}, mutation.OperationID); err != nil {
 		return nil, err
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO app.restaurant_operations(id,actor_id,device_id,route,fingerprint,response)

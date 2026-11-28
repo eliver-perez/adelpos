@@ -9,6 +9,7 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.v2.createEmptyComposeRule
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithTag
@@ -66,6 +67,7 @@ import com.adelpos.meseros.navigation.TAG_NAV_TAKEAWAY
 import java.io.File
 import java.io.FileOutputStream
 import java.util.UUID
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -298,14 +300,93 @@ class TakeawayOnGoTest {
         launch()
         enterAna()
         openTakeaway()
-        tap("$TAG_TAKEAWAY_EDIT_PREFIX$offline")
-        fillCustomer(name = "Luisa Martínez", phone = "")
-        waitUntil("el nombre en Go") {
-            account(offline).text("customer_name") == "Luisa Martínez" &&
-                account(offline).text("phone") == "" &&
-                customerEdits().isEmpty()
+        // Etapa M1 (§5.7): lo que pasa en el dispositivo queda en el registro con su hora (el
+        // canal de eventos, las lecturas de Go y lo que dice la lista del pedido), para saber por
+        // qué en Android 8 la lista no se ponía al día.
+        val watch = watchTakeaway(offline)
+        try {
+            tap("$TAG_TAKEAWAY_EDIT_PREFIX$offline")
+            fillCustomer(name = "Luisa Martínez", phone = "")
+            waitUntil("el nombre en Go") {
+                account(offline).text("customer_name") == "Luisa Martínez" &&
+                    account(offline).text("phone") == "" &&
+                    customerEdits().isEmpty()
+            }
+            log("t6 · el nombre ya está en Go y no queda la edición en el dispositivo")
+            try {
+                waitForText("Luisa Martínez")
+            } catch (failure: Throwable) {
+                // Lo que se ve en ese momento: la pantalla (¿el teclado?), el método de entrada y
+                // cada ventana con sus nodos.
+                screenshot("t6-falla")
+                val input =
+                    TestDevice.app.getSystemService(
+                        android.view.inputmethod.InputMethodManager::class.java,
+                    )
+                log(
+                    "t6 · método de entrada activo: ${input?.isActive}, aceptando texto: ${input?.isAcceptingText}",
+                )
+                scenario?.onActivity { activity ->
+                    val insets =
+                        androidx.core.view.ViewCompat.getRootWindowInsets(activity.window.decorView)
+                    log(
+                        "t6 · teclado según Android: " +
+                            "${insets?.isVisible(androidx.core.view.WindowInsetsCompat.Type.ime())} " +
+                            "${insets?.getInsets(androidx.core.view.WindowInsetsCompat.Type.ime())}",
+                    )
+                }
+                compose
+                    .onAllNodes(isRoot(), useUnmergedTree = true)
+                    .fetchSemanticsNodes()
+                    .forEach { root -> log("t6 · ventana ${root.id} ${root.boundsInRoot}") }
+                val roots = compose.onAllNodes(isRoot(), useUnmergedTree = true)
+                for (index in roots.fetchSemanticsNodes().indices) {
+                    runCatching { roots[index].printToLog(TAG, maxDepth = Int.MAX_VALUE) }
+                }
+                throw failure
+            }
+        } finally {
+            watch.cancel()
         }
-        waitForText("Luisa Martínez")
+    }
+
+    /** Registra en `AdelOnGo` el canal de eventos y la lectura de [accountId] mientras corre t6. */
+    private fun watchTakeaway(accountId: String): kotlinx.coroutines.Job {
+        val realtime = container.catalogRealtime.realtime
+        val restaurant = container.waiterMode.restaurant
+        val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default)
+        val start = android.os.SystemClock.elapsedRealtime()
+        fun at() = "+${android.os.SystemClock.elapsedRealtime() - start} ms"
+        val job = kotlinx.coroutines.SupervisorJob()
+        scope.launch(job) { realtime.state.collect { log("t6 · ${at()} canal: $it") } }
+        scope.launch(job) {
+            realtime.signals.collect { signal ->
+                when (signal) {
+                    is com.adelpos.core.model.realtime.RealtimeSignal.Changes ->
+                        signal.events.forEach { event ->
+                            log(
+                                "t6 · ${at()} evento ${event.scope} ${event.kind} ${event.aggregateId}",
+                            )
+                        }
+                    else -> log("t6 · ${at()} señal $signal")
+                }
+            }
+        }
+        scope.launch(job) {
+            restaurant.accountsReadAt.collect { log("t6 · ${at()} lectura de Go: $it") }
+        }
+        scope.launch(job) {
+            restaurant.allOpenAccounts.collect { accounts ->
+                val name = accounts.firstOrNull { it.id == accountId }?.customer?.name
+                log("t6 · ${at()} la lectura dice: $name")
+            }
+        }
+        scope.launch(job) {
+            container.database.waiter().observeCustomerEdits().collect { edits ->
+                log("t6 · ${at()} ediciones por enviar: ${edits.map { it.customerName }}")
+            }
+        }
+        return job
     }
 
     @Test

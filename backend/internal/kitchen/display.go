@@ -13,6 +13,7 @@ import (
 	"local/ad-el-pos/server/internal/documents"
 	"local/ad-el-pos/server/internal/events"
 	"local/ad-el-pos/server/internal/stationscope"
+	"local/ad-el-pos/server/internal/tableunions"
 )
 
 // Pantalla de cocina para Android (etapa K1, Fase A; §2 a §4 de la especificación y decisiones K1-D4, K1-D5, K1-D7,
@@ -77,6 +78,8 @@ var displayAccountKinds = map[string]bool{
 	"restaurant.account.split":     true,
 	"restaurant.account.cancelled": true,
 	"restaurant.items.transferred": true,
+	// Etapa M1 (M1-D14): unir, agregar, quitar o deshacer la unión de la mesa de la cuenta cambia su título.
+	"restaurant.account.table_union": true,
 }
 
 // AppendDisplayConfigurationChanged publica kitchen_display.configuration.changed para una pantalla (deviceID) o para
@@ -428,6 +431,8 @@ type displayHeader struct {
 	CustomerName string  `json:"customer_name"`
 	TableName    *string `json:"table_name"`
 	WaiterName   string  `json:"waiter_name"`
+	// UnionName (etapa M1) es el nombre de la unión abierta de la mesa de la cuenta, o null.
+	UnionName *string `json:"union_name"`
 }
 
 // DisplayCardHeader son los datos de la cuenta que muestra una tarjeta.
@@ -590,7 +595,7 @@ func groupByAccount(tasks []displayTask) [][]displayTask {
 func (display *displayService) headers(accounts []string) (map[string]displayHeader, error) {
 	rows, err := many[displayHeader](display.ctx, display.tx, `SELECT jsonb_build_object('id',a.id,'folio',a.folio,
             'mode',a.mode,'name',a.name,'customer_name',a.customer_name,'table_name',tb.name,
-            'waiter_name',coalesce(person.display_name,''))
+            'waiter_name',coalesce(person.display_name,''),'union_name',`+tableunions.UnionNameSQL("a.table_id")+`)
         FROM app.restaurant_accounts a LEFT JOIN app.restaurant_tables tb ON tb.id=a.table_id
         LEFT JOIN app.users person ON person.id=a.assigned_user_id WHERE a.id = ANY($1::uuid[])`, accounts)
 	if err != nil {
@@ -617,6 +622,15 @@ func cardHeader(header displayHeader, sender string) DisplayCardHeader {
 		result.Subtitle = header.Name
 		if strings.TrimSpace(header.CustomerName) != "" {
 			result.Subtitle = header.CustomerName
+		}
+	case header.UnionName != nil && strings.TrimSpace(*header.UnionName) != "":
+		// Etapa M1 (M1-D14): la mesa unida se titula con su unión («Mesa 5 + 6»), sin repetir el nombre de una cuenta que
+		// se llama como la unión.
+		result.Title = documents.TableContext(*header.UnionName)
+		// Tampoco la referencia recortada de una cuenta sin nombre en una unión de nombre largo (M1-D29).
+		if !sameDisplayName(header.Name, *header.UnionName) && !sameDisplayName(header.Name, result.Title) &&
+			!sameDisplayName(header.Name, tableunions.AccountReference(*header.UnionName)) {
+			result.Subtitle = header.Name
 		}
 	case header.TableName != nil && strings.TrimSpace(*header.TableName) != "":
 		result.Title = *header.TableName

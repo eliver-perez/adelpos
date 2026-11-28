@@ -18,7 +18,7 @@ import { formatMoney } from '../../services/money';
 import { notifyError, notifySuccess } from '../../services/notify';
 import { permissionName, textLength, validReasonDescription } from '../../services/payments';
 import { countLabel } from '../../services/plural';
-import { accountLabel, serverDateTime } from '../../services/restaurant';
+import { accountLabel, accountPlace, serverDateTime } from '../../services/restaurant';
 import type {
   Account,
   AccountCancellation,
@@ -108,8 +108,10 @@ function cancelledMessage(account: Account) {
 // Dónde queda la cuenta cancelada: nunca es venta y la mesa se libera si no tiene otras cuentas.
 function outcomeText(account: Account) {
   const report = 'No cuenta como venta: aparece en el reporte «Cuentas canceladas».';
-  if (account.mode === 'dine_in' && account.table_name) {
-    return `${report} ${account.table_name} queda libre si no tiene otras cuentas abiertas.`;
+  // Etapa M1: en una unión de mesas, la unión (se deshace sola cuando no le quedan cuentas abiertas).
+  const place = accountPlace(account);
+  if (account.mode === 'dine_in' && place) {
+    return `${report} ${place} queda libre si no tiene otras cuentas abiertas.`;
   }
   return report;
 }

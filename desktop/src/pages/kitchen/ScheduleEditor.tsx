@@ -72,13 +72,13 @@ export function ScheduleEditor({
           onChange={setLead}
         />
         <Check
-          label="Liberar a cocina automáticamente a su hora"
+          label="Enviar a cocina automáticamente a su hora"
           value={automatic}
           onChange={setAutomatic}
         />
         <p className="muted">
-          Esta operación ajusta preparación; conserva cantidades, precios y la hora comercial del
-          pedido.
+          Solo cambia cuándo llega el pedido a cocina: sus productos, cantidades y precios no
+          cambian.
         </p>
       </Form>
     </section>

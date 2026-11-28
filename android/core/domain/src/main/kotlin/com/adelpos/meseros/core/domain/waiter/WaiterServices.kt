@@ -88,6 +88,13 @@ sealed interface SendRequest {
      * momento.
      */
     data object StillSaving : SendRequest
+
+    /**
+     * Etapa M1 (M1-D13): la captura lleva una unión en pantalla que todavía no nace en Go (sin
+     * conexión, o Go la rechazó): nunca entra en la cola. El mesero elige «Enviar solo a la mesa» o
+     * «Esperar».
+     */
+    data object UnionPending : SendRequest
 }
 
 /** Cómo quedó un descarte (de una captura o de un pedido en revisión). */
@@ -115,7 +122,8 @@ interface CaptureService {
     /**
      * Retoma la captura del mesero en esa mesa y cuenta (o en una cuenta nueva de la mesa si
      * [account] es null) o empieza una. [seenAccountIds] son las cuentas abiertas que veía en la
-     * mesa (`seen_account_ids`).
+     * mesa (`seen_account_ids`; en una unión, las de toda la unión). Etapa M1: [seenUnion] es la
+     * unión que veía y [unionJoin], la unión en pantalla que nace con el primer producto.
      */
     suspend fun open(
         userId: String,
@@ -123,7 +131,15 @@ interface CaptureService {
         tableName: String,
         account: AccountSummary?,
         seenAccountIds: List<String>,
+        seenUnion: SeenUnion? = null,
+        unionJoin: UnionJoin? = null,
     ): Capture
+
+    /**
+     * Etapa M1 (M1-D13): «Enviar solo a la mesa»: la captura deja la unión en pantalla y sigue como
+     * una cuenta nueva de la mesa de inicio.
+     */
+    suspend fun dropUnion(captureId: String) {}
 
     /**
      * Para llevar (A2, §3.2): retoma la captura del mesero en ese pedido para llevar o, con

@@ -4,6 +4,7 @@ import type { Account, RestaurantTable } from '../../../services/restaurant';
 import {
   accountCustomName,
   accountLabel,
+  accountPlace,
   isPendingAccount,
   serverDateTime,
   takeawayCustomerName,
@@ -27,16 +28,23 @@ function captureTitle(account: Account | null) {
   if (account.mode === 'takeaway') {
     return pending ? 'Para llevar · Pedido nuevo' : `Para llevar · Pedido #${account.folio}`;
   }
+  // Etapa M1: en una unión de mesas, el nombre de la unión («Mesa 5 + 6»).
+  const place = accountPlace(account);
   if (pending) {
-    return account.table_name ? `${account.table_name} · Cuenta nueva` : 'Cuenta nueva sin mesa';
+    return place ? `${place} · Cuenta nueva` : 'Cuenta nueva sin mesa';
   }
-  if (account.table_name) {
-    return `${account.table_name} · Cuenta #${account.folio}`;
+  if (place) {
+    return `${place} · Cuenta #${account.folio}`;
   }
   return accountLabel(account);
 }
 
-function captureDetails(account: Account, table: RestaurantTable | null, timezone: string) {
+function captureDetails(
+  account: Account,
+  table: RestaurantTable | null,
+  timezone: string,
+  seats: number | null,
+) {
   const details: string[] = [];
   // Etapa 9D (§4.1): los datos del pedido (cliente, teléfono, programación) se capturan cuando el
   // pedido ya existe, después de guardar el primer producto.
@@ -61,13 +69,19 @@ function captureDetails(account: Account, table: RestaurantTable | null, timezon
     return details;
   }
   if (isPendingAccount(account)) {
-    if (table) details.push(`Mesa para ${table.seats}`);
-    details.push('La cuenta se abre al guardar el primer producto');
+    if (table && seats) details.push(`Mesa para ${seats}`);
+    // Etapa M1 (M1-D9): con una unión que vive en la pantalla, la unión nace con la cuenta.
+    details.push(
+      account.table_union && !account.table_union.id
+        ? 'La unión y la cuenta se guardan con el primer producto'
+        : 'La cuenta se abre al guardar el primer producto',
+    );
     return details;
   }
   details.push(`Mesero: ${account.assigned_name}`);
-  // La cuenta no guarda comensales (pendiente de migración): se informa la capacidad de la mesa.
-  if (table) details.push(`Mesa para ${table.seats}`);
+  // La cuenta no guarda comensales (pendiente de migración): se informa la capacidad de la mesa (de la unión, en
+  // una unión de mesas).
+  if (table && seats) details.push(`Mesa para ${seats}`);
   details.push(`Abierta ${openedAt(account, timezone)}`);
   const custom = accountCustomName(account);
   if (account.table_name && custom) {
@@ -87,6 +101,7 @@ export function CaptureTopBar({
   account,
   backLabel,
   table,
+  seats = null,
   tableAccounts,
   timezone,
   canOpenAccount,
@@ -104,6 +119,8 @@ export function CaptureTopBar({
   account: Account | null;
   backLabel: string;
   table: RestaurantTable | null;
+  // Capacidad del lugar: la de la mesa o, en una unión, la sumada que calcula Go (etapa M1).
+  seats?: number | null;
   tableAccounts: Account[];
   timezone: string;
   canOpenAccount: boolean;
@@ -122,7 +139,9 @@ export function CaptureTopBar({
 }) {
   const takeaway = account?.mode === 'takeaway';
   const title = captureTitle(account);
-  const details = account ? captureDetails(account, table, timezone) : [];
+  const details = account
+    ? captureDetails(account, table, timezone, seats ?? table?.seats ?? null)
+    : [];
   // Un pedido para llevar enviado a cocina sin nombre no se bloquea: se avisa con discreción y se
   // identifica por su número de pedido.
   const unnamedSent =

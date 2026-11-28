@@ -10,7 +10,14 @@ import {
   searchTables,
   tableStateLabels,
 } from '../../services/restaurant';
-import type { Area, RestaurantTable, TableState } from '../../services/restaurant';
+import type {
+  Area,
+  RestaurantTable,
+  ScreenUnion,
+  TableGroup,
+  TableState,
+  TableUnion,
+} from '../../services/restaurant';
 import { Icon } from '../Icon';
 import { tableStateIcons } from './tableStateIcons';
 
@@ -33,6 +40,14 @@ interface TableMapProps {
   // Umbral de cuenta abierta por mucho tiempo (settings.long_open_hours de Go), para el texto de la
   // advertencia; la marca long_open de cada mesa la calcula Go.
   longOpenHours?: number;
+  // Etapa M1 (contrato §10): las uniones abiertas (contorno sólido con su nombre y su capacidad), los grupos activos
+  // (marco tenue con su nombre) y la unión que vive en la pantalla (contorno discontinuo). Sin la capacidad
+  // table-unions-v1, vacíos.
+  unions?: TableUnion[];
+  groups?: TableGroup[];
+  screenUnion?: ScreenUnion | null;
+  // Atajo de un grupo al tocar su nombre en el marco («Unir Mesa 3»); sin él, el nombre no se toca.
+  onGroupShortcut?: (group: TableGroup) => void;
 }
 
 // Etapa 9D (§3.2): escala automática del mapa operativo. Al abrir un área, el mapa calcula una sola
@@ -147,12 +162,16 @@ const panThreshold = 8;
 // Nombre accesible del mosaico: nombre y estado primero (así lo buscan las pruebas y los lectores
 // de pantalla), después cuentas, tiempo ocupada, precuenta o saldo y la capacidad de la mesa. El
 // tiempo y el saldo los calcula Go; aquí solo se presentan.
-function accessibleName(table: RestaurantTable, longOpenHours?: number) {
+function accessibleName(table: RestaurantTable, longOpenHours?: number, union?: TableUnion) {
   const parts = [
     table.name,
     tableStateLabels[table.state],
     countLabel(table.account_count, 'cuenta', 'cuentas'),
   ];
+  // Etapa M1: una mesa unida se abre como la unión; el nombre accesible lo dice.
+  if (union) {
+    parts.splice(1, 0, `unida en ${union.name}`);
+  }
   if (table.account_count > 0) {
     parts.push(elapsedTime(table.occupied_seconds));
   }
@@ -288,13 +307,31 @@ function TableSearch({
 
 const visibleResults = 8;
 
+// Etapa M1 (contrato §10): en la lista de mesas encontradas, una unión es una sola entrada con su nombre (la primera
+// de sus mesas que coincide); sus mesas no salen por separado.
+export function searchEntries(results: ReturnType<typeof searchTables>, unions: TableUnion[]) {
+  const seen = new Set<string>();
+  const entries: (ReturnType<typeof searchTables>[number] & { union: TableUnion | null })[] = [];
+  for (const result of results) {
+    const union = unions.find((entry) => entry.table_ids.includes(result.table.id)) ?? null;
+    if (union && seen.has(union.id)) {
+      continue;
+    }
+    if (union) {
+      seen.add(union.id);
+    }
+    entries.push({ ...result, union });
+  }
+  return entries;
+}
+
 function SearchResults({
   query,
   results,
   onChoose,
 }: {
   query: string;
-  results: ReturnType<typeof searchTables>;
+  results: ReturnType<typeof searchEntries>;
   onChoose: (table: RestaurantTable) => void;
 }) {
   const shown = results.slice(0, visibleResults);
@@ -309,17 +346,17 @@ function SearchResults({
       </p>
       {shown.length > 0 && (
         <div className="table-search-options" role="group" aria-label="Mesas encontradas">
-          {shown.map(({ table, area }) => (
+          {shown.map(({ table, area, union }) => (
             <button
               key={table.id}
               type="button"
               className="secondary-button table-search-option"
-              aria-label={`${table.name}, ${area.name}, ${tableStateLabels[table.state]}`}
+              aria-label={`${union?.name ?? table.name}, ${area.name}, ${tableStateLabels[table.state]}`}
               onClick={() => onChoose(table)}
             >
               <Icon name="table" size={18} />
               <span className="table-search-option-text">
-                <strong>{table.name}</strong>
+                <strong>{union?.name ?? table.name}</strong>
                 <span>
                   {area.name} · {tableStateLabels[table.state]}
                 </span>
@@ -354,6 +391,10 @@ export function TableMap({
   autoFit = false,
   highlight = null,
   longOpenHours,
+  unions = [],
+  groups = [],
+  screenUnion = null,
+  onGroupShortcut,
 }: TableMapProps) {
   const canvas = useRef<HTMLDivElement>(null);
   const viewport = useRef<HTMLDivElement>(null);
@@ -384,7 +425,7 @@ export function TableMap({
   );
   const searching = !designer && query.trim() !== '';
   const results = searching
-    ? searchTables(operationalTables(tables, areas), areas, query, areaID)
+    ? searchEntries(searchTables(operationalTables(tables, areas), areas, query, areaID), unions)
     : [];
   // El diseñador de «Áreas y distribución» conserva el lienzo proporcional de 1000 × 560 (las
   // posiciones se editan sobre el espacio completo); el mapa operativo se ajusta a las mesas.
@@ -525,6 +566,48 @@ export function TableMap({
     };
   }
 
+  // Etapa M1 (contrato §10): rectángulo que envuelve un conjunto de mesas del área a la vista, con la misma fórmula
+  // que cada mesa y un margen alrededor (el contorno de una unión y el marco de un grupo). null si ninguna está a la
+  // vista.
+  function boxStyle(ids: string[], margin: number): CSSProperties | null {
+    const members = visible.filter((table) => ids.includes(table.id));
+    if (members.length === 0) {
+      return null;
+    }
+    const left = Math.min(...members.map((table) => table.x));
+    const top = Math.min(...members.map((table) => table.y));
+    const right = Math.max(...members.map((table) => table.x + table.width));
+    const bottom = Math.max(...members.map((table) => table.y + table.height));
+    if (fit) {
+      return {
+        left: `${fit.offsetX + (left - fit.originX) * fit.scale - margin}px`,
+        top: `${fit.offsetY + (top - fit.originY) * fit.scale - margin}px`,
+        width: `${(right - left) * fit.scale + margin * 2}px`,
+        height: `${(bottom - top) * fit.scale + margin * 2}px`,
+      };
+    }
+    return {
+      left: `calc(${left / 10}% - ${margin}px)`,
+      top: `calc(${top / 5.6}% - ${margin}px)`,
+      width: `calc(${(right - left) / 10}% + ${margin * 2}px)`,
+      height: `calc(${(bottom - top) / 5.6}% + ${margin * 2}px)`,
+    };
+  }
+  const areaGroups = groups.filter((group) => group.area_id === areaID);
+  const areaUnions = designer ? [] : unions.filter((union) => union.area_id === areaID);
+  const unionOf = (table: RestaurantTable) =>
+    areaUnions.find((union) => union.table_ids.includes(table.id));
+  // La unión elegida (o la que vive en la pantalla desde la mesa elegida) se ve elegida completa.
+  const selectedIDs = new Set<string>(selectedTableID ? [selectedTableID] : []);
+  for (const union of areaUnions) {
+    if (selectedTableID && union.table_ids.includes(selectedTableID)) {
+      union.table_ids.forEach((id) => selectedIDs.add(id));
+    }
+  }
+  if (screenUnion && screenUnion.startTableID === selectedTableID) {
+    screenUnion.allTableIDs.forEach((id) => selectedIDs.add(id));
+  }
+
   const pannable = !!fit?.overflow;
   return (
     <div
@@ -591,6 +674,76 @@ export function TableMap({
                   : 'Crea un área y sus mesas para comenzar.'}
               </p>
             )}
+            {/* Etapa M1: el marco tenue de cada mesa divisible, con su nombre; tocar el nombre es su atajo («Unir
+                Mesa 3») mientras ninguna sección está unida. Cada sección sigue siendo una mesa que se toca. */}
+            {areaGroups.map((group) => {
+              const style = boxStyle(group.table_ids, 12);
+              if (!style) {
+                return null;
+              }
+              const joined = visible.some(
+                (table) => group.table_ids.includes(table.id) && !!table.union_id,
+              );
+              return (
+                <div
+                  key={`grupo-${group.id}`}
+                  className="table-group-frame"
+                  style={style}
+                  data-group-id={group.id}
+                >
+                  {onGroupShortcut && !joined && !designer ? (
+                    <button
+                      type="button"
+                      className="table-group-label table-group-shortcut"
+                      aria-label={`Unir ${group.name}`}
+                      title={`Unir ${group.name}`}
+                      onClick={() => onGroupShortcut(group)}
+                    >
+                      <Icon name="table" size={12} />
+                      {group.name}
+                    </button>
+                  ) : (
+                    <span className="table-group-label">{group.name}</span>
+                  )}
+                </div>
+              );
+            })}
+            {/* Etapa M1: el contorno sólido de cada unión abierta con el nombre y la capacidad que calcula Go, y el
+                discontinuo de la unión que vive en la pantalla (nace con el primer producto). Las mesas siguen
+                tocándose por debajo y abren la unión. */}
+            {areaUnions.map((union) => {
+              const style = boxStyle(union.table_ids, 6);
+              return style ? (
+                <div
+                  key={`union-${union.id}`}
+                  className={`table-union-outline table-union-${union.state}`}
+                  style={style}
+                  data-union-id={union.id}
+                  aria-hidden="true"
+                >
+                  <span className="table-union-label">
+                    {union.name} · {countLabel(union.seats, 'lugar', 'lugares')}
+                  </span>
+                </div>
+              ) : null;
+            })}
+            {!designer &&
+              screenUnion &&
+              (() => {
+                const style = boxStyle(screenUnion.allTableIDs, 6);
+                return style ? (
+                  <div
+                    className="table-union-outline table-union-screen"
+                    style={style}
+                    aria-hidden="true"
+                  >
+                    <span className="table-union-label">
+                      {screenUnion.name} · {countLabel(screenUnion.seats, 'lugar', 'lugares')} · sin
+                      guardar
+                    </span>
+                  </div>
+                ) : null;
+              })()}
             {visible.map((table) => {
               const highlighted = !!highlight && table.state === highlight;
               return (
@@ -600,12 +753,12 @@ export function TableMap({
                   data-table-id={table.id}
                   style={tableStyle(table)}
                   className={`restaurant-table table-${table.state} table-${table.shape} ${
-                    selectedTableID === table.id ? 'selected-table' : ''
+                    selectedIDs.has(table.id) ? 'selected-table' : ''
                   } ${highlighted ? 'table-highlighted' : ''} ${
                     table.long_open ? 'table-long-open' : ''
-                  }`}
-                  aria-label={accessibleName(table, longOpenHours)}
-                  aria-pressed={selectedTableID === table.id}
+                  } ${unionOf(table) ? 'table-in-union' : ''}`}
+                  aria-label={accessibleName(table, longOpenHours, unionOf(table))}
+                  aria-pressed={selectedIDs.has(table.id)}
                   onClick={() => onSelect(table)}
                   onPointerDown={(event) => {
                     if (!designer || !onPosition) return;

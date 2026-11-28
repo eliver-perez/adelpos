@@ -8,8 +8,10 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"local/ad-el-pos/server/internal/catalog"
+	"local/ad-el-pos/server/internal/documents"
 	"local/ad-el-pos/server/internal/events"
 	"local/ad-el-pos/server/internal/inventory"
+	"local/ad-el-pos/server/internal/tableunions"
 )
 
 type unitRecord struct {
@@ -42,13 +44,28 @@ func readVersion(ctx context.Context, tx pgx.Tx, id string) (*versionSnapshot, e
 	return one[versionSnapshot](ctx, tx, `SELECT jsonb_build_object('request',v.request,'quote_line',v.quote_line,
         'catalog',o.pricing_snapshot) FROM app.restaurant_item_versions v JOIN app.restaurant_orders o ON o.id=v.order_id WHERE v.id=$1`, id)
 }
+
+// readContext es el encabezado de la comanda en el momento de liberarla. Etapa M1 (M1-D14): la mesa de una cuenta unida
+// es el nombre de su unión con documents.TableContext («Salón · Mesa 5 + 6»); una mesa sola se imprime como siempre.
 func readContext(ctx context.Context, tx pgx.Tx, accountID, orderID string) (*TicketContext, error) {
-	return one[TicketContext](ctx, tx, `SELECT jsonb_build_object('establishment',e.name,'timezone',e.timezone,
+	context, err := one[TicketContext](ctx, tx, `SELECT jsonb_build_object('establishment',e.name,'timezone',e.timezone,
         'folio',a.folio,'account_name',a.name,'table',coalesce(t.name,''),'area',coalesce(z.name,''),
         'mode',a.mode,'customer',a.customer_name,'origin',a.origin,'employee',person.display_name,'order_id',o.id)
         FROM app.restaurant_accounts a CROSS JOIN app.establishment e
         JOIN app.restaurant_orders o ON o.id=$2 JOIN app.users person ON person.id=o.author_id
         LEFT JOIN app.restaurant_tables t ON t.id=a.table_id LEFT JOIN app.restaurant_areas z ON z.id=t.area_id WHERE a.id=$1`, accountID, orderID)
+	if err != nil {
+		return nil, err
+	}
+	var union *string
+	if err := tx.QueryRow(ctx, "SELECT "+tableunions.UnionNameSQL("a.table_id")+" FROM app.restaurant_accounts a WHERE a.id=$1",
+		accountID).Scan(&union); err != nil {
+		return nil, err
+	}
+	if union != nil {
+		context.Table = documents.TableContext(*union)
+	}
+	return context, nil
 }
 
 func (handler *service) createRelease(eventID, accountID, orderID string, unitIDs []string) (*Release, error) {
@@ -345,16 +362,46 @@ func Integrate(ctx context.Context, tx pgx.Tx, eventID, accountID, kind string, 
 		if !changed {
 			break
 		}
-		rescheduled, err := tx.Exec(ctx, `UPDATE app.kitchen_releases r SET scheduled_at=a.scheduled_at,
+		rows, err := tx.Query(ctx, `UPDATE app.kitchen_releases r SET scheduled_at=a.scheduled_at,
             due_at=a.scheduled_at-make_interval(mins=>r.lead_minutes),revision=r.revision+1,
             state=CASE WHEN a.scheduled_at IS NULL THEN 'pending' ELSE 'scheduled' END
             FROM app.restaurant_accounts a WHERE a.id=$1 AND r.account_id=a.id
-            AND r.state IN ('pending','scheduled','blocked') AND r.scheduled_at IS DISTINCT FROM a.scheduled_at`, accountID)
+            AND r.state IN ('pending','scheduled','blocked') AND r.scheduled_at IS DISTINCT FROM a.scheduled_at
+            RETURNING r.id::text,a.scheduled_at IS NULL`, accountID)
 		if err != nil {
 			return err
 		}
-		if rescheduled.RowsAffected() > 0 {
+		rescheduled, unscheduled := 0, []string{}
+		for rows.Next() {
+			var id string
+			var withoutTime bool
+			if err := rows.Scan(&id, &withoutTime); err != nil {
+				rows.Close()
+				return err
+			}
+			rescheduled++
+			if withoutTime {
+				unscheduled = append(unscheduled, id)
+			}
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if rescheduled > 0 {
 			handler.notePreparationAccount(accountID)
+		}
+		// Etapa M1 (§5.3, decisión del propietario M1-D17, reemplaza K11-D9): quitar la hora a un pedido programado lo
+		// envía a cocina en ese momento, en esta misma transacción, como un pedido sin hora (createRelease). Antes
+		// quedaba «Por enviar a cocina» hasta que alguien tocara «Enviar a cocina ahora».
+		for _, id := range unscheduled {
+			release, err := readRelease(ctx, tx, id)
+			if err != nil {
+				return err
+			}
+			if err := handler.prepareRelease(release); err != nil {
+				return err
+			}
 		}
 	}
 	// Etapa A1 (A1-D11): la cuenta ya publica su propio evento restaurant.*; el de preparación dice además que cambió lo

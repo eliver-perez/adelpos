@@ -49,6 +49,45 @@ fun OrderStateBadge(state: OrderState, modifier: Modifier = Modifier) {
     )
 }
 
+/**
+ * Etapa M1 (§5.5, M1-D16): una captura con productos que todavía no se envían a cocina, en el panel
+ * de la mesa. Dice «Por enviar», como el pedido que espera en la cola, pero con el tono del
+ * borrador (gris y lápiz): nunca se envía solo, solo con «Enviar a cocina» (regla 18).
+ */
+@Composable
+fun CaptureUnsentBadge(modifier: Modifier = Modifier) {
+    val colors = AdelTheme.colors
+    StateBadge(
+        text = stringResource(R.string.capture_unsent),
+        icon = AdelIcons.Edit,
+        tone = BadgeTone(colors.graySoft, colors.gray, colors.gray),
+        modifier = modifier.testTag(TAG_CAPTURE_UNSENT),
+    )
+}
+
+/**
+ * Etapa M1 (§5.5): «Tu cuenta», arriba a la derecha de la tarjeta de la cuenta de la que es
+ * responsable el mesero activo (`assigned_user_id` de Go).
+ */
+@Composable
+fun MineBadge(modifier: Modifier = Modifier) {
+    val colors = AdelTheme.colors
+    Surface(
+        modifier = modifier.testTag(TAG_ACCOUNT_MINE),
+        shape = RoundedCornerShape(999.dp),
+        color = colors.blueSoft,
+        contentColor = AdelTheme.colors.text,
+        border = BorderStroke(width = 1.dp, color = colors.blue),
+    ) {
+        Text(
+            text = stringResource(R.string.account_mine),
+            style = MaterialTheme.typography.labelMedium,
+            maxLines = 1,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+        )
+    }
+}
+
 @Composable
 fun orderStateLabel(state: OrderState): String =
     stringResource(
@@ -328,11 +367,13 @@ private fun StateBadge(text: String, icon: ImageVector, tone: BadgeTone, modifie
                 tint = tone.accent,
                 modifier = Modifier.size(18.dp),
             )
-            // Etapa A3 (§4.8): una etiqueta nunca se parte; si no cabe, se acorta.
+            // Etapa A3 (§4.8): una etiqueta nunca se parte letra por letra. Etapa M1 (§5.6): si no
+            // cabe en un renglón, baja al segundo por palabras («Enviado · sin confirmar en
+            // cocina» en la tableta vertical se cortaba en «coci…»).
             Text(
                 text = text,
                 style = MaterialTheme.typography.labelLarge,
-                maxLines = 1,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
         }
@@ -340,6 +381,8 @@ private fun StateBadge(text: String, icon: ImageVector, tone: BadgeTone, modifie
 }
 
 const val TAG_ORDER_STATE_PREFIX = "order-state-"
+const val TAG_CAPTURE_UNSENT = "capture-unsent"
+const val TAG_ACCOUNT_MINE = "account-mine"
 const val TAG_PREPARATION_PREFIX = "preparation-"
 const val TAG_LONG_OPEN = "long-open"
 const val TAG_TAKEAWAY_PREPARATION_PREFIX = "takeaway-preparation-"

@@ -30,6 +30,11 @@ export const kitchenDisplayCapability = 'kitchen-display-v1';
 // como antes.
 export const kitchenCoverageCapability = 'kitchen-coverage-v1';
 
+// Etapa M1 (contrato §1, servidor 0.18.0): unir mesas y mesas divisibles (rutas restaurant/table-unions y
+// restaurant/table-groups, y los campos de la unión en el mapa y en las cuentas). Sin ella no se muestran «Unir con…»,
+// el contorno de la unión, el marco del grupo, su atajo ni los grupos de Áreas y distribución.
+export const tableUnionsCapability = 'table-unions-v1';
+
 let announced: ReadonlySet<string> = new Set();
 
 // rememberServerCapabilities guarda lo que informó el servidor al conectar (useSession lo llama con la respuesta de

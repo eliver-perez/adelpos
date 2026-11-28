@@ -3,7 +3,9 @@ package operations
 import (
 	"strings"
 
+	"local/ad-el-pos/server/internal/events"
 	"local/ad-el-pos/server/internal/payments"
+	"local/ad-el-pos/server/internal/tableunions"
 )
 
 // tableQuery entrega cada mesa con su ocupación calculada por Go en una sola consulta para todo el
@@ -25,7 +27,14 @@ import (
 //
 // Con varias cuentas gana el estado más avanzado (esperando pago > pago parcial > ocupada). El total,
 // lo pagado y el saldo salen de la fórmula única de payments (AccountStandingSQL).
+//
+// Etapa M1 (M1-D10): aquí se decide la ocupación de una mesa unida. Sus cuentas son las de todas las mesas de su unión
+// abierta (tableunions.PlaceTablesSQL), así que cada mesa de la unión se lee con el estado, las cuentas, el saldo, la
+// hora y long_open de la unión, y las reglas de siempre (no desactivar, no poner fuera de servicio) se aplican solas.
+// union_id y group_id dicen su unión abierta y el grupo activo del que es sección.
 var tableQuery = `SELECT to_jsonb(t) || jsonb_build_object(
+    'union_id',` + tableunions.UnionIDSQL("t.id") + `,
+    'group_id',` + tableunions.GroupIDSQL("t.id") + `,
     'account_count',occupancy.account_count,
     'occupied_since',occupancy.occupied_since,
     'occupied_seconds',occupancy.occupied_seconds,
@@ -46,7 +55,7 @@ var tableQuery = `SELECT to_jsonb(t) || jsonb_build_object(
         coalesce(bool_or(f.paid>0 AND f.balance>0),false) AS partial_payment
         FROM app.restaurant_accounts a
         CROSS JOIN LATERAL (` + payments.AccountStandingSQL("a.id") + `) f
-        WHERE a.table_id=t.id AND a.state='open') occupancy`
+        WHERE a.table_id IN ` + tableunions.PlaceTablesSQL("t.id") + ` AND a.state='open') occupancy`
 
 // tableHasOpenAccounts rechaza poner fuera de servicio una mesa con cuentas abiertas (etapa 7.1).
 func tableHasOpenAccounts() error {
@@ -123,6 +132,9 @@ func (handler *service) tables(parts []string) (any, error) {
 		if table.ID != "" || table.Revision != 0 {
 			return nil, invalid("La mesa nueva no debe reutilizar identidad ni revisión.")
 		}
+		if err := handler.requireNameFreeOfGroups(table.AreaID, table.Name); err != nil {
+			return nil, err
+		}
 		table.ID = newID()
 		_, err = handler.tx.Exec(handler.ctx, `INSERT INTO app.restaurant_tables
             (id,area_id,name,shape,x,y,width,height,seats,active,out_of_service)
@@ -146,6 +158,20 @@ func (handler *service) tables(parts []string) (any, error) {
 		if table.OutOfService && !old.OutOfService && old.AccountCount > 0 {
 			return nil, tableHasOpenAccounts()
 		}
+		// Etapa M1 (M1-D4 y M1-D10): una mesa unida o que es sección de un grupo no cambia de área (antes el PATCH podía
+		// cambiarle el área aunque tuviera cuentas; una unión y un grupo son siempre de una sola área).
+		if table.AreaID != old.AreaID {
+			if err := handler.requireAreaChangeAllowed(old); err != nil {
+				return nil, err
+			}
+		}
+		// Etapa M1 (M1-D33): una mesa no toma el nombre de un grupo activo de su área (al renombrarla o al cambiarla de
+		// área), como un grupo no toma el de una mesa.
+		if table.AreaID != old.AreaID || !strings.EqualFold(table.Name, old.Name) {
+			if err := handler.requireNameFreeOfGroups(table.AreaID, table.Name); err != nil {
+				return nil, err
+			}
+		}
 		_, err = handler.tx.Exec(handler.ctx, `UPDATE app.restaurant_tables SET area_id=$1,name=$2,shape=$3,x=$4,y=$5,
             width=$6,height=$7,seats=$8,active=$9,out_of_service=$10,revision=revision+1,updated_at=now()
             WHERE id=$11 AND revision=$12`, table.AreaID, table.Name, table.Shape, table.X, table.Y,
@@ -154,11 +180,74 @@ func (handler *service) tables(parts []string) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Etapa M1: renombrar una mesa unida cambia el nombre de su unión (y el de sus cuentas sin nombre propio).
+	if old, ok := before.(*Table); ok && old.UnionID != nil && old.Name != table.Name {
+		if err := handler.refreshUnionName(*old.UnionID); err != nil {
+			return nil, err
+		}
+	}
 	saved, err := readOne[Table](handler.ctx, handler.tx, tableQuery+" WHERE t.id=$1", table.ID)
 	if err != nil {
 		return nil, err
 	}
 	return saved, handler.audit(handler.ctx, handler.tx, "restaurant.table.saved", "table", &table.ID, before, saved)
+}
+
+// requireNameFreeOfGroups rechaza el nombre de una mesa que es el de un grupo activo del área, sin distinguir
+// mayúsculas (M1-D33, TABLE_GROUP_NAME_TAKEN, el mismo texto que cubre los dos casos). Un choque con otra mesa sigue
+// siendo el de siempre (la llave única del área).
+func (handler *service) requireNameFreeOfGroups(areaID, name string) error {
+	var taken bool
+	if err := handler.tx.QueryRow(handler.ctx, `SELECT EXISTS(SELECT FROM app.table_groups g WHERE g.area_id=$1 AND g.active
+        AND lower(g.name)=lower($2))`, areaID, name).Scan(&taken); err != nil {
+		return err
+	}
+	if taken {
+		return &Error{Status: 409, Code: codeGroupNameTaken, Message: "Ya hay una mesa o un grupo con ese nombre en esta área."}
+	}
+	return nil
+}
+
+// requireAreaChangeAllowed rechaza cambiar de área una mesa unida (TABLE_IN_UNION) o agrupada
+// (TABLE_GROUP_SECTION_AREA).
+func (handler *service) requireAreaChangeAllowed(old *Table) error {
+	if old.UnionID != nil {
+		union, err := handler.readUnion(*old.UnionID)
+		if err != nil {
+			return err
+		}
+		return handler.tableInUnion(old.ID, old.Name, union)
+	}
+	if old.GroupID != nil {
+		return &Error{Status: 409, Code: codeGroupSectionAreaGuard, Message: "Quita la mesa del grupo antes de cambiarla de área.",
+			Details: map[string]any{"table_id": old.ID, "group_id": *old.GroupID}}
+	}
+	return nil
+}
+
+// refreshUnionName vuelve a nombrar una unión abierta después de renombrar una de sus mesas.
+func (handler *service) refreshUnionName(unionID string) error {
+	row, err := handler.readUnionRow(unionID)
+	if err != nil || row.State != "open" {
+		return err
+	}
+	members, err := handler.readMemberTables(memberIDs(row.Members))
+	if err != nil {
+		return err
+	}
+	description, err := tableunions.Describe(handler.ctx, handler.tx, members)
+	if err != nil || description.Name == row.Name {
+		return err
+	}
+	if err := handler.updateUnionName(unionID, description); err != nil {
+		return err
+	}
+	reference := unionReference(unionID, description.Name, description.TableIDs)
+	if err := handler.renameUnionAccounts(unionID, row.Name, description.Name, "renamed",
+		unionReference(unionID, row.Name, description.TableIDs), reference); err != nil {
+		return err
+	}
+	return events.Append(handler.ctx, handler.tx, tableunions.ChangedKind, "restaurant", nil, nil)
 }
 
 func (handler *service) layout() (any, error) {

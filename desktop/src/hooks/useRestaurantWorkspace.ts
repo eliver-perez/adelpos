@@ -9,6 +9,8 @@ import {
   normalizeSelection,
   pendingAccountBill,
   pendingAccountPrefix,
+  samePlace,
+  unionOfTable,
 } from '../services/restaurant';
 import type {
   Account,
@@ -19,7 +21,9 @@ import type {
   EditorState,
   OrderQuote,
   Overview,
+  ScreenUnion,
 } from '../services/restaurant';
+import { serverHas, tableUnionsCapability } from '../services/serverCapabilities';
 import { useCaptureDraft } from './useCaptureDraft';
 import { useDraftSync } from './useDraftSync';
 import { useLiveResource } from './useLiveResource';
@@ -52,6 +56,8 @@ interface PendingAccount {
   mode: Account['mode'];
   tableID: string | null;
   createdAt: string;
+  // Etapa M1: la unión en pantalla con la que nace la cuenta (M1-D9), o null.
+  union: ScreenUnion | null;
 }
 
 // Vista en que se captura una cuenta pendiente: la mesa en Mesas, el pedido en Para llevar y la
@@ -138,6 +144,9 @@ export function useRestaurantWorkspace(
   const [cancelLine, setCancelLine] = useState<ConfirmedLine | null>(null);
   const [refresh, setRefresh] = useState(0);
   const [pending, setPending] = useState<PendingAccount | null>(null);
+  // Etapa M1 (M1-D9): unión de mesas que vive solo en la pantalla hasta el primer producto. Elegir otra mesa, otra
+  // área u otra vista la quita; salir de la captura sin productos no guarda nada en Go.
+  const [screenUnion, setScreenUnion] = useState<ScreenUnion | null>(null);
   // Creaciones de cuentas pendientes que Go rechazó con la captura ya cerrada (etapa 9D, revisión
   // P2): se avisan y se quitan de la selección en el efecto de abajo.
   const [rejectedCreations, setRejectedCreations] = useState<RejectedCreation[]>([]);
@@ -186,12 +195,24 @@ export function useRestaurantWorkspace(
       : undefined;
   const defaultPriceList =
     lookups.data?.['price-lists'].find((list) => list.is_default && list.active)?.id ?? '';
+  // Etapa M1: la cuenta pendiente se muestra con el nombre de su unión (la que vive en la pantalla o la de Go).
+  const pendingUnionOfGo = pending?.tableID ? unionOfTable(overview.data, pending.tableID) : null;
+  const pendingPlace = pending?.union
+    ? { id: '', name: pending.union.name, table_ids: pending.union.allTableIDs }
+    : pendingUnionOfGo
+      ? {
+          id: pendingUnionOfGo.id,
+          name: pendingUnionOfGo.name,
+          table_ids: pendingUnionOfGo.table_ids,
+        }
+      : null;
   const pendingBill =
     pendingSelected && (!pending.tableID || pendingTable)
       ? pendingAccountBill({
           localID: pending.localID,
           mode: pending.mode,
           table: pendingTable ?? null,
+          union: pendingPlace,
           priceListID: defaultPriceList,
           createdAt: pending.createdAt,
           timezone: overview.data?.timezone ?? accounts.data?.timezone ?? 'UTC',
@@ -230,6 +251,9 @@ export function useRestaurantWorkspace(
         'restaurant_save_layout',
         'restaurant_save_settings',
         'restaurant_table_service',
+        // Etapa M1: las mesas divisibles se administran en Áreas y distribución, sin cuenta.
+        'restaurant_create_table_group',
+        'restaurant_save_table_group',
       ].includes(operation)
     ) {
       setPanel('capture');
@@ -280,6 +304,11 @@ export function useRestaurantWorkspace(
             : current,
         );
         setPending((current) => (current?.localID === localID ? null : current));
+        // Etapa M1: la unión en pantalla de esa mesa ya nació en Go con la cuenta (o se envió solo a la mesa): deja
+        // la pantalla. La de otra mesa sigue.
+        setScreenUnion((current) =>
+          current && created.account.table_id === current.startTableID ? null : current,
+        );
         setRefresh((current) => current + 1);
       }),
     [draft.engine],
@@ -458,6 +487,13 @@ export function useRestaurantWorkspace(
   function chooseTable(id: string) {
     flushCurrent();
     leavePending();
+    // Etapa M1: tocar una mesa de la unión en pantalla vuelve a mostrarla (desde su mesa de inicio); cualquier otra
+    // mesa la quita sin guardar nada.
+    if (screenUnion && screenUnion.allTableIDs.includes(id)) {
+      id = screenUnion.startTableID;
+    } else if (screenUnion) {
+      setScreenUnion(null);
+    }
     setTableID(id);
     setSelections((current) => ({ ...current, tables: '' }));
     setPanel('capture');
@@ -468,6 +504,7 @@ export function useRestaurantWorkspace(
   function switchView(next: RestaurantView) {
     flushCurrent();
     leavePending();
+    setScreenUnion(null);
     setView(next);
     setPanel('capture');
     setCaptureOpen(next, false);
@@ -497,15 +534,25 @@ export function useRestaurantWorkspace(
     flushCurrent();
     leavePending();
     const tableID = mode === 'takeaway' ? null : table;
+    // Etapa M1: en una mesa unida, las cuentas vistas son las de toda la unión (Go las compara así, M1-D9) y se dice
+    // qué unión se veía (seen_union_id, solo con la capacidad: un servidor anterior rechazaría el campo).
+    const union = tableID ? unionOfTable(overview.data, tableID) : null;
     const seenAccountIDs = tableID
       ? (accounts.data?.items ?? [])
-          .filter((entry) => entry.state === 'open' && entry.table_id === tableID)
+          .filter((entry) => entry.state === 'open' && samePlace(entry, tableID, union))
           .map((entry) => entry.id)
       : [];
+    const join = tableID && screenUnion?.startTableID === tableID ? screenUnion : null;
     const localID = `${pendingAccountPrefix}${newID()}`;
-    draft.engine.preparePending(localID, { mode, tableID, seenAccountIDs });
+    draft.engine.preparePending(localID, {
+      mode,
+      tableID,
+      seenAccountIDs,
+      ...(tableID && serverHas(tableUnionsCapability) ? { seenUnionID: union?.id ?? null } : {}),
+      ...(join ? { union: { tableIDs: join.tableIDs, groupID: join.groupID } } : {}),
+    });
     const target = pendingView({ mode, tableID });
-    setPending({ localID, mode, tableID, createdAt: new Date().toISOString() });
+    setPending({ localID, mode, tableID, createdAt: new Date().toISOString(), union: join });
     if (target !== view) {
       setSearch('');
       setPage(1);
@@ -537,6 +584,43 @@ export function useRestaurantWorkspace(
 
   function openPendingAnyway(localID: string) {
     draft.engine.openNewAccount(localID);
+  }
+
+  // Etapa M1: Go rechazó la unión en pantalla al guardar el primer producto (una mesa se ocupó o se unió en otra
+  // terminal). «Enviar solo a la mesa» reenvía sin la unión; «Esperar» conserva todo sin enviar.
+  const unionConflict = draft.engine.unionConflict();
+  // Con el rechazo, el mapa y las cuentas se vuelven a leer: la pantalla muestra cómo quedaron las mesas en Go.
+  const unionConflictKey = unionConflict ? `${unionConflict.localID}|${unionConflict.code}` : '';
+  useEffect(() => {
+    if (unionConflictKey) setRefresh((current) => current + 1);
+  }, [unionConflictKey]);
+
+  function sendWithoutUnion(localID: string) {
+    setPending((current) => (current?.localID === localID ? { ...current, union: null } : current));
+    setScreenUnion(null);
+    draft.engine.dropUnion(localID);
+  }
+
+  function waitForUnion(localID: string) {
+    draft.engine.waitForUnion(localID);
+  }
+
+  // Etapa M1 (M1-D9): «Unir con…» desde una mesa libre (o el atajo de un grupo con todas sus secciones libres): la
+  // unión queda en la pantalla, con el panel de su mesa de inicio, hasta el primer producto.
+  function showScreenUnion(union: ScreenUnion) {
+    flushCurrent();
+    leavePending();
+    setScreenUnion(union);
+    setTableID(union.startTableID);
+    setSelections((current) => ({ ...current, tables: '' }));
+    setPanel('capture');
+    setPage(1);
+    setSearch('');
+  }
+
+  // «Deshacer la unión»: la unión en pantalla se quita; en Go no había nada.
+  function dropScreenUnion() {
+    setScreenUnion(null);
   }
 
   function enterCapture() {
@@ -677,6 +761,12 @@ export function useRestaurantWorkspace(
     resolvingConflict,
     addPendingToAccount,
     openPendingAnyway,
+    unionConflict,
+    sendWithoutUnion,
+    waitForUnion,
+    screenUnion,
+    showScreenUnion,
+    dropScreenUnion,
     reportError,
     search,
     setSearch,

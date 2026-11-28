@@ -10,7 +10,7 @@
 #   ADELPOS_E2E_NETWORK_URL=https://127.0.0.1:8454 \
 #   ADELPOS_E2E_PROVISIONING_FILE=/ruta/al/provisioning-token \
 #   [ADELPOS_E2E_DATABASE_URL=postgresql://usuario:clave@127.0.0.1:55499/adel_pos_test_…] \
-#   scripts/android-e2e.sh [--suite access|catalog|waiter|field|takeaway|precheck|alerts|adjustments|license|connection|kitchen|endtoend|all] \
+#   scripts/android-e2e.sh [--suite access|catalog|waiter|field|takeaway|precheck|alerts|adjustments|license|unions|legacy|connection|kitchen|endtoend|all] \
 #       [--steps "…"] \
 #       [--no-install] [--out <carpeta>]
 #
@@ -141,6 +141,18 @@
 # «Licencia: quedan 3 días» en la barra · l8 (licencia vencida) «La licencia del sistema no permite capturar pedidos».
 # Capturas de pantalla de cada paso en <salida>/screens.
 #
+# Suite `unions` (etapa M1, Fase C, UnionsOnGoTest, con un servidor temporal nuevo; en las tabletas): u1 restaurante
+# (Salón M1 con las mesas 5 a 10, Terraza M1, hamburguesa con ruta a cocina y refresco sin ruta), emparejar y entrar ·
+# u2 una sola tarjeta por cuenta con «Tu cuenta» (§5.5) y el tiempo que tarda el panel en dejar «$0.00 · Borrador»
+# después de «Enviar a cocina» (§5.6, registro AdelOnGo «M1 · retraso») · u3 (SIN red) el pedido sin conexión es su
+# propia tarjeta «Por enviar» · u4 (con red) sale y su tarjeta pasa a ser la de la cuenta · uniones (con
+# table-unions-v1): u5 «Unir con…» desde una mesa ocupada, el panel, la lista y el contorno · u6 la unión que hace la
+# principal se ve y «Quitar mesa» la deshace · u7 la unión en pantalla nace con el primer producto · u8 (SIN red) una
+# unión en pantalla nunca va a la cola (M1-D13) · u9 (con red) el pedido va solo a la mesa y el atajo del grupo con una
+# sección ocupada · u10 un producto sin preparación sin etiqueta de cocina (§5.2) · u11 la unión cambia en otra terminal
+# mientras se captura (M1-D32, TABLE_UNION_CONFLICT) · u12 el título completo (M1-D36, para el teléfono). Capturas en
+# <salida>/screens.
+#
 # Licencia (etapa L1): desde la Fase C, un servidor sin licencia no empareja ni deja capturar ni administrar. Por eso,
 # en un solo lugar (prepare_server → ensure_test_license), si el servidor temporal dice «Sin activar», el guion le
 # importa una licencia de prueba perpetua con cupos de sobra (premium: 5 cajas, 10 comanderos y 5 pantallas de
@@ -216,10 +228,12 @@ suite_class() {
         alerts) echo "AlertsOnGoTest" ;;
         adjustments) echo "AdjustmentsOnGoTest" ;;
         license) echo "LicenseOnGoTest" ;;
+        unions) echo "UnionsOnGoTest" ;;
+        legacy) echo "LegacyUnionOnGoTest" ;;
         connection) echo "ConnectionOnGoTest" ;;
         kitchen) echo "KitchenOnGoTest" ;;
         endtoend) echo "AlertsOnGoTest" ;;
-        *) fail "suite desconocida: $1 (access, catalog, waiter, field, takeaway, precheck, alerts, adjustments, license, connection, kitchen, endtoend o all)" ;;
+        *) fail "suite desconocida: $1 (access, catalog, waiter, field, takeaway, precheck, alerts, adjustments, license, unions, legacy, connection, kitchen, endtoend o all)" ;;
     esac
 }
 
@@ -234,6 +248,8 @@ suite_steps() {
         alerts) echo "r1 r2 r3 r4 r5 r6 r7 r8 r10 r9" ;;
         adjustments) echo "a1 a2 a3 a4 a5 a6 a7" ;;
         license) echo "l1 l2 l3 l4 l5 l6 l7 l8" ;;
+        unions) echo "u1 u2 u3 u4 u5 u6 u7 u8 u9 u10 u11 u12" ;;
+        legacy) echo "v1 v2" ;;
         connection) echo "c1" ;;
         kitchen) echo "k1 k2 k3 k4 k5 k6 k7 k8 k9 k10 k11 k13" ;;
         endtoend) echo "m1 c1 m2" ;;
@@ -995,6 +1011,41 @@ alerts_step() {
     esac
 }
 
+# Etapa M1, Fase C: la tarjeta única de la cuenta, el retraso después de «Enviar a cocina» y las uniones de mesas.
+unions_step() {
+    case "$1" in
+        u1) run_step u1_prepararEmparejarYEntrar ;;
+        u2) run_step u2_unaTarjetaPorCuentaYElRetrasoDespuesDeEnviar ;;
+        u3) offline_step u3_sinConexionElPedidoEsSuPropiaTarjeta ;;
+        u4) run_step u4_alVolverLaRedLaTarjetaEsLaDeLaCuenta ;;
+        u5) run_step u5_unirDesdeUnaMesaOcupadaContornoYUnaSolaEntrada ;;
+        u6) run_step u6_laUnionDeOtraTerminalSeVeYQuitarMesaLaDeshace ;;
+        u7) run_step u7_unionEnPantallaNaceConElPrimerProducto ;;
+        u8) offline_step u8_sinConexionLaUnionEnPantallaNoVaALaCola ;;
+        u9) run_step u9_alVolverLaRedVaSoloALaMesaYElAtajoDelGrupoLoDiceGo ;;
+        u10) run_step u10_loQueNoNecesitaPreparacionNoLlevaEtiqueta ;;
+        u11) run_step u11_laUnionCambiaEnOtraTerminalYSeConservaLoCapturado ;;
+        u12) run_step u12_elTituloNoSeCorta ;;
+        *) fail "paso desconocido de la suite unions: $1" ;;
+    esac
+    mkdir -p "$SUITE_OUT/screens"
+    "$ADB" -s "$ANDROID_SERIAL" pull "/sdcard/Android/data/$APP_ID/files/screens/." \
+        "$SUITE_OUT/screens" >/dev/null 2>&1 || true
+}
+
+# Etapa M1, Fase C: la 0.4.1 frente a una unión (v1, con el APK de pruebas de la 0.4.1 que lleva el paso) y la 0.5.0
+# instalada encima (v2). Las dos con --no-install: el guion no instala, se instala cada versión con adb entre pasos.
+legacy_step() {
+    case "$1" in
+        v1) run_step v1_laVersionAnteriorFrenteAUnaUnion ;;
+        v2) run_step v2_alActualizarALa050LaUnionEsUnaSolaEntrada ;;
+        *) fail "paso desconocido de la suite legacy: $1" ;;
+    esac
+    mkdir -p "$SUITE_OUT/screens"
+    "$ADB" -s "$ANDROID_SERIAL" pull "/sdcard/Android/data/$APP_ID/files/screens/." \
+        "$SUITE_OUT/screens" >/dev/null 2>&1 || true
+}
+
 # Etapa A3, §4: los ajustes de la aplicación en vertical y horizontal, con sus capturas de pantalla.
 adjustments_step() {
     case "$1" in
@@ -1407,6 +1458,8 @@ run_suite() {
             alerts) alerts_step "$step" ;;
             adjustments) adjustments_step "$step" ;;
             license) license_step "$step" ;;
+            unions) unions_step "$step" ;;
+            legacy) legacy_step "$step" ;;
             connection) connection_step "$step" ;;
             kitchen) kitchen_step "$step" ;;
             endtoend) endtoend_step "$step" ;;

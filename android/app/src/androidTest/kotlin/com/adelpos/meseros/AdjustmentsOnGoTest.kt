@@ -76,6 +76,7 @@ import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_SCREEN
 import com.adelpos.meseros.feature.waiter.tables.TAG_TABLES_VIEW
 import com.adelpos.meseros.feature.waiter.tables.TAG_TABLE_PREFIX
 import com.adelpos.meseros.navigation.TAG_APP_NOTICE
+import com.adelpos.meseros.navigation.TAG_APP_TITLE
 import java.io.File
 import java.io.FileOutputStream
 import java.util.UUID
@@ -480,7 +481,8 @@ class AdjustmentsOnGoTest {
         compose.waitUntil(timeoutMillis = 20_000) {
             compose
                 .onAllNodes(
-                    hasText(title) and hasAnyAncestor(hasTestTag(TAG_TOP_BAR)),
+                    hasText(title) and
+                        (hasAnyAncestor(hasTestTag(TAG_TOP_BAR)) or hasTestTag(TAG_APP_TITLE)),
                     useUnmergedTree = true,
                 )
                 .fetchSemanticsNodes()

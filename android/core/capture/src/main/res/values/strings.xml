@@ -38,6 +38,11 @@
     <string name="capture_discard">Descartar la captura</string>
     <string name="capture_discard_title">¿Descartar la captura?</string>
     <string name="capture_discard_text">Se quitan los productos tuyos que no se han enviado a cocina, también de la cuenta en la computadora principal. Si la cuenta se abrió con esta captura y queda vacía, también se descarta. Lo enviado no cambia.</string>
+    <!-- Etapa M1 (M1-D13): una unión en pantalla que no se pudo guardar nunca va a la cola. -->
+    <string name="capture_union_offline">Sin conexión no se pueden unir mesas. Puedes enviar el pedido solo a la %1$s o esperar a tener conexión.</string>
+    <string name="capture_union_rejected">%1$s Puedes enviar el pedido solo a la %2$s o esperar.</string>
+    <string name="capture_union_send_alone">Enviar solo a la %1$s</string>
+    <string name="capture_union_wait">Esperar</string>
     <string name="capture_still_saving">Todavía se está guardando lo último que capturaste. Toca «Enviar a cocina» de nuevo en un momento.</string>
     <string name="discard_pending_title">Falta quitarlo de la cuenta</string>
     <string name="discard_pending_text">No hay conexión con la computadora principal: lo que descartaste todavía está guardado en la cuenta y se quitará en cuanto vuelva la conexión. Lo ves en Pendientes.</string>

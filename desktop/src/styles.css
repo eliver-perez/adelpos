@@ -1720,6 +1720,64 @@ summary {
   background: var(--warning-soft);
   color: var(--warning);
 }
+/* Etapa M1 (contrato §10): el marco tenue de una mesa divisible (grupo) alrededor de sus secciones, con su nombre; el
+   contorno sólido de una unión con su nombre y su capacidad, del color de su estado, y el discontinuo de la unión que
+   vive en la pantalla. Van detrás de las mesas y no se tocan: las mesas siguen tocándose. Solo el nombre del grupo
+   (su atajo) se toca. */
+.table-group-frame,
+.table-union-outline {
+  position: absolute;
+  pointer-events: none;
+}
+.table-group-frame {
+  border: 2px dashed var(--border);
+  border-radius: 16px;
+}
+.table-union-outline {
+  border: 3px solid var(--table-occupied-border);
+  border-radius: 14px;
+}
+.table-union-awaiting_payment {
+  border-color: var(--table-awaiting-border);
+}
+.table-union-partial_payment {
+  border-color: var(--table-partial-border);
+}
+.table-union-screen {
+  border-style: dashed;
+  border-color: var(--accent);
+}
+.table-group-label,
+.table-union-label {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  left: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.4;
+  white-space: nowrap;
+  transform: translateY(-60%);
+}
+.table-union-label {
+  border-color: currentColor;
+  color: var(--text);
+}
+.table-group-shortcut {
+  min-height: 28px;
+  border-color: var(--accent-border);
+  color: var(--accent);
+  cursor: pointer;
+  pointer-events: auto;
+}
 .table-map-designer .table-map-viewport {
   max-height: none;
 }
@@ -4383,6 +4441,12 @@ summary {
 .capture-tag-cancelled {
   text-decoration: line-through;
 }
+/* Etapa M1 (§5.1): un producto que la cocina marcó listo, en turquesa como en la aplicación de meseros. */
+.capture-tag-ready {
+  border-color: var(--teal);
+  background: var(--teal-soft);
+  color: var(--teal);
+}
 .capture-line-detail {
   font-size: 11px;
   color: var(--muted);
@@ -5061,6 +5125,80 @@ summary {
   border-color: var(--table-out-border);
   background: var(--table-out-bg);
   color: var(--table-out-text);
+}
+/* Etapa M1: unir mesas desde el panel («Unir con…», el atajo del grupo, «Agregar mesa», «Quitar mesa» y la unión
+   que vive en la pantalla con su nota). */
+.table-panel-union {
+  display: grid;
+  gap: 6px;
+  padding: 10px 14px 0;
+  flex-shrink: 0;
+}
+.table-panel-union p {
+  font-size: 13px;
+}
+.table-panel-union-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.table-panel-union-actions button {
+  min-height: 48px;
+  font-size: 13px;
+}
+/* Etapa M1: mesas divisibles en Áreas y distribución. */
+.table-groups-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.table-groups-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+/* Etapa M1: diálogo «Unir con…», «Agregar mesa» y «Quitar mesa»: las mesas del área como botones grandes (las que
+   no se pueden unir, deshabilitadas con su motivo) y debajo la vista previa de Go con sus problemas. */
+.dialog-panel.join-tables-dialog {
+  width: min(680px, 100%);
+}
+.join-tables-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.join-table-option {
+  display: grid;
+  gap: 2px;
+  min-height: 56px;
+  padding: 8px 12px;
+  text-align: left;
+}
+.join-table-option[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.join-tables-preview {
+  display: grid;
+  gap: 4px;
+  min-height: 24px;
+}
+.dialog-panel .join-tables-name {
+  color: var(--text);
+}
+.dialog-panel .join-tables-problem {
+  color: var(--danger);
+  font-weight: 600;
 }
 .table-panel-accounts {
   display: flex;

@@ -417,7 +417,12 @@ la mesa y el área son las actuales de la cuenta.
 
 - Ventas por tasa de IVA, día, semana ISO, mes, hora local del cierre, producto, variante, modalidad, salón por área y
   mesa, para llevar por origen (ventanilla es un origen de para llevar), lista de precios, turno, cuentas cerradas y
-  evolución con el periodo anterior. `sales.by_day` incluye los días sin ventas.
+  evolución con el periodo anterior. `sales.by_day` incluye los días sin ventas. **Desde la etapa M1** (M1-D3), una
+  venta de una unión de mesas guarda la unión al reconocerse (`sales_recognitions.table_union_id`,
+  `table_union_name` y `table_union_tables`; NULL en lo anterior, que no se reescribe): «Ventas de salón» la muestra
+  en un solo renglón, «5 + 6», **sin repartirla** entre sus mesas, y el filtro de una mesa incluye las uniones en que
+  estuvo. «En curso» y «Cuentas canceladas» dicen la unión (la cancelación la guarda en `account_cancellations`,
+  M1-D30); «Modificaciones de cantidades» la deduce por la hora (M1-D39).
 - **Ventas por turno**: la venta pertenece al turno de la operación que cerró la cuenta (los cobros, al turno de cada
   pago); los turnos en arqueo se excluyen.
 - Productos más y menos vendidos («menos vendidos» agrega con cero los productos activos sin ventas del periodo, solo sin

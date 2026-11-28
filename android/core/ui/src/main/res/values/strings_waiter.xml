@@ -7,14 +7,19 @@
     <string name="order_state_sending">Enviando</string>
     <string name="order_state_received">Recibido por el restaurante</string>
     <string name="order_state_needs_review">Requiere tu revisión</string>
+    <!-- Etapa M1 (§5.5, M1-D16): una captura con productos sin enviar en el panel de la mesa. -->
+    <string name="capture_unsent">Por enviar</string>
+    <!-- Etapa M1 (§5.5): la cuenta de la que es responsable el mesero activo. -->
+    <string name="account_mine">Tu cuenta</string>
 
-    <!-- Preparación de lo enviado: los mismos textos del escritorio y de cocina. -->
+    <!-- Preparación de lo enviado: los mismos textos del escritorio y de cocina. Etapa M1 (contrato §4,
+         M1-D18): en las vistas de la cuenta, lo liberado dice «En cocina», igual que el escritorio. -->
     <string name="preparation_without_items">Sin productos</string>
     <string name="preparation_draft">Borrador</string>
     <string name="preparation_confirmed_pending_dispatch">Pendiente de liberación</string>
     <string name="preparation_pending_release">Enviado · sin confirmar en cocina</string>
     <string name="preparation_scheduled">Programado para preparación</string>
-    <string name="preparation_released">Liberado a preparación</string>
+    <string name="preparation_released">En cocina</string>
     <string name="preparation_preparing">En preparación</string>
     <string name="preparation_ready">Listo</string>
     <string name="preparation_change_pending">Cambio de cocina pendiente de revisión</string>

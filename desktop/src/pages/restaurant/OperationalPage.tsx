@@ -15,10 +15,25 @@ import {
 } from '../../hooks/useSupervisorAuthorization';
 import { useNavigation } from '../../navigation/NavigationContext';
 import type { RestaurantView, WorkspacePanel } from '../../hooks/useRestaurantWorkspace';
+import { APIError } from '../../services/api';
 import { notifyError, notifySuccess } from '../../services/notify';
 import { countLabel } from '../../services/plural';
-import { accountLabel, isPendingAccount } from '../../services/restaurant';
-import type { Account, RestaurantTable, TableState } from '../../services/restaurant';
+import {
+  accountLabel,
+  groupOfTable,
+  isPendingAccount,
+  samePlace,
+  tableNameIncludesWord,
+  unionOfTable,
+} from '../../services/restaurant';
+import type {
+  Account,
+  RestaurantTable,
+  TableGroup,
+  TableState,
+  TableUnion,
+} from '../../services/restaurant';
+import { serverHas, tableUnionsCapability } from '../../services/serverCapabilities';
 import {
   CashShortcut,
   CashShortcutSheet,
@@ -38,6 +53,9 @@ import { CancelAccount } from './CancelAccount';
 import { CancelItem } from './CancelItem';
 import { OperationsAdmin } from './OperationsAdmin';
 import { TablePanel } from './TablePanel';
+import type { TableJoinActions } from './TablePanel';
+import { JoinTablesDialog } from './TableUnions';
+import type { JoinChoice, JoinRequest } from './TableUnions';
 import { TablesSummaryPanel, areaTables } from './TablesSummaryPanel';
 import { CheckoutPanel } from './checkout/CheckoutPanel';
 import { CheckoutToolbar } from './checkout/CheckoutToolbar';
@@ -47,6 +65,11 @@ import type { BillAction } from './capture/CaptureBill';
 import { CaptureScreen, WorkspaceBill, captureLinesLocked } from './capture/CaptureScreen';
 
 const accountActions: AccountAction[] = ['split', 'transfer', 'merge', 'move', 'assign'];
+
+// «la Mesa 5» en una frase, sin repetir «Mesa» (la regla de documents.TableContext de Go).
+function tableInSentence(name: string) {
+  return tableNameIncludesWord(name) ? `la ${name}` : `la Mesa ${name}`;
+}
 
 export function OperationalPage({
   active,
@@ -124,6 +147,19 @@ export function OperationalPage({
   const draftUncertain = workspace.draft.uncertain;
   const blocked = mutation.busy || mutation.uncertain || draftUncertain;
   const selectedTable = overview.data?.tables.find((table) => table.id === workspace.tableID);
+  // Etapa M1 (contrato §10): la unión abierta de la mesa elegida (su panel es el de la unión), el grupo del que es
+  // sección y la unión que vive en la pantalla desde ella. Unir mesas solo con la capacidad table-unions-v1 y el
+  // permiso «Unir mesas»; sin ellos no se ve nada nuevo.
+  const unionsAvailable = serverHas(tableUnionsCapability);
+  const canJoin = unionsAvailable && can('restaurant.tables.join');
+  const selectedUnion = selectedTable ? unionOfTable(overview.data, selectedTable.id) : null;
+  const selectedGroup = selectedTable ? groupOfTable(overview.data, selectedTable.id) : null;
+  const selectedScreenUnion =
+    selectedTable && workspace.screenUnion?.startTableID === selectedTable.id
+      ? workspace.screenUnion
+      : null;
+  const [join, setJoin] = useState<JoinRequest | null>(null);
+  const [joinError, setJoinError] = useState('');
   // El cobro (y sus devoluciones) sustituye la captura y la cuenta dentro de la misma vista.
   const checkoutOpen = view !== 'manage' && (panel === 'checkout' || panel === 'refund') && !!bill;
   const editorVisible =
@@ -280,10 +316,15 @@ export function OperationalPage({
     const table = account.table_id
       ? overview.data?.tables.find((entry) => entry.id === account.table_id)
       : undefined;
+    // Etapa M1: en una unión, las cuentas de toda la unión.
+    const union = account.table_id ? unionOfTable(overview.data, account.table_id) : null;
     const others =
       workspace.accounts.data?.items.filter(
         (entry) =>
-          entry.state === 'open' && entry.table_id === account.table_id && entry.id !== account.id,
+          entry.state === 'open' &&
+          !!account.table_id &&
+          samePlace(entry, account.table_id, union) &&
+          entry.id !== account.id,
       ).length ?? 0;
     const message = [
       `${takeaway ? 'El pedido' : 'La cuenta'} no tiene productos enviados a cocina, pagos ni registros de cocina.`,
@@ -294,7 +335,9 @@ export function OperationalPage({
       table
         ? others > 0
           ? 'Las demás cuentas de la mesa no cambian.'
-          : `${table.name} quedará libre.`
+          : union
+            ? `La unión ${union.name} se deshará y sus mesas quedarán libres.`
+            : `${table.name} quedará libre.`
         : '',
     ]
       .filter(Boolean)
@@ -326,17 +369,23 @@ export function OperationalPage({
 
   // «Liberar mesa» (etapa 7.1): una cuenta vacía se descarta sin motivo después de confirmarlo.
   async function releaseAccount(table: RestaurantTable, account: Account) {
-    // Con otras cuentas abiertas la mesa sigue ocupada: solo se libera esta cuenta.
+    // Con otras cuentas abiertas la mesa sigue ocupada: solo se libera esta cuenta. Etapa M1: en una unión cuentan
+    // las de toda la unión, y sin otras la unión se deshace.
+    const union = unionOfTable(overview.data, table.id);
+    const place = union?.name ?? table.name;
     const others =
       workspace.accounts.data?.items.filter(
-        (entry) => entry.state === 'open' && entry.table_id === table.id && entry.id !== account.id,
+        (entry) =>
+          entry.state === 'open' && samePlace(entry, table.id, union) && entry.id !== account.id,
       ).length ?? 0;
     const release = await confirm({
-      title: `¿Liberar ${table.name}?`,
+      title: `¿Liberar ${place}?`,
       message:
         others > 0
           ? `${accountLabel(account)} no tiene productos, pagos ni registros de cocina. Se descartará; las demás cuentas de la mesa no cambian.`
-          : `${accountLabel(account)} no tiene productos, pagos ni registros de cocina. Se descartará y la mesa quedará libre.`,
+          : union
+            ? `${accountLabel(account)} no tiene productos, pagos ni registros de cocina. Se descartará, la unión se deshará y sus mesas quedarán libres.`
+            : `${accountLabel(account)} no tiene productos, pagos ni registros de cocina. Se descartará y la mesa quedará libre.`,
       confirmLabel: 'Liberar mesa',
       cancelLabel: 'Conservar la cuenta',
       tone: 'danger',
@@ -350,7 +399,11 @@ export function OperationalPage({
         body: { revision: account.revision },
       });
       notifySuccess(
-        others > 0 ? `${accountLabel(account)} liberada.` : `${table.name} quedó libre.`,
+        others > 0
+          ? `${accountLabel(account)} liberada.`
+          : union
+            ? `${union.name} quedó libre.`
+            : `${table.name} quedó libre.`,
       );
     } catch (problem) {
       workspace.reportError(problem, 'No se pudo liberar la mesa.');
@@ -369,6 +422,138 @@ export function OperationalPage({
       );
     } catch (problem) {
       workspace.reportError(problem, 'No se pudo cambiar el servicio de la mesa.');
+    }
+  }
+
+  // Etapa M1 (§1 y §3; contrato §10): unir mesas. El diálogo pide la vista previa a Go; aquí se escribe lo elegido.
+  // Desde una mesa ocupada la unión nace en Go al momento (sus cuentas pasan a la unión); con todas libres vive en
+  // la pantalla hasta el primer producto (M1-D9). Los rechazos se muestran con el texto de Go, tal cual.
+  function openJoin(request: JoinRequest) {
+    setJoinError('');
+    setJoin(request);
+  }
+
+  function closeJoin() {
+    setJoin(null);
+    setJoinError('');
+  }
+
+  // Un resultado incierto queda en «Recuperar resultado»: el diálogo se cierra para no escribir dos veces.
+  function joinProblem(problem: unknown) {
+    if (mutation.isPending()) {
+      closeJoin();
+      return;
+    }
+    setJoinError(
+      problem instanceof Error && problem.message
+        ? problem.message
+        : 'No se pudo hacer. Inténtalo de nuevo.',
+    );
+  }
+
+  function showJoinInScreen(
+    request: Extract<JoinRequest, { kind: 'join' | 'group' }>,
+    choice: JoinChoice,
+  ) {
+    const preview = choice.preview;
+    if (!preview) {
+      return;
+    }
+    const group = request.kind === 'group' ? request.group : null;
+    workspace.showScreenUnion({
+      startTableID: request.start.id,
+      tableIDs: group ? [] : choice.tableIDs,
+      groupID: group?.id ?? null,
+      allTableIDs: group ? group.table_ids : [request.start.id, ...choice.tableIDs],
+      name: preview.name,
+      seats: preview.seats,
+    });
+    closeJoin();
+  }
+
+  async function confirmJoin(choice: JoinChoice) {
+    const request = join;
+    if (!request) {
+      return;
+    }
+    setJoinError('');
+    if (request.kind === 'join' || request.kind === 'group') {
+      if (request.start.account_count === 0) {
+        showJoinInScreen(request, choice);
+        return;
+      }
+      try {
+        const result = await workspace.execute<{ union: TableUnion }>('restaurant_create_union', {
+          body:
+            request.kind === 'group'
+              ? { start_table_id: request.start.id, group_id: request.group.id }
+              : { start_table_id: request.start.id, table_ids: choice.tableIDs },
+        });
+        closeJoin();
+        notifySuccess(`Mesas unidas: ${result.union.name}.`);
+      } catch (problem) {
+        // La mesa de inicio se liberó mientras tanto: la unión vive en la pantalla, como desde una mesa libre.
+        if (problem instanceof APIError && problem.code === 'TABLE_UNION_DEFERRED') {
+          showJoinInScreen(request, choice);
+          return;
+        }
+        joinProblem(problem);
+      }
+      return;
+    }
+    const tableID = choice.tableIDs[0];
+    if (!tableID) {
+      return;
+    }
+    const tableName = overview.data?.tables.find((table) => table.id === tableID)?.name ?? '';
+    try {
+      if (request.kind === 'add') {
+        const result = await workspace.execute<{ union: TableUnion }>(
+          'restaurant_add_union_table',
+          {
+            id: request.union.id,
+            body: { revision: request.union.revision, table_id: tableID },
+          },
+        );
+        closeJoin();
+        notifySuccess(`Se agregó ${tableName}: ahora ${result.union.name}.`);
+        return;
+      }
+      // Quitar: la unión y la mesa viajan juntas («unión/mesa», resource_pair del puente).
+      const result = await workspace.execute<{ union: TableUnion; dissolved: boolean }>(
+        'restaurant_remove_union_table',
+        {
+          id: `${request.union.id}/${tableID}`,
+          body: { revision: request.union.revision },
+        },
+      );
+      closeJoin();
+      notifySuccess(
+        result.dissolved
+          ? `Se quitó ${tableName} y la unión se deshizo: las cuentas quedan en la mesa que sigue.`
+          : `Se quitó ${tableName}: ahora ${result.union.name}.`,
+      );
+    } catch (problem) {
+      joinProblem(problem);
+    }
+  }
+
+  const joining: TableJoinActions | null =
+    canJoin && selectedTable
+      ? {
+          onJoin: () => openJoin({ kind: 'join', start: selectedTable }),
+          onGroup: (group: TableGroup) => openJoin({ kind: 'group', group, start: selectedTable }),
+          onAddTable: (union: TableUnion) => openJoin({ kind: 'add', union }),
+          onRemoveTable: (union: TableUnion) => openJoin({ kind: 'remove', union }),
+          onDropScreenUnion: workspace.dropScreenUnion,
+        }
+      : null;
+
+  // El atajo del grupo desde el marco del mapa: empieza en su primera sección.
+  function groupShortcut(group: TableGroup) {
+    const start = overview.data?.tables.find((table) => table.id === group.table_ids[0]);
+    if (start) {
+      openJoin({ kind: 'group', group, start });
     }
   }
 
@@ -443,13 +628,26 @@ export function OperationalPage({
     chooseTable: showTable,
     tables: () => {
       const areas = overview.data?.areas ?? [];
+      // Etapa M1: una unión es una sola entrada con su nombre (abre la unión desde su primera mesa).
+      const listed = new Set<string>();
       return (overview.data?.tables ?? [])
         .filter((table) => table.active)
-        .map((table) => ({
-          id: table.id,
-          name: table.name,
-          areaName: areas.find((area) => area.id === table.area_id)?.name ?? '',
-        }));
+        .flatMap((table) => {
+          const union = unionOfTable(overview.data, table.id);
+          if (union && listed.has(union.id)) {
+            return [];
+          }
+          if (union) {
+            listed.add(union.id);
+          }
+          return [
+            {
+              id: table.id,
+              name: union?.name ?? table.name,
+              areaName: areas.find((area) => area.id === table.area_id)?.name ?? '',
+            },
+          ];
+        });
     },
     back,
   };
@@ -701,12 +899,17 @@ export function OperationalPage({
   const conflictTable = conflict
     ? overview.data?.tables.find((table) => table.id === conflict.tableID)
     : undefined;
+  // Etapa M1: Go rechazó la unión en pantalla (o la unión que se veía en la mesa) al guardar el primer producto.
+  const unionConflict = workspace.unionConflict;
+  const unionConflictTable = unionConflict
+    ? overview.data?.tables.find((table) => table.id === unionConflict.tableID)
+    : undefined;
   const banners = (
     <>
       {dialog}
       {/* Con el atajo compartido, App muestra la hoja una sola vez. */}
       {!inShell && <CashShortcutSheet shortcut={cashShortcut} can={can} timezone={timezone} />}
-      {conflict && (
+      {conflict && !conflict.union && (
         <ChoiceDialog
           title="Esta mesa ya tiene una cuenta"
           message={
@@ -729,6 +932,68 @@ export function OperationalPage({
               onSelect: () => workspace.openPendingAnyway(conflict.localID),
             },
           ]}
+        />
+      )}
+      {/* Etapa M1 (TABLE_IN_UNION): otra terminal unió la mesa con otras mientras capturabas. Como con una cuenta
+          nueva en la mesa: agregar a una cuenta de la unión o abrir otra en la unión a sabiendas. */}
+      {conflict?.union && (
+        <ChoiceDialog
+          title="Esta mesa ya está unida con otras mesas"
+          message={
+            <p>
+              Otra terminal unió {conflictTable ? conflictTable.name : 'la mesa'} en{' '}
+              {conflict.union.name} mientras capturabas. Tus productos se conservan en esta
+              terminal: agrégalos a una cuenta de la unión o abre una cuenta nueva en ella.
+            </p>
+          }
+          busy={workspace.resolvingConflict}
+          choices={[
+            ...conflict.accounts.map((entry) => ({
+              label: `Agregar a la Cuenta #${entry.folio}`,
+              onSelect: () => void workspace.addPendingToAccount(conflict.localID, entry.id),
+            })),
+            {
+              label: `Abrir una cuenta nueva en ${conflict.union.name}`,
+              onSelect: () => workspace.openPendingAnyway(conflict.localID),
+            },
+          ]}
+        />
+      )}
+      {unionConflict && (
+        <ChoiceDialog
+          title={
+            unionConflict.joined
+              ? 'No se pudieron unir las mesas'
+              : 'La unión cambió en otra terminal'
+          }
+          message={
+            <>
+              <p>{unionConflict.message}</p>
+              <p>No se guardó nada. Tus productos se conservan en esta terminal.</p>
+            </>
+          }
+          choices={[
+            {
+              label: unionConflict.joined
+                ? `Enviar solo a ${tableInSentence(unionConflictTable?.name ?? '')}`
+                : `Abrir la cuenta en ${tableInSentence(unionConflictTable?.name ?? '')}`,
+              onSelect: () => workspace.sendWithoutUnion(unionConflict.localID),
+            },
+            {
+              label: 'Esperar',
+              onSelect: () => workspace.waitForUnion(unionConflict.localID),
+            },
+          ]}
+        />
+      )}
+      {join && overview.data && (
+        <JoinTablesDialog
+          request={join}
+          overview={overview.data}
+          busy={mutation.busy}
+          error={joinError}
+          onCancel={closeJoin}
+          onConfirm={(choice) => void confirmJoin(choice)}
         />
       )}
       {mutation.uncertain && (
@@ -857,10 +1122,11 @@ export function OperationalPage({
     // mesa, el panel de la mesa. Una acción de la cuenta (dividir, precuenta, historial…) ocupa el
     // lugar del mapa y al cerrarse vuelve a él; el panel permanece.
     const tablePanelAction = panel === 'capture' || panel === 'editor' ? null : accountPanel();
+    // Etapa M1: las cuentas de una mesa unida son las de toda la unión (Go las manda así en listAccounts).
     const tableAccounts =
       selectedTable && workspace.accounts.data
         ? workspace.accounts.data.items.filter(
-            (entry) => entry.state === 'open' && entry.table_id === selectedTable.id,
+            (entry) => entry.state === 'open' && samePlace(entry, selectedTable.id, selectedUnion),
           )
         : null;
     const longOpenHours = overview.data?.settings.long_open_hours;
@@ -890,6 +1156,10 @@ export function OperationalPage({
                 autoFit
                 highlight={selectedTable ? null : highlight}
                 longOpenHours={longOpenHours}
+                unions={unionsAvailable ? overview.data.unions : undefined}
+                groups={unionsAvailable ? overview.data.groups : undefined}
+                screenUnion={workspace.screenUnion}
+                onGroupShortcut={canJoin ? groupShortcut : undefined}
               />
             </section>
           ) : (
@@ -917,6 +1187,10 @@ export function OperationalPage({
               onDiscard={(account) => void discardAccount(account)}
               onService={(outOfService) => void changeTableService(selectedTable, outOfService)}
               longOpenHours={longOpenHours}
+              union={selectedUnion}
+              screenUnion={selectedScreenUnion}
+              group={selectedUnion ? null : selectedGroup}
+              joining={joining}
             />
           ) : (
             <TablesSummaryPanel

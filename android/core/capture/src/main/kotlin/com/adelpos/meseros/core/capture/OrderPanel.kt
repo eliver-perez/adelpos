@@ -510,13 +510,16 @@ private fun SentRow(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            PreparationBadge(
-                if (line.cancelled) {
-                    PreparationState.CANCELLED
-                } else {
-                    line.preparationState
-                },
-            )
+            // Etapa M1 (§5.2, M1-D15): lo que no necesita preparación no lleva etiqueta de cocina.
+            if (line.showsPreparation) {
+                PreparationBadge(
+                    if (line.cancelled) {
+                        PreparationState.CANCELLED
+                    } else {
+                        line.preparationState
+                    },
+                )
+            }
             if (!line.cancelled) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TextButton(

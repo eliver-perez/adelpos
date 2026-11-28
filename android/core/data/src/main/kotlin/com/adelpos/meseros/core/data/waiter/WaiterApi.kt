@@ -49,6 +49,63 @@ class WaiterApi(
     suspend fun state(server: ServerTransport, headers: Headers) =
         get(server, headers, "restaurant/state", RecoveryStateDto.serializer())
 
+    // --- Etapa M1: uniones de mesas (contrato §3) ---
+
+    suspend fun previewUnion(server: ServerTransport, headers: Headers, body: UnionPreviewBody) =
+        send(
+            server = server,
+            headers = headers,
+            method = "POST",
+            path = "restaurant/table-unions/preview",
+            body = body,
+            serializer = UnionPreviewBody.serializer(),
+            deserializer = UnionPreviewDto.serializer(),
+        )
+
+    suspend fun createUnion(server: ServerTransport, headers: Headers, body: CreateUnionBody) =
+        send(
+            server = server,
+            headers = headers,
+            method = "POST",
+            path = "restaurant/table-unions",
+            body = body,
+            serializer = CreateUnionBody.serializer(),
+            deserializer = UnionAnswerDto.serializer(),
+        )
+
+    suspend fun addUnionTable(
+        server: ServerTransport,
+        headers: Headers,
+        unionId: String,
+        body: AddUnionTableBody,
+    ) =
+        send(
+            server = server,
+            headers = headers,
+            method = "POST",
+            path = "restaurant/table-unions/$unionId/tables",
+            body = body,
+            serializer = AddUnionTableBody.serializer(),
+            deserializer = UnionAnswerDto.serializer(),
+        )
+
+    suspend fun removeUnionTable(
+        server: ServerTransport,
+        headers: Headers,
+        unionId: String,
+        tableId: String,
+        body: MutationBody,
+    ) =
+        send(
+            server = server,
+            headers = headers,
+            method = "POST",
+            path = "restaurant/table-unions/$unionId/tables/$tableId/remove",
+            body = body,
+            serializer = MutationBody.serializer(),
+            deserializer = UnionAnswerDto.serializer(),
+        )
+
     suspend fun bill(server: ServerTransport, headers: Headers, accountId: String) =
         get(server, headers, "restaurant/accounts/$accountId", BillDto.serializer())
 

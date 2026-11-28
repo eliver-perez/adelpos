@@ -5,7 +5,12 @@ import { useLiveResource } from '../../hooks/useLiveResource';
 import { useRestaurantMutation } from '../../hooks/useRestaurantMutation';
 import { APIError } from '../../services/api';
 import { notifyError, notifySuccess } from '../../services/notify';
-import { jobLabels, preparationLabels, type ExecuteKitchen } from '../../services/kitchen';
+import {
+  jobLabels,
+  preparationLabels,
+  taskStateLabels,
+  type ExecuteKitchen,
+} from '../../services/kitchen';
 import { serverDateTime } from '../../services/restaurant';
 import { KitchenSettingsForm } from './KitchenSettingsForm';
 import { KitchenTickets } from './KitchenTickets';
@@ -192,7 +197,8 @@ function KitchenHistory({ timezone }: { timezone: string }) {
           {event.after_value?.state && (
             <p>
               Estado:{' '}
-              {preparationLabels[event.after_value.state] ??
+              {taskStateLabels[event.after_value.state] ??
+                preparationLabels[event.after_value.state] ??
                 jobLabels[event.after_value.state as keyof typeof jobLabels] ??
                 event.after_value.state}
             </p>

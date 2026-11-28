@@ -73,6 +73,32 @@ function UnitsAuthorization({ after }: { after: RecordValue }) {
   return <p>Autorizó: {supervisorName(after) || 'con su propio permiso'}</p>;
 }
 
+// Etapa M1 (§1.4): un cambio de la unión de mesas en el historial de la cuenta. Go registra el cambio («joined»,
+// «table_added», «table_removed», «renamed» o «dissolved») con la unión de antes y la de después; aquí solo se dice
+// en palabras del restaurante, con el nombre de la unión que calculó Go.
+function unionName(value: unknown) {
+  const union = record(value);
+  return typeof union.name === 'string' ? union.name : '';
+}
+
+function UnionChange({ before, after }: { before: RecordValue; after: RecordValue }) {
+  const previous = unionName(before.union);
+  const current = unionName(after.union);
+  const lines: Record<string, string> = {
+    joined: current ? `Se unieron las mesas: ${current}.` : 'Se unieron las mesas.',
+    table_added: current
+      ? `Se agregó una mesa a la unión: ahora es ${current}.`
+      : 'Se agregó una mesa a la unión.',
+    table_removed: current
+      ? `Se quitó una mesa de la unión: ahora es ${current}.`
+      : 'Se quitó una mesa de la unión.',
+    renamed: current ? `La unión ahora se llama ${current}.` : 'La unión cambió de nombre.',
+    dissolved: previous ? `La unión ${previous} se deshizo.` : 'La unión de mesas se deshizo.',
+  };
+  const change = typeof after.change === 'string' ? after.change : '';
+  return <p>{lines[change] ?? 'Cambiaron las mesas unidas de la cuenta.'}</p>;
+}
+
 export function HistoryDetails({ event }: { event: HistoryEvent }) {
   const before = record(event.payload.before);
   const after = record(event.payload.after);
@@ -112,6 +138,7 @@ export function HistoryDetails({ event }: { event: HistoryEvent }) {
         <p>Partidas en borrador: {event.payload.after.length}</p>
       )}
       {event.kind === 'account.cancelled' && <AccountCancelled event={event} after={after} />}
+      {event.kind === 'account.table_union' && <UnionChange before={before} after={after} />}
       {event.kind === 'account.discarded' && (
         <div className="form-stack">
           {discardedDraft > 0 && <p>Productos sin enviar descartados: {discardedDraft}</p>}

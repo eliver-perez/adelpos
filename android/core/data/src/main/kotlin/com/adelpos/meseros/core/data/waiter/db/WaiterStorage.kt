@@ -19,8 +19,10 @@ import com.adelpos.meseros.core.domain.waiter.OrderReview
 import com.adelpos.meseros.core.domain.waiter.OrderState
 import com.adelpos.meseros.core.domain.waiter.PendingOrder
 import com.adelpos.meseros.core.domain.waiter.ReviewReason
+import com.adelpos.meseros.core.domain.waiter.SeenUnion
 import com.adelpos.meseros.core.domain.waiter.TableAccountRef
 import com.adelpos.meseros.core.domain.waiter.TakeawayCustomer
+import com.adelpos.meseros.core.domain.waiter.UnionJoin
 import com.adelpos.meseros.core.domain.waiter.UnresolvedSave
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -29,7 +31,7 @@ import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
 
 /*
- * Documentos JSON de las tablas del modo Mesero y Para llevar (`AppDatabase` v6). Los renglones van
+ * Documentos JSON de las tablas del modo Mesero y Para llevar (`AppDatabase` v6; v7 en la etapa M1). Los renglones van
  * con la forma `DraftItem` del contrato (la misma que se envía a Go), así que lo guardado es
  * exactamente lo que se mandará; los importes, como cadenas decimales.
  */
@@ -60,7 +62,53 @@ private data class StoredDestination(
     val mode: String = DINE_IN,
     @SerialName("customer_name") val customerName: String = "",
     val phone: String = "",
+    // Etapa M1 (v7): la unión que veía el mesero; los pedidos guardados antes no lo tienen.
+    @SerialName("seen_union_known") val seenUnionKnown: Boolean = false,
+    @SerialName("seen_union_id") val seenUnionId: String? = null,
 )
+
+/**
+ * Etapa M1 (v7, `captures.union_view` y el guardado sin respuesta): la unión que veía el mesero y
+ * la unión en pantalla que nace con el primer producto.
+ */
+@Serializable
+private data class StoredUnion(
+    @SerialName("seen_union_known") val seenUnionKnown: Boolean = false,
+    @SerialName("seen_union_id") val seenUnionId: String? = null,
+    @SerialName("join_table_ids") val joinTableIds: List<String>? = null,
+    @SerialName("join_group_id") val joinGroupId: String? = null,
+    @SerialName("join_name") val joinName: String? = null,
+    @SerialName("join_start_name") val joinStartName: String? = null,
+) {
+    val seen: SeenUnion?
+        get() = if (seenUnionKnown) SeenUnion(seenUnionId) else null
+
+    val join: UnionJoin?
+        get() = joinTableIds?.let { tables ->
+            UnionJoin(
+                tableIds = tables,
+                groupId = joinGroupId,
+                name = joinName.orEmpty(),
+                startName = joinStartName.orEmpty(),
+            )
+        }
+
+    companion object {
+        fun of(seen: SeenUnion?, join: UnionJoin?): StoredUnion? =
+            if (seen == null && join == null) {
+                null
+            } else {
+                StoredUnion(
+                    seenUnionKnown = seen != null,
+                    seenUnionId = seen?.id,
+                    joinTableIds = join?.tableIds,
+                    joinGroupId = join?.groupId,
+                    joinName = join?.name,
+                    joinStartName = join?.startName,
+                )
+            }
+    }
+}
 
 @Serializable
 private data class StoredLine(
@@ -103,6 +151,8 @@ private data class StoredUnresolvedSave(
     val mode: String = DINE_IN,
     @SerialName("customer_name") val customerName: String = "",
     val phone: String = "",
+    // Etapa M1: la unión que llevaba el guardado (se repite igual).
+    val union: StoredUnion? = null,
 )
 
 /** Modalidad de lo guardado antes de la v6 (todo era de salón). */
@@ -148,6 +198,10 @@ object WaiterStorage {
             mode = capture.mode.wireName,
             customerName = capture.customer.name,
             customerPhone = capture.customer.phone,
+            unionView =
+                StoredUnion.of(capture.seenUnion, capture.unionJoin)?.let {
+                    json.encodeToString(StoredUnion.serializer(), it)
+                },
         )
 
     fun toCapture(entity: CaptureEntity): Capture =
@@ -177,7 +231,13 @@ object WaiterStorage {
             createdAccount = entity.createdAccount,
             mode = OrderMode.fromWireName(entity.mode),
             customer = TakeawayCustomer(entity.customerName, entity.customerPhone),
+            seenUnion = unionOf(entity.unionView)?.seen,
+            unionJoin = unionOf(entity.unionView)?.join,
         )
+
+    private fun unionOf(document: String?): StoredUnion? = document?.let {
+        json.decodeFromString(StoredUnion.serializer(), it)
+    }
 
     fun toEntity(order: PendingOrder): PendingOrderEntity =
         PendingOrderEntity(
@@ -197,6 +257,8 @@ object WaiterStorage {
                         mode = order.destination.mode.wireName,
                         customerName = order.destination.customer.name,
                         phone = order.destination.customer.phone,
+                        seenUnionKnown = order.destination.seenUnion != null,
+                        seenUnionId = order.destination.seenUnion?.id,
                     ),
                 ),
             lines =
@@ -269,6 +331,7 @@ object WaiterStorage {
                             mode = save.mode.wireName,
                             customerName = save.customer.name,
                             phone = save.customer.phone,
+                            union = StoredUnion.of(save.seenUnion, save.unionJoin),
                         ),
                     )
                 },
@@ -291,6 +354,9 @@ object WaiterStorage {
                     seenAccountIds = destination.seenAccountIds,
                     mode = OrderMode.fromWireName(destination.mode),
                     customer = TakeawayCustomer(destination.customerName, destination.phone),
+                    seenUnion =
+                        if (destination.seenUnionKnown) SeenUnion(destination.seenUnionId)
+                        else null,
                 ),
             lines =
                 json.decodeFromString(orderLines, entity.lines).map { stored ->
@@ -351,6 +417,8 @@ object WaiterStorage {
                         items = stored.items.map(WaiterMapper::draftLine),
                         mode = OrderMode.fromWireName(stored.mode),
                         customer = TakeawayCustomer(stored.customerName, stored.phone),
+                        seenUnion = stored.union?.seen,
+                        unionJoin = stored.union?.join,
                     )
                 },
             clockCorrected = entity.clockCorrected,
