@@ -348,7 +348,8 @@ Los agentes de la etapa usan el arnés aislado (`$SP/iso.sh <árbol> gradle <tar
   pantalla nunca va a la cola (M1-D13) y `u9` (con red) el pedido va solo a la mesa, y el atajo del grupo con una sección
   ocupada; `u10` el refresco sin etiqueta de cocina (§5.2); `u11` la unión cambia en otra terminal mientras se captura
   (`TABLE_UNION_CONFLICT`, M1-D32); `u12` el título completo (M1-D36; se corre también en el teléfono, en vertical, en
-  horizontal y a 360 dp con `wm density`).
+  horizontal y a 360 dp con `wm density`). Desde la Fase F la suite completa aprueba también en el teléfono (u2 cierra el
+  panel de la mesa antes de cambiar de área).
 - **`LegacyUnionOnGoTest`** (etapa M1, `--suite legacy`, pasos `v1` y `v2`, fuera de `all`): `v1` corre con la **0.4.1**
   instalada (de una copia `git archive` de `main`, con esta clase agregada solo para la prueba y sin `v2`, que usa
   etiquetas de la 0.5.0): la principal une la Mesa 21 (ocupada) con la 22, la 0.4.1 captura en la 22, Go le responde
