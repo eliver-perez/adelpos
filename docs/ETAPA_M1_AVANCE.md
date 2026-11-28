@@ -2572,3 +2572,298 @@ Se fusiona `etapa-m1-b` en `etapa-m1`. La fase solo cambió `desktop/`.
     Quedan como sugerencia para una etapa siguiente y se dicen en la entrega.
 - **Lo no verificado** (Windows, la aplicación Tauri real, dos escritorios a la vez) queda así, como en las etapas
   anteriores: el puente de Playwright usa la misma lista cerrada de `api.rs` y `cargo` la prueba.
+
+## Fase F · Versión 0.18.0, documentación y regresión completa (§7 y §8)
+
+Árbol `$SP/wt/m1-f`, rama `etapa-m1-f` (desde `etapa-m1` `17acd9a3`, con las fases 0, E, A y sus correcciones, R, B y
+las dos partes de C), `ISO_TAG=F`. La especificación quedó intacta (md5 `4750ae46…` antes y después de cada formato) y
+`docs/licencias/CONTRATO*` también. No se tocó la instalación real, la hora de la Mac, `licensing.sicrat.com`,
+`possys.bak` ni los emuladores del propietario (5554 y 5556). No se construyeron el `.pkg` ni la APK final. Guiones y
+registros en `$SP/m1/` (`f-*.sh`) y `$SP/m1/f-logs/`.
+
+### Commits (rama `etapa-m1-f`)
+
+| Commit     | Tema                                                                                                                      |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `d4963a7b` | Versión 0.18.0 del servidor y el escritorio (`config/product.json` con la sincronía y los dos lockfile)                   |
+| `3d24aab2` | Documentación de la etapa (§8): guía del propietario, importador, cocina, Android, API, `CLAUDE.md` y `android/CLAUDE.md` |
+| `b90b8fd6` | Las uniones en la documentación de operación y reportes, y la 0.18.0 en las guías de licencias                            |
+| `0ad519b8` | La prueba del asistente de la K1.1 espera las impresoras de cocina antes de decidir (falla de WebKit)                     |
+| `1223606b` | Dos pruebas de meseros siguen el teléfono vertical de la §5.6 (`AccessScreensTest` y `unions` u2)                         |
+| `2d807c89` | La regresión final en `CLAUDE.md` (fila de la etapa en §13–14 y §19) y `android/CLAUDE.md`                                |
+
+### 1. Versión
+
+- Servidor y escritorio **0.18.0**: `config/product.json` y, con `scripts/sync-metadata.mjs`, `metadata.json`, la copia
+  generada, `package.json`, `tauri.conf.json` y `Cargo.toml`, más `package-lock.json` y `Cargo.lock`. `sync-check`
+  aprobado. `schema_version` sigue en 31 (Fase A) y `min_client_versions` sin cambio. No queda ningún «0.17.0» que diga
+  la versión vigente (los que quedan son historia).
+- Meseros ya estaba en **0.5.0** (versionCode 6). Cocina sigue en **0.1.0**: `git diff main..HEAD -- android-core cocina`
+  está vacío (M1-D14 y M1-D40).
+
+### 2. Documentación
+
+- **`docs/UNIR_MESAS.md`** (nueva, la guía corta del propietario, donde viven las demás guías «Guía corta para…»): qué es
+  una unión, unir desde una mesa libre (en pantalla hasta el primer producto) o desde una ocupada (al momento), no unir
+  dos ocupadas, unir sin conexión en la tableta, agregar y quitar mesas, cuándo se deshace sola, las mesas divisibles
+  (secciones, atajo, combinaciones parciales, sección ocupada), cómo crear, cambiar y quitar un grupo con sus rechazos, el
+  permiso «Unir mesas» y lo que conviene saber (M1-D27, M1-D39 y la 0.4.1).
+- **`docs/MIGRAR_SISTEMA_ANTERIOR.md`**: sección «Mesas divisibles del sistema anterior» (M1-D5: con la mesa base y sin
+  ella, los dudosos con el texto del resumen, la base que no se vuelve mesa viva y no cuenta en la validación, el
+  respaldo del restaurante con «Mesa 3» de cuatro secciones) y la segunda importación en «Repetirlo al pasar a
+  producción».
+- **`docs/KITCHEN_AND_PRINTING.md`**: K11-D9 pasa a historia por M1-D17 (la nota del principio, «Enviado · sin confirmar
+  en cocina», el panel «Por enviar a cocina» y las limitaciones), «liberado» es «Por preparar» en Preparación, y la
+  sección nueva «Uniones de mesas, etiquetas por renglón y textos de Preparación · etapa M1» (el nombre de la unión en la
+  comanda, el KDS, Preparación y los avisos; §5.1 con su causa; `preparation_required`; §5.3; la tabla de textos de
+  M1-D18 y lo que no cambió por M1-D43).
+- **`CLAUDE.md`**: la última revisión y las versiones (0.18.0, esquema 31, meseros 0.5.0, cocina 0.1.0) con la K1.1 como
+  etapa anterior; §3 (el modelo, `internal/tableunions`, `SettleEmpty`, la creación diferida, las mesas divisibles y las
+  instantáneas de lo cerrado; la composición del backend con las rutas, eventos, capacidad, licencia y **ningún lock
+  nuevo**); §4 (el paquete y la `0031`; la siguiente es la `0032`); §6 (las pruebas de la etapa, la lección de M1-D30 y
+  los AVD de M1-D37); §11–12 («Unir mesas y mesas divisibles en la interfaz» y «Reglas permanentes desde la etapa M1»,
+  con la lección de M1-D30: horas con `clock_timestamp()` después del lock y documentos de lo cerrado desde su
+  instantánea); §15 (M1-D1 a M1-D43; K11-D9 reemplazada); §17 (la 0.5.0 y los AVD); §19 (lo no verificado y las
+  limitaciones de la M1; K11-D9 y `takeaway t6` corregidos); §20 (la `0031` inmutable al instalar el `.pkg` 0.18.0).
+- **`android/CLAUDE.md`**: la etapa en la introducción, la versión 0.5.0 y 6, las suites `unions` (`u1`–`u12`) y `legacy`
+  (`v1` con la 0.4.1 y `v2` encima), las pruebas de pantallas de la M1, la actualización 0.4.1 → 0.5.0, los AVD de la
+  etapa en la matriz, la sección «Uniones de mesas y ajustes de la etapa M1» (tarjeta única, `preparation_required`,
+  unir, M1-D13, `seen_union_id`, textos cortados, el retraso, el contraste, **`KeyboardOnClose`**) y **Room 7**
+  (`captures.union_view`, `MIGRATION_6_7`, el destino de la cola sin cambio de esquema).
+- **`docs/API_V1.md`**: la Fase A ya lo tenía completo, también con M1-D29 a M1-D33 (recorte, horas, índice,
+  `TABLE_UNION_CONFLICT` y `TABLE_GROUP_NAME_TAKEN` de una mesa); se agregó la etapa en la introducción y el rango de
+  decisiones. `API_CONTRACTS.md`, el mismo rango.
+- **`docs/ANDROID_INSTALAR.md`**: la 0.5.0 (archivo `AD-EL-POS-Android-0.5.0.apk`), «De la 0.4.1 a la 0.5.0» encima sin
+  volver a emparejar, la tarjeta por cuenta con «Tu cuenta», el permiso «Unir mesas» (también la excepción a «la
+  actualización no cambia los roles») y unir sin conexión.
+- **Otros**: `README.md` (unir mesas y el paquete), `docs/RESTAURANT_OPERATIONS.md` (sección de la etapa M1),
+  `docs/REPORTS.md` (la venta de una unión sin repartir, M1-D3) y `docs/licencias/INTEGRACION.md` y
+  `PASO_A_PRODUCCION.md` (la 0.18.0 también es de desarrollo).
+- **Textos viejos**: en `docs/` ya no queda nada que describa como vigente «Lo tuyo en esta mesa», «Liberado a
+  preparación», «No hay unidades de preparación…» ni que quitar la hora no envía; lo que queda está marcado como «antes»
+  o «hasta la 0.17.0».
+
+### 3. Regresión completa (una sola vez)
+
+Todo sobre la rama de la Fase F (`d4963a7b` para el código; después solo cambiaron Markdown y una especificación de
+Playwright). Go temporales con la confianza de prueba de licencias (`vectors.json`): los 32 de Android dijeron
+`license_server_disabled` al arrancar y ninguno nombró `sicrat` (`$SP/m1/f-logs/licencias-go.txt` y los tres
+últimos); los de Playwright usaron el simulador `license-test` en 127.0.0.1:8494 y sus 21 registros tampoco nombran
+`sicrat`. La Mac no se durmió
+ni tuvo la pantalla bloqueada en ninguna corrida (`pmset -g log` sin «Sleep»/«Wake» desde las 18:20; `ioreg` sin
+`CGSSessionScreenIsLocked`). Las suites largas corrieron dentro de `caffeinate -i -s`. Carga: Go, Playwright y dos
+emuladores a la vez, más los dos emuladores del propietario (carga de la Mac entre 5 y 15).
+
+#### Go, formato y escritorio
+
+| Prueba                                                                                                   | Resultado                                                | Tiempo            |
+| -------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- | ----------------- |
+| `go-unit` (vet normal e `integration`, `test -race` de 40 paquetes, `GOOS=windows` build y vet)          | aprobado                                                 | 69 s              |
+| `go-int ./internal/database`                                                                             | aprobado                                                 | 19 s              |
+| `go-int ./internal/administration`                                                                       | aprobado                                                 | 302 s             |
+| `go-int ./internal/catalog`                                                                              | aprobado                                                 | 26 s              |
+| `go-int ./internal/operations` (con `TestStageM1*`, `TestStageM1Concurrency` y las del revisor)          | aprobado                                                 | 973 s             |
+| `go-int ./internal/payments`                                                                             | aprobado                                                 | 4 s               |
+| `go-int ./internal/reports`                                                                              | aprobado                                                 | 186 s             |
+| `go-int ./internal/reports/operational` (a las 19:00, lejos de las 05:00)                                | aprobado                                                 | 52 s              |
+| `go-int ./internal/designer`, `identity`, `apicontract` (`TestContractV1`), `backupschedule`             | aprobados                                                | 30, 29, 71 y 12 s |
+| `go-int ./cmd/ad-el-pos-server` (con el candado `$SP/m1/candado-cmd`)                                    | aprobado                                                 | 79 s              |
+| `go-int ./internal/discovery`, `legacyimport`, `licensing`, `licenseseats`                               | aprobados                                                | 6, 19, 13 y 10 s  |
+| **Integración: 16 de 16 paquetes de la tupla**, todos a la primera                                       | **16/16**                                                | ≈ 31 min          |
+| `fmt-check` (4 veces, con la comprobación de datos reales) y `sync-check`                                | aprobados; md5 de la especificación sin cambio           | —                 |
+| Vitest (con `tsc --noEmit`)                                                                              | **112 archivos, 1 075 pruebas**, 0 fallas                | 30 s              |
+| `npm run build`                                                                                          | aprobado                                                 | 11 s              |
+| `cargo test` (con `stage_m1_table_union_routes_are_closed`)                                              | **123 aprobadas**, 4 ignoradas, 0 fallas                 | 37 s              |
+| **Playwright Chromium**, suite completa con los cuatro servidores (8261, 8262, 8264 y el simulador 8494) | **58/58** a la primera                                   | 27.5 min          |
+| **Playwright WebKit**, suite completa con los cuatro servidores                                          | **57/58**: falló `workflow-stagez-k11-assistant` (abajo) | 27.5 min          |
+| `workflow-stagez-k11-*` solas después del arreglo `0ad519b8`, en WebKit y en Chromium                    | 2/2 y 2/2                                                | 30 s y 31 s       |
+| `workflow-stagez-k11-assistant` sola en WebKit, tres veces seguidas                                      | 3/3                                                      | ≈ 18 s cada una   |
+
+#### Android en la Mac
+
+| Prueba                                                                                                                                                                             | Resultado                                                                                                            | Tiempo |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | ------ |
+| `ktfmtCheck` de `android-core`, `android` y `cocina`                                                                                                                               | aprobados                                                                                                            | 17 s   |
+| `android-core`: `:model:test`, `testDebugUnitTest` y `lintDebug` (pruebas con `--rerun`)                                                                                           | **93** (model 60, network 26, ui 7), 0 fallas; lint aprobado                                                         | 14 s   |
+| `android`: `:core:domain:test`, `testDebugUnitTest` y `lintDebug`                                                                                                                  | **350** (core/data 172, core/domain 152, core/ui 8, feature/access 7, takeaway 5, waiter 6), 0 fallas; lint aprobado | 37 s   |
+| `cocina`: `testDebugUnitTest` y `lintDebug`                                                                                                                                        | **56**, 0 fallas; lint aprobado                                                                                      | 12 s   |
+| APK: la 0.4.1 de una copia `git archive` de `main` (`a33ada0`; debug, pruebas y de entrega) y la 0.5.0 de este árbol (debug, pruebas y de entrega), con `~/.android/adel-pos-dev/` | las dos de entrega con la huella `fb6a4bac…7c86`; `aapt`: 0.5.0/6 y 0.4.1/5                                          | —      |
+
+#### Android en los emuladores (M1-D37)
+
+Emuladores de la etapa, sin ventana y de solo lectura, con `$SP/iso.sh - emu-up`, como mucho dos a la vez:
+`ADEL_M1_Tablet_API37` (5570, Android 17), `ADEL_A1_Tablet_API26` (5572, Android 8.0) y `ADEL_M1_Phone_API37` (5574,
+Android 17, en lugar de la copia de `Pixel_8`: mismo perfil y misma imagen). Siempre con `ANDROID_SERIAL` y adb con
+tiempo límite; los del propietario (5554 y 5556) no se tocaron.
+
+**Instrumentadas** (`connectedDebugAndroidTest` por proyecto, desinstalando antes y contando los XML; las pruebas contra
+Go se omiten aquí porque corren con el guion):
+
+| Proyecto                                  | 5570 · tableta Android 17                                                      | 5572 · tableta Android 8                             | 5574 · teléfono Android 17                                                                                                                                                      |
+| ----------------------------------------- | ------------------------------------------------------------------------------ | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `android-core` (network 7, ui 3)          | **10**, 0 fallas (46 s)                                                        | **10**, 0 fallas (28 s)                              | **10**, 0 fallas (38 s)                                                                                                                                                         |
+| Meseros (`app` / `core:data` / `core:ui`) | **178**: 77 corridas, 101 omitidas, 0 fallas (364 s); `StageM1ScreensTest` 4/4 | **178**: 75 corridas, 103 omitidas, 0 fallas (189 s) | **178**: 77 corridas, 101 omitidas, **1 falla** (`AccessScreensTest.cambioRapidoDeMeseroDesdeElMenu`, de la prueba; abajo) (255 s); después del arreglo `AccessScreensTest` 5/5 |
+| Cocina                                    | **28**: 15 corridas, 13 omitidas, 0 fallas (59 s)                              | **28**: 15 corridas, 13 omitidas, 0 fallas (34 s)    | — (es de tableta)                                                                                                                                                               |
+
+**De punta a punta contra un Go temporal nuevo por suite** (`scripts/android-e2e.sh`). En lugar de `--suite all` (que
+instala con Gradle) se corrió cada parte de `all` con su Go nuevo instalando con adb (`$SP/m1/f-chain.sh`), en los tres
+emuladores igual: en Android 8 la instalación de Gradle se cuelga (A3-D33) y así ninguna corrida usaba Gradle mientras
+el otro emulador corría las instrumentadas. Las mismas partes y el mismo orden que `all`, más `unions`, `legacy`,
+`kitchen` y `endtoend`, que no entran en `all`.
+
+| Suite (pasos)                                                                                                       | 5570 · tableta Android 17                                                                                                       | 5572 · tableta Android 8                            | 5574 · teléfono Android 17                                                                  |
+| ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `access` 1–5 y, con otro Go, 6–7                                                                                    | 5/5 (46 s) y 2/2 (18 s)                                                                                                         | 5/5 (69 s) y 2/2 (18 s)                             | 5/5 (39 s) y 2/2 (18 s)                                                                     |
+| `catalog` (a–c, con la base temporal)                                                                               | 3/3 (18 s)                                                                                                                      | 3/3 (13 s)                                          | 3/3 (25 s)                                                                                  |
+| `waiter` (w1–w13c)                                                                                                  | 19/19 (239 s)                                                                                                                   | 19/19 (207 s)                                       | 19/19 (212 s)                                                                               |
+| `field` (f1–f10, **con f7**: el guion recibe la base)                                                               | 13/13 (314 s)                                                                                                                   | 13/13 (292 s)                                       | 13/13 (300 s)                                                                               |
+| `takeaway` (t1–t9)                                                                                                  | 9/9 (131 s)                                                                                                                     | **9/9 con t6** (117 s)                              | 9/9 (117 s)                                                                                 |
+| `precheck` (p1–p7)                                                                                                  | 7/7 (104 s)                                                                                                                     | 7/7 (84 s)                                          | 7/7 (94 s)                                                                                  |
+| `alerts` (r1–r10)                                                                                                   | 11/11 (607 s)                                                                                                                   | 11/11 (590 s)                                       | 11/11 (585 s)                                                                               |
+| `adjustments` (a1–a7)                                                                                               | 7/7 (146 s)                                                                                                                     | 7/7 (140 s)                                         | 7/7 (136 s)                                                                                 |
+| `license` (l1–l8, con el reloj del Go)                                                                              | 8/8 (144 s)                                                                                                                     | 8/8 (123 s)                                         | 8/8 (136 s)                                                                                 |
+| **`unions`** (u1–u12)                                                                                               | 12/12 (218 s)                                                                                                                   | 12/12 (190 s)                                       | 11/12 (u2, de la prueba; abajo); después del arreglo **12/12** (206 s)                      |
+| **`legacy`** v1 con la 0.4.1 y v2 con la 0.5.0 encima                                                               | 1/1 y 1/1 (segunda vuelta)                                                                                                      | 1/1 y 1/1 (segunda vuelta)                          | —                                                                                           |
+| `kitchen` (aplicación de cocina, k1–k13 sin k12)                                                                    | 14/14 (317 s, segunda vuelta)                                                                                                   | 14/14 (285 s, segunda vuelta)                       | — (es de tableta)                                                                           |
+| `endtoend` (m1, c1, m2)                                                                                             | 4/4 (43 s, segunda vuelta)                                                                                                      | 4/4 (32 s)                                          | —                                                                                           |
+| `connection` c1 (10 minutos sin uso, las dos tabletas a la vez y sin otra carga)                                    | 1/1 (632 s): 0 de 556 s con «Sin conexión», 0 sin respuesta, 0 lecturas repetidas, 59 respuestas de Go, 3 bloqueos y 3 entradas | 1/1 (619 s): 0 de 560 s, 0, 0, 58 respuestas, 3 y 3 | —                                                                                           |
+| `AccessScreensTest` y `unions` otra vez, con el APK de pruebas de `1223606b`                                        | `AccessScreensTest` 5/5 (84 s); `unions` 12/12 (328 s)                                                                          | `unions` 12/12 (252 s)                              | `AccessScreensTest` 5/5 (18 s); `unions` 12/12 (206 s)                                      |
+| Título de la M1 (`unions` u1, u3, u4 y u12) en vertical, horizontal y a 360 dp                                      | —                                                                                                                               | —                                                   | 4/4, 1/1 y 3/3: «Mesas» y «Nuevo pedido para llevar» en un renglón, sin cortar, en las tres |
+| **Actualización 0.4.1 → 0.5.0**: datos (`waiter` w1 y w3 con la 0.4.1, la 0.5.0 encima con `adb install -r -t`, w4) | 2/2 y 1/1; versionCode 5 → 6, la misma `firstInstallTime`; el pedido de la cola salió una vez sin volver a entrar               | 2/2 y 1/1; lo mismo                                 | —                                                                                           |
+| **Firma**: la 0.4.1 de entrega y encima la 0.5.0 de entrega, sin abrirla                                            | «Success», versionCode 5 → 6, la misma `firstInstallTime`; las dos `fb6a4bac…7c86`                                              | lo mismo                                            | —                                                                                           |
+
+**La 0.4.1 frente a una unión** (`legacy` v1, en las dos tabletas, registro `AdelOnGo` «M1 · 0.4.1»): la principal une
+la Mesa 21 (ocupada) con la 22; la 0.4.1 captura en la 22, Go le responde `TABLE_HAS_ACCOUNT` y con «Abrir otra
+cuenta» el pedido entra en la cuenta 2 de la Mesa 22 **dentro de la unión** «Mesa 21 + 22». Con la 0.5.0 encima (v2),
+sin volver a emparejar, la unión es una sola entrada con sus dos cuentas.
+
+**Mediciones** (`field` f2, registro «Fase F ·»):
+
+| Medida                                                                         | 5570 · Android 17 | 5572 · Android 8                  | 5574 · teléfono                   |
+| ------------------------------------------------------------------------------ | ----------------- | --------------------------------- | --------------------------------- |
+| Arranque en frío (proceso → lista de meseros)                                  | 2 935 ms          | 1 716 ms                          | 3 064 ms                          |
+| PIN → Mesas con la primera mesa                                                | 1 033 ms          | 1 214 ms                          | 962 ms                            |
+| PIN → la mesa 40 a la vista                                                    | 1 889 ms          | 2 123 ms                          | 1 610 ms                          |
+| «Nueva cuenta» → catálogo a la vista                                           | 496 ms            | 349 ms                            | 334 ms                            |
+| «Enviar a cocina» → «Recibido por el restaurante»                              | 325 ms            | 316 ms                            | 313 ms                            |
+| Memoria (total de `dumpsys meminfo`)                                           | ≈ 146 MiB         | ≈ 90 MiB                          | ≈ 149 MiB                         |
+| `unions` u2: «$0.00 · Borrador» a la vista después de «Enviar a cocina» (§5.6) | —                 | 0 ms (total de Go a los 19–20 ms) | 0 ms (total de Go a los 21–53 ms) |
+
+### 4. Lo que falló y cómo se resolvió
+
+1. **Playwright WebKit, `workflow-stagez-k11-assistant`** (1 de 58; en Chromium aprobó). «Crear «Cocina»» seguía
+   deshabilitado: el contexto de la falla muestra el selector «Impresora de la estación» con «Elige la impresora». Las
+   impresoras de cocina llegan en otra lectura (`kitchen_outputs`); la prueba revisaba el selector con `isVisible()`
+   (que no espera) antes de que esa lectura llegara, así que no eligió «Sin impresora: solo pantalla» y el botón quedó
+   esperando una elección. **De la prueba, no de la pantalla** (la especificación es de la K1.1 y no cambió en la M1;
+   salió con la Mac cargada por los emuladores). Arreglo `0ad519b8`: espera a que aparezca el selector o a que el botón
+   se habilite antes de decidir. No toca `backend/`, `config/` ni código compartido, así que no se repite la regresión
+   completa: las dos de la K1.1 aprobaron solas en los dos motores y la del asistente tres veces seguidas en WebKit. La
+   Mac no se durmió ni tenía la pantalla bloqueada.
+2. **`ADEL_M1_Tablet_API37` se cerró solo** a las 19:41, en `kitchen` k8 (k1–k7 aprobadas): el proceso de qemu terminó
+   sin mensaje (en su registro solo hay errores de GL de `swiftshader`, «Failed to find ColorBuffer»), con la Mac muy
+   cargada (Playwright, Gradle de las instrumentadas de la otra tableta y cuatro emuladores). Es del emulador, no de la
+   aplicación. Se volvió a arrancar y se repitieron `kitchen`, `endtoend`, `legacy` y la actualización: todo aprobado.
+3. **En Android 8, dos instalaciones con adb no respondieron en 300 s** (la aplicación de cocina antes de `kitchen` y la
+   0.4.1 antes de `legacy`; la de `endtoend`, justo entre las dos, instaló bien). Es del emulador (A3-D33 ya lo había
+   visto con Gradle). `f-adb-install.sh` instala desde entonces sin «streamed» en Android 8 (copia el APK y lo
+   instala) y se repitieron `kitchen` (14/14) y `legacy` (v1 y v2); las instalaciones siguientes respondieron al
+   momento. Por la falla de instalación quedó en el registro una corrida de `legacy` v1 sin aplicación (0 pasos), que no
+   cuenta.
+
+4. **El teléfono (`ADEL_M1_Phone_API37`), dos pruebas que no se habían corrido ahí** (la Fase C corrió en el teléfono
+   solo `unions` u1, u3, u4 y u12):
+   - `AccessScreensTest.cambioRapidoDeMeseroDesdeElMenu` (instrumentada) buscaba el nombre «Ana» escrito en la barra;
+     desde la §5.6 (decisión 5 de la Fase C, M1-D34) en el teléfono vertical el menú del mesero lleva solo la inicial y
+     el nombre va en su descripción. La aplicación hace lo decidido: es de la prueba.
+   - `unions` u2 tocaba la pestaña «Terraza M1» con el panel de la mesa anterior abierto, que en el teléfono (un panel a
+     la vez) la tapa. También de la prueba.
+     Arreglo `1223606b` (solo pruebas de `android/app/src/androidTest`; la aplicación y el APK de entrega no cambian):
+     `activeWaiterIs` acepta el nombre escrito o la descripción del menú, y u2 cierra el panel antes de cambiar de área
+     (`pressBackIfPanel`, como los demás pasos). En el teléfono: `AccessScreensTest` 5/5 y `unions` 12/12; en las tabletas
+     se repitieron `AccessScreensTest` (Android 17) y `unions` (las dos) al final (abajo).
+
+Ningún defecto de la aplicación ni del servidor; ninguna corrección de código del producto: las tres correcciones son de
+pruebas.
+
+### 5. M1-D41
+
+- **«En línea» con el modo avión puesto: es de la aplicación, por diseño de la A3, y lo hace visible la forma de la
+  prueba.** El guion corta la red desde la Mac **antes** de abrir el paso (cada paso es un proceso nuevo). Con el
+  proceso naciendo ya sin red, Android nunca avisa que se perdió (no había red que perder) y la A3 (`4fa6331`, a pedido
+  de su coordinador) hace que el estado único **dude** al arrancar —la barra dice «En línea»— hasta la primera
+  respuesta de Go, un aviso de Android de que no hay red o el plazo de la tolerancia (20 s);
+  `ConnectionMonitor.reportedLinkState` no manda el «sin red» inicial porque Android puede tardar en dar la red a la
+  aplicación recién abierta. Las capturas se toman antes del plazo: en `unions` u3 y u8, a los 12–14 s de la primera
+  lectura sin respuesta (`AdelLink`), en las dos tabletas (5572: 19:27:03 → 19:27:15; 5570: 19:36:44 → 19:36:57 y
+  19:38:12 → 19:38:24), igual que en las de la Fase C. El pedido sí queda «Por enviar». Con el dispositivo ya abierto,
+  activar el modo avión dice «Sin conexión» al momento (`ConnectionOnDeviceTest.modoAvionCambiaElIndicador` aprobó en
+  la tableta de Android 17 y en el teléfono; en Android 8 se omite porque la orden no existe) y la barra y los avisos dicen
+  siempre lo mismo (`ServerLinkScreensTest`, 3/3 en las dos tabletas).
+  **No se corrige**: cambiarlo cambia una decisión de la A3 y el código compartido de `android-core`
+  (`ConnectionMonitor`), con lo que cocina subiría a 0.1.1. Queda como propuesta para el coordinador.
+- **El diálogo de cancelar**: en `waiter` w8 se cerró a los **531 ms** en 5570 (con Playwright WebKit y dos
+  emuladores a la vez) y a los **175 ms** en 5572; el de modificar, 600 y 137 ms. Nunca cerca de los 10 s de la Fase C.
+  En el teléfono, 237 ms (cancelar) y 162 ms (modificar).
+
+### 6. Decisiones propuestas
+
+1. **La guía del propietario es `docs/UNIR_MESAS.md`**, junto a las demás «Guía corta para…» (`ANDROID_INSTALAR.md`,
+   `COCINA_INSTALAR.md`, `TERMINAL_DE_COCINA.md`, `MIGRAR_SISTEMA_ANTERIOR.md`), y `ANDROID_INSTALAR.md` y
+   `MIGRAR_SISTEMA_ANTERIOR.md` la enlazan. _Porqué_: ahí viven las guías del dueño de etapas anteriores.
+2. **La regresión de Android por partes con adb en los tres emuladores**, en lugar de `--suite all` con Gradle: las
+   mismas partes, cada una con su Go nuevo, más `unions`, `legacy`, `kitchen`, `endtoend` y `connection`. _Porqué_: en
+   Android 8 la instalación de Gradle se cuelga (A3-D33), y así no había dos Gradle a la vez en el mismo árbol mientras la
+   otra tableta corría las instrumentadas.
+3. **M1-D41 («En línea» al abrir sin red) no se corrige en esta etapa.** _Porqué_: es el comportamiento que pidió la A3
+   (`4fa6331`) y cambiarlo toca `android-core` (`ConnectionMonitor`/`ServerLinkTracker`), lo que obliga a cocina 0.1.1.
+   Si el propietario lo quiere, una etapa siguiente puede decidir «Sin conexión» al arrancar cuando Android dice que no
+   hay red durante unos segundos (en lugar de esperar la tolerancia de 20 s), con sus pruebas en meseros y cocina.
+4. **La cabecera de `CLAUDE.md`** describe la M1 y conserva la K1.1 como «la etapa anterior»; el texto de la K1 sale de
+   la cabecera (sigue en §3, §13–14, §15, §19 y su avance), como hizo la K1.1 con la L1.
+5. **Sin `docs/VERIFICATION_STAGEM1.md` en esta rama**: las etapas anteriores lo escribieron con el SHA-256 del `.pkg`,
+   que aquí construye el coordinador. Esta sección tiene todo para escribirlo (o para la fila de la etapa en §13–14 de
+   `CLAUDE.md`, que sí se agregó con lo que se sabe).
+
+### 7. Lo no verificado
+
+- **Windows**: nada (solo `GOOS=windows` build y vet de Go en `go-unit`).
+- **La aplicación real de Tauri** y **dos escritorios a la vez sobre la misma unión**: Playwright usa la vista previa con
+  el puente; la carrera la cubren `TestStageM1Concurrency` y `TestStageM1ReviewConcurrency` (aprobadas).
+- **Dispositivos físicos, wifi real, papel** (la comanda con «Salón · Mesa 5 + 6») y una tableta de cocina real.
+- **`ADEL_A1_Phone_API33`**: no se usó; el teléfono de la regresión es `ADEL_M1_Phone_API37` (el ancho de 360 dp con
+  `wm density`, como la Fase C).
+- **M1-D41**: explicado, no corregido (arriba).
+- El `.pkg` 0.18.0, la APK de entrega 0.5.0 definitiva y la instalación en la Mac del propietario: los hace el
+  coordinador.
+
+### 8. Para el coordinador
+
+- Fusionar `etapa-m1-f` (6 commits, de `d4963a7b` a `2d807c89`). Después de fusionar: construir el `.pkg` 0.18.0 y la APK
+  de entrega 0.5.0 (`AD-EL-POS-Android-0.5.0.apk`, el nombre que ya dice `ANDROID_INSTALAR.md`) con la llave de
+  desarrollo; cocina no cambia (0.1.0, sin APK nuevo).
+- Decidir si M1-D41 se deja para una etapa siguiente (propuesta 3).
+- Si quiere `docs/VERIFICATION_STAGEM1.md` como en las etapas anteriores, sale de esta sección más el SHA-256 del `.pkg`.
+- En la entrega al propietario: la «Mesa 3» del respaldo real tendrá cuatro secciones (3a a 3d) y la guía le dice cómo
+  quitar la 3d si no es parte de la U.
+
+### Decisiones del coordinador al cerrar la Fase F
+
+Se fusiona `etapa-m1-f` en `etapa-m1` (`996ecc3a`). Las tres correcciones de la fase son de pruebas; el código del
+producto no cambió desde la Fase B.
+
+- **M1-D44.** Se aceptan las decisiones propuestas 1, 2, 4 y 5 de la Fase F:
+  - la guía del propietario es `docs/UNIR_MESAS.md`;
+  - la regresión de Android se corrió por partes con adb, cada una con su Go nuevo, en lugar de `--suite all` con
+    Gradle;
+  - la cabecera de `CLAUDE.md` describe la M1 y conserva la K1.1 como la etapa anterior;
+  - `docs/VERIFICATION_STAGEM1.md` lo escribe el coordinador con el SHA-256 del `.pkg` y de la APK.
+- **M1-D45. «En línea» al abrir la aplicación sin red (M1-D41) no se corrige en esta etapa.** Es el arranque que decidió
+  la A3 (`4fa6331`): el estado duda hasta 20 s antes de decir «Sin conexión» si el proceso nace sin red. Con la
+  aplicación abierta, el modo avión dice «Sin conexión» al momento. Cambiarlo toca `android-core`
+  (`ConnectionMonitor`) y obliga a cocina 0.1.1. Queda como sugerencia para una etapa siguiente y se dice en la entrega.
+- **M1-D46. Entregables.** El coordinador construye la APK de entrega 0.5.0 (llave de desarrollo) y el `.pkg` 0.18.0
+  sobre una copia exacta de `996ecc3a` (`git archive`). Cocina no lleva APK nueva: sigue la 0.1.0 de la K1.
+  Resultado: `AD-EL POS_0.18.0.pkg` (24 144 578 bytes, SHA-256 `f87c6eed…a446`) y `AD-EL-POS-Android-0.5.0.apk`
+  (2 734 647 bytes, SHA-256 `ed650050…d5f4`, huella `fb6a4bac…7c86`), con sus comprobaciones en
+  [VERIFICATION_STAGEM1.md](VERIFICATION_STAGEM1.md).
