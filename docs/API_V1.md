@@ -13,7 +13,9 @@ sin conexión y el cursor de eventos de la recuperación (ver «Modo Mesero»). 
 (servidor 0.16.0, esquema 29, ver «Pantalla de cocina»). La etapa K1.1
 ([etapas/ETAPA_K1_1_COCINA_AJUSTES.md](etapas/ETAPA_K1_1_COCINA_AJUSTES.md)) agregó la **cobertura del enrutamiento**,
 **«Productos sin ruta»** y los dos 409 del panel de cocina (servidor 0.17.0, esquema 30, ver «Configuración guiada de
-cocina»).
+cocina»). La etapa M1 ([etapas/ETAPA_M1_MESAS.md](etapas/ETAPA_M1_MESAS.md)) agregó las **uniones de mesas y las mesas
+divisibles**, `preparation_required` y quitar la hora que envía a cocina (servidor 0.18.0, esquema 31, ver «Uniones de
+mesas y mesas divisibles · etapa M1»).
 
 - **Contrato OpenAPI 3.1**: [`backend/internal/apicontract/openapi.json`](../backend/internal/apicontract/openapi.json)
   es la fuente. El servidor lo publica en `GET /api/v1/openapi.json` (sin sesión) y está incrustado en el binario.
@@ -1072,7 +1074,7 @@ kitchen/settings` y `PUT kitchen/timing` lo aceptan en el cuerpo y no lo cambian
 ## Uniones de mesas y mesas divisibles · etapa M1
 
 Capacidad `table-unions-v1` (servidor 0.18.0, esquema 31). Sin ella el escritorio y Android esconden «Unir con…», el
-contorno de la unión, el marco y el atajo de una mesa divisible y la administración de grupos. Decisiones M1-D1 a M1-D19
+contorno de la unión, el marco y el atajo de una mesa divisible y la administración de grupos. Decisiones M1-D1 a M1-D43
 y el contrato de la etapa en [ETAPA_M1_AVANCE.md](ETAPA_M1_AVANCE.md). Go decide todo (el nombre, la capacidad, qué
 mesas se pueden unir y qué pasa con las cuentas); el cliente solo muestra lo que responde.
 

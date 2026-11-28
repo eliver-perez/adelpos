@@ -1,10 +1,12 @@
 # Teléfonos y tabletas de meseros
 
 Guía corta para usar la aplicación **AD-EL POS para Android** en los teléfonos y tabletas de los meseros (etapas A1 a
-A3, L1 y K1). Con ella cada mesero:
+A3, L1, K1 y M1). Con ella cada mesero:
 
 - Entra con **su nombre y su PIN** en un teléfono o una tableta que comparten varios meseros.
 - Ve las mesas y sus cuentas, captura los pedidos y los manda a cocina con **«Enviar a cocina»**.
+- **Une mesas** cuando llega un grupo grande («Mesa 5 + 6») y usa las **mesas divisibles** («Mesa 3» con 3A, 3B y 3C):
+  guía aparte en [UNIR_MESAS.md](UNIR_MESAS.md).
 - Toma pedidos **Para llevar** con el mismo catálogo y ve si ya están listos y pagados (sección 6).
 - Imprime la **precuenta** de una mesa o de un pedido para llevar en la impresora asignada a ese dispositivo
   (sección 7).
@@ -20,7 +22,7 @@ la caja, como siempre.
 pedidos de su estación y los marca como listos. Tiene su propia guía: [COCINA_INSTALAR.md](COCINA_INSTALAR.md). Las dos
 aplicaciones se pueden instalar en la misma tableta sin estorbarse.
 
-> **Versión de prueba.** Esta es la versión **0.4.1** de la aplicación. No viene de la tienda de Google (Play Store):
+> **Versión de prueba.** Esta es la versión **0.5.0** de la aplicación. No viene de la tienda de Google (Play Store):
 > se instala con un archivo y está firmada con una llave de desarrollo, por eso Android avisa al instalarla. Todavía no
 > se ha probado en un teléfono ni en una tableta reales (solo en los emuladores de la Mac de pruebas).
 
@@ -28,7 +30,7 @@ aplicaciones se pueden instalar en la misma tableta sin estorbarse.
 
 Sirve cualquier teléfono o tableta con **Android 8.0 o posterior**.
 
-1. **Pasa el archivo `AD-EL-POS-Android-0.4.1.apk`** al teléfono o la tableta, de la forma que te sea más fácil:
+1. **Pasa el archivo `AD-EL-POS-Android-0.5.0.apk`** al teléfono o la tableta, de la forma que te sea más fácil:
    - **Carpeta compartida** (por ejemplo, Google Drive): súbelo desde la computadora y ábrelo en el dispositivo.
    - **Correo**: envíalo como archivo adjunto y ábrelo desde el correo del dispositivo. Algunos correos (Gmail, por
      ejemplo) no dejan adjuntar archivos `.apk`; si te pasa, usa una carpeta compartida.
@@ -60,6 +62,15 @@ posterior es distinto**: no se instala encima (ver «Pasar de la 0.1.0 a la 0.2.
 emparejar**: el dispositivo sigue autorizado, los meseros entran con su PIN de siempre y los pedidos que hayan quedado
 por enviar salen solos, una sola vez. Para el mesero, la aplicación se ve y funciona igual que la 0.4.0. Si hay pedidos
 por enviar, conviene instalarla con conexión.
+
+**De la 0.4.1 a la 0.5.0.** La 0.5.0 se instala **encima** de la 0.4.1 con los mismos pasos y **no hay que volver a
+emparejar**: el dispositivo sigue autorizado, los meseros entran con su PIN de siempre y los pedidos que hayan quedado
+por enviar salen solos, una sola vez. Lo nuevo: **unir mesas** ([UNIR_MESAS.md](UNIR_MESAS.md)), **una sola tarjeta
+por cuenta** en la mesa, con **«Tu cuenta»** en las del mesero (sección 3, «Las cuentas de una mesa»), y ningún aviso de
+cocina en lo que no necesita preparación (un refresco o unas papas sin estación). Para unir mesas la computadora
+principal necesita la **0.18.0**; con una anterior, la 0.5.0 funciona igual que la 0.4.1 y no muestra «Unir con…».
+Conviene actualizar todos los teléfonos y tabletas: uno con la 0.4.1 ve las mesas unidas por separado (si captura en
+una, la computadora le ofrece agregar a la cuenta que ya hay o abrir otra dentro de la unión, y no se pierde nada).
 
 **Qué versión tiene cada dispositivo.** En la computadora principal, en **Administración › Sistema › Terminales**, la
 fila de cada teléfono o tableta dice su versión instalada (por ejemplo, «Android 14 · versión instalada 0.4.1»). Se
@@ -165,8 +176,12 @@ solo aparecen en la computadora principal con la 0.13.0 (o en una terminal que t
 - **Mesas.** Arriba, en una sola fila: **«Lista | Mapa»**, las **áreas** (toca una para ver solo sus mesas) y
   **«Pendientes»**. En el mapa las mesas se ven como en la computadora principal, del tamaño que quepa; si el área es
   grande, el mapa se desliza hacia los lados y hacia abajo. Toca una mesa para ver sus cuentas.
-- **Las cuentas de una mesa.** Cada una dice en un renglón «Mesa 6 · folio 12 · $755.00» y debajo su estado. Desde ahí
-  se abre la cuenta, se imprime la precuenta (**«Imprimir precuenta»**, sección 7) y, si la cuenta está vacía (sin
+- **Las cuentas de una mesa.** Desde la 0.5.0 hay **una tarjeta por cuenta**: dice en un renglón «Mesa 6 · folio 12 ·
+  $755.00» y debajo cómo va el envío («Recibido por el restaurante», «Por enviar»…) y la cocina («En cocina», «Listo»…).
+  Las cuentas del mesero que tiene la sesión dicen **«Tu cuenta»** arriba a la derecha. Un pedido que todavía no tiene
+  cuenta (por ejemplo, uno capturado sin conexión) se ve como su propia tarjeta **«Por enviar»**, para que no se pierda
+  de vista; cuando la computadora lo recibe, pasa a la tarjeta de su cuenta. Lo que no necesita preparación no lleva
+  aviso de cocina. Desde ahí se abre la cuenta, se imprime la precuenta (**«Imprimir precuenta»**, sección 7) y, si la cuenta está vacía (sin
   productos ni pagos), se puede quitar con **«Descartar cuenta vacía»**: pide confirmación, necesita conexión y el
   permiso de abrir cuentas (sección 4). Si mientras tanto otra terminal le agregó algo, no se descarta y se ve como
   está.
@@ -203,6 +218,7 @@ para llevar, marca «Entregado» un pedido ya pagado e imprime la precuenta. Lo 
 | Para llevar: ver, tomar pedidos y anotar el cliente | «Consultar tablero de pedidos para llevar y ventanilla» y «Administrar datos de pedidos para llevar» |
 | Marcar «Entregado» un pedido para llevar ya pagado  | «Registrar entrega de pedidos para llevar»                                                           |
 | Imprimir la precuenta (sección 7)                   | «Imprimir tickets y precuentas»                                                                      |
+| Unir mesas ([UNIR_MESAS.md](UNIR_MESAS.md))         | «Unir mesas» (desde la 0.18.0)                                                                       |
 
 El mesero **nunca cobra** y no se entrega un pedido sin pagar: si no está pagado, el teléfono dice «Cobrar en caja
 antes de entregar». Imprimir desde el dispositivo necesita además una impresora asignada a ese dispositivo (sección 7).
@@ -220,7 +236,8 @@ permiso se marca solo lo que necesita, y al quitar uno del que dependen otros, l
 funcionar.
 
 **Si la computadora principal ya estaba instalada** (0.12.0 o 0.13.0), la actualización **no cambia los roles**: el
-Mesero conserva lo que le marcaste. Para dejarlo como en una instalación nueva, en **«Editar permisos»** del rol toca
+Mesero conserva lo que le marcaste. La única excepción es **«Unir mesas»**: la actualización a la 0.18.0 se lo agrega a
+los roles Mesero, Cajero, Supervisor y Administrador que ya podían abrir cuentas y ver las mesas (no quita nada). Para dejarlo como en una instalación nueva, en **«Editar permisos»** del rol toca
 **«Restablecer permisos predeterminados»**: la computadora muestra qué se agregará y qué se quitará, pide confirmación y
 lo deja en el Registro de movimientos. No cambia el límite de descuento del rol ni los permisos propios de cada usuario.
 Si le habías dado «Modificar» o «Cancelar unidades», el restablecimiento los quita: márcalos otra vez si los usa. El
@@ -299,8 +316,9 @@ Cada pedido tiene uno de estos estados:
   falta de cupo o por su fecha y hora** (sección 11). No se pierde ni se reintenta solo: cuando el encargado lo
   resuelva, el mesero lo abre en **«Pendientes» › «Revisar»** y toca **«Enviar de nuevo»** (es el mismo pedido: nunca
   se duplica).
-- Sin conexión se ven las mesas de la última vez que hubo conexión. **Modificar o cancelar lo ya enviado** necesita
-  conexión.
+- Sin conexión se ven las mesas de la última vez que hubo conexión. **Modificar o cancelar lo ya enviado** y **unir
+  mesas** necesitan conexión. Si se pierde la conexión con una unión que todavía no se guardaba, la aplicación lo dice
+  y deja elegir **«Enviar solo a la Mesa 5»** o **«Esperar»**: nunca manda el pedido a otro lado sin avisar.
 - **No se puede cambiar de mesero** con pedidos sin enviar (sección 4).
 - **El dispositivo no cobra.** Las cuentas se cobran en la caja.
 

@@ -81,6 +81,15 @@ test('el asistente al aprobar una pantalla de cocina sin estaciones termina con 
     const create = steps.getByRole('button', { name: 'Crear «Cocina»', exact: true });
     await expect(create).toBeVisible();
     const printer = steps.getByRole('combobox', { name: 'Impresora de la estación' });
+    // Las impresoras de cocina llegan en otra lectura: mientras tanto el selector no existe y el botón está
+    // deshabilitado. Se espera a que llegue (el selector o el botón habilitado) antes de decidir; sin esperar, en WebKit
+    // con la Mac cargada el selector apareció después de revisarlo y la prueba no eligió impresora (regresión de la M1).
+    const enabledCreate = steps.getByRole('button', {
+      name: 'Crear «Cocina»',
+      exact: true,
+      disabled: false,
+    });
+    await expect(printer.or(enabledCreate).first()).toBeVisible();
     if (await printer.isVisible()) {
       await chooseOption(printer, 'Sin impresora: solo pantalla');
     }
