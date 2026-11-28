@@ -4319,7 +4319,7 @@ kitchen/timing` lo aceptan y no lo cambian.
 
 ## Etapa M1 · Uniones de mesas y mesas divisibles (Fase A, esquema 31; servidor 0.18.0)
 
-Decisiones M1-D1 a M1-D19 y el contrato de la etapa en `docs/ETAPA_M1_AVANCE.md`; la forma de cada respuesta, los
+Decisiones M1-D1 a M1-D43 y el contrato de la etapa en `docs/ETAPA_M1_AVANCE.md`; la forma de cada respuesta, los
 errores con su texto y la cola sin conexión están en `docs/API_V1.md`, «Uniones de mesas y mesas divisibles · etapa M1»,
 y en `openapi.json` (`previewTableUnion`, `createTableUnion`, `addTableToUnion`, `removeTableFromUnion`,
 `getTableUnion`, `createTableGroup` y `updateTableGroup`). Migración `0031_uniones_de_mesas.sql`, sección «Fase A».

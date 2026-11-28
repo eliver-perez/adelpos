@@ -387,3 +387,38 @@ Fases C y D de la etapa 9G (decisiones D9 y D11; contrato para clientes en [API_
   **Desde la etapa 9H** es una por usuario y por terminal: iniciar sesión en otra terminal ya no cierra la anterior
   (solo volver a entrar en la misma terminal), y cambiar la contraseña cierra todas.
 - **Sin verificar**: dos computadoras reales en la red y la carga con varias terminales (Fase W).
+
+## Uniones de mesas y mesas divisibles · etapa M1
+
+Etapa M1 (servidor 0.18.0, esquema 31; especificación [etapas/ETAPA_M1_MESAS.md](etapas/ETAPA_M1_MESAS.md), decisiones
+M1-D1 a M1-D43 en [ETAPA_M1_AVANCE.md](ETAPA_M1_AVANCE.md)). Contrato en [API_V1.md](API_V1.md), «Uniones de mesas y
+mesas divisibles · etapa M1»; guía del propietario en [UNIR_MESAS.md](UNIR_MESAS.md).
+
+- **Modelo** (M1-D1): una unión es un conjunto de mesas del mismo área (`app.table_unions` y
+  `app.table_union_members`); una cuenta es de la unión porque su `table_id` es una mesa miembro, así que cobrar,
+  cocina, dividir, transferir, combinar y la cola sin conexión funcionan sin código propio. El nombre («Mesa 5 + 6») y
+  la capacidad los calcula Go (M1-D2, `internal/tableunions`).
+- **Ocupación** (M1-D10): cada mesa de una unión se lee como ocupada con el estado, las cuentas, el saldo y el tiempo de
+  la unión (`tableQuery`), así que no se desactiva, no se pone fuera de servicio y no cambia de área.
+  `listAccounts?table_id=` de una mesa unida devuelve las cuentas de toda la unión.
+- **Creación diferida** (M1-D9), como una cuenta: con todas las mesas libres la unión vive en la pantalla y nace en
+  `openAccount` con el primer producto (`union_table_ids` o `union_group_id`); si una mesa se ocupó mientras tanto, 409
+  sin guardar nada. Desde una mesa ocupada, `createTableUnion` une al momento y sus cuentas quedan en la unión.
+- **Agregar, quitar y deshacerse**: agregar solo mesas libres; quitar una mesa no saca cuentas (las de esa mesa pasan a
+  la primera que queda); con una sola mesa la unión se deshace. **Se deshace sola** en `tableunions.SettleEmpty` al final
+  de cada escritura de `operations.Handle` y de `payments.Handle` (M1-D7), cuando ya no le quedan cuentas abiertas.
+- **Mesas divisibles** (M1-D4): `app.table_groups` y `app.table_group_sections`; cada sección es una mesa normal y el
+  atajo del grupo es una unión con `group_id`. Una sección ocupada impide el atajo (`TABLE_GROUP_SECTION_OCCUPIED`).
+- **Concurrencia** (§2.3, M1-D11): sin lock nuevo; 7820148305 exclusivo y el índice único parcial de miembros (una mesa
+  en una sola unión abierta). Dos terminales sobre las mismas mesas: solo una gana y la otra recibe el código y el texto
+  del contrato. Lo revisó un revisor independiente (`TestStageM1Concurrency` y `TestStageM1ReviewConcurrency`).
+- **Historial**: la unión guarda el suyo (`app.table_union_events`) y cada cuenta abierta afectada recibe
+  `account.table_union` en `restaurant_events` (unir, agregar, quitar, deshacer y renombrar), con quién y la terminal.
+  Un cambio de la unión no sube la revisión de la cuenta.
+- **Cola sin conexión** (M1-D13): un pedido a una mesa que al llegar está en una unión va a la unión; una unión que solo
+  estaba en la pantalla nunca entra en la cola. Tabla de casos en [API_V1.md](API_V1.md).
+- **Ajustes de la §5**: `preparation_required` por renglón y por cuenta (§5.2) y quitar la hora a un pedido programado
+  lo envía a cocina (§5.3, M1-D17); detalle en [KITCHEN_AND_PRINTING.md](KITCHEN_AND_PRINTING.md).
+- **Limitaciones**: una cuenta reabierta por una devolución conserva el nombre que tenía al cerrarse (M1-D27); un
+  cliente anterior (escritorio 0.17.0 o meseros 0.4.1) ve las mesas unidas por separado y recibe `TABLE_HAS_ACCOUNT`
+  con las cuentas de la unión.
